@@ -8,6 +8,9 @@
 // --thumb  → a single beautiful 3/4-front view on a TRANSPARENT background
 //            (no grid/cone), az≈-32° el≈14°, tight crop, ~700×450 — the UI
 //            thumbnail used by MODEL_IMAGES in modelSpecs.ts.
+// --face   → an extreme close-up of ONLY the tram's FACE (front 30% of the
+//            FIRST GLB) on a TRANSPARENT background: az≈-28° el≈6°, tight
+//            framing so the windshield/headlights dominate, ~600×600. Nose = −Z.
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -17,7 +20,8 @@ import puppeteer from 'puppeteer';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const thumb = args.includes('--thumb');
-const rest = args.filter((a) => a !== '--thumb');
+const face = args.includes('--face');
+const rest = args.filter((a) => a !== '--thumb' && a !== '--face');
 if (rest.length === 0) {
   console.error('usage: node scripts/render-model.mjs <model.glb> [more.glb ...] [--thumb] [out.png]');
   process.exit(1);
@@ -26,7 +30,7 @@ const out = rest[rest.length - 1].endsWith('.png') ? rest.pop() : 'model-render.
 const glbs = rest.map((p) => readFileSync(resolve(p)).toString('base64'));
 
 // Bundle three + loader once (cached). Cache key bumped when the entry changes.
-const bundlePath = join(root, 'node_modules/.cache/render-model-bundle-v3.js');
+const bundlePath = join(root, 'node_modules/.cache/render-model-bundle-v4.js');
 if (!existsSync(bundlePath)) {
   mkdirSync(dirname(bundlePath), { recursive: true });
   const entry = join(dirname(bundlePath), 'render-model-entry.mjs');
@@ -161,6 +165,70 @@ window.renderThumb = async function (base64List) {
   renderer.render(scene, cam);
   return renderer.domElement.toDataURL('image/png');
 };
+window.renderFace = async function (base64List) {
+  // Extreme close-up of the tram's FACE — only the FRONT PORTION of the first
+  // GLB. Nose = the −Z end; we frame just the front 30% of the bbox so the
+  // windshield/headlights dominate. Transparent background.
+  const W = 600, H = 600;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+  renderer.setSize(W, H);
+  renderer.setClearColor(0x000000, 0); // transparent
+  const scene = new THREE.Scene();
+  scene.background = null;
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8088a0, 1.2));
+  const sun = new THREE.DirectionalLight(0xfff4e0, 2.1);
+  sun.position.set(24, 40, 34); // key light from front-ish so the face is lit
+  scene.add(sun);
+  const fill = new THREE.DirectionalLight(0xdde8ff, 0.8);
+  fill.position.set(-22, 16, 18);
+  scene.add(fill);
+  const loader = new GLTFLoader();
+  // ONLY the first GLB — the head section carries the face.
+  const buf = Uint8Array.from(atob(base64List[0]), c => c.charCodeAt(0)).buffer;
+  const gltf = await loader.parseAsync(buf, '');
+  const obj = gltf.scene;
+  scene.add(obj);
+  const total = new THREE.Box3().setFromObject(obj);
+  const size = total.getSize(new THREE.Vector3());
+  // Front 30% of the bbox along Z (nose at −Z). Frame this sub-box tightly.
+  const noseFrac = 0.30;
+  const zFront = total.min.z;
+  const zBack = total.min.z + size.z * noseFrac;
+  const c = new THREE.Vector3(
+    (total.min.x + total.max.x) / 2,
+    (total.min.y + total.max.y) / 2,
+    (zFront + zBack) / 2,
+  );
+  const cam = new THREE.PerspectiveCamera(32, W / H, 0.1, 500);
+  const vFov = cam.fov * Math.PI / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * cam.aspect);
+  const az = -28 * Math.PI / 180, el = 6 * Math.PI / 180;
+  const dir = new THREE.Vector3(
+    Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az) * -1,
+  ).normalize();
+  const forward = dir.clone().negate();
+  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+  const up = new THREE.Vector3().crossVectors(right, forward).normalize();
+  // Fit ONLY the front sub-box (8 corners over the nose slab) so the face fills
+  // the frame — the rest of the car falls outside / behind.
+  let halfW = 0, halfH = 0, halfD = 0;
+  for (const sx of [total.min.x, total.max.x]) {
+    for (const sy of [total.min.y, total.max.y]) {
+      for (const sz of [zFront, zBack]) {
+        const v = new THREE.Vector3(sx, sy, sz).sub(c);
+        halfW = Math.max(halfW, Math.abs(v.dot(right)));
+        halfH = Math.max(halfH, Math.abs(v.dot(up)));
+        halfD = Math.max(halfD, Math.abs(v.dot(forward)));
+      }
+    }
+  }
+  const m = 1.04; // tight margin — the face should nearly touch the edges
+  const dist = Math.max(halfW * m / Math.tan(hFov / 2), halfH * m / Math.tan(vFov / 2)) + halfD;
+  cam.position.copy(dir).multiplyScalar(dist).add(c);
+  cam.lookAt(c);
+  renderer.render(scene, cam);
+  return renderer.domElement.toDataURL('image/png');
+};
 window.__ready = true;
 `);
   execSync(`npx esbuild ${entry} --bundle --format=iife --outfile=${bundlePath}`, { cwd: root, stdio: 'inherit' });
@@ -179,8 +247,11 @@ try {
   await page.addScriptTag({ content: bundle });
   await page.waitForFunction('window.__ready === true', { timeout: 15000 });
   const dataUrl = await page.evaluate(
-    (list, isThumb) => (isThumb ? window.renderThumb(list) : window.renderGLBs(list)),
-    glbs, thumb
+    (list, mode) =>
+      (mode === 'face' ? window.renderFace(list)
+        : mode === 'thumb' ? window.renderThumb(list)
+        : window.renderGLBs(list)),
+    glbs, face ? 'face' : thumb ? 'thumb' : 'sheet'
   );
   mkdirSync(dirname(resolve(out)), { recursive: true });
   writeFileSync(resolve(out), Buffer.from(dataUrl.split(',')[1], 'base64'));

@@ -21,9 +21,16 @@ export function tramModelImageSource(modelId: TramModelId): number | null {
   return typeof asset === 'number' && asset !== 0 ? asset : null;
 }
 
+/**
+ * The bundled illustrations are near-square FACE closeups (rendered by
+ * scripts/render-model.mjs --face, ~600×600, transparent). Default width
+ * follows that aspect; contentFit 'contain' keeps any aspect undistorted.
+ */
+export const MODEL_IMAGE_ASPECT = 1.1;
+
 export interface TramModelImageProps {
   modelId: TramModelId;
-  /** Rendered height; width defaults to a wide side-profile aspect. */
+  /** Rendered height; width defaults to the face-closeup aspect. */
   height: number;
   style?: StyleProp<ImageStyle>;
 }
@@ -36,7 +43,7 @@ export function TramModelImage({ modelId, height, style }: TramModelImageProps) 
     <Image
       source={source}
       contentFit="contain"
-      style={[{ height, width: height * 2 }, style]}
+      style={[{ height, width: Math.round(height * MODEL_IMAGE_ASPECT) }, style]}
       accessibilityIgnoresInvertColors
       transition={120}
     />

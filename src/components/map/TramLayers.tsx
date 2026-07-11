@@ -5,9 +5,11 @@
 // body) and a gold selection halo.
 //
 // Cadence (60 fps): the engine ticks at TICK_MS (~16 ms). Every tick pushes the
-// sections FC (small — viewport-culled) and retargets the follow camera; the
-// points FC (whole fleet, badges/dots) is pushed at ~15 Hz (POINTS_PUSH_MS).
-// Stringify is skipped entirely while the sections FC stays empty.
+// sections FC (small — viewport-culled); the points FC (whole fleet,
+// badges/dots) is pushed at ~15 Hz (POINTS_PUSH_MS). The follow camera is
+// retargeted at ~12.5 Hz (CAMERA_RETARGET_MS) with overlapping linear glides —
+// see the comment at CAMERA_RETARGET_MS. Stringify is skipped entirely while
+// the sections FC stays empty.
 
 import {
   Camera,
@@ -22,7 +24,7 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, type ReactElement, type RefObject } from 'react';
 
 import { Tram } from '@/constants/theme';
-import { getRuntime, POINTS_PUSH_MS, TICK_MS } from '@/hooks/tramData';
+import { getRuntime, POINTS_PUSH_MS } from '@/hooks/tramData';
 import { buildFrame } from '@/lib/render/featureBuilder';
 import type { PlannerItinerary, Viewport } from '@/lib/types';
 import { useFavoritesStore } from '@/stores/favorites';
@@ -33,9 +35,14 @@ import {
   BAND_BADGES_TO_MODELS,
   BAND_DOTS_TO_BADGES,
   BAND_FADE,
-  MODEL_REAL_SCALE_ZOOM,
   SECTIONS_FEED_MIN_ZOOM,
 } from './mapStyle';
+
+/**
+ * Comic-scale curve: models only reach real-world 1× at this zoom (deeper than
+ * the old MODEL_REAL_SCALE_ZOOM=16.6 — mid zooms stay comically oversized).
+ */
+const MODEL_COMIC_REAL_SCALE_ZOOM = 17.0;
 
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 const EMPTY_FC_STRING = JSON.stringify(EMPTY_FC);
@@ -48,6 +55,39 @@ const FOLLOW_PITCH = 56;
  * ahead-and-slightly-to-the-side (only while followHeadingLock is on).
  */
 const FOLLOW_HEADING_AHEAD = 160;
+
+/**
+ * Follow-camera cadence. Retargeting `setCamera` on EVERY 16 ms tick restarts
+ * the native Mapbox camera animator 60×/s, which chokes it into ~1 Hz visible
+ * stutter (user-reported regression). Instead we retarget every ~80 ms with a
+ * 170 ms linear glide: each new glide starts before the previous one ends, so
+ * consecutive animations overlap into continuous motion, while the animator is
+ * only restarted 12.5×/s. Deliberately NOT tied to the 1 Hz UI cadence.
+ */
+const CAMERA_RETARGET_MS = 80;
+const CAMERA_GLIDE_MS = 170;
+
+/** Meters per degree of latitude (target-leading math, small offsets only). */
+const M_PER_DEG_LAT = 111_320;
+
+/**
+ * Lead a coordinate along `bearing` by the distance the tram covers in
+ * CAMERA_RETARGET_MS at `speedKmh` — the camera glides toward where the tram
+ * is about to be instead of trailing where it was at retarget time.
+ */
+function leadTarget(
+  [lng, lat]: [number, number],
+  bearing: number,
+  speedKmh: number,
+): [number, number] {
+  const distM = (speedKmh / 3.6) * (CAMERA_RETARGET_MS / 1000);
+  if (distM <= 0) return [lng, lat];
+  const rad = (bearing * Math.PI) / 180;
+  return [
+    lng + (distM * Math.sin(rad)) / (M_PER_DEG_LAT * Math.cos((lat * Math.PI) / 180)),
+    lat + (distM * Math.cos(rad)) / M_PER_DEG_LAT,
+  ];
+}
 
 /** Badge color: PID red, dark blue for night lines 90–99. */
 const BADGE_COLOR = [
@@ -70,6 +110,7 @@ export function TramLayers({ cameraRef, viewportRef, modelUris }: TramLayersProp
   const sectionsFedRef = useRef(false);
   const sectionsEmptyRef = useRef(true);
   const lastPointsPushMsRef = useRef(0);
+  const lastCameraPushMsRef = useRef(0);
   const favSetRef = useRef<{ source: string[]; set: Set<string> } | null>(null);
   const lineFilterRef = useRef<{
     source: PlannerItinerary | null;
@@ -145,23 +186,32 @@ export function TramLayers({ cameraRef, viewportRef, modelUris }: TramLayersProp
         sectionsRef.current?.setNativeProps({ id: 'trams-sections', shape: EMPTY_FC_STRING });
       }
 
-      // Follow camera: retarget every frame for a continuous linear glide.
+      // Follow camera: retarget every CAMERA_RETARGET_MS (NOT every tick — see
+      // the cadence comment above) with a longer overlapping glide. Engine
+      // state is read fresh at each retarget.
       const followKey = selection.followTramKey;
-      if (followKey) {
+      if (followKey && nowMs - lastCameraPushMsRef.current >= CAMERA_RETARGET_MS) {
         const state = rt.engine.getState(followKey, nowMs);
         if (state) {
+          lastCameraPushMsRef.current = nowMs;
           // Track where the tram is RENDERED: raw fix in live mode, sim otherwise.
           const isLive = positionMode === 'live';
+          const bearing = isLive ? state.observedBearing : state.bearing;
           cameraRef.current?.setCamera({
-            centerCoordinate: isLive ? state.observedPosition : state.position,
+            // Lead slightly toward where the tram will be at the next retarget.
+            centerCoordinate: leadTarget(
+              isLive ? state.observedPosition : state.position,
+              bearing,
+              state.simSpeedKmh,
+            ),
             zoomLevel: FOLLOW_ZOOM,
             pitch: FOLLOW_PITCH,
             // Heading lock: look at the tram from ahead-side; otherwise north-up.
             heading: useSettingsStore.getState().followHeadingLock
-              ? ((isLive ? state.observedBearing : state.bearing) + FOLLOW_HEADING_AHEAD) % 360
+              ? (bearing + FOLLOW_HEADING_AHEAD) % 360
               : 0,
             animationMode: 'linearTo',
-            animationDuration: TICK_MS,
+            animationDuration: CAMERA_GLIDE_MS,
           });
         }
       }
@@ -207,8 +257,10 @@ export function TramLayers({ cameraRef, viewportRef, modelUris }: TramLayersProp
     />,
   ];
   if (modelUris != null) {
-    // Band 3–4 (≥14.8): articulated 3D sections. modelScale eases from a
-    // comically-large 2.6× down to real-world 1.0 by z16.6.
+    // Band 3–4 (≥14.8): articulated 3D sections. modelScale follows a clearly
+    // cartoonish exponential curve: 5× at band entry (mid zoom = toy trams),
+    // easing to real-world 1× only at z17. Oversized models overlapping at
+    // hubs is acceptable per spec ("comically oversized").
     sectionLayers.push(
       <ModelLayer
         key="tram-models"
@@ -222,11 +274,15 @@ export function TramLayers({ cameraRef, viewportRef, modelUris }: TramLayersProp
           modelRotation: [0, 0, ['get', 'bearing']] as unknown as number[],
           modelScale: [
             'interpolate',
-            ['linear'],
+            ['exponential', 1.6],
             ['zoom'],
             BAND_BADGES_TO_MODELS,
-            ['literal', [2.6, 2.6, 2.6]],
-            MODEL_REAL_SCALE_ZOOM,
+            ['literal', [5, 5, 5]],
+            15.6,
+            ['literal', [3.2, 3.2, 3.2]],
+            16.4,
+            ['literal', [1.6, 1.6, 1.6]],
+            MODEL_COMIC_REAL_SCALE_ZOOM,
             ['literal', [1, 1, 1]],
           ],
           modelOpacity: [

@@ -1,23 +1,51 @@
-// Škoda 52T "ForCity Plus Praha" — 5 sections, ~32 m, newest fleet flagship
-// (deliveries 2025+). Geometry verified against 2025 photos of cars 9503/9506:
-//   * Front: huge one-piece glossy BLACK windshield dome (glass from ~1.2 m to
-//     ~2.9 m, wrapping the corners), grey "helmet" roof cap above it.
-//   * Bumper: light grey with a single vertical dark-red center stripe.
-//   * Headlights: two compact LED clusters INSIDE the black dome's lower
-//     corners (no full-width strip), amber destination display behind glass.
-//   * Livery: warm light-grey body, continuous black flush window band, dark
-//     red full-height blocks at door bays wrapping OVER the roof edge; the
-//     doorless left side mirrors the red blocks.
-//   * Doors (5 × 1300 mm double-leaf, right side only): 1 at rear of section
-//     a, 2 in section c, 2 in the front half of section e. b/d have none.
-//   * Pantographs on b and d; bogies under a/e (outer) + b/d (center), c is
-//     suspended. Smooth deep skirts, grey roof with low AC pods, black sensor
-//     pod on the front roof.
+// Škoda 52T "ForCity Plus Praha" — 5 sections, ~32 m, unidirectional, newest
+// fleet flagship (deliveries 2025+). ACCURACY ROUND 2 — rebuilt against photo
+// references of cars 9503/9506 (Wikimedia Commons: Barrandov, Hlubočepy,
+// Vltavská, Dvorecký most, linka 12; 2025-2026):
+//
+//   * FRONT: one glossy BLACK helmet — windshield, display zone and roof crown
+//     are a single black dome from y≈1.2 up and over the roof, wrapping ~1 m
+//     back along the rooftop. Body-white A-pillar strips flank the glass from
+//     bumper to y≈2.55, then the black crown spans full width.
+//   * Bumper band: body-white 0.3→1.2 m with a ~0.95 m wide PID-red vertical
+//     stripe down the center (red "pid" wordmark on the left cheek, fleet
+//     number right). Škoda logo centered on the black mask.
+//   * Headlights: compact LED clusters (3-dot DRL + projector) recessed in the
+//     black mask's lower corners at y≈1.42, x≈±0.8.
+//   * Amber destination display INSIDE the black at y≈2.7, ~1.35 m wide.
+//   * LIVERY (bright PID red on near-white warm grey, alternating blocks):
+//     roof-edge band red over rear half of section a + all of b, and all of d;
+//     big red lower-body blocks (skirt→sill) on b, c and most of e, carrying
+//     white "pid" logos; everything else body white. Left side mirrors.
+//   * Window band: tall continuous dark glass 1.42→2.72 with slim black
+//     pillars; doors are full-height dark glass leaves dropping to the skirt.
+//   * Doors (right side only): 1 at rear of a, 2 in c, 2 in front half of e.
+//   * Pantographs on b and d; bogies under a/e (swivel) + b/d (semi-swivel),
+//     c suspended. Deep smooth body-colored skirts, light grey roof with low
+//     AC pods, black sensor pod behind the front crown.
 
 import {
-  MeshBuilder, arcZAtX, buildSectionShell, destinationDisplay, mirrorArcZ,
-  noseArc, roofPod, roofSlab, singleArmPantograph, wallSegs,
+  MATERIALS, MeshBuilder, arcZAtX, buildSectionShell, destinationDisplay,
+  mirrorArcZ, noseArc, roofPod, roofSlab, singleArmPantograph, wallSegs,
 } from './lib.mjs';
+
+// ── local palette (hex sampled from 2025-26 photos; keys namespaced "52t") ───
+Object.assign(MATERIALS, {
+  '52tBody': { hex: 0xe9ebe9, rough: 0.45, metal: 0.08 }, // near-white warm grey
+  '52tRed': { hex: 0xc81a2b, rough: 0.48, metal: 0.06 }, // bright PID livery red
+  // metal 0.35 (palette cap) suppresses the washed-out diffuse so the helmet
+  // reads glossy BLACK in sunlight like the photos, not grey
+  '52tMask': { hex: 0x08090c, rough: 0.32, metal: 0.35 },
+  '52tGlassF': {
+    hex: 0x0a0d12, rough: 0.28, metal: 0.35,
+    emissive: [0.012, 0.014, 0.017], // barely-there cab-interior hint
+  },
+  '52tGlass': {
+    hex: 0x111419, rough: 0.3, metal: 0.3,
+    emissive: [0.02, 0.023, 0.026], // continuous dark side band
+  },
+  '52tRoof': { hex: 0xc2c6c8, rough: 0.55, metal: 0.12 },
+});
 
 const W = 2.5;
 const HW = W / 2;
@@ -25,24 +53,24 @@ const LEND = 6.9; // a, e
 const LMIDB = 5.8; // b, d
 const LMIDC = 5.6; // c
 const Y0 = 0.3; // skirt bottom
-const SILL = 1.1; // bottom of the black window band
-const WINTOP = 2.48; // top of the glass
-const YTOP = 2.95; // top of the side wall
-const ROOFTOP = 3.14;
-const NOSE = 1.25;
+const SILL = 1.42; // bottom of the dark window band
+const WINTOP = 2.72; // top of the glass band
+const YTOP = 2.92; // top of the side wall (slim fascia above windows)
+const ROOFTOP = 3.12;
+const NOSE = 1.3;
 
 const MATS = {
-  lower: 'greyLight',
-  upper: 'greyLight',
-  pillar: 'black', // continuous flush black window band
-  glass: 'glass',
-  door: 'redDark',
-  frame: 'redDark', // red door bay surrounds
+  lower: '52tBody',
+  upper: '52tBody',
+  pillar: '52tMask', // slim black pillars → continuous dark band
+  glass: '52tGlass',
+  door: '52tGlass', // full-height dark glass door leaves
+  frame: '52tMask',
 };
-const WIN = { targetWin: 1.55, pillar: 0.12 };
-const DOOR = { t: 'door', len: 1.3, topMat: 'redDark' };
+const WIN = { targetWin: 1.55, pillar: 0.11 };
+const DOOR = { t: 'door', len: 1.3, lowY: Y0, topMat: '52tBody' };
 
-// ── livery helpers ───────────────────────────────────────────────────────────
+// ── livery overlays ──────────────────────────────────────────────────────────
 
 /** z-spans of the doors that wallSegs will produce for `items`. */
 function doorSpans(z0, wallLen, items) {
@@ -55,145 +83,244 @@ function doorSpans(z0, wallLen, items) {
   return spans;
 }
 
-/**
- * New-PID red door bays: mirror the red block on the doorless left side
- * (below the sill + above the windows) and wrap a red band over the roof
- * edge — the 52T's signature vertical-stripe livery.
- */
-function redBays(mb, rawSpans) {
-  // photos: adjacent door bays (sections c, e) form ONE contiguous red block
-  const spans = [];
-  for (const s of rawSpans) {
-    const last = spans[spans.length - 1];
-    if (last && s[0] - last[1] < 1.2) last[1] = s[1];
-    else spans.push([...s]);
+/** Subtract door spans from [a, b] → list of panel-only sub-ranges. */
+function cutSpans([a, b], holes) {
+  let ranges = [[a, b]];
+  for (const [h0, h1] of holes) {
+    const next = [];
+    for (const [r0, r1] of ranges) {
+      if (h1 <= r0 || h0 >= r1) { next.push([r0, r1]); continue; }
+      if (h0 > r0 + 0.02) next.push([r0, h0]);
+      if (h1 < r1 - 0.02) next.push([h1, r1]);
+    }
+    ranges = next;
   }
-  for (const [zd0, zd1] of spans) {
-    const zc = (zd0 + zd1) / 2;
-    const d = zd1 - zd0 + 0.16;
-    mb.box('redDark', { x: -(HW + 0.008), y: (Y0 + SILL) / 2, z: zc, w: 0.016, h: SILL - Y0, d });
-    mb.box('redDark', { x: -(HW + 0.008), y: (WINTOP + YTOP) / 2, z: zc, w: 0.016, h: YTOP - WINTOP, d });
-    roofSlab(mb, {
-      z0: zc - d / 2, z1: zc + d / 2, xw: HW + 0.01,
-      yTop: YTOP + 0.015, roofTop: ROOFTOP + 0.012, mat: 'redDark',
+  return ranges;
+}
+
+/** Red lower-body block (skirt→sill) on both walls, skipping door bays. */
+function redLower(mb, range, rightHoles = []) {
+  for (const [za, zb] of cutSpans(range, rightHoles)) {
+    mb.box('52tRed', {
+      x: HW + 0.008, y: (Y0 + SILL) / 2, z: (za + zb) / 2,
+      w: 0.016, h: SILL - Y0, d: zb - za,
     });
+  }
+  const [za, zb] = range; // left side has no doors — continuous block
+  mb.box('52tRed', {
+    x: -(HW + 0.008), y: (Y0 + SILL) / 2, z: (za + zb) / 2,
+    w: 0.016, h: SILL - Y0, d: zb - za,
+  });
+}
+
+/** Red roof-edge band (fascia above windows + wrap over the roof slab edge). */
+function redRoofBand(mb, [za, zb]) {
+  for (const sx of [-1, 1]) {
+    mb.box('52tRed', {
+      x: sx * (HW + 0.008), y: (WINTOP + YTOP) / 2, z: (za + zb) / 2,
+      w: 0.016, h: YTOP - WINTOP, d: zb - za,
+    });
+  }
+  roofSlab(mb, {
+    z0: za, z1: zb, xw: HW + 0.01,
+    yTop: YTOP + 0.012, roofTop: ROOFTOP + 0.01, mat: '52tRed',
+  });
+}
+
+/** Small white "pid" wordmark plate on a red lower block. */
+function pidLogo(mb, { z, y = 0.95 }) {
+  for (const sx of [-1, 1]) {
+    mb.box('white', { x: sx * (HW + 0.018), y, z, w: 0.012, h: 0.16, d: 0.42 });
   }
 }
 
 // ── cab mask (front dirZ −1 / tail dirZ +1) ──────────────────────────────────
 
-function plusMask(mb, { dirZ }) {
-  const zA = LEND / 2 - NOSE; // |z| where the walls start
-  const arc = (depth, hw = HW, p = 0.85) => {
-    const a = noseArc({ hw, zStart: -zA, depth, p, n: 18 });
-    return dirZ > 0 ? mirrorArcZ(a) : a;
-  };
-  // blunt face with generously rounded shoulders; windshield rakes back
-  const arcs = {
-    lipLo: arc(1.12),
-    lipHi: arc(1.2),
-    bumpHi: arc(1.25), // deepest point → nose tip
-    frameHi: arc(1.23),
-    glassHi: arc(0.82, HW, 0.78),
-    domeHi: arc(0.52, HW, 0.85),
-    capHi: arc(0.3, HW - 0.22, 0.9),
-  };
-  noseBands(mb, {
-    bands: [
-      { y0: Y0, y1: 0.52, mat: 'trim', arc0: arcs.lipLo, arc1: arcs.lipHi },
-      { y0: 0.52, y1: 1.06, mat: 'greyLight', arc0: arcs.lipHi, arc1: arcs.bumpHi },
-      { y0: 1.06, y1: 1.2, mat: 'black', arc0: arcs.bumpHi, arc1: arcs.frameHi },
-      // one-piece windshield flowing into the black dome above (52T signature)
-      { y0: 1.2, y1: 2.66, mat: 'glass', arc0: arcs.frameHi, arc1: arcs.glassHi },
-      { y0: 2.66, y1: 3.04, mat: 'black', arc0: arcs.glassHi, arc1: arcs.domeHi },
-      // slim body-grey helmet cap over the dome
-      { y0: 3.04, y1: ROOFTOP, mat: 'greyLight', arc0: arcs.domeHi, arc1: arcs.capHi },
-    ],
-    capMat: 'roof',
-    capCorners: [],
-  });
-
-  const tipZ = arcZAtX(arcs.bumpHi, 0);
-  // vertical dark-red center stripe down the grey bumper (new PID face)
-  mb.box('redDark', { x: 0, y: 0.7, z: tipZ - dirZ * 0.01, w: 0.62, h: 0.74, d: 0.08 });
-
-  // twin compact LED clusters inside the black dome's lower corners
-  // (outward direction along z is `dirZ` × positive offset from the arc)
-  const lamp = dirZ < 0 ? 'headlight' : 'taillight';
-  for (const sx of [-1, 1]) {
-    const zl = arcZAtX(arcs.frameHi, sx * 0.68);
-    mb.box('black', { x: sx * 0.68, y: 1.26, z: zl + dirZ * 0.015, w: 0.48, h: 0.18, d: 0.07 });
-    mb.box(lamp, { x: sx * 0.68, y: 1.26, z: zl + dirZ * 0.05, w: 0.34, h: 0.1, d: 0.06 });
-  }
-
-  if (dirZ < 0) {
-    // amber destination display right behind the top of the windshield
-    destinationDisplay(mb, { zFace: -(zA + 0.88) - 0.02, y: 2.46, w: 1.2, h: 0.19 });
-    // red pid wordmark on the left bumper cheek
-    mb.box('redDark', { x: -0.58, y: 0.9, z: arcZAtX(arcs.bumpHi, -0.58) - 0.02, w: 0.26, h: 0.11, d: 0.05 });
-    // windshield wiper
-    const zw = (y) => -(zA + 1.23 - (0.41 * (y - 1.2)) / 1.46) - 0.03;
-    mb.beam('black', [0.18, 1.32, zw(1.32)], [-0.32, 2.2, zw(2.2)], 0.03);
-  } else {
-    // small line-number display at the top of the rear window
-    destinationDisplay(mb, { zFace: zA + 0.88 + 0.02, y: 2.46, w: 0.6, h: 0.19, dir: 1 });
-  }
-  // camera-mirror pods at the A-pillar tops
-  for (const sx of [-1, 1]) {
-    mb.box('black', { x: sx * (HW + 0.02), y: 2.45, z: -dirZ * (zA + 0.12), w: 0.06, h: 0.1, d: 0.2 });
-  }
-}
-
-/** noseBands is tiny — inline local version so the helmet band can differ. */
-function noseBands(mb, { bands, capMat, capCorners }) {
-  let top = null;
-  for (const b of bands) {
-    mb.ribbon(b.mat, arcAt3(b.arc0, b.y0), arcAt3(b.arc1, b.y1));
-    top = b;
-  }
-  if (top && capCorners) {
-    const pts = [...arcAt3(top.arc1, top.y1), ...capCorners.map(([x, z]) => [x, top.y1, z])];
-    mb.fan(capMat, pts, [0, 1, 0]);
-  }
-}
+const N = 20; // arc facets — smooth rounded helmet
 const arcAt3 = (arc, y) => arc.map(([x, z]) => [x, y, z]);
 
-/** Smooth full-depth skirt panels over a bogie (52T's clean look). */
+/** Ribbon between two arcs split into material slices by point index. */
+function ribbonSliced(mb, arc0, y0, arc1, y1, parts) {
+  for (const p of parts) {
+    mb.ribbon(
+      p.mat,
+      arcAt3(arc0, y0).slice(p.i0, p.i1 + 1),
+      arcAt3(arc1, y1).slice(p.i0, p.i1 + 1),
+    );
+  }
+}
+
+function cabMask(mb, { dirZ }) {
+  const zA = LEND / 2 - NOSE; // |z| where the walls start
+  const mk = (depth, hw = HW, p = 0.72) => {
+    const a = noseArc({ hw, zStart: -zA, depth, p, n: N });
+    return dirZ > 0 ? mirrorArcZ(a) : a;
+  };
+  // side-view profile: bumper leans slightly out, windshield nearly upright
+  // (gentle rake), then the black crown curls hard back over the roof.
+  const aSkirt = mk(1.12);
+  const aBump0 = mk(1.18);
+  const aBump1 = mk(1.3); // deepest point → nose tip at ±L/2 exactly
+  const aMask1 = mk(1.26);
+  const aGlass1 = mk(1.06);
+  const aDisp1 = mk(0.88);
+  const aCrown1 = mk(0.5, HW - 0.3, 0.8);
+
+  // material slices: [0..3] & [17..20] = body-white A-pillar strips;
+  // bumper band center [7..13] = the wide PID-red front stripe.
+  const pill = (mat) => [
+    { i0: 0, i1: 3, mat: '52tBody' },
+    { i0: 3, i1: 17, mat },
+    { i0: 17, i1: 20, mat: '52tBody' },
+  ];
+  const stripe = [
+    { i0: 0, i1: 7, mat: '52tBody' },
+    { i0: 7, i1: 13, mat: '52tRed' },
+    { i0: 13, i1: 20, mat: '52tBody' },
+  ];
+  ribbonSliced(mb, aSkirt, Y0, aBump0, 0.46, stripe); // skirt lip tuck-in
+  ribbonSliced(mb, aBump0, 0.46, aBump1, 1.2, stripe); // bumper band
+  // lamp zone: black wraps the full corner (photos: mask meets the side wall)
+  mb.ribbon('52tMask', arcAt3(aBump1, 1.2), arcAt3(aMask1, 1.6));
+  ribbonSliced(mb, aMask1, 1.6, aGlass1, 2.55, pill('52tGlassF')); // windshield
+  mb.ribbon('52tMask', arcAt3(aGlass1, 2.55), arcAt3(aDisp1, 2.86)); // display
+  mb.ribbon('52tMask', arcAt3(aDisp1, 2.86), arcAt3(aCrown1, ROOFTOP)); // crown
+  // black cap over the crown arc (arc endpoints sit on the wall-start plane,
+  // so the arc itself is a closed plan polygon) + glossy roof wrap behind it
+  mb.fan('52tMask', arcAt3(aCrown1, ROOFTOP), [0, 1, 0]);
+  const zWrap0 = dirZ < 0 ? -zA : zA - 1.05;
+  roofSlab(mb, {
+    z0: zWrap0, z1: zWrap0 + 1.05, xw: HW + 0.006,
+    yTop: YTOP + 0.008, roofTop: ROOFTOP + 0.008, mat: '52tMask',
+  });
+  // black swoosh: mask height carries onto the cab sides above the window band
+  for (const sx of [-1, 1]) {
+    mb.box('52tMask', {
+      x: sx * (HW + 0.006), y: (WINTOP + YTOP) / 2, z: zWrap0 + 0.425,
+      w: 0.012, h: YTOP - WINTOP, d: 0.85,
+    });
+  }
+
+  const zOf = (depth) => -dirZ * (zA + depth);
+  /** z of the sloped mask surface at (x, y): lerp two arcs by height. */
+  const surfZ = (x, y, arcLo, yLo, arcHi, yHi) => {
+    const t = (y - yLo) / (yHi - yLo);
+    return arcZAtX(arcLo, x) + t * (arcZAtX(arcHi, x) - arcZAtX(arcLo, x));
+  };
+
+  // headlight clusters recessed in the mask's lower corners: dark pocket +
+  // LED DRL strip + round projector lens (tail: red taillight strips)
+  for (const sx of [-1, 1]) {
+    const x = sx * 0.78;
+    const zs = surfZ(x, 1.42, aBump1, 1.2, aMask1, 1.6);
+    mb.box('black', { x, y: 1.42, z: zs + dirZ * 0.02, w: 0.46, h: 0.22, d: 0.08 });
+    if (dirZ < 0) {
+      mb.box('headlight', { x: x - sx * 0.06, y: 1.44, z: zs + dirZ * 0.075, w: 0.26, h: 0.08, d: 0.04 });
+      mb.cylinder('headlight', {
+        x: x + sx * 0.17, y: 1.42, z: zs + dirZ * 0.075, r: 0.055, len: 0.04, axis: 'z', seg: 10,
+      });
+    } else {
+      mb.box('taillight', { x, y: 1.44, z: zs + dirZ * 0.075, w: 0.3, h: 0.07, d: 0.04 });
+    }
+  }
+
+  // Škoda winged-arrow roundel on the black mask center (x=0 → tip depth)
+  mb.cylinder('silver', {
+    x: 0, y: 1.62, z: surfZ(0, 1.62, aMask1, 1.6, aGlass1, 2.55) - dirZ * 0.012,
+    r: 0.085, len: 0.03, axis: 'z', seg: 12,
+  });
+  // anti-collision LiDAR box low on the mask
+  mb.box('black', { x: 0, y: 1.32, z: surfZ(0, 1.32, aBump1, 1.2, aMask1, 1.6) - dirZ * 0.01, w: 0.3, h: 0.12, d: 0.06 });
+
+  // amber destination display inside the black band — flat face sitting just
+  // proud of the dome tip so it never sinks behind the curved band
+  const wDisp = dirZ < 0 ? 1.05 : 0.55;
+  const zDisp = surfZ(0, 2.7, aGlass1, 2.55, aDisp1, 2.86);
+  destinationDisplay(mb, { zFace: zDisp + dirZ * 0.025, y: 2.7, w: wDisp, h: 0.2, dir: dirZ });
+
+  if (dirZ < 0) {
+    // red "pid" wordmark on the left bumper cheek
+    const zl = surfZ(-0.85, 0.88, aBump0, 0.46, aBump1, 1.2);
+    mb.box('52tRed', { x: -0.85, y: 0.88, z: zl + dirZ * 0.012, w: 0.3, h: 0.13, d: 0.05 });
+    // single large windshield wiper parked diagonally
+    const zw = (y) => surfZ(0.1, y, aMask1, 1.6, aGlass1, 2.55) - dirZ * 0.035;
+    mb.beam('black', [0.55, 1.7, zw(1.7)], [-0.35, 2.35, zw(2.35)], 0.03);
+  } else {
+    const zl = surfZ(0.85, 0.88, aBump0, 0.46, aBump1, 1.2);
+    mb.box('52tRed', { x: 0.85, y: 0.88, z: zl + dirZ * 0.012, w: 0.3, h: 0.13, d: 0.05 });
+  }
+  // slim camera-mirror pods high on the A-pillars (stay inside width gate)
+  for (const sx of [-1, 1]) {
+    mb.box('black', {
+      x: sx * (HW + 0.02), y: 2.5, z: -dirZ * (zA + 0.1), w: 0.06, h: 0.12, d: 0.2,
+    });
+  }
+}
+
+/** Smooth body-colored skirt panels over a bogie (52T's clean flush look). */
 function bogieCovers(mb, { z }) {
   for (const sx of [-1, 1]) {
-    mb.box('greyLight', { x: sx * (HW + 0.01), y: 0.6, z, w: 0.02, h: 0.6, d: 2.5 });
+    mb.box('52tBody', { x: sx * (HW + 0.01), y: 0.62, z, w: 0.02, h: 0.64, d: 2.5 });
   }
 }
 
 // ── sections ─────────────────────────────────────────────────────────────────
+
+/** Shared shell call; returns wall extent for livery painting. */
+function shell(mb, { length, front, rear, rightItems, bogies }) {
+  const { z0, z1 } = buildSectionShell(mb, {
+    length, width: W, y0: Y0, sill: SILL, winTop: WINTOP, yTop: YTOP, roofTop: ROOFTOP,
+    front, rear,
+    noseDepthF: front === 'cab' ? NOSE : 0,
+    noseDepthR: rear === 'cab' ? NOSE : 0,
+    rightItems,
+    leftItems: [{ t: 'run' }],
+    mats: MATS,
+    roofMat: '52tRoof',
+    bogies,
+    winOpts: WIN,
+  });
+  return { z0, z1 };
+}
 
 function buildEnd({ tail }) {
   const mb = new MeshBuilder();
   const rightItems = tail
     ? [{ t: 'run', weight: 0.3 }, { ...DOOR }, { t: 'run', weight: 0.7 }, { ...DOOR }, { t: 'run', weight: 2.0 }]
     : [{ t: 'run', weight: 2.0 }, { ...DOOR }, { t: 'run', weight: 0.35 }];
-  buildSectionShellLocal(mb, {
+  const { z0, z1 } = shell(mb, {
     length: LEND,
     front: tail ? 'joint' : 'cab',
     rear: tail ? 'cab' : 'bellows',
     rightItems,
     bogies: [tail ? 1.2 : -1.2],
   });
-  plusMask(mb, { dirZ: tail ? 1 : -1 });
+  cabMask(mb, { dirZ: tail ? 1 : -1 });
   bogieCovers(mb, { z: tail ? 1.2 : -1.2 });
-  // AC pod + (front only) black anti-collision sensor pod behind the helmet
-  roofPod(mb, { z: tail ? -1.2 : 1.2, y: ROOFTOP, w: 1.5, h: 0.22, d: 2.1 });
-  if (!tail) roofPod(mb, { z: -1.55, y: ROOFTOP, w: 0.8, h: 0.13, d: 0.7, mat: 'black' });
-  else roofPod(mb, { z: 1.7, y: ROOFTOP, w: 1.0, h: 0.14, d: 0.8 });
+  const holes = doorSpans(z0, z1 - z0, rightItems);
+  if (tail) {
+    // red lower block over the door half of e (rear of block fades to white tail)
+    redLower(mb, [z0, 0.65], holes);
+    pidLogo(mb, { z: 0.4 });
+  } else {
+    // red roof band starts behind the black crown wrap and runs into section b
+    redRoofBand(mb, [z0 + 1.1, z1]);
+  }
+  // low AC pod + black sensor pod tucked behind the cab crown
+  roofPod(mb, { z: tail ? -1.3 : 1.3, y: ROOFTOP, w: 1.55, h: 0.18, d: 2.1, mat: '52tRoof' });
+  roofPod(mb, {
+    z: tail ? (LEND / 2 - NOSE - 1.35) : -(LEND / 2 - NOSE - 1.35),
+    y: ROOFTOP, w: 0.7, h: 0.12, d: 0.6, mat: 'black',
+  });
   return mb;
 }
 
-function buildMid({ length, pantograph }) {
+function buildMid({ length, pantograph, redRoof }) {
   const mb = new MeshBuilder();
   const rightItems = pantograph
     ? [{ t: 'run' }]
     : [{ t: 'run', weight: 0.5 }, { ...DOOR }, { t: 'run', weight: 1 }, { ...DOOR }, { t: 'run', weight: 0.5 }];
-  buildSectionShellLocal(mb, {
+  const { z0, z1 } = shell(mb, {
     length,
     front: 'joint',
     rear: 'bellows',
@@ -203,41 +330,28 @@ function buildMid({ length, pantograph }) {
   if (pantograph) {
     singleArmPantograph(mb, { z: 0, yRoof: ROOFTOP });
     for (const zc of [-1.95, 1.95]) {
-      roofPod(mb, { z: zc, y: ROOFTOP, w: 1.3, h: 0.16, d: 1.0 });
+      roofPod(mb, { z: zc, y: ROOFTOP, w: 1.35, h: 0.15, d: 1.0, mat: '52tRoof' });
     }
     bogieCovers(mb, { z: 0 });
+    if (redRoof) redRoofBand(mb, [z0, z1]);
+    // b also carries a red lower block (livery photo: red skirt band under b)
+    if (redRoof === 'b') redLower(mb, [z0, z1]);
   } else {
-    roofPod(mb, { z: 0, y: ROOFTOP, w: 1.5, h: 0.22, d: 2.2 });
+    roofPod(mb, { z: 0, y: ROOFTOP, w: 1.55, h: 0.18, d: 2.2, mat: '52tRoof' });
+    const holes = doorSpans(z0, z1 - z0, rightItems);
+    redLower(mb, [z0, z1], holes); // section c: big red lower block w/ pid
+    pidLogo(mb, { z: (z0 + z1) / 2 });
   }
   return mb;
-}
-
-/** Shared shell call + red livery bays derived from the right-wall doors. */
-function buildSectionShellLocal(mb, { length, front, rear, rightItems, bogies }) {
-  const L2 = length / 2;
-  const z0 = front === 'cab' ? -L2 + NOSE : -L2 + 0.06;
-  const z1 = rear === 'cab' ? L2 - NOSE : rear === 'bellows' ? L2 - 0.28 : L2 - 0.06;
-  buildSectionShell(mb, {
-    length, width: W, y0: Y0, sill: SILL, winTop: WINTOP, yTop: YTOP, roofTop: ROOFTOP,
-    front, rear,
-    noseDepthF: front === 'cab' ? NOSE : 0,
-    noseDepthR: rear === 'cab' ? NOSE : 0,
-    rightItems,
-    leftItems: [{ t: 'run' }],
-    mats: MATS,
-    bogies,
-    winOpts: WIN,
-  });
-  redBays(mb, doorSpans(z0, z1 - z0, rightItems));
 }
 
 export function sections() {
   const eEnd = { length: LEND, width: W };
   return [
     { key: '52t-a', build: () => buildEnd({ tail: false }), expect: eEnd },
-    { key: '52t-b', build: () => buildMid({ length: LMIDB, pantograph: true }), expect: { length: LMIDB, width: W } },
+    { key: '52t-b', build: () => buildMid({ length: LMIDB, pantograph: true, redRoof: 'b' }), expect: { length: LMIDB, width: W } },
     { key: '52t-c', build: () => buildMid({ length: LMIDC }), expect: { length: LMIDC, width: W } },
-    { key: '52t-d', build: () => buildMid({ length: LMIDB, pantograph: true }), expect: { length: LMIDB, width: W } },
+    { key: '52t-d', build: () => buildMid({ length: LMIDB, pantograph: true, redRoof: true }), expect: { length: LMIDB, width: W } },
     { key: '52t-e', build: () => buildEnd({ tail: true }), expect: eEnd },
   ];
 }

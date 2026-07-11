@@ -7,9 +7,10 @@ import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
+import { ModelPreviewButton } from '@/components/model/ModelPreviewButton';
 import { AboutTramCard } from '@/components/tram/AboutTramCard';
 import { StopsTimeline } from '@/components/tram/StopsTimeline';
-import { AcSnowflake, TramModelImage } from '@/components/tram/TramModelImage';
+import { AcSnowflake } from '@/components/tram/TramModelImage';
 import { DelayPill } from '@/components/ui/DelayPill';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
@@ -270,7 +271,8 @@ export default function TramDetailSheet() {
                   <AcSnowflake airConditioned={state.snapshot.airConditioned} size={11} />
                 </View>
               </View>
-              <TramModelImage modelId={state.model.id} height={72} style={styles.headerImage} />
+              {/* Face closeup, top-right — tap to open the full-screen 3D viewer. */}
+              <ModelPreviewButton modelId={state.model.id} height={104} style={styles.headerImage} />
             </View>
 
             {/* Live row */}
@@ -411,7 +413,7 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   subtitle: { flexShrink: 1, fontSize: 13 },
-  headerImage: { width: 116 },
+  headerImage: { width: 120 },
   liveRow: {
     alignItems: 'stretch',
     borderCurve: 'continuous',
