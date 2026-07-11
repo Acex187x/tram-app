@@ -15,6 +15,9 @@ src/
     golemio/vehicles.ts    # fetchTramPositions(): poll + filter route_type===0 → TramSnapshot[]
     golemio/gtfs.ts        # fetchTripDetail(tripId) → RouteGeometry source data; stops/routes helpers
     golemio/shapeCache.ts  # disk-persisted (expo-file-system) shape_id → RouteGeometry, in-mem LRU on top
+    feed/types.ts          # TramFeed boundary contract + CalibrationRecord (what a future backend implements)
+    feed/localGolemioFeed.ts # TramFeed impl on-client: the 5 s poll loop + shapeCache/motionlog delegation
+    feed/calibration.ts    # TramPublicState → CalibrationRecord (field order/rounding = JSONL + API contract)
     fleet/registry.ts      # regNumberToModel(), MODEL_SPECS (sections, lengths, livery), coupled-pair heuristic
     geo/polyline.ts        # Polyline: cumulative dists, pointAt(s), bearingAt(s), curvature profile
     engine/engine.ts       # TramEngine (pure TS, no React): ingest() + tick() + getFrame()
@@ -24,20 +27,36 @@ src/
   components/map/          # MapScreen composition: layers, camera controller, glass chrome
   components/ui/           # GlassPanel (guarded expo-glass-effect w/ blur fallback), badges, rows
   stores/                  # zustand: favorites (persisted), selection/follow, settings (persisted)
-  hooks/tramData.ts        # TramRuntime singleton: poll + thermal-adaptive tick loop + frame/UI
+  hooks/tramData.ts        # TramRuntime singleton: consumes an injected TramFeed (default
+                           #   LocalGolemioFeed) + thermal-adaptive tick loop + frame/UI
                            #   subscriptions (useTramRuntime/useAllTramStates/useTramState)
-  lib/motionlog/           # opt-in ride/motion recorder (settings) — logs polls + device GPS,
-                           #   persisted via expo-file-system; decoupled behind a require() guard
+  lib/motionlog/           # opt-in ride/motion recorder (settings) — stores the feed's calibration
+                           #   records + device GPS, persisted via expo-file-system; decoupled
+                           #   behind a require() guard
   app/                     # expo-router routes (see UI section)
 scripts/generate-tram-models.mjs  → assets/models/*.glb
 ```
 
 Shared contracts: `src/lib/types.ts` — single source of truth, all modules import from it.
 
+## Feed boundary (TramFeed)
+
+All live data crosses ONE seam: the `TramFeed` interface (`src/lib/feed/types.ts`)
+— push-style snapshot batches (`subscribeSnapshots`), trip-geometry resolution
+(`getGeometry`/`requestGeometry`/`promoteGeometry`), a calibration-telemetry sink
+(`reportCalibration`, `CalibrationRecord`), and feed health (`status()` → status
+chip). `TramRuntime` consumes an injected feed and owns only the simulation;
+`LocalGolemioFeed` is today's sole implementation — the "backend" running on the
+client (5 s Golemio poll loop, shapeCache, motionlog storage). A future
+`RemoteFeed` (server polls Golemio at ~1–2 s, pushes diffs, precomputes geometry,
+aggregates calibration fleet-wide) replaces it 1:1 with the engine and UI
+untouched — see `decisions/backend-plan.md`.
+
 ## Data flow
 
-1. React Query polls `GET /v2/vehiclepositions?limit=10000` every **5s**
-   (`refetchIntervalInBackground: false`). Filter `trip.gtfs.route_type === 0`.
+1. The feed (`LocalGolemioFeed`) polls `GET /v2/vehiclepositions?limit=10000`
+   every **5s** (foreground only) and pushes each batch into the runtime.
+   Filter `trip.gtfs.route_type === 0`.
    NEVER pass `includeNotTracking=true`. `shape_dist_traveled` is a **string in km** → meters.
 2. Entity key: `vehicle_registration_number` (stable across trips), fallback `trip_id`.
 3. Unseen `trip_id` → shape queue: `GET /v2/gtfs/trips/{id}?includeShapes=true&includeStopTimes=true&includeStops=true`,

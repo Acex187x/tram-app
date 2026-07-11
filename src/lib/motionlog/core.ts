@@ -14,6 +14,14 @@
 //
 // All I/O, time, location and timers are injected (see MotionLogDeps) so the
 // buffering/flush/eviction logic is unit-testable with in-memory fakes.
+//
+// Entry-point split (feed boundary refactor): the FEED owns WHEN calibration
+// records are produced (LocalGolemioFeed.reportCalibration per batch); this
+// module owns HOW/WHERE they are stored. `onCalibration(records)` is the
+// storage entry point; `onPoll(states)` remains as the state-based convenience
+// wrapper (it builds the records itself via feed/calibration).
+import { toCalibrationRecord, toCalibrationRecords } from '@/lib/feed/calibration';
+import type { CalibrationRecord } from '@/lib/feed/types';
 import type { TramPublicState } from '@/lib/types';
 
 // ── injected boundaries ──────────────────────────────────────────────────────
@@ -133,23 +141,13 @@ function sanitizeKey(key: string): string {
   return key.replace(/[^A-Za-z0-9_-]/g, '_');
 }
 
-/** Build one compact daily-log record line for a tram (no trailing newline). */
+/**
+ * Build one compact daily-log record line for a tram (no trailing newline).
+ * Field order + rounding now live in feed/calibration.ts — the record IS the
+ * feed's CalibrationRecord, serialized.
+ */
 export function pollRecord(s: TramPublicState, t: number): string {
-  return JSON.stringify({
-    t,
-    key: s.key,
-    model: s.model.id,
-    line: s.snapshot.line,
-    obsDist: r(s.snapshot.shapeDistM),
-    simDist: r(s.simDistM),
-    projDist: r(s.projectedObservedDistM),
-    devM: r(s.deviationM, 1),
-    kmh: r(s.simSpeedKmh, 1),
-    bias: r(s.paceBias, 2),
-    lat: r(s.position[1], 6),
-    lng: r(s.position[0], 6),
-    mode: s.phase,
-  });
+  return JSON.stringify(toCalibrationRecord(s, t));
 }
 
 /** Build one ride record line correlating a GPS fix with the sim (no newline). */
@@ -205,20 +203,34 @@ export class MotionLog {
   // — passive daily logging —
 
   /**
-   * Called once per poll by the map runtime. Appends a record for every tram
-   * with geometry to the in-memory buffer and opportunistically flushes.
-   * Guaranteed not to throw.
+   * Storage entry point, called once per snapshot batch by the feed
+   * (LocalGolemioFeed.reportCalibration). Appends every record to the
+   * in-memory buffer and opportunistically flushes. An empty batch still
+   * advances the flush clock check. Guaranteed not to throw. `nowMs` defaults
+   * to the batch time carried by the records (all records in a batch share it).
+   */
+  onCalibration(records: readonly CalibrationRecord[], nowMs?: number): void {
+    try {
+      const t = nowMs ?? (records.length > 0 ? records[records.length - 1].t : this.deps.now());
+      for (const rec of records) {
+        this.pending.push(JSON.stringify(rec));
+      }
+      this.capPending();
+      if (this.pending.length >= FLUSH_AT_LINES || t - this.lastFlushMs >= FLUSH_MS) {
+        this.flush(t);
+      }
+    } catch {
+      // A logging failure must never disturb the runtime.
+    }
+  }
+
+  /**
+   * State-based convenience wrapper (historic entry point): builds records for
+   * every tram with geometry, then stores them. Guaranteed not to throw.
    */
   onPoll(states: readonly TramPublicState[], nowMs: number): void {
     try {
-      for (const s of states) {
-        if (!s.hasGeometry) continue;
-        this.pending.push(pollRecord(s, nowMs));
-      }
-      this.capPending();
-      if (this.pending.length >= FLUSH_AT_LINES || nowMs - this.lastFlushMs >= FLUSH_MS) {
-        this.flush(nowMs);
-      }
+      this.onCalibration(toCalibrationRecords(states, nowMs), nowMs);
     } catch {
       // A logging failure must never disturb the runtime.
     }

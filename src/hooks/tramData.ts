@@ -1,6 +1,9 @@
 // TramRuntime — the single live-data spine of the app.
-// Polls Golemio every POLL_MS, feeds TramEngine, drives simulation ticks at
-// TICK_MS (~60 Hz), prefetches trip geometries, and exposes:
+// Consumes an injected TramFeed (default LocalGolemioFeed — the "backend"
+// running on the client): snapshot batches are PUSHED into the engine, trip
+// geometries resolve through the feed, and calibration telemetry flows back
+// out through it. The runtime itself owns the simulation: thermal-adaptive
+// tick loop, engine ingest, and exposes:
 //   • imperative frame access for the map (getRuntime().engine / subscribeFrame)
 //   • React hooks (1 Hz) for screens/lists — useAllTramStates, useTramState, …
 // The map screen renders frames imperatively via ShapeSource.setNativeProps;
@@ -10,13 +13,14 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import { getModelSpec, isLikelyCoupledPair, regNumberToModelId } from '@/lib/fleet/registry';
 import { TramEngine, type ProjectionCadence } from '@/lib/engine/engine';
-import { promoteTag } from '@/lib/golemio/client';
+import { toCalibrationRecords } from '@/lib/feed/calibration';
+import { LocalGolemioFeed } from '@/lib/feed/localGolemioFeed';
+import type { TramFeed } from '@/lib/feed/types';
 import * as shapeCache from '@/lib/golemio/shapeCache';
-import { fetchTramSnapshots } from '@/lib/golemio/vehicles';
 import type { RouteGeometry, TramPublicState, TramSnapshot } from '@/lib/types';
 import { useSettingsStore, type PositionMode } from '@/stores/settings';
 
-export const POLL_MS = 5_000;
+export { POLL_MS } from '@/lib/feed/localGolemioFeed';
 export const TICK_MS = 16; // ~60 fps simulation while trams visibly glide (zoom ≥ 14)
 /**
  * Idle tick (~10 Hz): at far zooms nothing on screen moves faster than
@@ -26,6 +30,8 @@ export const TICK_MS = 16; // ~60 fps simulation while trams visibly glide (zoom
  */
 export const TICK_IDLE_MS = 100;
 const UI_NOTIFY_MS = 1_000;
+/** Re-ingest shortly after a prefetch so early geometries apply without waiting a poll. */
+const GEOMETRY_NUDGE_MS = 2_500;
 
 /**
  * Points FC (badges/dots, whole fleet) push cadence by zoom — at far zooms the
@@ -57,53 +63,25 @@ export function detailModeForZoom(zoom: number, current: boolean): boolean {
 
 export type FrameListener = (nowMs: number) => void;
 
-/** Contract with src/lib/motionlog (ships in a parallel workstream). */
-interface MotionLogModule {
-  getMotionLog(): { onPoll(states: TramPublicState[], nowMs: number): void };
-}
-
-let motionLogModule: MotionLogModule | null | undefined;
-
-/**
- * Feed each successful poll ingest to the motion logger. Defensive by
- * contract: the module may not exist until integration, and logging must
- * never break the poll loop.
- */
-function notifyMotionLog(states: TramPublicState[], nowMs: number): void {
-  if (motionLogModule === undefined) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      motionLogModule = require('@/lib/motionlog') as MotionLogModule;
-    } catch {
-      motionLogModule = null;
-    }
-  }
-  if (!motionLogModule?.getMotionLog) return;
-  try {
-    motionLogModule.getMotionLog().onPoll(states, nowMs);
-  } catch {
-    // Logger errors must never disturb the runtime.
-  }
-}
-
-class TramRuntime {
+export class TramRuntime {
   readonly engine = new TramEngine({
     resolveModel: (snapshot: TramSnapshot) =>
       getModelSpec(regNumberToModelId(snapshot.registrationNumber)),
   });
 
+  /** The data service. LocalGolemioFeed today; a RemoteFeed later — same contract. */
+  private readonly feed: TramFeed;
   private refCount = 0;
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
   private uiNotifyTimer: ReturnType<typeof setInterval> | null = null;
   private nudgeTimer: ReturnType<typeof setTimeout> | null = null;
   private appStateSub: { remove(): void } | null = null;
-  private pollInFlight = false;
-  private pollAbort: AbortController | null = null;
+  private feedUnsub: (() => void) | null = null;
   /**
-   * Bumped whenever the runtime is paused/torn down. Async work (in-flight
-   * poll, the 2.5s nudge) captures the generation at start and no-ops if it
+   * Bumped whenever the runtime is paused/torn down. Deferred work (the 2.5 s
+   * geometry nudge) captures the generation at schedule time and no-ops if it
    * changed — so stale completions can't mutate the engine after teardown.
+   * (The feed keeps its own generation guard for in-flight polls.)
    */
   private generation = 0;
   private lastSnapshots: TramSnapshot[] = [];
@@ -117,8 +95,19 @@ class TramRuntime {
   private uiVersion = 0;
   private uiStatesCache: { version: number; states: TramPublicState[] } | null = null;
 
-  lastError: string | null = null;
-  lastPollAtMs = 0;
+  constructor(feed: TramFeed = new LocalGolemioFeed()) {
+    this.feed = feed;
+  }
+
+  /** Message of the last failed batch delivery, or null (status chip). */
+  get lastError(): string | null {
+    return this.feed.status().lastError;
+  }
+
+  /** Wall-clock ms of the last delivered snapshot batch, 0 = never (status chip). */
+  get lastPollAtMs(): number {
+    return this.feed.status().lastBatchAtMs;
+  }
 
   /** Coupled-pair predicate for featureBuilder opts. */
   readonly coupledPairFn = (key: string): boolean => {
@@ -134,6 +123,9 @@ class TramRuntime {
       // later 'active' transition is always observed (previously stop() removed
       // it, stranding the runtime dead after the first backgrounding).
       this.appStateSub = AppState.addEventListener('change', this.onAppState);
+      // The feed subscription also spans the retained lifetime; pause/resume
+      // only toggles feed.stop()/start() (a stopped feed emits nothing).
+      this.feedUnsub = this.feed.subscribeSnapshots(this.onSnapshots);
       // Projection-sim cadence tracks the position-mode setting: full-rate
       // dead-reckoning is only needed while 'live' renders it every frame; in
       // 'smooth' it is consumed at ~1 Hz, so the engine coarsens it to 500 ms.
@@ -152,6 +144,8 @@ class TramRuntime {
       this.pause();
       this.appStateSub?.remove();
       this.appStateSub = null;
+      this.feedUnsub?.();
+      this.feedUnsub = null;
       this.settingsUnsub?.();
       this.settingsUnsub = null;
     }
@@ -162,13 +156,12 @@ class TramRuntime {
     this.engine.setProjectionCadence(cadence);
   }
 
-  /** Start the timer loops + an immediate poll. Idempotent. */
+  /** Start the timer loops + the feed (which polls immediately). Idempotent. */
   private resume(): void {
     if (this.tickTimer) return;
     this.startTickTimer();
     this.uiNotifyTimer = setInterval(() => this.bumpUi(), UI_NOTIFY_MS);
-    this.pollTimer = setInterval(() => void this.poll(), POLL_MS);
-    void this.poll();
+    this.feed.start();
   }
 
   private startTickTimer(): void {
@@ -201,23 +194,22 @@ class TramRuntime {
   }
 
   /**
-   * Halt timers and all outstanding async work WITHOUT removing the AppState
-   * subscription (used on background). Aborts the in-flight poll, cancels the
-   * pending nudge, and bumps the generation so any late completions no-op.
+   * Halt timers, the feed, and all outstanding async work WITHOUT removing the
+   * AppState/feed subscriptions (used on background). feed.stop() aborts the
+   * in-flight poll; the pending nudge is cancelled and the generation bumped so
+   * any late completions no-op.
    */
   private pause(): void {
     this.generation += 1;
-    for (const t of [this.pollTimer, this.tickTimer, this.uiNotifyTimer]) {
+    for (const t of [this.tickTimer, this.uiNotifyTimer]) {
       if (t) clearInterval(t);
     }
-    this.pollTimer = this.tickTimer = this.uiNotifyTimer = null;
+    this.tickTimer = this.uiNotifyTimer = null;
     if (this.nudgeTimer) {
       clearTimeout(this.nudgeTimer);
       this.nudgeTimer = null;
     }
-    this.pollAbort?.abort();
-    this.pollAbort = null;
-    this.pollInFlight = false;
+    this.feed.stop();
   }
 
   private readonly onAppState = (status: AppStateStatus): void => {
@@ -229,55 +221,37 @@ class TramRuntime {
     }
   };
 
-  private async poll(): Promise<void> {
-    if (this.pollInFlight) return;
-    this.pollInFlight = true;
+  /**
+   * One fresh snapshot batch from the feed → engine ingest + calibration
+   * report + geometry warm-up. This is the push-side replacement for the old
+   * inline poll body (the fetch/abort/status plumbing now lives in the feed).
+   */
+  private readonly onSnapshots = (snapshots: TramSnapshot[], atMs: number): void => {
     const gen = this.generation;
-    const abort = new AbortController();
-    this.pollAbort = abort;
-    try {
-      const snapshots = await fetchTramSnapshots({ signal: abort.signal });
-      if (gen !== this.generation) return; // paused/torn down mid-flight
-      this.lastSnapshots = snapshots;
-      this.lastPollAtMs = Date.now();
-      this.lastError = null;
-      const now = Date.now();
-      this.engine.ingest(snapshots, (tripId) => shapeCache.getLoaded(tripId), now);
-      notifyMotionLog(this.engine.getStates(now), now);
-      // Prefetch geometries for trips we don't have yet (background priority).
-      const missing = snapshots.filter((s) => !shapeCache.has(s.tripId)).map((s) => s.tripId);
-      if (missing.length > 0) {
-        shapeCache.requestPrefetch(missing, 2);
-        // As geometries arrive, they are adopted on the next ingest; nudge one
-        // extra ingest shortly after so early geometries apply without waiting
-        // a full poll cycle. Tracked so teardown can cancel it.
-        this.nudgeTimer = setTimeout(() => {
-          this.nudgeTimer = null;
-          if (gen !== this.generation) return;
-          this.engine.ingest(this.lastSnapshots, (tripId) => shapeCache.getLoaded(tripId), Date.now());
-          this.bumpUi();
-        }, 2_500);
-      }
-      this.bumpUi();
-    } catch (e) {
-      if (gen !== this.generation) return; // aborted by pause(): swallow
-      this.lastError = e instanceof Error ? e.message : String(e);
-    } finally {
-      // Only the still-current generation may clear the in-flight flag / abort
-      // handle; a stale completion must not disturb a freshly resumed poll.
-      if (gen === this.generation) this.pollInFlight = false;
-      if (this.pollAbort === abort) this.pollAbort = null;
+    this.lastSnapshots = snapshots;
+    this.engine.ingest(snapshots, (tripId) => this.feed.getGeometry(tripId), atMs);
+    this.feed.reportCalibration(toCalibrationRecords(this.engine.getStates(atMs), atMs));
+    // Warm geometries for trips we don't have yet (background priority).
+    const missing = snapshots.filter((s) => !this.feed.getGeometry(s.tripId)).map((s) => s.tripId);
+    if (missing.length > 0) {
+      this.feed.requestGeometry(missing, 2);
+      // As geometries arrive, they are adopted on the next ingest; nudge one
+      // extra ingest shortly after so early geometries apply without waiting
+      // a full poll cycle. Tracked so teardown can cancel it.
+      this.nudgeTimer = setTimeout(() => {
+        this.nudgeTimer = null;
+        if (gen !== this.generation) return;
+        this.engine.ingest(this.lastSnapshots, (tripId) => this.feed.getGeometry(tripId), Date.now());
+        this.bumpUi();
+      }, GEOMETRY_NUDGE_MS);
     }
-  }
+    this.bumpUi();
+  };
 
   /** Raise fetch priority for the selected/followed tram's geometry. */
   prioritizeTrip(tripId: string | null | undefined): void {
-    if (!tripId || shapeCache.has(tripId)) return;
-    // First try to promote an already-queued waiter (the common cold-cache
-    // case: the citywide poll enqueued this trip at background priority and it
-    // is stuck behind the 16-starts/8s queue). If nothing is queued yet, ask
-    // the cache to issue it at urgent priority.
-    if (!promoteTag(tripId, 0)) shapeCache.requestPrefetch([tripId], 0);
+    if (!tripId) return;
+    this.feed.promoteGeometry(tripId);
   }
 
   subscribeFrame(listener: FrameListener): () => void {
@@ -313,7 +287,7 @@ class TramRuntime {
 
 let runtime: TramRuntime | null = null;
 
-/** The app-wide runtime singleton (created lazily). */
+/** The app-wide runtime singleton (created lazily, on the default local feed). */
 export function getRuntime(): TramRuntime {
   if (!runtime) runtime = new TramRuntime();
   return runtime;
@@ -343,7 +317,12 @@ export function useTramState(key: string | null | undefined): TramPublicState | 
   return key ? rt.engine.getState(key, Date.now()) : undefined;
 }
 
-/** All loaded route geometries (grows as shapes stream in), ~1 Hz. */
+/**
+ * All loaded route geometries (grows as shapes stream in), ~1 Hz. NOTE: this
+ * enumerates the local shape cache directly — bulk enumeration (planner graph)
+ * is deliberately outside the TramFeed contract for now; a remote feed still
+ * fills the same local cache, so this keeps working unchanged.
+ */
 export function useLoadedGeometries(): RouteGeometry[] {
   const rt = getRuntime();
   useSyncExternalStore(rt.subscribeUi, rt.getUiVersion);

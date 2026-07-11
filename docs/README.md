@@ -23,6 +23,8 @@ and HOW (with `src/…` references) for one subsystem.
 |---|---|
 | [`decisions/data-pipeline.md`](decisions/data-pipeline.md) | Golemio polling, rate-limit queue, entity keying, GTFS/shape fetching + disk cache, `RouteGeometry` construction. |
 | [`decisions/interpolation-engine.md`](decisions/interpolation-engine.md) | The physics sim: speed-limit field, braking envelope, dwell, and the observation-primary pace controller with trail bias + crawl/catch-up regimes. |
+| [`decisions/backend-plan.md`](decisions/backend-plan.md) | The future backend (server-side 1–2 s Golemio polling, push stream, precomputed geometry, fleet-wide calibration priors) and the `TramFeed` client boundary that makes it a drop-in. |
+| [`performance.md`](performance.md) | Performance & thermal playbook: everything done for perf (cadence system, GPU knobs, allocation discipline), the invariants that must not be broken, and the pre-ship verification checklist. |
 | [`decisions/map-rendering.md`](decisions/map-rendering.md) | Zoom bands, ModelLayer scaling, the imperative-push source pattern, the follow camera (80 ms retarget / 170 ms overlapping glide, persistent gestures), thermal cadences. |
 | [`decisions/3d-models.md`](decisions/3d-models.md) | Programmatic GLB authoring (`@gltf-transform/core`), the −Z front convention, per-type sections, and the expo-gl + three interactive viewer (WebGL1 chain). |
 | [`decisions/ux-screens.md`](decisions/ux-screens.md) | The Liquid Glass shell and the form-sheet screens (tram / line / search / favorites / planner / stop / settings), follow/selection UX. |
