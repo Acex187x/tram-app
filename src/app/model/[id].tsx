@@ -15,6 +15,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
+// React Native defines `navigator` without `userAgent`; GLTFLoader (r162)
+// sniffs `navigator.userAgent.indexOf('Firefox')` and crashes on undefined.
+const nav = globalThis.navigator as { userAgent?: string } | undefined;
+if (nav && typeof nav.userAgent !== 'string') {
+  try {
+    Object.defineProperty(nav, 'userAgent', { value: 'ReactNative ExpoGL', configurable: true });
+  } catch {
+    // non-configurable navigator: GLTFLoader will fail loudly instead
+  }
+}
+
 import {
   fitRadius,
   IDLE_SPIN_DEG_PER_S,
@@ -222,6 +233,18 @@ export default function ModelViewerScreen() {
       try {
         const width = gl.drawingBufferWidth;
         const height = gl.drawingBufferHeight;
+        // expo-gl returns undefined for VERSION/SHADING_LANGUAGE_VERSION string
+        // params; three r162 calls .indexOf on them. Shim them to WebGL 1 ids.
+        const rawGetParameter = gl.getParameter.bind(gl);
+        (gl as unknown as { getParameter: (p: number) => unknown }).getParameter = (
+          pname: number,
+        ) => {
+          const value = rawGetParameter(pname);
+          if (typeof value === 'string') return value;
+          if (pname === gl.VERSION) return 'WebGL 1.0 (Expo GL)';
+          if (pname === gl.SHADING_LANGUAGE_VERSION) return 'WebGL GLSL ES 1.0 (Expo GL)';
+          return value;
+        };
         renderer = new THREE.WebGLRenderer({
           canvas: makeFakeCanvas(gl),
           context: gl as unknown as WebGL2RenderingContext,
@@ -260,6 +283,17 @@ export default function ModelViewerScreen() {
         const ground = makeGroundCircle(Math.max(size.x, size.z) * 0.72);
         ground.position.set(target.x, total.min.y - 0.02, target.z);
         scene.add(ground);
+
+        // expo-gl WebGL1 quirk (verified on-simulator): the scene stays blank
+        // unless at least one MeshBasicMaterial object is drawn — it primes the
+        // program pipeline for the PBR materials. A 1 cm cube hidden 1 m below
+        // the ground disc costs nothing and makes everything render.
+        const pipelinePrimer = new THREE.Mesh(
+          new THREE.BoxGeometry(0.01, 0.01, 0.01),
+          new THREE.MeshBasicMaterial({ color: 0x000000 }),
+        );
+        pipelinePrimer.position.set(target.x, total.min.y - 1, target.z);
+        scene.add(pipelinePrimer);
 
         // ── camera: 3/4 front, framing the whole consist ────────────────────
         const aspect = width / Math.max(1, height);
@@ -313,6 +347,7 @@ export default function ModelViewerScreen() {
         setStatus('ready');
       } catch (e) {
         console.warn('[model-viewer] failed to build 3D scene', e);
+        if (e instanceof Error) console.warn('[model-viewer] stack:', e.stack);
         try {
           renderer?.dispose();
         } catch {
