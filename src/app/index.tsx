@@ -5,13 +5,14 @@
 // Will be replaced by the real map screen.
 import Mapbox, {
   Camera,
+  CircleLayer,
   MapView,
   ModelLayer,
   Models,
   ShapeSource,
-  StyleImport,
 } from '@rnmapbox/maps';
-import { useEffect, useRef } from 'react';
+import { Asset } from 'expo-asset';
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 Mapbox.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_KEY ?? null);
@@ -38,6 +39,14 @@ const staticFeatures = [
 
 export default function SpikeScreen() {
   const movingRef = useRef<ShapeSource>(null);
+  const [modelUri, setModelUri] = useState<string | null>(null);
+
+  useEffect(() => {
+    Asset.fromModule(require('../../assets/models/spike-arrow.glb'))
+      .downloadAsync()
+      .then((a) => setModelUri(a.localUri))
+      .catch((e) => console.error('model asset load failed', e));
+  }, []);
 
   useEffect(() => {
     let t = 0;
@@ -62,26 +71,26 @@ export default function SpikeScreen() {
         styleURL={Mapbox.StyleURL.Standard}
         scaleBarEnabled={false}
       >
-        <StyleImport
-          id="basemap"
-          existing
-          config={{ lightPreset: 'day', show3dObjects: 'true' }}
-        />
         <Camera
-          defaultSettings={{ centerCoordinate: CENTER, zoomLevel: 16.5, pitch: 55, heading: 0 }}
+          defaultSettings={{ centerCoordinate: [14.4172, 50.0813], zoomLevel: 17.2, pitch: 55, heading: 0 }}
         />
-        <Models models={{ arrow: require('../../assets/models/spike-arrow.glb') }} />
+        {modelUri != null && <Models models={{ arrow: modelUri }} />}
         <ShapeSource
           id="calib"
           shape={{ type: 'FeatureCollection', features: staticFeatures }}
         >
           <ModelLayer
             id="calib-models"
+            slot="top"
             style={{
               modelId: ['get', 'modelKey'],
               modelRotation: [0, 0, ['get', 'bearing']],
-              modelScale: [1, 1, 1],
+              modelScale: [2, 2, 2],
             }}
+          />
+          <CircleLayer
+            id="calib-dots"
+            style={{ circleRadius: 5, circleColor: '#00c8ff', circleOpacity: 0.8 }}
           />
         </ShapeSource>
         <ShapeSource

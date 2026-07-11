@@ -105,6 +105,21 @@ Layers stacked, banded by zoom with opacity crossfades:
 
 - ModelLayer style: `modelId: ['get','modelKey']`, `modelRotation: [0,0,['get','bearing']]`
   (+ HEADING_OFFSET calibration const), `modelEmissiveStrength: 1.2`.
+
+### SPIKE-VERIFIED conventions (2026-07-11, simulator, rnmapbox 10.3.2 / Mapbox iOS 11.20.1)
+- Data-driven `modelId: ['get','modelKey']` AND `modelRotation: [0,0,['get','bearing']]` WORK.
+- GLB loading: `require()` asset URLs are BROKEN in dev (native strips query params from metro
+  URLs). MUST load via `Asset.fromModule(require(...)).downloadAsync()` → pass `localUri`
+  (file://) strings to `<Models models={{key: uri}}>`. Render `<Models>` only after all resolved.
+- Model orientation (empirical): GLB Y-up, meters. With `modelRotation z = β`, the model's
+  authored +Z axis points at compass bearing β+180°, rotation clockwise-positive.
+  ⇒ CONVENTION: author trams with FRONT toward **−Z**; then `z = bearing` faces correctly.
+- `ModelLayer` needs `slot="top"` over the Standard style; add layers only after style load
+  (models registered before layers — <Models> first works).
+- Do NOT use `<StyleImport id="basemap">` with a direct `styleURL: StyleURL.Standard` — that
+  import id does not exist ("Import basemap does not exist"). Either skip Standard config or use
+  a styleJSON with `imports: [{id:'basemap', url:'mapbox://styles/mapbox/standard', config:{...}}]`.
+- Hot reload does NOT re-register models/layers reliably — restart the app when iterating on map code.
 - Transparent CircleLayer across all zooms for hit-testing (ModelLayer taps unreliable).
 - Route lines: LineLayer over union of loaded shapes (dark red 7A0603 + lighter casing),
   below tram layers; selected line highlighted.
