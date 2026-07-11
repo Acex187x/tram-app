@@ -26,6 +26,29 @@ export const Colors = {
 
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
+/**
+ * Prague tram (PID) brand palette — shared by map layers and UI chrome.
+ * pidRed is the official route color returned by Golemio for every tram line.
+ */
+export const Tram = {
+  /** PID dark red — route lines, brand accents. */
+  pidRed: '#7A0603',
+  /** Classic Tatra livery red. */
+  liveryRed: '#B02A26',
+  /** Classic livery cream — badges, glyphs on red. */
+  cream: '#F5EBD8',
+  /** Route line casing / subtle strokes. */
+  redSoft: 'rgba(122, 6, 3, 0.35)',
+  /** Selected line highlight. */
+  gold: '#E0A526',
+  /** Delay states. */
+  onTime: '#2E8B57',
+  late: '#C7791B',
+  veryLate: '#B3261E',
+  /** Night line accent (dark blue like PID night routes). */
+  night: '#20315C',
+} as const;
+
 export const Fonts = Platform.select({
   ios: {
     /** iOS `UIFontDescriptorSystemDesignDefault` */

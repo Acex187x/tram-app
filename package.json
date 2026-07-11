@@ -41,6 +41,9 @@
     "@gltf-transform/core": "^4.4.1",
     "@gltf-transform/functions": "^4.4.1",
     "@types/react": "~19.2.2",
+    "esbuild": "^0.28.1",
+    "puppeteer": "^25.3.0",
+    "three": "^0.185.1",
     "typescript": "~6.0.3"
   },
   "scripts": {
