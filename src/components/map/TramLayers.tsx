@@ -32,6 +32,7 @@ import { useCallback, useEffect, useRef, type ReactElement, type RefObject } fro
 
 import { Tram } from '@/constants/theme';
 import { getRuntime, pointsPushIntervalMs } from '@/hooks/tramData';
+import { bearingAt, pointAt } from '@/lib/geo/polyline';
 import { buildFrame } from '@/lib/render/featureBuilder';
 import type { PlannerItinerary, Viewport } from '@/lib/types';
 import { useFavoritesStore } from '@/stores/favorites';
@@ -254,17 +255,27 @@ export function TramLayers({
           return;
         }
         lastCameraPushMsRef.current = nowMs;
-        // Track where the tram is RENDERED: raw fix in live mode, sim otherwise.
+        // Track where the tram is RENDERED. In live mode that is the PROJECTED
+        // observation (the fix dead-reckoned to now) — anchoring to the raw fix
+        // left the camera parked while the tram drove away.
         const isLive = positionMode === 'live';
-        const bearing = isLive ? state.observedBearing : state.bearing;
+        let anchor = state.position;
+        let bearing = state.bearing;
+        if (isLive) {
+          const geometry = rt.engine.getGeometry(followKey);
+          const projDist = state.projectedObservedDistM;
+          if (geometry && projDist != null) {
+            anchor = pointAt(geometry.coordinates, geometry.cumDistM, projDist);
+            bearing = bearingAt(geometry.coordinates, geometry.cumDistM, projDist);
+          } else {
+            anchor = state.observedPosition;
+            bearing = state.observedBearing;
+          }
+        }
         const overrides = gesture?.overrides ?? null;
         cameraRef.current?.setCamera({
           // Lead slightly toward where the tram will be at the next retarget.
-          centerCoordinate: leadTarget(
-            isLive ? state.observedPosition : state.position,
-            bearing,
-            state.simSpeedKmh,
-          ),
+          centerCoordinate: leadTarget(anchor, bearing, state.simSpeedKmh),
           zoomLevel: overrides?.zoom ?? FOLLOW_ZOOM,
           pitch: overrides?.pitch ?? FOLLOW_PITCH,
           // Camera behind the tram, looking forward over the roof; the user's
