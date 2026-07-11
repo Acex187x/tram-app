@@ -1,0 +1,241 @@
+// Upcoming-stops timeline for the tram detail sheet. Renders the stops ahead
+// of the tram's simulated position as an iOS grouped-list style timeline with
+// a rail of dots, delay-adjusted times, and a terminus flag. While the trip
+// geometry is still streaming in it shows a subtle pulsing skeleton.
+import { SymbolView } from 'expo-symbols';
+import { useEffect, useMemo, useRef } from 'react';
+import { Animated, StyleSheet, Text, useColorScheme, View } from 'react-native';
+
+import { delayColor } from '@/components/ui/DelayPill';
+import { Colors, Tram } from '@/constants/theme';
+import type { RouteGeometry, RouteStop } from '@/lib/types';
+
+export interface StopsTimelineProps {
+  /** Trip geometry, or undefined while it is still loading. */
+  geometry: RouteGeometry | undefined;
+  /** Tram's simulated distance along the shape, meters. */
+  simDistM: number;
+  /** Current reported delay, seconds (shifts scheduled times). */
+  delaySeconds: number;
+}
+
+/** H:mm clock label (24h, Prague style). */
+function fmtClock(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function LoadingSkeleton() {
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const opacity = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.75, duration: 650, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.3, duration: 650, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+
+  const bone = scheme === 'dark' ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.12)';
+  return (
+    <View>
+      {[0, 1, 2, 3].map((i) => (
+        <Animated.View key={i} style={[styles.row, { opacity }]}>
+          <View style={styles.rail}>
+            <View style={[styles.dot, { backgroundColor: bone }]} />
+          </View>
+          <View style={[styles.bone, { backgroundColor: bone, width: `${62 - i * 9}%` }]} />
+          <View style={[styles.bone, { backgroundColor: bone, width: 42 }]} />
+        </Animated.View>
+      ))}
+      <Text style={[styles.loadingNote, { color: Colors[scheme].textSecondary }]}>
+        route loading…
+      </Text>
+    </View>
+  );
+}
+
+interface StopRowProps {
+  stop: RouteStop;
+  delaySeconds: number;
+  isNext: boolean;
+  isFirst: boolean;
+  isLast: boolean;
+}
+
+function StopRow({ stop, delaySeconds, isNext, isFirst, isLast }: StopRowProps) {
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const c = Colors[scheme];
+  const delayed = delaySeconds > 60;
+  const expectedMs = stop.arrivalMs + delaySeconds * 1000;
+  const railColor = scheme === 'dark' ? 'rgba(176,42,38,0.55)' : Tram.redSoft;
+  const dotColor = scheme === 'dark' ? Tram.liveryRed : Tram.pidRed;
+
+  return (
+    <View style={styles.row}>
+      <View style={styles.rail}>
+        <View
+          style={[styles.railSegment, styles.railTop, { backgroundColor: railColor, opacity: isFirst ? 0 : 1 }]}
+        />
+        <View
+          style={[styles.railSegment, styles.railBottom, { backgroundColor: railColor, opacity: isLast ? 0 : 1 }]}
+        />
+        <View
+          style={
+            isNext
+              ? [styles.dotNext, { backgroundColor: dotColor }]
+              : [styles.dot, { backgroundColor: dotColor }]
+          }
+        />
+      </View>
+      <View style={styles.nameCol}>
+        <View style={styles.nameLine}>
+          <Text
+            style={[styles.name, { color: c.text }, isNext && styles.nameNext]}
+            numberOfLines={1}
+          >
+            {stop.name}
+          </Text>
+          {isNext && (
+            <View style={styles.nextChip}>
+              <Text style={styles.nextChipText} allowFontScaling={false}>
+                NEXT
+              </Text>
+            </View>
+          )}
+        </View>
+        {stop.isTerminal && (
+          <View style={styles.terminalLine}>
+            <SymbolView name="flag.checkered" size={11} tintColor={c.textSecondary} />
+            <Text style={[styles.terminalText, { color: c.textSecondary }]}>Terminus</Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.timeCol}>
+        <Text
+          style={[
+            styles.time,
+            { color: delayed ? delayColor(delaySeconds) : c.text },
+            isNext && styles.timeNext,
+          ]}
+          allowFontScaling={false}
+        >
+          {fmtClock(expectedMs)}
+        </Text>
+        {delayed && (
+          <Text style={[styles.timeSched, { color: c.textSecondary }]} allowFontScaling={false}>
+            {fmtClock(stop.arrivalMs)}
+          </Text>
+        )}
+      </View>
+    </View>
+  );
+}
+
+export function StopsTimeline({ geometry, simDistM, delaySeconds }: StopsTimelineProps) {
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+
+  const upcoming = useMemo(() => {
+    if (!geometry) return [];
+    // Keep the stop the tram is currently dwelling at (±2 m tolerance).
+    return geometry.stops.filter((s) => s.distM >= simDistM - 2);
+  }, [geometry, simDistM]);
+
+  if (!geometry) return <LoadingSkeleton />;
+
+  if (upcoming.length === 0) {
+    return (
+      <Text style={[styles.loadingNote, { color: Colors[scheme].textSecondary }]}>
+        No stops remaining on this trip.
+      </Text>
+    );
+  }
+
+  return (
+    <View>
+      {upcoming.map((stop, i) => (
+        <StopRow
+          key={`${stop.stopId}-${stop.sequence}`}
+          stop={stop}
+          delaySeconds={delaySeconds}
+          isNext={i === 0}
+          isFirst={i === 0}
+          isLast={i === upcoming.length - 1}
+        />
+      ))}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  row: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 40,
+    paddingVertical: 4,
+  },
+  rail: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+    width: 18,
+  },
+  railSegment: {
+    left: 8,
+    position: 'absolute',
+    width: 2,
+  },
+  railTop: { height: '50%', top: 0 },
+  railBottom: { bottom: 0, height: '50%' },
+  dot: {
+    borderRadius: 4,
+    height: 8,
+    width: 8,
+  },
+  dotNext: {
+    backgroundColor: Tram.pidRed,
+    borderColor: Tram.gold,
+    borderRadius: 7,
+    borderWidth: 2.5,
+    height: 14,
+    width: 14,
+  },
+  nameCol: { flex: 1, gap: 1 },
+  nameLine: { alignItems: 'center', flexDirection: 'row', gap: 6 },
+  name: { flexShrink: 1, fontSize: 15 },
+  nameNext: { fontSize: 16, fontWeight: '600' },
+  nextChip: {
+    backgroundColor: Tram.pidRed,
+    borderRadius: 5,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+  },
+  nextChipText: {
+    color: Tram.cream,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+  },
+  terminalLine: { alignItems: 'center', flexDirection: 'row', gap: 4 },
+  terminalText: { fontSize: 12 },
+  timeCol: { alignItems: 'flex-end' },
+  time: { fontSize: 15, fontVariant: ['tabular-nums'] },
+  timeNext: { fontWeight: '600' },
+  timeSched: {
+    fontSize: 12,
+    fontVariant: ['tabular-nums'],
+    textDecorationLine: 'line-through',
+  },
+  bone: { borderRadius: 5, height: 12 },
+  loadingNote: {
+    fontSize: 13,
+    fontStyle: 'italic',
+    paddingVertical: 8,
+    textAlign: 'center',
+  },
+});

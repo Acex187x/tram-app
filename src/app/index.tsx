@@ -1,116 +1,203 @@
-// SPIKE SCREEN — validates the riskiest assumptions before real implementation:
-// 1. @rnmapbox/maps builds & renders Standard 3D style on Expo SDK 57
-// 2. ModelLayer renders bundled GLBs with data-driven modelRotation ['get','bearing']
-// 3. ShapeSource.setNativeProps sustains ~15fps updates
-// Will be replaced by the real map screen.
+// THE MAP SCREEN — heart of the app. Full-bleed 3D Mapbox Standard map of
+// Prague with the live tram fleet, route network, planner overlay and Liquid
+// Glass chrome. Sheets (tram/line/favorites/planner/search/settings) float
+// over this screen as formSheets; the map keeps rendering beneath them.
+
 import Mapbox, {
   Camera,
-  CircleLayer,
+  LocationPuck,
   MapView,
-  ModelLayer,
-  Models,
-  ShapeSource,
+  StyleImport,
+  type MapState,
 } from '@rnmapbox/maps';
-import { Asset } from 'expo-asset';
-import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import * as Location from 'expo-location';
+import * as SplashScreen from 'expo-splash-screen';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import {
+  buildMapStyleJSON,
+  resolveLightPreset,
+  STANDARD_CONFIG,
+} from '@/components/map/mapStyle';
+import { BottomDock, ControlStack, FollowBanner, StatusChip } from '@/components/map/MapChrome';
+import { PlannerOverlay } from '@/components/map/PlannerOverlay';
+import { RouteNetwork } from '@/components/map/RouteNetwork';
+import { TramLayers } from '@/components/map/TramLayers';
+import { useTramModels } from '@/components/map/useTramModels';
+import { getRuntime, useTramRuntime } from '@/hooks/tramData';
+import type { Viewport } from '@/lib/types';
+import { useSelectionStore } from '@/stores/selection';
+import { useSettingsStore } from '@/stores/settings';
 
 Mapbox.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_KEY ?? null);
 
-// Národní třída area — tram tracks run roughly east-west here.
-const CENTER: [number, number] = [14.4189, 50.0813];
+const PRAGUE_CENTER: [number, number] = [14.42, 50.082];
+const INITIAL_ZOOM = 13.8;
+const INITIAL_PITCH = 45;
+const INITIAL_VIEWPORT: Viewport = {
+  bbox: [14.32, 50.03, 14.52, 50.14],
+  zoom: INITIAL_ZOOM,
+};
+/** Re-evaluate the 'auto' light preset this often. */
+const LIGHT_REFRESH_MS = 5 * 60 * 1000;
+/** Never leave the user stuck on the splash if the map fails to load. */
+const SPLASH_FAILSAFE_MS = 8_000;
 
-function feature(id: string, lng: number, lat: number, bearing: number) {
-  return {
-    type: 'Feature' as const,
-    id,
-    properties: { bearing, modelKey: 'arrow' },
-    geometry: { type: 'Point' as const, coordinates: [lng, lat] },
-  };
-}
+export default function MapScreen() {
+  useTramRuntime(); // keeps polling + simulation alive while the map lives
 
-// Static calibration row: bearings 0/90/180/270 west-to-east.
-const staticFeatures = [
-  feature('b0', 14.4165, 50.0813, 0),
-  feature('b90', 14.417, 50.0813, 90),
-  feature('b180', 14.4175, 50.0813, 180),
-  feature('b270', 14.418, 50.0813, 270),
-];
+  const insets = useSafeAreaInsets();
+  const cameraRef = useRef<Camera>(null);
+  const viewportRef = useRef<Viewport>({ ...INITIAL_VIEWPORT });
+  const splashHiddenRef = useRef(false);
+  const [is3D, setIs3D] = useState(true);
+  const [locationGranted, setLocationGranted] = useState(false);
+  const modelUris = useTramModels();
 
-export default function SpikeScreen() {
-  const movingRef = useRef<ShapeSource>(null);
-  const [modelUri, setModelUri] = useState<string | null>(null);
-
+  // ── Light preset: settings override or Prague time-of-day, refreshed 5-min ─
+  const lightPresetSetting = useSettingsStore((s) => s.lightPreset);
+  const [lightClock, setLightClock] = useState(() => Date.now());
   useEffect(() => {
-    Asset.fromModule(require('../../assets/models/spike-arrow.glb'))
-      .downloadAsync()
-      .then((a) => setModelUri(a.localUri))
-      .catch((e) => console.error('model asset load failed', e));
+    const iv = setInterval(() => setLightClock(Date.now()), LIGHT_REFRESH_MS);
+    return () => clearInterval(iv);
+  }, []);
+  const lightPreset = resolveLightPreset(lightPresetSetting, lightClock);
+  // Style JSON is created once; later preset changes flow through StyleImport
+  // so the style never reloads (reload would drop runtime layers/models).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const styleJSON = useMemo(() => buildMapStyleJSON(lightPreset), []);
+
+  // ── Splash: hide when the base map is in, failsafe either way ──────────────
+  const hideSplash = useCallback(() => {
+    if (splashHiddenRef.current) return;
+    splashHiddenRef.current = true;
+    void SplashScreen.hideAsync();
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(hideSplash, SPLASH_FAILSAFE_MS);
+    return () => clearTimeout(t);
+  }, [hideSplash]);
+
+  // ── Viewport tracking (feeds frame culling + zoom banding via ref) ─────────
+  const onCameraChanged = useCallback((state: MapState) => {
+    // Ref assignment only — no React work per camera event.
+    const { ne, sw } = state.properties.bounds;
+    viewportRef.current = {
+      bbox: [sw[0], sw[1], ne[0], ne[1]],
+      zoom: state.properties.zoom,
+    };
   }, []);
 
+  // Any touch on the map cancels tram-follow.
+  const onMapTouchStart = useCallback(() => {
+    const selection = useSelectionStore.getState();
+    if (selection.followTramKey) selection.setFollowTramKey(null);
+  }, []);
+
+  // ── One-shot fly-to requests from search/line/favorites sheets ─────────────
+  const flyToTarget = useSelectionStore((s) => s.flyToTarget);
   useEffect(() => {
-    let t = 0;
-    const iv = setInterval(() => {
-      t += 1;
-      const lng = 14.4185 + (t % 150) * 0.00002;
-      movingRef.current?.setNativeProps({
-        // @ts-expect-error shape accepts stringified GeoJSON
-        shape: JSON.stringify({
-          type: 'FeatureCollection',
-          features: [feature('mover', lng, 50.0817, 90)],
-        }),
+    if (!flyToTarget) return;
+    const selection = useSelectionStore.getState();
+    if (selection.followTramKey) selection.setFollowTramKey(null);
+    cameraRef.current?.setCamera({
+      centerCoordinate: flyToTarget.coordinates,
+      zoomLevel: flyToTarget.zoom ?? 15.5,
+      animationMode: 'flyTo',
+      animationDuration: 1300,
+    });
+    selection.requestFlyTo(null);
+  }, [flyToTarget]);
+
+  // Followed tram's geometry loads first (smooth on-shape follow ASAP).
+  const followTramKey = useSelectionStore((s) => s.followTramKey);
+  useEffect(() => {
+    if (!followTramKey) return;
+    const state = getRuntime().engine.getState(followTramKey);
+    if (state) getRuntime().prioritizeTrip(state.snapshot.tripId);
+  }, [followTramKey]);
+
+  // Show the location puck from the start if permission was granted earlier.
+  useEffect(() => {
+    Location.getForegroundPermissionsAsync()
+      .then(({ status }) => {
+        if (status === Location.PermissionStatus.GRANTED) setLocationGranted(true);
+      })
+      .catch(() => {});
+  }, []);
+
+  // ── Chrome actions ──────────────────────────────────────────────────────────
+  const onLocate = useCallback(async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== Location.PermissionStatus.GRANTED) return;
+      setLocationGranted(true);
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
       });
-    }, 66);
-    return () => clearInterval(iv);
+      useSelectionStore.getState().setFollowTramKey(null);
+      cameraRef.current?.setCamera({
+        centerCoordinate: [pos.coords.longitude, pos.coords.latitude],
+        zoomLevel: 15.5,
+        animationMode: 'flyTo',
+        animationDuration: 1200,
+      });
+    } catch {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  }, []);
+
+  const onTogglePitch = useCallback(() => {
+    setIs3D((current) => {
+      cameraRef.current?.setCamera({
+        pitch: current ? 0 : 55,
+        animationMode: 'easeTo',
+        animationDuration: 550,
+      });
+      return !current;
+    });
   }, []);
 
   return (
     <View style={styles.container}>
       <MapView
         style={styles.map}
-        styleURL={Mapbox.StyleURL.Standard}
+        styleJSON={styleJSON}
         scaleBarEnabled={false}
+        compassEnabled
+        compassPosition={{ top: insets.top + 178, right: 21 }}
+        pitchEnabled
+        onDidFinishLoadingMap={hideSplash}
+        onCameraChanged={onCameraChanged}
+        onTouchStart={onMapTouchStart}
       >
         <Camera
-          defaultSettings={{ centerCoordinate: [14.4172, 50.0813], zoomLevel: 17.2, pitch: 55, heading: 0 }}
+          ref={cameraRef}
+          defaultSettings={{
+            centerCoordinate: PRAGUE_CENTER,
+            zoomLevel: INITIAL_ZOOM,
+            pitch: INITIAL_PITCH,
+          }}
         />
-        {modelUri != null && <Models models={{ arrow: modelUri }} />}
-        <ShapeSource
-          id="calib"
-          shape={{ type: 'FeatureCollection', features: staticFeatures }}
-        >
-          <ModelLayer
-            id="calib-models"
-            slot="top"
-            style={{
-              modelId: ['get', 'modelKey'],
-              modelRotation: [0, 0, ['get', 'bearing']],
-              modelScale: [2, 2, 2],
-            }}
-          />
-          <CircleLayer
-            id="calib-dots"
-            style={{ circleRadius: 5, circleColor: '#00c8ff', circleOpacity: 0.8 }}
-          />
-        </ShapeSource>
-        <ShapeSource
-          id="mover"
-          ref={movingRef}
-          shape={{ type: 'FeatureCollection', features: [feature('mover', 14.4185, 50.0817, 90)] }}
-        >
-          <ModelLayer
-            id="mover-model"
-            style={{
-              modelId: 'arrow',
-              modelRotation: [0, 0, 90],
-              modelScale: [1, 1, 1],
-            }}
-          />
-        </ShapeSource>
+        {/* Live re-lighting of the Standard basemap (import id defined in styleJSON). */}
+        <StyleImport
+          id="basemap"
+          existing
+          config={{ ...STANDARD_CONFIG, lightPreset }}
+        />
+        <RouteNetwork />
+        <PlannerOverlay cameraRef={cameraRef} />
+        <TramLayers cameraRef={cameraRef} viewportRef={viewportRef} modelUris={modelUris} />
+        {locationGranted && <LocationPuck puckBearingEnabled puckBearing="heading" />}
       </MapView>
-      <View style={styles.badge} pointerEvents="none">
-        <Text style={styles.badgeText}>SPIKE: red nose = model front, row bearings 0/90/180/270</Text>
-      </View>
+
+      <StatusChip />
+      <ControlStack is3D={is3D} onLocate={() => void onLocate()} onTogglePitch={onTogglePitch} />
+      <FollowBanner />
+      <BottomDock />
     </View>
   );
 }
@@ -118,14 +205,4 @@ export default function SpikeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { flex: 1 },
-  badge: {
-    position: 'absolute',
-    top: 60,
-    alignSelf: 'center',
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  badgeText: { color: 'white', fontSize: 12 },
 });
