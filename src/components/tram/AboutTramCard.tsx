@@ -1,10 +1,12 @@
-// "About this tram" card: fleet-model spec sheet (manufacturer, years, size,
+// "About this tram" card: tappable model illustration ("View in 3D" — opens
+// the full-screen viewer), fleet-model spec sheet (manufacturer, years, size,
 // top speed), low-floor + amenity badges sourced from the live snapshot, and
 // the model's fun fact as an italic footer. iOS grouped-list styling.
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { StyleSheet, Text, useColorScheme, View } from 'react-native';
 
-import { TramModelImage, tramModelImageSource } from '@/components/tram/TramModelImage';
+import { ModelPreviewButton } from '@/components/model/ModelPreviewButton';
+import { tramModelImageSource } from '@/components/tram/TramModelImage';
 import { Colors, Tram } from '@/constants/theme';
 import type { TramModelSpec, TramSnapshot } from '@/lib/types';
 
@@ -70,7 +72,7 @@ export function AboutTramCard({ model, snapshot }: AboutTramCardProps) {
     <View style={[styles.card, { backgroundColor: cardFill }]}>
       {tramModelImageSource(model.id) != null && (
         <View style={[styles.illustrationWrap, { borderBottomColor: separator }]}>
-          <TramModelImage modelId={model.id} height={110} style={styles.illustration} />
+          <ModelPreviewButton modelId={model.id} height={110} style={styles.illustration} />
         </View>
       )}
       <SpecRow icon="building.2" label="Manufacturer" value={model.manufacturer} />
@@ -133,6 +135,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   illustration: {
+    // ModelPreviewButton defaults to alignSelf:'flex-start'; center it here.
+    alignSelf: 'center',
     maxWidth: '100%',
   },
   specRow: {

@@ -1,18 +1,18 @@
 // Tram detail form sheet — floats over the live map (transparent formSheet,
 // detents [0.38, 0.95]). Live data via useTramState(key) at ~1 Hz with a local
-// 1 s ticker for the next-stop ETA countdown and the "Updated Ns ago" stat.
+// 1 s ticker for the "Updated Ns ago" stat; the next-stop ETA countdown lives
+// in StopsTimeline (rendered on the NEXT row).
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
-import { ModelPreviewButton } from '@/components/model/ModelPreviewButton';
 import { AboutTramCard } from '@/components/tram/AboutTramCard';
 import { RideRecorder } from '@/components/tram/RideRecorder';
 import { StopsTimeline } from '@/components/tram/StopsTimeline';
 import { AcSnowflake } from '@/components/tram/TramModelImage';
-import { DelayPill } from '@/components/ui/DelayPill';
+import { DelayPill, delayLabel } from '@/components/ui/DelayPill';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
 import { SheetContent } from '@/components/ui/SheetContent';
@@ -24,36 +24,6 @@ import { useSelectionStore } from '@/stores/selection';
 import { useSettingsStore } from '@/stores/settings';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Live ETA countdown. Anchors on every fresh value from the runtime (~1 Hz)
- * and ticks locally each second so the countdown never freezes if UI updates
- * stall between polls.
- */
-function useEtaCountdown(etaS: number | null): number | null {
-  const anchorRef = useRef<{ etaS: number; atMs: number } | null>(null);
-  const [, setTick] = useState(0);
-
-  if (etaS == null) {
-    anchorRef.current = null;
-  } else if (!anchorRef.current || anchorRef.current.etaS !== etaS) {
-    anchorRef.current = { etaS, atMs: Date.now() };
-  }
-
-  useEffect(() => {
-    const t = setInterval(() => setTick((n) => n + 1), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  const anchor = anchorRef.current;
-  if (!anchor) return null;
-  return Math.max(0, Math.round(anchor.etaS - (Date.now() - anchor.atMs) / 1000));
-}
-
-function fmtEta(s: number): string {
-  if (s < 60) return `${s} s`;
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-}
 
 /** Now-ms ticking every second, for the "Updated Ns ago" stat. */
 function useNowTick(): number {
@@ -70,13 +40,6 @@ function fmtAge(ageS: number): string {
   if (ageS < 120) return `${ageS}s`;
   return `${Math.floor(ageS / 60)}m`;
 }
-
-const PHASE_META: Record<TramPublicState['phase'], { label: string; icon: SFSymbol }> = {
-  cruise: { label: 'Cruising', icon: 'tram.fill' },
-  dwell: { label: 'At stop', icon: 'pause.circle.fill' },
-  terminal: { label: 'At terminus', icon: 'flag.checkered' },
-  unknown: { label: 'Tracking', icon: 'antenna.radiowaves.left.and.right' },
-};
 
 // ── small building blocks ────────────────────────────────────────────────────
 
@@ -205,7 +168,6 @@ export default function TramDetailSheet() {
     [geometries, tripId],
   );
 
-  const etaS = useEtaCountdown(state?.nextStopEtaS ?? null);
   const nowMs = useNowTick();
   // Age of the last REAL AVL observation (origin_timestamp), live-ticking.
   const updatedAgoS = state
@@ -250,21 +212,19 @@ export default function TramDetailSheet() {
 
         {state && (
           <>
-            {/* Header */}
+            {/* Header — only badge + headsign + subtitle; the delay pill lives
+                in the stats row and the 3D preview in the About card, so a long
+                terminus name gets the full width and never ellipsizes. */}
             <View style={styles.header}>
               <LineBadge line={state.snapshot.line} size="lg" />
               <View style={styles.headerText}>
-                <View style={styles.headsignRow}>
-                  <Text
-                    style={[styles.headsign, { color: c.text }]}
-                    numberOfLines={1}
-                  >
-                    {state.snapshot.headsign}
-                  </Text>
-                  <DelayPill delaySeconds={state.snapshot.delaySeconds} />
-                </View>
+                <Text style={[styles.headsign, { color: c.text }]} numberOfLines={2}>
+                  {state.snapshot.headsign}
+                </Text>
                 <View style={styles.subtitleRow}>
-                  <Text style={[styles.subtitle, { color: c.textSecondary }]} numberOfLines={1}>
+                  {/* No numberOfLines: the subtitle wraps rather than ellipsize,
+                      so the full registration number is always visible. */}
+                  <Text style={[styles.subtitle, { color: c.textSecondary }]}>
                     {state.model.name}
                     {state.snapshot.registrationNumber != null &&
                       ` · #${state.snapshot.registrationNumber}`}
@@ -272,11 +232,9 @@ export default function TramDetailSheet() {
                   <AcSnowflake airConditioned={state.snapshot.airConditioned} size={11} />
                 </View>
               </View>
-              {/* Face closeup, top-right — tap to open the full-screen 3D viewer. */}
-              <ModelPreviewButton modelId={state.model.id} height={104} style={styles.headerImage} />
             </View>
 
-            {/* Live row */}
+            {/* Live row: last-fix age | current delay */}
             <View
               style={[
                 styles.liveRow,
@@ -305,36 +263,12 @@ export default function TramDetailSheet() {
                   { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)' },
                 ]}
               />
-              <View style={styles.liveCell}>
-                <SymbolView
-                  name={PHASE_META[state.phase].icon}
-                  size={15}
-                  tintColor={state.phase === 'cruise' ? Tram.onTime : c.textSecondary}
-                />
-                <Text style={[styles.livePhase, { color: c.text }]} numberOfLines={1}>
-                  {PHASE_META[state.phase].label}
-                </Text>
-                <Text style={[styles.liveCaption, { color: c.textSecondary }]}>now</Text>
-              </View>
               <View
-                style={[
-                  styles.liveDivider,
-                  { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)' },
-                ]}
-              />
-              <View style={[styles.liveCell, styles.liveCellWide]}>
-                <Text style={[styles.liveCaption, { color: c.textSecondary }]} numberOfLines={1}>
-                  Next stop
-                </Text>
-                <Text style={[styles.liveNextName, { color: c.text }]} numberOfLines={1}>
-                  {state.nextStopName ?? '—'}
-                </Text>
-                <Text
-                  style={[styles.liveEta, { color: scheme === 'dark' ? Tram.liveryRed : Tram.pidRed }]}
-                  allowFontScaling={false}
-                >
-                  {etaS != null ? fmtEta(etaS) : '· · ·'}
-                </Text>
+                style={styles.liveCell}
+                accessibilityLabel={`Delay: ${delayLabel(state.snapshot.delaySeconds)}`}
+              >
+                <DelayPill delaySeconds={state.snapshot.delaySeconds} style={styles.livePill} />
+                <Text style={[styles.liveCaption, { color: c.textSecondary }]}>delay</Text>
               </View>
             </View>
 
@@ -378,6 +312,7 @@ export default function TramDetailSheet() {
               simDistM={state.simDistM}
               delaySeconds={state.snapshot.delaySeconds}
               phase={state.phase}
+              nextStopEtaS={state.nextStopEtaS}
             />
 
             {/* About */}
@@ -405,19 +340,13 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   headerText: { flex: 1, gap: 2 },
-  headsignRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-  },
-  headsign: { flexShrink: 1, fontSize: 20, fontWeight: '700', letterSpacing: -0.3 },
+  headsign: { fontSize: 20, fontWeight: '700', letterSpacing: -0.3 },
   subtitleRow: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 5,
   },
-  subtitle: { flexShrink: 1, fontSize: 13 },
-  headerImage: { width: 120 },
+  subtitle: { flexShrink: 1, fontSize: 13, lineHeight: 17 },
   liveRow: {
     alignItems: 'stretch',
     borderCurve: 'continuous',
@@ -432,17 +361,14 @@ const styles = StyleSheet.create({
     gap: 2,
     justifyContent: 'center',
   },
-  liveCellWide: { flex: 1.6 },
   liveDivider: {
     alignSelf: 'stretch',
     marginHorizontal: 8,
     width: StyleSheet.hairlineWidth,
   },
   liveBig: { fontSize: 22, fontVariant: ['tabular-nums'], fontWeight: '700' },
-  livePhase: { fontSize: 14, fontWeight: '600' },
   liveCaption: { fontSize: 11 },
-  liveNextName: { fontSize: 14, fontWeight: '600', maxWidth: '100%' },
-  liveEta: { fontSize: 17, fontVariant: ['tabular-nums'], fontWeight: '700' },
+  livePill: { alignSelf: 'center', marginBottom: 2 },
   deviationRow: {
     alignItems: 'center',
     flexDirection: 'row',

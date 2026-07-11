@@ -1,9 +1,11 @@
 // Upcoming-stops timeline for the tram detail sheet. Renders the stops ahead
 // of the tram's simulated position as an iOS grouped-list style timeline with
-// a rail of dots, delay-adjusted times, and a terminus flag. While the trip
-// geometry is still streaming in it shows a subtle pulsing skeleton.
+// a rail of dots, delay-adjusted times, and a terminus flag. The NEXT row
+// carries the live ETA countdown (red, ticking each second) with the expected
+// wall-clock arrival beneath it. While the trip geometry is still streaming in
+// it shows a subtle pulsing skeleton.
 import { SymbolView } from 'expo-symbols';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
 import { delayColor } from '@/components/ui/DelayPill';
@@ -21,11 +23,44 @@ export interface StopsTimelineProps {
   /** Current sim phase — during 'dwell' the first upcoming stop is the one the
    *  tram is stopped AT, so NEXT shifts to the following stop (matches header). */
   phase?: TramPublicState['phase'];
+  /** Engine's ETA to the next stop, seconds — shown as a live countdown on the
+   *  NEXT row. Ticks locally each second between runtime updates. */
+  nextStopEtaS?: number | null;
 }
 
 // The timetable clocks are Prague wall-clock instants; format them in
 // Europe/Prague regardless of the device timezone (see formatPragueClock).
 const fmtClock = formatPragueClock;
+
+/**
+ * Live ETA countdown. Anchors on every fresh value from the runtime (~1 Hz)
+ * and ticks locally each second so the countdown never freezes if UI updates
+ * stall between polls.
+ */
+function useEtaCountdown(etaS: number | null): number | null {
+  const anchorRef = useRef<{ etaS: number; atMs: number } | null>(null);
+  const [, setTick] = useState(0);
+
+  if (etaS == null) {
+    anchorRef.current = null;
+  } else if (!anchorRef.current || anchorRef.current.etaS !== etaS) {
+    anchorRef.current = { etaS, atMs: Date.now() };
+  }
+
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const anchor = anchorRef.current;
+  if (!anchor) return null;
+  return Math.max(0, Math.round(anchor.etaS - (Date.now() - anchor.atMs) / 1000));
+}
+
+function fmtEta(s: number): string {
+  if (s < 60) return `${s} s`;
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
 
 function LoadingSkeleton() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
@@ -69,9 +104,11 @@ interface StopRowProps {
   isAtStop: boolean;
   isFirst: boolean;
   isLast: boolean;
+  /** Live countdown seconds — only set on the NEXT row. */
+  etaS?: number | null;
 }
 
-function StopRow({ stop, delaySeconds, isNext, isAtStop, isFirst, isLast }: StopRowProps) {
+function StopRow({ stop, delaySeconds, isNext, isAtStop, isFirst, isLast, etaS }: StopRowProps) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const c = Colors[scheme];
   const delayed = delaySeconds > 60;
@@ -134,28 +171,49 @@ function StopRow({ stop, delaySeconds, isNext, isAtStop, isFirst, isLast }: Stop
         )}
       </View>
       <View style={styles.timeCol}>
-        <Text
-          style={[
-            styles.time,
-            { color: delayed ? delayColor(delaySeconds) : c.text },
-            emphasized && styles.timeNext,
-          ]}
-          allowFontScaling={false}
-        >
-          {fmtClock(expectedMs)}
-        </Text>
-        {delayed && (
-          <Text style={[styles.timeSched, { color: c.textSecondary }]} allowFontScaling={false}>
-            {fmtClock(baseMs)}
-          </Text>
+        {isNext && !isAtStop && etaS != null ? (
+          // NEXT row: live ticking countdown, expected wall time beneath.
+          <>
+            <Text style={[styles.etaLive, { color: dotColor }]} allowFontScaling={false}>
+              {fmtEta(etaS)}
+            </Text>
+            <Text style={[styles.timeSmall, { color: c.textSecondary }]} allowFontScaling={false}>
+              {fmtClock(expectedMs)}
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text
+              style={[
+                styles.time,
+                { color: delayed ? delayColor(delaySeconds) : c.text },
+                emphasized && styles.timeNext,
+              ]}
+              allowFontScaling={false}
+            >
+              {fmtClock(expectedMs)}
+            </Text>
+            {delayed && (
+              <Text style={[styles.timeSched, { color: c.textSecondary }]} allowFontScaling={false}>
+                {fmtClock(baseMs)}
+              </Text>
+            )}
+          </>
         )}
       </View>
     </View>
   );
 }
 
-export function StopsTimeline({ geometry, simDistM, delaySeconds, phase }: StopsTimelineProps) {
+export function StopsTimeline({
+  geometry,
+  simDistM,
+  delaySeconds,
+  phase,
+  nextStopEtaS,
+}: StopsTimelineProps) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const etaS = useEtaCountdown(nextStopEtaS ?? null);
 
   const upcoming = useMemo(() => {
     if (!geometry) return [];
@@ -189,6 +247,7 @@ export function StopsTimeline({ geometry, simDistM, delaySeconds, phase }: Stops
           isNext={i === nextIndex}
           isFirst={i === 0}
           isLast={i === upcoming.length - 1}
+          etaS={i === nextIndex ? etaS : null}
         />
       ))}
     </View>
@@ -270,6 +329,8 @@ const styles = StyleSheet.create({
   timeCol: { alignItems: 'flex-end' },
   time: { fontSize: 15, fontVariant: ['tabular-nums'] },
   timeNext: { fontWeight: '600' },
+  etaLive: { fontSize: 17, fontVariant: ['tabular-nums'], fontWeight: '700' },
+  timeSmall: { fontSize: 12, fontVariant: ['tabular-nums'] },
   timeSched: {
     fontSize: 12,
     fontVariant: ['tabular-nums'],
