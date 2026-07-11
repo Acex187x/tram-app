@@ -8,6 +8,8 @@ import {
   A_BRK,
   cruiseCapAt,
   meanCruiseCapOver,
+  todDwellFactor,
+  todPaceFactor,
   vAllowedAt,
   type SpeedProfile,
 } from './speedProfile';
@@ -255,11 +257,18 @@ function hashString(str: string): number {
   return Math.abs(h);
 }
 
-/** Dwell duration for a stop: feed value, else 18 s ± deterministic 0–8 s jitter. */
-export function dwellDurationMs(stop: RouteStop): number {
+/**
+ * Dwell duration for a stop: feed value (scheduled computed dwell — NEVER
+ * time-of-day scaled), else the 18 s ± deterministic 0–8 s jitter default,
+ * multiplied by todDwellFactor(nowMs) when a wall clock is provided (peak
+ * boarding takes longer). Callers without a time context omit nowMs and get
+ * the unscaled default.
+ */
+export function dwellDurationMs(stop: RouteStop, nowMs?: number): number {
   if (stop.dwellSeconds > 0) return stop.dwellSeconds * 1000;
   const jitter = (hashString(stop.stopId) % 17) - 8; // deterministic, in [-8, 8]
-  return (DEFAULT_DWELL_S + jitter) * 1000;
+  const baseMs = (DEFAULT_DWELL_S + jitter) * 1000;
+  return nowMs === undefined ? baseMs : baseMs * todDwellFactor(nowMs);
 }
 
 function isTerminalStop(geometry: RouteGeometry, stop: RouteStop): boolean {
@@ -336,7 +345,7 @@ function seedStopState(sim: TramSim, nowMs: number): void {
     sim.dwellUntilMs = departMs;
   } else if (atStop) {
     sim.phase = 'dwell';
-    sim.dwellUntilMs = nowMs + dwellDurationMs(current);
+    sim.dwellUntilMs = nowMs + dwellDurationMs(current, nowMs);
   }
   // else: scheduled departure already passed and the feed doesn't report
   // at_stop — the dwell is considered served; cruise on.
@@ -442,7 +451,7 @@ function updatePaceBias(
   let dwellS = 0;
   for (const stop of sim.geometry.stops) {
     if (stop.distM > prevObsDistM + 1 && stop.distM < obsDistM - 1) {
-      dwellS += dwellDurationMs(stop) / 1000;
+      dwellS += dwellDurationMs(stop, snapshot.observedAtMs) / 1000;
     }
   }
   const effDtS = Math.max(dtObsS - dwellS, dtObsS * 0.25);
@@ -584,10 +593,15 @@ export function tick(sim: TramSim, nowMs: number, dtS: number): void {
     // hard limit — a late tram may hold cruise speed but never overrun a stop.
     // The learned per-tram paceBias scales the cruise target too, so a tram
     // that really runs at 70% of profile pace cruises at ~70% between fixes
-    // instead of sprinting to the cap and then crawling.
+    // instead of sprinting to the cap and then crawling. The time-of-day pace
+    // factor (hour-blended TOD_PACE_TABLE, neutral until calibrated) composes
+    // on top: paceBias then only learns the per-vehicle RESIDUAL.
     vTarget = Math.min(
       vAllowed,
-      cruiseCapAt(sim.profile, sim.geometry, sim.sM) * factor * sim.paceBias,
+      cruiseCapAt(sim.profile, sim.geometry, sim.sM) *
+        factor *
+        sim.paceBias *
+        todPaceFactor(nowMs),
     );
   }
 
@@ -613,7 +627,7 @@ export function tick(sim: TramSim, nowMs: number, dtS: number): void {
       sim.phase = 'terminal';
     } else {
       sim.phase = 'dwell';
-      let dwellMs = dwellDurationMs(next);
+      let dwellMs = dwellDurationMs(next, nowMs);
       if (sim.adaptiveDwell && e > 0) {
         // Behind reality: the real tram has already spent part of its dwell
         // here — trim proportionally, but never blink (≥ DWELL_MIN_S when

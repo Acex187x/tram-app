@@ -30,6 +30,154 @@ export const CENTER_BBOX: readonly [number, number, number, number] = [
   14.395, 50.068, 14.46, 50.096,
 ];
 
+// ── time-of-day model ────────────────────────────────────────────────────────
+// Hour-of-day multipliers (Prague local) for the cruise pace and for DEFAULT
+// dwell durations. Shipped NEUTRAL (all 1.0): the calibration program
+// (docs/calibration/plan.md) drops learned per-hour values in later without
+// any structural change here. Factors blend linearly between adjacent hour
+// entries — entry h anchors h:00, so 07:30 resolves to the midpoint of
+// entries 7 and 8 (wrapping 23→0) and pace never steps discontinuously.
+
+let pragueHmFormatter: Intl.DateTimeFormat | null | undefined;
+
+/** Prague-local fractional hour (h + m/60) at a timestamp, minute resolution. */
+function pragueHourMinuteAt(ms: number): number {
+  if (pragueHmFormatter === undefined) {
+    try {
+      pragueHmFormatter = new Intl.DateTimeFormat('en-GB', {
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: false,
+        timeZone: 'Europe/Prague',
+      });
+    } catch {
+      pragueHmFormatter = null;
+    }
+  }
+  if (pragueHmFormatter) {
+    let h = NaN;
+    let m = NaN;
+    for (const part of pragueHmFormatter.formatToParts(new Date(ms))) {
+      if (part.type === 'hour') h = parseInt(part.value, 10);
+      else if (part.type === 'minute') m = parseInt(part.value, 10);
+    }
+    if (!Number.isNaN(h) && !Number.isNaN(m)) return (h % 24) + m / 60;
+  }
+  // Fallback: CET/CEST approximation.
+  const d = new Date(ms);
+  return ((d.getUTCHours() + 2) % 24) + d.getUTCMinutes() / 60;
+}
+
+/** Per-minute cache so the Intl lookup runs once per wall-clock minute, not per tick. */
+let pragueMinuteCache: { minute: number; hourFrac: number } | null = null;
+
+/** Fractional Prague-local hour of day in [0, 24), second resolution. */
+export function pragueHourFrac(nowMs: number): number {
+  const minute = Math.floor(nowMs / 60000);
+  if (!pragueMinuteCache || pragueMinuteCache.minute !== minute) {
+    pragueMinuteCache = { minute, hourFrac: pragueHourMinuteAt(minute * 60000) };
+  }
+  const secFrac = (nowMs - minute * 60000) / 60000; // [0, 1) of a minute
+  return pragueMinuteCache.hourFrac + secFrac / 60;
+}
+
+/** Integer Prague-local hour of day, 0–23. */
+export function pragueHour(nowMs: number): number {
+  return Math.floor(pragueHourFrac(nowMs)) % 24;
+}
+
+/**
+ * Per-hour cruise-pace multiplier, Prague local (entry h anchors h:00).
+ * NEUTRAL until the calibration program fills learned values — VALUES STAY 1.0
+ * for now; the comments document the EXPECTED future shape only.
+ * Composes multiplicatively with the pace-controller factor and the per-tram
+ * paceBias, always under the braking envelope.
+ */
+export const TOD_PACE_TABLE: number[] = [
+  1.0, // 00 — night running: expect up to ~1.2 (empty streets, green waves)
+  1.0, // 01 — night running: expect up to ~1.2
+  1.0, // 02 — night running: expect up to ~1.2
+  1.0, // 03 — night running: expect up to ~1.2
+  1.0, // 04 — night running: expect up to ~1.2
+  1.0, // 05 — early service: expect ~1.1 (still light traffic)
+  1.0, // 06 — pre-peak ramp: expect ~0.9
+  1.0, // 07 — AM peak: expect ~0.8 (car traffic + heavy boarding)
+  1.0, // 08 — AM peak: expect ~0.8
+  1.0, // 09 — peak tail: expect ~0.9
+  1.0, // 10 — midday: expect ~1.0
+  1.0, // 11 — midday: expect ~1.0
+  1.0, // 12 — midday: expect ~1.0
+  1.0, // 13 — midday: expect ~1.0
+  1.0, // 14 — pre-peak: expect ~0.95
+  1.0, // 15 — PM peak: expect ~0.8
+  1.0, // 16 — PM peak: expect ~0.8
+  1.0, // 17 — PM peak: expect ~0.8
+  1.0, // 18 — peak tail: expect ~0.9
+  1.0, // 19 — evening: expect ~1.0
+  1.0, // 20 — evening: expect ~1.0–1.1
+  1.0, // 21 — evening: expect ~1.1
+  1.0, // 22 — night running: expect ~1.1–1.2
+  1.0, // 23 — night running: expect up to ~1.2
+];
+
+/**
+ * Per-hour multiplier for DEFAULT (fallback) dwell durations, Prague local
+ * (entry h anchors h:00). NEUTRAL until calibrated — VALUES STAY 1.0 for now;
+ * comments document the EXPECTED future shape only. Scheduled
+ * computed_dwell_time_seconds is never scaled by this; adaptive-dwell logic
+ * composes on top unchanged.
+ */
+export const TOD_DWELL_TABLE: number[] = [
+  1.0, // 00 — night: expect ~0.8 (few passengers, quick doors)
+  1.0, // 01 — night: expect ~0.8
+  1.0, // 02 — night: expect ~0.8
+  1.0, // 03 — night: expect ~0.8
+  1.0, // 04 — night: expect ~0.8
+  1.0, // 05 — early service: expect ~0.9
+  1.0, // 06 — pre-peak ramp: expect ~1.1
+  1.0, // 07 — AM peak: expect ~1.2–1.4 (boarding takes longer)
+  1.0, // 08 — AM peak: expect ~1.2–1.4
+  1.0, // 09 — peak tail: expect ~1.1
+  1.0, // 10 — midday: expect ~1.0
+  1.0, // 11 — midday: expect ~1.0
+  1.0, // 12 — midday: expect ~1.0
+  1.0, // 13 — midday: expect ~1.0
+  1.0, // 14 — pre-peak: expect ~1.1
+  1.0, // 15 — PM peak: expect ~1.2–1.4
+  1.0, // 16 — PM peak: expect ~1.2–1.4
+  1.0, // 17 — PM peak: expect ~1.2–1.4
+  1.0, // 18 — peak tail: expect ~1.1
+  1.0, // 19 — evening: expect ~1.0
+  1.0, // 20 — evening: expect ~0.95
+  1.0, // 21 — evening: expect ~0.9
+  1.0, // 22 — night: expect ~0.85
+  1.0, // 23 — night: expect ~0.8
+];
+
+/**
+ * Blended table lookup at the Prague-local fractional hour: linear
+ * interpolation between entry floor(h) and the next entry (wrapping 23→0).
+ * The equal-entries fast path also guarantees EXACT neutrality (returns the
+ * entry itself, no float round-trip) while the shipped tables are uniform.
+ */
+function todTableFactor(table: readonly number[], nowMs: number): number {
+  const frac = pragueHourFrac(nowMs);
+  const h0 = Math.floor(frac) % 24;
+  const a = table[h0];
+  const b = table[(h0 + 1) % 24];
+  return a === b ? a : a + (b - a) * (frac - Math.floor(frac));
+}
+
+/** Time-of-day cruise-pace multiplier at nowMs (hour-blended TOD_PACE_TABLE). */
+export function todPaceFactor(nowMs: number): number {
+  return todTableFactor(TOD_PACE_TABLE, nowMs);
+}
+
+/** Time-of-day DEFAULT-dwell multiplier at nowMs (hour-blended TOD_DWELL_TABLE). */
+export function todDwellFactor(nowMs: number): number {
+  return todTableFactor(TOD_DWELL_TABLE, nowMs);
+}
+
 export interface SpeedProfile {
   shapeId: string;
   /** Daytime flag the profile was built with (center zone active when true). */

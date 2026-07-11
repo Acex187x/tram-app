@@ -10,7 +10,7 @@ import type {
   TramSnapshot,
 } from '@/lib/types';
 import { bearingAt, pointAt, projectPointToPolyline } from '../geo/polyline';
-import { A_BRK, buildSpeedProfile, type SpeedProfile } from './speedProfile';
+import { A_BRK, buildSpeedProfile, pragueHour, type SpeedProfile } from './speedProfile';
 import {
   applySnapshot,
   createSim,
@@ -93,29 +93,7 @@ interface Entry {
   projSim: TramSim | null;
 }
 
-let pragueHourFormatter: Intl.DateTimeFormat | null | undefined;
-
-function pragueHour(nowMs: number): number {
-  if (pragueHourFormatter === undefined) {
-    try {
-      pragueHourFormatter = new Intl.DateTimeFormat('en-GB', {
-        hour: 'numeric',
-        hour12: false,
-        timeZone: 'Europe/Prague',
-      });
-    } catch {
-      pragueHourFormatter = null;
-    }
-  }
-  if (pragueHourFormatter) {
-    const h = parseInt(pragueHourFormatter.format(new Date(nowMs)), 10);
-    if (!Number.isNaN(h)) return h % 24;
-  }
-  // Fallback: CET/CEST approximation.
-  return (new Date(nowMs).getUTCHours() + 2) % 24;
-}
-
-/** Default daytime rule: 07:00–19:00 Prague time. */
+/** Default daytime rule: 07:00–19:00 Prague time (shared helper in speedProfile). */
 export function defaultIsDaytime(nowMs: number): boolean {
   const h = pragueHour(nowMs);
   return h >= 7 && h < 19;
