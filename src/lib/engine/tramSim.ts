@@ -49,6 +49,42 @@ export const MIN_PACE_FACTOR = 0.55;
 export const PACE_GAIN_M = 120;
 /** Max |stop.distM − s| for trusting an at_stop feed state when seeding a dwell, m. */
 const AT_STOP_MATCH_M = 50;
+
+// ── adaptive dwell synchronization ───────────────────────────────────────────
+// Stop dwells are the PRIMARY error-correction mechanism for the main
+// smooth-mode sim: stretching or trimming a dwell reads as natural boarding
+// variance, unlike visible mid-segment speed manipulation. Enabled per sim via
+// createSim's { adaptiveDwell: true } option — TramEngine turns it on for MAIN
+// sims only; live-projection sims mirror reality and keep fixed dwells.
+
+/** Max extension past the base dwell while waiting for reality to catch up, s. */
+export const DWELL_MAX_EXTEND_S = 75;
+/**
+ * An extended dwell keeps holding while e = target − s ≤ −this (sim still
+ * ahead of reality) and releases once e recovers above it, meters.
+ */
+export const DWELL_EXTEND_RELEASE_M = 8;
+/**
+ * Dwell-shortening gain, m: when the sim arrives BEHIND reality (e > 0) the
+ * base dwell is scaled by clamp(1 − e / this, 0, 1) — the real tram has
+ * already used up part of its dwell here.
+ */
+export const DWELL_SHORTEN_GAIN_M = 80;
+/** Behind-error above which an upcoming stop's dwell is skipped entirely, m. */
+export const DWELL_SKIP_ERR_M = 60;
+/** Minimum visible dwell when stopping at all, s — avoids 1-s door blinks. */
+export const DWELL_MIN_S = 4;
+/** Speed cap while rolling through a skipped stop's zone, m/s. */
+export const DWELL_SKIP_ROLL_V_MS = 4;
+/**
+ * Half-width of a skipped stop's roll zone, m: v²/(2·A_BRK) — the distance
+ * from which the braking envelope has already brought the sim down to
+ * DWELL_SKIP_ROLL_V_MS. The skip decision fires only inside this window, so
+ * releasing the stop's 0-limit never violates the braking envelope, and the
+ * roll cap holds until the same distance past the stop.
+ */
+export const DWELL_SKIP_ZONE_M =
+  (DWELL_SKIP_ROLL_V_MS * DWELL_SKIP_ROLL_V_MS) / (2 * A_BRK);
 /**
  * Pace-bias EWMA half-life, seconds: a fix stream at a new pace dominates the
  * bias within ~2–3 min — drivers swap mid-route, and central districts without
@@ -122,6 +158,19 @@ export interface TramSim {
    * above −HARD_BRAKE_EXIT_M. Hysteresis avoids brake/sprint oscillation.
    */
   crawling: boolean;
+  /**
+   * Adaptive dwell synchronization enabled (MAIN smooth-mode sim only): stop
+   * dwells extend while the sim is ahead of reality, shrink or are skipped
+   * while behind. Always false for live-projection sims — they mirror reality
+   * (dead-reckon the raw fix) by definition.
+   */
+  adaptiveDwell: boolean;
+  /**
+   * End of the currently active skipped-stop roll zone, m along shape: while
+   * sM is below this, the cruise target is capped at DWELL_SKIP_ROLL_V_MS so
+   * the sim rolls through the skipped platform at a modest pace. 0 = none.
+   */
+  skipRollUntilM: number;
 }
 
 // ── schedule anchor ──────────────────────────────────────────────────────────
@@ -304,6 +353,16 @@ export function nextUndwelledStop(sim: TramSim): RouteStop | null {
 
 // ── lifecycle ────────────────────────────────────────────────────────────────
 
+export interface CreateSimOptions {
+  /**
+   * Enable adaptive dwell synchronization (extend/shorten/skip stop dwells to
+   * absorb tracking error). TramEngine sets this for MAIN smooth-mode sims
+   * only — live-projection sims must mirror reality with fixed dwells.
+   * Defaults to false.
+   */
+  adaptiveDwell?: boolean;
+}
+
 /**
  * Create a sim from a live snapshot. Initial s = the reported shape distance
  * projected forward by the elapsed time since observation at schedule pace.
@@ -314,6 +373,7 @@ export function createSim(
   snapshot: TramSnapshot,
   nowMs: number,
   lengthM: number = DEFAULT_TRAM_LENGTH_M,
+  opts: CreateSimOptions = {},
 ): TramSim {
   const anchor = buildScheduleAnchor(geometry.stops, snapshot.delaySeconds);
   const obsSchedDistM = evalScheduleAnchor(anchor, snapshot.observedAtMs);
@@ -336,6 +396,8 @@ export function createSim(
     lastTeleportMs: 0,
     paceBias: 1,
     crawling: false,
+    adaptiveDwell: opts.adaptiveDwell === true,
+    skipRollUntilM: 0,
   };
   seedStopState(sim, nowMs);
   return sim;
@@ -347,6 +409,7 @@ export function reanchorSim(sim: TramSim, sM: number, nowMs: number): void {
   sim.phase = 'cruise';
   sim.dwellUntilMs = 0;
   sim.crawling = false;
+  sim.skipRollUntilM = 0;
   sim.dwelledStopSeqs.clear();
   seedStopState(sim, nowMs);
 }
@@ -418,6 +481,7 @@ export function applySnapshot(sim: TramSim, snapshot: TramSnapshot, nowMs: numbe
     sim.phase = 'cruise';
     sim.dwellUntilMs = 0;
     sim.crawling = false;
+    sim.skipRollUntilM = 0;
     sim.dwelledStopSeqs.clear();
     seedStopState(sim, nowMs);
     sim.lastTeleportMs = nowMs;
@@ -441,6 +505,17 @@ export function applySnapshot(sim: TramSim, snapshot: TramSnapshot, nowMs: numbe
  * All regimes stay clamped by the braking envelope (vTarget ≤ vAllowed) —
  * catch-up can never defeat curve/stop limits. Acceleration is clamped to
  * [−1.2, +1.0] m/s². s never decreases.
+ *
+ * Adaptive dwell synchronization (sim.adaptiveDwell — main smooth-mode sims
+ * only) handles the error AT STOPS, composing with the mid-segment regimes:
+ *  - ahead (e ≤ −DWELL_EXTEND_RELEASE_M at base-dwell expiry): keep dwelling —
+ *    "boarding takes longer" — re-evaluated every tick (a fresh fix releases
+ *    early), capped at base + DWELL_MAX_EXTEND_S. phase stays 'dwell'.
+ *  - behind (e > 0 at arrival): base dwell scaled by clamp(1 − e/80, 0, 1),
+ *    never below DWELL_MIN_S when stopping at all.
+ *  - badly behind (e > DWELL_SKIP_ERR_M): skip the dwell — mark the stop
+ *    served and roll through its zone at ≤ DWELL_SKIP_ROLL_V_MS; phase never
+ *    enters 'dwell' (the real tram already left, doors stay closed).
  */
 export function tick(sim: TramSim, nowMs: number, dtS: number): void {
   const dt = Math.min(Math.max(dtS, 0), MAX_TICK_DT_S);
@@ -451,13 +526,44 @@ export function tick(sim: TramSim, nowMs: number, dtS: number): void {
   }
   if (sim.phase === 'dwell') {
     sim.vMs = 0;
-    if (nowMs >= sim.dwellUntilMs) sim.phase = 'cruise';
+    if (nowMs >= sim.dwellUntilMs) {
+      // Adaptive extension: while the sim is still AHEAD of reality, keep
+      // holding at the platform — it reads as slow boarding, not error
+      // correction. Re-evaluated every tick so a fresh fix releases it early;
+      // hard-capped at base dwell + DWELL_MAX_EXTEND_S.
+      const holdForReality =
+        sim.adaptiveDwell &&
+        nowMs < sim.dwellUntilMs + DWELL_MAX_EXTEND_S * 1000 &&
+        targetDistAt(sim, nowMs) - sim.sM <= -DWELL_EXTEND_RELEASE_M;
+      if (!holdForReality) sim.phase = 'cruise';
+    }
     return;
   }
   if (dt <= 0) return;
 
   // Pace controller: observation-primary target, timetable as low-gain reference.
   const e = targetDistAt(sim, nowMs) - sim.sM;
+
+  // Adaptive dwell skip: badly behind reality — the real tram already served
+  // and left this stop — so don't stop at all: mark the stop served (it must
+  // not re-trigger) and roll through its zone at a modest cap. Decided only
+  // once the braking envelope has already brought the sim inside
+  // DWELL_SKIP_ZONE_M (i.e. at/below the roll cap), so releasing the stop's
+  // 0-limit never violates the envelope. Terminal stops are never skipped.
+  let next = nextUndwelledStop(sim);
+  if (
+    sim.adaptiveDwell &&
+    next &&
+    e > DWELL_SKIP_ERR_M &&
+    next.distM - sim.sM <= DWELL_SKIP_ZONE_M &&
+    !isTerminalStop(sim.geometry, next)
+  ) {
+    sim.dwelledStopSeqs.add(next.sequence);
+    sim.minStopDist = next.distM + 0.01;
+    sim.skipRollUntilM = next.distM + DWELL_SKIP_ZONE_M;
+    next = nextUndwelledStop(sim);
+  }
+
   const vAllowed = vAllowedAt(sim.profile, sim.geometry, sim.sM, sim.minStopDist);
 
   // Hard-brake latch with hysteresis (enter at −40 m, exit at −12 m).
@@ -485,13 +591,18 @@ export function tick(sim: TramSim, nowMs: number, dtS: number): void {
     );
   }
 
+  // Modest roll-through pace while inside a just-skipped stop's zone (still
+  // clamped by the envelope via the min above — vTarget only ever decreases).
+  if (sim.sM < sim.skipRollUntilM) {
+    vTarget = Math.min(vTarget, DWELL_SKIP_ROLL_V_MS);
+  }
+
   // Acceleration clamp.
   const a = Math.min(A_ACC, Math.max(-A_BRK, (vTarget - sim.vMs) / dt));
   sim.vMs = Math.max(0, sim.vMs + a * dt);
 
   const sNew = sim.sM + sim.vMs * dt;
 
-  const next = nextUndwelledStop(sim);
   if (next && sNew >= next.distM - STOP_REACH_M) {
     // Reached the stop (never slide past an un-dwelled stop).
     sim.sM = Math.max(sim.sM, Math.min(sNew, next.distM));
@@ -502,7 +613,16 @@ export function tick(sim: TramSim, nowMs: number, dtS: number): void {
       sim.phase = 'terminal';
     } else {
       sim.phase = 'dwell';
-      sim.dwellUntilMs = nowMs + dwellDurationMs(next);
+      let dwellMs = dwellDurationMs(next);
+      if (sim.adaptiveDwell && e > 0) {
+        // Behind reality: the real tram has already spent part of its dwell
+        // here — trim proportionally, but never blink (≥ DWELL_MIN_S when
+        // stopping at all). e > DWELL_SKIP_ERR_M normally skips above; this
+        // floor also covers arrivals landing between the two thresholds.
+        const shortenFactor = Math.max(0, 1 - e / DWELL_SHORTEN_GAIN_M);
+        dwellMs = Math.max(DWELL_MIN_S * 1000, dwellMs * shortenFactor);
+      }
+      sim.dwellUntilMs = nowMs + dwellMs;
     }
     return;
   }

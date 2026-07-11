@@ -315,6 +315,58 @@ fighting the feed; the "Live" toggle lets the user see the raw fix directly.
 
 ---
 
+## 13. Adaptive dwell synchronization — stop dwells as the primary error corrector
+
+**Problem.** The pace controller corrects tracking error *mid-segment*, where corrections are
+visible: a sim that ran ahead crawls at 1 m/s down an open street, a late one sprints — both
+read as unnatural speed manipulation. Stops are the one place where holding still or leaving
+promptly *is* the natural behavior: dwell time already varies with boarding in reality.
+
+**Decision.** Use stop dwells as the primary error-correction mechanism, keyed off the same
+error the pace controller uses, `e = targetDistAt(now) − s` (observation-primary blend −
+`TRAIL_M`). Applied **only** to the main smooth-mode sim via `createSim(..., { adaptiveDwell:
+true })` (`tramSim.ts CreateSimOptions`); `TramEngine` sets it on main sims only. **projSims
+are never adaptive** — they dead-reckon the raw fix and must mirror reality with fixed dwells
+(`engine.ts`, projSim creation). Bare `createSim` defaults to off.
+
+**How** (`tramSim.ts tick()`):
+
+- **Sim AHEAD at a stop (`e ≤ −DWELL_EXTEND_RELEASE_M` when the base dwell expires):** keep
+  dwelling — "boarding takes longer". Re-evaluated **every tick**, so a fresh fix that closes
+  the gap releases it immediately; hard-capped at base dwell + `DWELL_MAX_EXTEND_S = 75 s`.
+  `phase` stays `'dwell'` throughout (doors-open rendering keys off it).
+- **Sim BEHIND at arrival (`e > 0`):** base dwell scaled by
+  `clamp(1 − e/DWELL_SHORTEN_GAIN_M, 0, 1)` — the real tram already spent part of its dwell
+  here — floored at `DWELL_MIN_S = 4 s` (no 1-s door blinks).
+- **Badly behind (`e > DWELL_SKIP_ERR_M = 60 m`):** skip the dwell entirely — the real tram
+  already left. The stop is marked served (`dwelledStopSeqs` + `minStopDist`, so it neither
+  re-triggers nor pins the envelope) and the sim rolls through the stop zone at ≤
+  `DWELL_SKIP_ROLL_V_MS = 4 m/s`. The decision fires only once the stop is within
+  `DWELL_SKIP_ZONE_M = v²/(2·A_BRK) ≈ 6.7 m` — the braking envelope has already brought the
+  sim to ≤ the roll cap there, so releasing the stop's 0-limit never violates the envelope.
+  `phase` never enters `'dwell'` (doors stay closed — correct, the real tram is gone).
+  Terminal stops are never skipped.
+
+**Composition.** The crawl/catch-up pace controller still owns mid-segment error; adaptive
+dwell owns error at stops. The car-following clamp (`engine.ts applyQueueConstraints`) runs
+after all sim ticks and **still wins**: a follower can neither depart into nor pass through a
+leader held in an extended dwell (test "a follower never overlaps a leader held in an
+extended dwell"). `s` stays monotonic in all three branches. Tests: `tram-sim.test.ts`
+"adaptive dwell" — extension until a fresh fix / cap at 75 s / non-adaptive contrast /
+skip-roll-through / proportional shortening / 4 s floor / queue invariant.
+
+| constant | value | role |
+|---|---|---|
+| `DWELL_MAX_EXTEND_S` | 75 s | max hold past the base dwell |
+| `DWELL_EXTEND_RELEASE_M` | 8 m | extended dwell releases once e > −8 m |
+| `DWELL_SHORTEN_GAIN_M` | 80 m | behind-dwell factor = clamp(1 − e/80, 0, 1) |
+| `DWELL_SKIP_ERR_M` | 60 m | behind-error that skips the dwell entirely |
+| `DWELL_MIN_S` | 4 s | minimum visible dwell when stopping at all |
+| `DWELL_SKIP_ROLL_V_MS` | 4 m/s | roll cap through a skipped stop's zone |
+| `DWELL_SKIP_ZONE_M` | ≈ 6.7 m | skip-decision window / roll-zone half-width |
+
+---
+
 ## Tuning constants (single source of truth: the code)
 
 | constant | value | file:line | role |

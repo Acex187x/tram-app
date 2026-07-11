@@ -1,5 +1,6 @@
 /// <reference types="jest" />
 
+import { QUEUE_GAP_M, TramEngine } from '@/lib/engine/engine';
 import { A_ACC, A_BRK, buildSpeedProfile, V_MAX_MS } from '@/lib/engine/speedProfile';
 import {
   applySnapshot,
@@ -7,6 +8,12 @@ import {
   CRAWL_V_MS,
   createSim,
   dwellDurationMs,
+  DWELL_EXTEND_RELEASE_M,
+  DWELL_MAX_EXTEND_S,
+  DWELL_MIN_S,
+  DWELL_SKIP_ERR_M,
+  DWELL_SKIP_ROLL_V_MS,
+  DWELL_SKIP_ZONE_M,
   evalScheduleAnchor,
   HARD_BRAKE_ENTER_M,
   observedDistAt,
@@ -18,7 +25,7 @@ import {
   type TramSim,
 } from '@/lib/engine/tramSim';
 import type { RouteGeometry, RouteStop } from '@/lib/types';
-import { makeGeometry, makeSnapshot } from './helpers';
+import { makeGeometry, makeSnapshot, makeSpec1 } from './helpers';
 
 const T0 = 1_000_000_000_000;
 const DT = 0.1;
@@ -602,5 +609,242 @@ describe('spawning near a stop (dwell seeding)', () => {
     const sim = makeSim(geo, 499);
     expect(sim.phase).toBe('cruise');
     expect(sim.dwelledStopSeqs.has(geo.stops[1].sequence)).toBe(true);
+  });
+});
+
+describe('adaptive dwell', () => {
+  // Flat schedule at the 500 m stop (the timetable says the tram is dwelling
+  // there right NOW, with a departure far in the future): the projected
+  // observation is frozen, so the tracking error e = target − s changes only
+  // via the sim's own motion or a fresh fix — deterministic test conditions.
+  const makeAheadGeo = () =>
+    makeGeometry(
+      [
+        [0, 0],
+        [1000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 530_000 },
+        { atM: 500, arrivalMs: T0 - 30_000, departureMs: T0 + 300_000, dwellSeconds: 10 },
+        { atM: 1000, arrivalMs: T0 + 800_000 },
+      ],
+    );
+
+  function makeAdaptiveSim(geo: RouteGeometry, shapeDistM: number, nowMs = T0): TramSim {
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const snapshot = makeSnapshot({ shapeDistM, observedAtMs: nowMs });
+    return createSim(geo, profile, snapshot, nowMs, undefined, { adaptiveDwell: true });
+  }
+
+  /** Drive the sim until it enters 'dwell'; returns the entry timestamp. */
+  function runToDwell(sim: TramSim, fromMs: number, maxSeconds: number): number {
+    let now = fromMs;
+    const steps = Math.round(maxSeconds / DT);
+    for (let i = 0; i < steps; i++) {
+      now += DT * 1000;
+      tick(sim, now, DT);
+      if (sim.phase === 'dwell') return now;
+    }
+    throw new Error('sim never entered dwell');
+  }
+
+  /** Run until the sim leaves 'dwell'; returns the exit timestamp. */
+  function runToDepart(sim: TramSim, fromMs: number, maxSeconds: number): number {
+    let now = fromMs;
+    const steps = Math.round(maxSeconds / DT);
+    for (let i = 0; i < steps; i++) {
+      now += DT * 1000;
+      tick(sim, now, DT);
+      if (sim.phase !== 'dwell') return now;
+    }
+    throw new Error('sim never departed the dwell');
+  }
+
+  it('ahead by ~30 m at a stop: extends the dwell past the base until a fresh fix closes the gap', () => {
+    const geo = makeAheadGeo();
+    // Spawn 30 m before the stop; the frozen target sits at ~467.5 m, so on
+    // arrival at ~500 m the sim is ~30 m AHEAD of reality.
+    const sim = makeAdaptiveSim(geo, 470);
+    const enterMs = runToDwell(sim, T0, 30);
+    expect(dwellDurationMs(geo.stops[1])).toBe(10_000); // configured base dwell
+    expect(targetDistAt(sim, enterMs) - sim.sM).toBeLessThan(-DWELL_EXTEND_RELEASE_M);
+
+    // 5 s PAST the base dwell the sim is still dwelling (phase stays 'dwell'
+    // throughout — doors-open rendering keys off it) and holds position.
+    let now = run(sim, enterMs, 15, () => {
+      expect(sim.phase).toBe('dwell');
+      expect(sim.vMs).toBe(0);
+    });
+    const sAtStop = sim.sM;
+
+    // A fresh fix ahead of the stop recovers e above −8 m → released within
+    // ticks (re-evaluated every tick), and the tram departs.
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 505, observedAtMs: now }), now);
+    expect(targetDistAt(sim, now) - sim.sM).toBeGreaterThan(-DWELL_EXTEND_RELEASE_M);
+    const exitMs = runToDepart(sim, now, 2);
+    expect((exitMs - now) / 1000).toBeLessThanOrEqual(0.3); // released promptly
+    run(sim, exitMs, 10);
+    expect(sim.phase).toBe('cruise');
+    expect(sim.sM).toBeGreaterThan(sAtStop + 5); // actually departed
+  });
+
+  it('extension caps at base + DWELL_MAX_EXTEND_S when reality never catches up', () => {
+    const geo = makeAheadGeo();
+    const sim = makeAdaptiveSim(geo, 470);
+    const enterMs = runToDwell(sim, T0, 30);
+    const exitMs = runToDepart(sim, enterMs, 120);
+    const dwellS = (exitMs - enterMs) / 1000;
+    const baseS = dwellDurationMs(geo.stops[1]) / 1000;
+    expect(dwellS).toBeGreaterThanOrEqual(baseS + DWELL_MAX_EXTEND_S - 0.5);
+    expect(dwellS).toBeLessThanOrEqual(baseS + DWELL_MAX_EXTEND_S + 0.5);
+  });
+
+  it('non-adaptive sims (the projSim default) depart at the base dwell even when ahead', () => {
+    const geo = makeAheadGeo();
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 470, observedAtMs: T0 }), T0);
+    expect(sim.adaptiveDwell).toBe(false); // opt-in only — projSims stay fixed
+    const enterMs = runToDwell(sim, T0, 30);
+    const exitMs = runToDepart(sim, enterMs, 30);
+    expect((exitMs - enterMs) / 1000).toBeGreaterThanOrEqual(9.5);
+    expect((exitMs - enterMs) / 1000).toBeLessThanOrEqual(10.5);
+  });
+
+  it('behind by ~100 m: rolls through the stop — never dwells, ≤ roll cap in the zone, stop served', () => {
+    // ~1.67 m/s schedule; a fresh fix places reality 160 m ahead of the sim,
+    // and the error stays > DWELL_SKIP_ERR_M through the stop zone at 60 m.
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [1000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 96_000 },
+        { atM: 60, arrivalMs: T0 - 60_000, dwellSeconds: 18 },
+        { atM: 1000, arrivalMs: T0 + 504_000 },
+      ],
+    );
+    const sim = makeAdaptiveSim(geo, 0);
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 160, observedAtMs: T0 }), T0);
+    expect(sim.lastTeleportMs).toBe(0); // 160 m error — reconcile, don't teleport
+    expect(targetDistAt(sim, T0) - sim.sM).toBeGreaterThan(DWELL_SKIP_ERR_M);
+
+    const stop = geo.stops[1];
+    let sPrev = sim.sM;
+    let sawZone = false;
+    run(sim, T0, 40, () => {
+      // Doors never open: the real tram already served and left this stop.
+      expect(sim.phase).not.toBe('dwell');
+      expect(sim.sM).toBeGreaterThanOrEqual(sPrev); // s stays monotonic
+      sPrev = sim.sM;
+      if (Math.abs(sim.sM - stop.distM) <= DWELL_SKIP_ZONE_M) {
+        sawZone = true;
+        // Modest roll through the stop zone (small tolerance for the one
+        // envelope-limited tick straddling the zone boundary).
+        expect(sim.vMs).toBeLessThanOrEqual(DWELL_SKIP_ROLL_V_MS + 0.3);
+      }
+    });
+    expect(sawZone).toBe(true); // actually crossed the platform, didn't stop short
+    expect(sim.dwelledStopSeqs.has(stop.sequence)).toBe(true); // marked served
+    expect(sim.sM).toBeGreaterThan(stop.distM + 50); // rolled past and moved on
+  });
+
+  it('behind by ~30 m: dwells noticeably shorter than the base but well above the minimum', () => {
+    // Flat schedule at the 60 m stop; fix at 110 m → e ≈ +30 on arrival.
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [1000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 100_000 },
+        { atM: 60, arrivalMs: T0 - 50_000, departureMs: T0 + 300_000, dwellSeconds: 16 },
+        { atM: 1000, arrivalMs: T0 + 800_000 },
+      ],
+    );
+    const sim = makeAdaptiveSim(geo, 0);
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 110, observedAtMs: T0 }), T0);
+
+    const enterMs = runToDwell(sim, T0, 30);
+    const eEntry = targetDistAt(sim, enterMs) - sim.sM;
+    expect(eEntry).toBeGreaterThan(20);
+    expect(eEntry).toBeLessThan(40);
+
+    const exitMs = runToDepart(sim, enterMs, 20);
+    const dwellS = (exitMs - enterMs) / 1000;
+    expect(dwellS).toBeLessThanOrEqual(13); // clearly shorter than the 16 s base
+    expect(dwellS).toBeGreaterThanOrEqual(8); // ~16 s × (1 − 30/80) ≈ 10 s
+    expect(dwellS).toBeGreaterThanOrEqual(DWELL_MIN_S);
+  });
+
+  it('never dwells shorter than DWELL_MIN_S when it does stop', () => {
+    // Base dwell 8 s, fix at ~137 m → e ≈ +50 on arrival (between the shorten
+    // and skip thresholds): 8 s × (1 − 50/80) = 3 s → clamped to the 4 s floor.
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [1000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 100_000 },
+        { atM: 60, arrivalMs: T0 - 50_000, departureMs: T0 + 300_000, dwellSeconds: 8 },
+        { atM: 1000, arrivalMs: T0 + 800_000 },
+      ],
+    );
+    const sim = makeAdaptiveSim(geo, 0);
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 137, observedAtMs: T0 }), T0);
+
+    const enterMs = runToDwell(sim, T0, 30);
+    const eEntry = targetDistAt(sim, enterMs) - sim.sM;
+    expect(eEntry).toBeGreaterThan(40);
+    expect(eEntry).toBeLessThan(DWELL_SKIP_ERR_M); // shortened, not skipped
+
+    const exitMs = runToDepart(sim, enterMs, 20);
+    const dwellS = (exitMs - enterMs) / 1000;
+    expect(dwellS).toBeGreaterThanOrEqual(DWELL_MIN_S - 0.2);
+    expect(dwellS).toBeLessThanOrEqual(DWELL_MIN_S + 0.5);
+  });
+
+  it('a follower never overlaps a leader held in an extended dwell (queue clamp wins)', () => {
+    const geo = makeAheadGeo(); // frozen target → the leader's dwell extends
+    const engine = new TramEngine({
+      resolveModel: () => makeSpec1(),
+      isDaytime: () => false,
+      isCoupled: () => false,
+    });
+    engine.ingest(
+      [
+        makeSnapshot({ key: 'lead', shapeDistM: 480, observedAtMs: T0 }),
+        makeSnapshot({ key: 'follow', shapeDistM: 460, observedAtMs: T0 }),
+      ],
+      () => geo,
+      T0,
+    );
+    engine.tick(T0); // arm the tick clock
+
+    const clearance = makeSpec1().totalLengthM + QUEUE_GAP_M;
+    const stepMs = 100;
+    let leadDwellMs = 0;
+    let followMax = 0;
+    let now = T0;
+    for (let i = 0; i < 700; i++) {
+      now += stepMs;
+      engine.tick(now);
+      const lead = engine.getState('lead', now);
+      const follow = engine.getState('follow', now);
+      if (!lead || !follow) throw new Error('missing state');
+      // THE invariant: the follower's nose never breaches the leader's tail
+      // buffer, even while the leader's dwell is adaptively extended.
+      expect(follow.simDistM).toBeLessThanOrEqual(lead.simDistM - clearance + 1e-6);
+      expect(follow.phase).not.toBe('dwell'); // queued outside the reach window
+      if (lead.phase === 'dwell') leadDwellMs += stepMs;
+      followMax = Math.max(followMax, follow.simDistM);
+    }
+    // The leader's dwell really was extended (base is 10 s)…
+    expect(leadDwellMs).toBeGreaterThan(40_000);
+    // …and the follower pressed right up against the queue limit behind it,
+    // so the clamp (not mere distance) is what kept them apart.
+    expect(followMax).toBeGreaterThan(500 - clearance - 5);
+    expect(followMax).toBeLessThanOrEqual(500 - clearance + 1e-6);
   });
 });

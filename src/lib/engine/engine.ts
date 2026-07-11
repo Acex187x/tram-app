@@ -228,7 +228,9 @@ export class TramEngine {
         // world position lies close to the new shape and near the schedule.
         const oldSim = entry.sim;
         const oldPos = pointAt(oldSim.geometry.coordinates, oldSim.geometry.cumDistM, oldSim.sM);
-        const newSim = createSim(geometry, profile, snapshot, nowMs, lengthM);
+        const newSim = createSim(geometry, profile, snapshot, nowMs, lengthM, {
+          adaptiveDwell: true,
+        });
         const proj = projectPointToPolyline(oldPos, geometry.coordinates, geometry.cumDistM);
         const sTarget = targetDistAt(newSim, nowMs);
         if (
@@ -242,13 +244,19 @@ export class TramEngine {
         }
         entry.sim = newSim;
       } else {
-        entry.sim = createSim(geometry, profile, snapshot, nowMs, lengthM);
+        // Main smooth-mode sims correct tracking error at stops (adaptive
+        // dwell); projection sims below never do — they mirror reality.
+        entry.sim = createSim(geometry, profile, snapshot, nowMs, lengthM, {
+          adaptiveDwell: true,
+        });
       }
       entry.tripId = snapshot.tripId;
 
       // Dead-reckoning sim for the projected observation: re-seed ONLY when a
       // genuinely new fix (or trip/geometry) arrives — that's the accepted
       // live-mode jump. Between identical polls it keeps integrating smoothly.
+      // NO adaptiveDwell here: the projection dead-reckons the raw fix and
+      // must keep fixed, reality-mirroring dwells.
       const proj = entry.projSim;
       if (
         !proj ||
