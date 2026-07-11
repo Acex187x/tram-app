@@ -76,6 +76,8 @@ export default function MapScreen() {
 
   // ── Viewport tracking (feeds frame culling + zoom banding via ref) ─────────
   const followGestureRef = useRef<FollowGestureState>({ gestureActive: false, overrides: null });
+  /** Latest camera params — seeds follow sessions so engaging changes nothing. */
+  const cameraStateRef = useRef({ zoom: INITIAL_ZOOM, pitch: INITIAL_PITCH, heading: 0 });
   const onCameraChanged = useCallback((state: MapState) => {
     // Ref assignments only — no React work per camera event.
     const { ne, sw } = state.properties.bounds;
@@ -83,6 +85,11 @@ export default function MapScreen() {
     viewportRef.current = {
       bbox: [sw[0], sw[1], ne[0], ne[1]],
       zoom,
+    };
+    cameraStateRef.current = {
+      zoom,
+      pitch: state.properties.pitch,
+      heading: state.properties.heading,
     };
     // Zoom-adaptive simulation rate (thermal): 60 Hz in the glide band
     // (hysteresis inside setDetailZoom), ~10 Hz at far zooms.
@@ -133,14 +140,29 @@ export default function MapScreen() {
     selection.requestFlyTo(null);
   }, [flyToTarget]);
 
-  // Followed tram's geometry loads first (smooth on-shape follow ASAP); each
-  // new follow (or follow end) starts from the default chase view — gesture
-  // overrides belong to a single follow session.
+  // Followed tram's geometry loads first (smooth on-shape follow ASAP). A new
+  // follow session KEEPS the user's current zoom/pitch/heading — the camera
+  // only flies to the tram, nothing else changes (the heading persists as an
+  // offset from the tram bearing, so later rotation-with-the-tram feels
+  // continuous). Gesture overrides still belong to a single follow session.
   const followTramKey = useSelectionStore((s) => s.followTramKey);
   useEffect(() => {
-    followGestureRef.current = { gestureActive: false, overrides: null };
-    if (!followTramKey) return;
+    if (!followTramKey) {
+      followGestureRef.current = { gestureActive: false, overrides: null };
+      return;
+    }
     const state = getRuntime().engine.getState(followTramKey);
+    const cam = cameraStateRef.current;
+    const live = useSettingsStore.getState().positionMode === 'live';
+    const bearing = state ? (live ? state.observedBearing : state.bearing) : cam.heading;
+    followGestureRef.current = {
+      gestureActive: false,
+      overrides: {
+        zoom: cam.zoom,
+        pitch: cam.pitch,
+        headingOffset: ((((cam.heading - bearing) % 360) + 540) % 360) - 180,
+      },
+    };
     if (state) getRuntime().prioritizeTrip(state.snapshot.tripId);
   }, [followTramKey]);
 
