@@ -57,31 +57,56 @@ export function planItineraries(
   const seenSignatures = new Set<string>();
   let expansions = 0;
 
-  const dfs = (
-    stationKey: string,
-    legs: PlannerLeg[],
-    usedLines: Set<string>,
-    visited: Set<string>,
-  ): void => {
-    if (expansions++ > MAX_EXPANSIONS) return;
-    if (results.length >= MAX_RESULTS * 4) return; // gather a pool, trim later
+  // A search state = "standing at `station`, having taken `legs`". Future
+  // expansion depends only on the station, the set of lines already ridden
+  // (a line is never ridden twice, which also forbids a consecutive same-line
+  // leg), and the stations already visited. We run a bounded BFS/Dijkstra with
+  // a best-cost map keyed by (station + used-line set) so the sequence
+  // deduplication above plus this frontier make completeness within
+  // MAX_TRANSFERS independent of cache insertion order.
+  interface SearchState {
+    station: string;
+    legs: PlannerLeg[];
+    usedLines: Set<string>;
+    visited: Set<string>;
+    stops: number;
+  }
 
-    const sequences = network.sequencesByStation.get(stationKey) ?? [];
-    const lastLine = legs.length > 0 ? legs[legs.length - 1].line : null;
+  const stateKey = (station: string, usedLines: Set<string>): string =>
+    `${station}::${[...usedLines].sort().join('>>')}`;
+
+  const bestStopsByState = new Map<string, number>();
+  const queue: SearchState[] = [
+    {
+      station: fromKey,
+      legs: [],
+      usedLines: new Set<string>(),
+      visited: new Set<string>([fromKey]),
+      stops: 0,
+    },
+  ];
+
+  // FIFO over the queue; because each expansion appends exactly one leg, states
+  // are processed in non-decreasing transfer order.
+  for (let head = 0; head < queue.length; head++) {
+    if (expansions++ > MAX_EXPANSIONS) break;
+    if (results.length >= MAX_RESULTS * 4) break; // gather a pool, trim later
+
+    const state = queue[head];
+    const sequences = network.sequencesByStation.get(state.station) ?? [];
 
     for (const seq of sequences) {
-      if (seq.line === lastLine) continue; // no consecutive same-line leg
-      if (usedLines.has(seq.line)) continue; // don't ride a line twice
+      if (state.usedLines.has(seq.line)) continue; // don't ride a line twice
 
-      const i = seq.stops.findIndex((s) => s.key === stationKey);
+      const i = seq.stops.findIndex((s) => s.key === state.station);
       if (i < 0) continue;
 
       for (let j = i + 1; j < seq.stops.length; j++) {
         const cand = seq.stops[j];
-        if (visited.has(cand.key)) continue;
+        if (state.visited.has(cand.key)) continue;
 
         if (cand.key === toKey) {
-          const legs2 = [...legs, makeLeg(seq, i, j)];
+          const legs2 = [...state.legs, makeLeg(seq, i, j)];
           const sig = legSignature(legs2);
           if (!seenSignatures.has(sig)) {
             seenSignatures.add(sig);
@@ -91,21 +116,29 @@ export function planItineraries(
         }
 
         if (
-          legs.length < MAX_TRANSFERS && // room for another leg (=> a transfer)
+          state.legs.length < MAX_TRANSFERS && // room for another leg (=> a transfer)
           isTransferStation(network, cand.key)
         ) {
-          dfs(
-            cand.key,
-            [...legs, makeLeg(seq, i, j)],
-            new Set(usedLines).add(seq.line),
-            new Set(visited).add(cand.key),
-          );
+          const usedLines = new Set(state.usedLines).add(seq.line);
+          const leg = makeLeg(seq, i, j);
+          const nextStops = state.stops + leg.stopCount;
+          // Keep only the cheapest (fewest stops) representative that reaches
+          // this (station, used-line set); dominated frontier states are pruned.
+          const key = stateKey(cand.key, usedLines);
+          const prevBest = bestStopsByState.get(key);
+          if (prevBest !== undefined && prevBest <= nextStops) continue;
+          bestStopsByState.set(key, nextStops);
+          queue.push({
+            station: cand.key,
+            legs: [...state.legs, leg],
+            usedLines,
+            visited: new Set(state.visited).add(cand.key),
+            stops: nextStops,
+          });
         }
       }
     }
-  };
-
-  dfs(fromKey, [], new Set<string>(), new Set<string>([fromKey]));
+  }
 
   results.sort(
     (a, b) => a.transferCount - b.transferCount || a.totalStops - b.totalStops,

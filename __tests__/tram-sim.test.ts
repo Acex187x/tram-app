@@ -1,12 +1,15 @@
 /// <reference types="jest" />
 
-import { buildSpeedProfile, V_MAX_MS } from '@/lib/engine/speedProfile';
+import { A_ACC, A_BRK, buildSpeedProfile, V_MAX_MS } from '@/lib/engine/speedProfile';
 import {
   applySnapshot,
   buildScheduleAnchor,
   createSim,
   dwellDurationMs,
   evalScheduleAnchor,
+  observedDistAt,
+  STOP_REACH_M,
+  targetDistAt,
   tick,
   type TramSim,
 } from '@/lib/engine/tramSim';
@@ -65,7 +68,7 @@ describe('schedule anchor', () => {
 });
 
 describe('straight-line acceleration', () => {
-  it('ramps up to vmax with accel ≤ 1.0 m/s² and never exceeds the catch-up cap', () => {
+  it('ramps up to vmax with accel ≤ 1.0 m/s² and never exceeds the hard cap', () => {
     const geo = makeGeometry(
       [
         [0, 0],
@@ -92,7 +95,7 @@ describe('straight-line acceleration', () => {
       sPrev = sim.sM;
     });
     expect(vMax).toBeGreaterThanOrEqual(13); // reached ~vmax
-    expect(vMax).toBeLessThanOrEqual(1.65 * V_MAX_MS + 0.1); // never above catch-up cap
+    expect(vMax).toBeLessThanOrEqual(V_MAX_MS + 1e-6); // catch-up never exceeds the hard cap
   });
 });
 
@@ -116,7 +119,9 @@ describe('braking before a sharp 90° curve', () => {
     let vBefore = 0;
     run(sim, T0, 240, () => {
       if (sim.sM > 300 && sim.sM < 400) vBefore = Math.max(vBefore, sim.vMs);
-      if (sim.sM >= 490 && sim.sM <= 510) cornerSpeeds.push(sim.vMs);
+      // Sample at/after the apex (incl. the trailing tram-length window): the
+      // envelope only requires reaching the curve cap AT the apex point.
+      if (sim.sM >= 499 && sim.sM <= 512) cornerSpeeds.push(sim.vMs);
       if (sim.sM >= 700 && sim.sM <= 800) afterSpeeds.push(sim.vMs);
     });
 
@@ -241,12 +246,67 @@ describe('pace controller', () => {
 
     const eEnd = evalScheduleAnchor(sim.lastAnchor, lastNow) - sim.sM;
     expect(eEnd).toBeLessThan(50); // caught up
-    expect(vMax).toBeGreaterThan(V_MAX_MS); // ran above the limit to catch up
-    expect(vMax).toBeLessThanOrEqual(1.65 * V_MAX_MS + 0.1); // …but within the clamp
+    expect(vMax).toBeGreaterThan(13); // ran at (nearly) full allowed speed to catch up
+    expect(vMax).toBeLessThanOrEqual(V_MAX_MS + 1e-6); // …never above the hard cap
   });
 });
 
-describe('teleport on large schedule error', () => {
+describe('observation reconciliation (applySnapshot)', () => {
+  // 10 m/s schedule pace → the controller has a real equilibrium below vmax.
+  const geo = makeGeometry(
+    [
+      [0, 0],
+      [3000, 0],
+    ],
+    [
+      { atM: 0, arrivalMs: T0 },
+      { atM: 3000, arrivalMs: T0 + 300_000 },
+    ],
+  );
+
+  it('converges toward a fresher observed shapeDistM within ~30 s', () => {
+    const sim = makeSim(geo);
+    let now = run(sim, T0, 30);
+
+    // Fresh AVL fix: the real tram is 200 m AHEAD of the sim (below teleport).
+    const obsDist = sim.sM + 200;
+    applySnapshot(sim, makeSnapshot({ shapeDistM: obsDist, observedAtMs: now }), now);
+    expect(sim.lastTeleportMs).toBe(0);
+    expect(observedDistAt(sim, now) - sim.sM).toBeCloseTo(200, 0);
+
+    let sPrev = sim.sM;
+    now = run(sim, now, 30, () => {
+      expect(sim.sM).toBeGreaterThanOrEqual(sPrev); // never reverses
+      sPrev = sim.sM;
+    });
+    // ~30 s later the sim has closed most of the 200 m gap to the projected
+    // observation (pre-fix the observation was ignored and the gap persisted)…
+    expect(Math.abs(observedDistAt(sim, now) - sim.sM)).toBeLessThan(90);
+    // …and settles into the controller deadband shortly after.
+    now = run(sim, now, 15);
+    expect(Math.abs(observedDistAt(sim, now) - sim.sM)).toBeLessThan(60);
+  });
+
+  it('slows down — never reverses — when the observation falls behind the sim', () => {
+    const sim = makeSim(geo);
+    let now = run(sim, T0, 60);
+    const vBefore = sim.vMs;
+    applySnapshot(
+      sim,
+      makeSnapshot({ shapeDistM: Math.max(0, sim.sM - 300), observedAtMs: now }),
+      now,
+    );
+    let sPrev = sim.sM;
+    now = run(sim, now, 20, () => {
+      expect(sim.sM).toBeGreaterThanOrEqual(sPrev); // s NEVER decreases
+      expect(sim.vMs).toBeGreaterThanOrEqual(0);
+      sPrev = sim.sM;
+    });
+    expect(sim.vMs).toBeLessThan(vBefore - 1); // eased off to let reality catch up
+  });
+});
+
+describe('teleport on large observation error', () => {
   const makeGeo = (departedAgoMs: number) =>
     makeGeometry(
       [
@@ -259,12 +319,12 @@ describe('teleport on large schedule error', () => {
       ],
     );
 
-  it('teleports to sSched when the error exceeds 500 m and clears dwell memory', () => {
-    const geo = makeGeo(200_000); // sSched(T0) = 1000
+  it('teleports to the projected OBSERVATION when it disagrees by > 500 m', () => {
+    const geo = makeGeo(200_000);
     const sim = makeSim(geo);
     expect(sim.sM).toBe(0);
 
-    applySnapshot(sim, makeSnapshot({ observedAtMs: T0 }), T0);
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 1000, observedAtMs: T0 }), T0);
     expect(sim.sM).toBeCloseTo(1000, 0);
     expect(sim.vMs).toBe(0);
     expect(sim.phase).toBe('cruise');
@@ -274,10 +334,20 @@ describe('teleport on large schedule error', () => {
     expect(sim.dwelledStopSeqs.has(geo.stops[1].sequence)).toBe(false);
   });
 
-  it('does NOT teleport for errors under 500 m (pace controller converges)', () => {
-    const geo = makeGeo(60_000); // sSched(T0) = 300
+  it('trusts a fresh observation over a large timetable error (no teleport)', () => {
+    const geo = makeGeo(200_000); // sSched(T0) = 1000, but the tram is really near 50 m
     const sim = makeSim(geo);
-    applySnapshot(sim, makeSnapshot({ observedAtMs: T0 }), T0);
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 50, observedAtMs: T0 }), T0);
+    expect(sim.sM).toBe(0);
+    expect(sim.lastTeleportMs).toBe(0);
+    // The pace target stays anchored near the observation, not the timetable.
+    expect(targetDistAt(sim, T0)).toBeLessThan(300);
+  });
+
+  it('does NOT teleport for observation errors under 500 m', () => {
+    const geo = makeGeo(60_000);
+    const sim = makeSim(geo);
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 300, observedAtMs: T0 }), T0);
     expect(sim.sM).toBe(0);
     expect(sim.lastTeleportMs).toBe(0);
   });
@@ -302,5 +372,128 @@ describe('createSim initial position', () => {
     expect(sim.sM).toBeCloseTo(550, 0);
     // Stops behind the initial position are marked dwelled.
     expect(sim.dwelledStopSeqs.has(geo.stops[0].sequence)).toBe(true);
+  });
+});
+
+describe('late tram braking (catch-up never defeats the envelope)', () => {
+  // Schedule pace 20 m/s — faster than any tram can go — keeps the pace factor
+  // pegged at its 1.65 maximum through the entire stop approach.
+  const geo = makeGeometry(
+    [
+      [0, 0],
+      [2000, 0],
+    ],
+    [
+      { atM: 0, arrivalMs: T0 },
+      { atM: 1000, arrivalMs: T0 + 50_000, departureMs: T0 + 70_000, dwellSeconds: 20 },
+      { atM: 2000, arrivalMs: T0 + 150_000 },
+    ],
+  );
+
+  it('approaches an isolated stop on the braking envelope and arrives smoothly', () => {
+    const sim = makeSim(geo);
+    let vPrev = sim.vMs;
+    let prevPhase: string = sim.phase;
+    let dwellEntries = 0;
+    let vAtDwellEntry = -1;
+    let vMax = 0;
+
+    run(sim, T0, 120, () => {
+      vMax = Math.max(vMax, sim.vMs);
+      const enteredDwell = sim.phase === 'dwell' && prevPhase !== 'dwell';
+      if (enteredDwell) {
+        dwellEntries++;
+        vAtDwellEntry = vPrev;
+      } else {
+        // No frame-to-frame speed discontinuity beyond the accel/brake clamps.
+        const dv = sim.vMs - vPrev;
+        expect(dv).toBeLessThanOrEqual(A_ACC * DT + 1e-9);
+        expect(dv).toBeGreaterThanOrEqual(-A_BRK * DT - 1e-9);
+      }
+      // On the approach, speed obeys the braking envelope toward the stop.
+      // (0.6 m/s allowance for accumulated per-frame integration lag; the
+      // pre-fix 1.65× envelope violated this by several m/s.)
+      if (dwellEntries === 0 && sim.sM > 600 && sim.sM < 1000 - STOP_REACH_M) {
+        expect(sim.vMs).toBeLessThanOrEqual(Math.sqrt(2 * A_BRK * (1000 - sim.sM)) + 0.6);
+      }
+      vPrev = sim.vMs;
+      prevPhase = sim.phase;
+    });
+
+    // Hard cap holds even at factor 1.65 (no ~66-70 km/h approach).
+    expect(vMax).toBeLessThanOrEqual(V_MAX_MS + 1e-9);
+    // The stop was neither skipped nor snapped through at speed.
+    expect(dwellEntries).toBe(1);
+    // Arrival speed ≈ the envelope value at the reach boundary (√(2·A_BRK·2 m)
+    // ≈ 2.2 m/s) — nearly stopped, not a 60 km/h → 0 snap like pre-fix.
+    expect(vAtDwellEntry).toBeGreaterThanOrEqual(0);
+    expect(vAtDwellEntry).toBeLessThan(Math.sqrt(2 * A_BRK * STOP_REACH_M) + 0.8);
+  });
+});
+
+describe('spawning near a stop (dwell seeding)', () => {
+  const makeStopGeo = () =>
+    makeGeometry(
+      [
+        [0, 0],
+        [1000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 120_000 },
+        { atM: 500, arrivalMs: T0 - 5_000, departureMs: T0 + 10_000 },
+        { atM: 1000, arrivalMs: T0 + 120_000 },
+      ],
+    );
+
+  it('spawning 1 m before a stop dwells there exactly once, until the scheduled departure', () => {
+    const geo = makeStopGeo();
+    const sim = makeSim(geo, 499);
+    // The stop 1 m AHEAD is not silently marked as served — it dwells now.
+    expect(sim.phase).toBe('dwell');
+    expect(sim.dwellUntilMs).toBe(T0 + 10_000); // remaining dwell = scheduled departure
+    expect(sim.dwelledStopSeqs.has(geo.stops[1].sequence)).toBe(true);
+    expect(sim.dwelledStopSeqs.has(geo.stops[0].sequence)).toBe(true); // truly behind
+
+    let dwellReEntries = 0;
+    let prevPhase: string = sim.phase;
+    run(sim, T0, 60, () => {
+      if (sim.phase === 'dwell' && prevPhase !== 'dwell') dwellReEntries++;
+      prevPhase = sim.phase;
+    });
+    expect(dwellReEntries).toBe(0); // the seeded dwell was the only one
+    expect(sim.sM).toBeGreaterThan(510); // and the tram departed afterwards
+  });
+
+  it('feed at_stop initializes a dwell at the feed-declared stop', () => {
+    const geo = makeStopGeo();
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const snapshot = makeSnapshot({
+      shapeDistM: 500,
+      observedAtMs: T0,
+      statePosition: 'at_stop',
+      lastStopSequence: geo.stops[1].sequence,
+    });
+    const sim = createSim(geo, profile, snapshot, T0);
+    expect(sim.phase).toBe('dwell');
+    expect(sim.dwellUntilMs).toBe(T0 + 10_000);
+    expect(sim.dwelledStopSeqs.has(geo.stops[0].sequence)).toBe(true);
+    expect(sim.dwelledStopSeqs.has(geo.stops[1].sequence)).toBe(true);
+  });
+
+  it('marks a reach-window stop as served (no dwell) when its departure already passed', () => {
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [1000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 120_000 },
+        { atM: 500, arrivalMs: T0 - 60_000, departureMs: T0 - 45_000 },
+        { atM: 1000, arrivalMs: T0 + 120_000 },
+      ],
+    );
+    const sim = makeSim(geo, 499);
+    expect(sim.phase).toBe('cruise');
+    expect(sim.dwelledStopSeqs.has(geo.stops[1].sequence)).toBe(true);
   });
 });

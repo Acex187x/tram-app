@@ -1,14 +1,21 @@
 // Planner itinerary overlay: each leg drawn as a bold gold casing with a
 // line-colored inner stroke (PID red / night blue). When an itinerary is set,
 // the camera fits its bounds once.
+//
+// IMPORTANT (verified on-device — see the note atop RouteNetwork.tsx): the
+// ShapeSource is mounted ONCE with a stable empty FeatureCollection and receives
+// geometry ONLY via setNativeProps. React must never commit a changing `shape`
+// prop, or the native source reverts / never applies (Fabric + rnmapbox quirk).
 
 import { Camera, LineLayer, ShapeSource } from '@rnmapbox/maps';
-import { useEffect, useMemo, type RefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 
 import { Tram } from '@/constants/theme';
 import { usePlannerStore } from '@/stores/planner';
 
 type LegFC = GeoJSON.FeatureCollection<GeoJSON.LineString, { line: string; legIndex: number }>;
+
+const EMPTY_FC: LegFC = { type: 'FeatureCollection', features: [] };
 
 export interface PlannerOverlayProps {
   cameraRef: RefObject<Camera | null>;
@@ -16,30 +23,35 @@ export interface PlannerOverlayProps {
 
 export function PlannerOverlay({ cameraRef }: PlannerOverlayProps) {
   const itinerary = usePlannerStore((s) => s.itinerary);
+  const sourceRef = useRef<ShapeSource>(null);
 
-  const legsFC = useMemo((): LegFC | null => {
-    if (!itinerary) return null;
-    const features: LegFC['features'] = [];
-    itinerary.legs.forEach((leg, i) => {
-      if (leg.coordinates.length < 2) return; // shape unknown for this leg
-      features.push({
-        type: 'Feature',
-        id: `leg-${i}`,
-        geometry: { type: 'LineString', coordinates: leg.coordinates },
-        properties: { line: leg.line, legIndex: i },
-      });
-    });
-    return features.length > 0 ? { type: 'FeatureCollection', features } : null;
-  }, [itinerary]);
-
-  // Fit the camera to the itinerary bounds when a new plan lands.
   useEffect(() => {
-    if (!legsFC) return;
+    // Build the leg FeatureCollection (skip legs whose shape is unknown).
+    const features: LegFC['features'] = [];
+    if (itinerary) {
+      itinerary.legs.forEach((leg, i) => {
+        if (leg.coordinates.length < 2) return;
+        features.push({
+          type: 'Feature',
+          id: `leg-${i}`,
+          geometry: { type: 'LineString', coordinates: leg.coordinates },
+          properties: { line: leg.line, legIndex: i },
+        });
+      });
+    }
+
+    const fc: LegFC = features.length > 0 ? { type: 'FeatureCollection', features } : EMPTY_FC;
+    // Push imperatively; clearing an itinerary pushes the empty collection.
+    sourceRef.current?.setNativeProps({ id: 'planner-legs', shape: JSON.stringify(fc) });
+
+    if (features.length === 0) return;
+
+    // Fit the camera to the itinerary bounds when a new plan lands.
     let minLng = Infinity;
     let minLat = Infinity;
     let maxLng = -Infinity;
     let maxLat = -Infinity;
-    for (const feature of legsFC.features) {
+    for (const feature of features) {
       for (const [lng, lat] of feature.geometry.coordinates) {
         if (lng < minLng) minLng = lng;
         if (lng > maxLng) maxLng = lng;
@@ -53,12 +65,10 @@ export function PlannerOverlay({ cameraRef }: PlannerOverlayProps) {
       [120, 60, 220, 60], // generous bottom padding: planner sheet floats there
       1000,
     );
-  }, [legsFC, cameraRef]);
-
-  if (!legsFC) return null;
+  }, [itinerary, cameraRef]);
 
   return (
-    <ShapeSource key={`planner-${legsFC.features.length}-${legsFC.features[0]?.properties?.line ?? ""}`} id="planner-legs" shape={legsFC}>
+    <ShapeSource ref={sourceRef} id="planner-legs" shape={EMPTY_FC}>
       <LineLayer
         id="planner-leg-casing"
         slot="top"

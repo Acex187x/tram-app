@@ -8,7 +8,8 @@ import { Animated, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
 import { delayColor } from '@/components/ui/DelayPill';
 import { Colors, Tram } from '@/constants/theme';
-import type { RouteGeometry, RouteStop } from '@/lib/types';
+import { formatPragueClock } from '@/lib/format/pragueTime';
+import type { RouteGeometry, RouteStop, TramPublicState } from '@/lib/types';
 
 export interface StopsTimelineProps {
   /** Trip geometry, or undefined while it is still loading. */
@@ -17,13 +18,14 @@ export interface StopsTimelineProps {
   simDistM: number;
   /** Current reported delay, seconds (shifts scheduled times). */
   delaySeconds: number;
+  /** Current sim phase — during 'dwell' the first upcoming stop is the one the
+   *  tram is stopped AT, so NEXT shifts to the following stop (matches header). */
+  phase?: TramPublicState['phase'];
 }
 
-/** H:mm clock label (24h, Prague style). */
-function fmtClock(ms: number): string {
-  const d = new Date(ms);
-  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
+// The timetable clocks are Prague wall-clock instants; format them in
+// Europe/Prague regardless of the device timezone (see formatPragueClock).
+const fmtClock = formatPragueClock;
 
 function LoadingSkeleton() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
@@ -63,17 +65,23 @@ interface StopRowProps {
   stop: RouteStop;
   delaySeconds: number;
   isNext: boolean;
+  /** The tram is currently dwelling AT this stop. */
+  isAtStop: boolean;
   isFirst: boolean;
   isLast: boolean;
 }
 
-function StopRow({ stop, delaySeconds, isNext, isFirst, isLast }: StopRowProps) {
+function StopRow({ stop, delaySeconds, isNext, isAtStop, isFirst, isLast }: StopRowProps) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const c = Colors[scheme];
   const delayed = delaySeconds > 60;
-  const expectedMs = stop.arrivalMs + delaySeconds * 1000;
+  // While dwelling, the arrival is already in the past — show the scheduled
+  // departure instead so the row reads as "leaving at".
+  const baseMs = isAtStop ? stop.departureMs : stop.arrivalMs;
+  const expectedMs = baseMs + delaySeconds * 1000;
   const railColor = scheme === 'dark' ? 'rgba(176,42,38,0.55)' : Tram.redSoft;
   const dotColor = scheme === 'dark' ? Tram.liveryRed : Tram.pidRed;
+  const emphasized = isNext || isAtStop;
 
   return (
     <View style={styles.row}>
@@ -86,26 +94,36 @@ function StopRow({ stop, delaySeconds, isNext, isFirst, isLast }: StopRowProps) 
         />
         <View
           style={
-            isNext
-              ? [styles.dotNext, { backgroundColor: dotColor }]
-              : [styles.dot, { backgroundColor: dotColor }]
+            isAtStop
+              ? [styles.dotAtStop, { backgroundColor: Tram.onTime }]
+              : isNext
+                ? [styles.dotNext, { backgroundColor: dotColor }]
+                : [styles.dot, { backgroundColor: dotColor }]
           }
         />
       </View>
       <View style={styles.nameCol}>
         <View style={styles.nameLine}>
           <Text
-            style={[styles.name, { color: c.text }, isNext && styles.nameNext]}
+            style={[styles.name, { color: c.text }, emphasized && styles.nameNext]}
             numberOfLines={1}
           >
             {stop.name}
           </Text>
-          {isNext && (
-            <View style={styles.nextChip}>
-              <Text style={styles.nextChipText} allowFontScaling={false}>
-                NEXT
+          {isAtStop ? (
+            <View style={styles.atStopChip}>
+              <Text style={styles.atStopChipText} allowFontScaling={false}>
+                AT STOP NOW
               </Text>
             </View>
+          ) : (
+            isNext && (
+              <View style={styles.nextChip}>
+                <Text style={styles.nextChipText} allowFontScaling={false}>
+                  NEXT
+                </Text>
+              </View>
+            )
           )}
         </View>
         {stop.isTerminal && (
@@ -120,7 +138,7 @@ function StopRow({ stop, delaySeconds, isNext, isFirst, isLast }: StopRowProps) 
           style={[
             styles.time,
             { color: delayed ? delayColor(delaySeconds) : c.text },
-            isNext && styles.timeNext,
+            emphasized && styles.timeNext,
           ]}
           allowFontScaling={false}
         >
@@ -128,7 +146,7 @@ function StopRow({ stop, delaySeconds, isNext, isFirst, isLast }: StopRowProps) 
         </Text>
         {delayed && (
           <Text style={[styles.timeSched, { color: c.textSecondary }]} allowFontScaling={false}>
-            {fmtClock(stop.arrivalMs)}
+            {fmtClock(baseMs)}
           </Text>
         )}
       </View>
@@ -136,7 +154,7 @@ function StopRow({ stop, delaySeconds, isNext, isFirst, isLast }: StopRowProps) 
   );
 }
 
-export function StopsTimeline({ geometry, simDistM, delaySeconds }: StopsTimelineProps) {
+export function StopsTimeline({ geometry, simDistM, delaySeconds, phase }: StopsTimelineProps) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
 
   const upcoming = useMemo(() => {
@@ -155,6 +173,11 @@ export function StopsTimeline({ geometry, simDistM, delaySeconds }: StopsTimelin
     );
   }
 
+  // While dwelling, upcoming[0] is the stop the tram is stopped AT; NEXT is the
+  // following stop, matching the engine's next-stop (shown in the sheet header).
+  const dwelling = phase === 'dwell' && upcoming.length > 0;
+  const nextIndex = dwelling ? 1 : 0;
+
   return (
     <View>
       {upcoming.map((stop, i) => (
@@ -162,7 +185,8 @@ export function StopsTimeline({ geometry, simDistM, delaySeconds }: StopsTimelin
           key={`${stop.stopId}-${stop.sequence}`}
           stop={stop}
           delaySeconds={delaySeconds}
-          isNext={i === 0}
+          isAtStop={dwelling && i === 0}
+          isNext={i === nextIndex}
           isFirst={i === 0}
           isLast={i === upcoming.length - 1}
         />
@@ -205,6 +229,14 @@ const styles = StyleSheet.create({
     height: 14,
     width: 14,
   },
+  dotAtStop: {
+    backgroundColor: Tram.onTime,
+    borderColor: Tram.cream,
+    borderRadius: 7,
+    borderWidth: 2.5,
+    height: 14,
+    width: 14,
+  },
   nameCol: { flex: 1, gap: 1 },
   nameLine: { alignItems: 'center', flexDirection: 'row', gap: 6 },
   name: { flexShrink: 1, fontSize: 15 },
@@ -216,6 +248,18 @@ const styles = StyleSheet.create({
     paddingVertical: 1.5,
   },
   nextChipText: {
+    color: Tram.cream,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+  },
+  atStopChip: {
+    backgroundColor: Tram.onTime,
+    borderRadius: 5,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+  },
+  atStopChipText: {
     color: Tram.cream,
     fontSize: 9,
     fontWeight: '700',

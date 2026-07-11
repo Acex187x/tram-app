@@ -72,6 +72,27 @@ export function buildSpeedProfile(
 }
 
 /**
+ * Cruise reference cap at sM: the zone/curve cap of the current segment,
+ * WITHOUT the braking envelope. max() of the segment endpoints so a low limit
+ * at a vertex acts as a *point* constraint (via the envelope), not a blanket
+ * limit over a possibly-long straight segment leading to/from it.
+ *
+ * Pace catch-up scaling may multiply THIS value only — never vAllowedAt() —
+ * so a late tram can hold the track's cruise speed but can never defeat the
+ * braking envelope toward stops/curves (the final target is clamped to it).
+ */
+export function cruiseCapAt(profile: SpeedProfile, geometry: RouteGeometry, sM: number): number {
+  const cum = geometry.cumDistM;
+  const n = cum.length;
+  if (n === 0) return 0;
+  const s = Math.min(Math.max(sM, 0), geometry.totalM);
+  const i = segmentIndexAt(cum, s);
+  return n > 1
+    ? Math.max(profile.vLimit[i], profile.vLimit[Math.min(i + 1, n - 1)])
+    : profile.vLimit[0];
+}
+
+/**
  * Braking envelope: the max speed permitted at sM so that every upcoming limit
  * within lookaheadM can be met with deceleration aBrk:
  *
@@ -95,11 +116,8 @@ export function vAllowedAt(
   const total = geometry.totalM;
   const s = Math.min(Math.max(sM, 0), total);
 
-  // Base cap for the current segment. max() of the endpoints so a low limit at a
-  // vertex acts as a *point* constraint (via the envelope below), not a blanket
-  // limit over a possibly-long straight segment leading to/from it.
-  const i = segmentIndexAt(cum, s);
-  let v = n > 1 ? Math.max(profile.vLimit[i], profile.vLimit[Math.min(i + 1, n - 1)]) : profile.vLimit[0];
+  // Base cap for the current segment (point-constraint semantics, see cruiseCapAt).
+  let v = cruiseCapAt(profile, geometry, s);
 
   const horizon = s + lookaheadM;
 

@@ -36,11 +36,24 @@ export function GlassPanel({ children, style, variant = 'regular', interactive, 
   const [reduceTransparency, setReduceTransparency] = useState(reduceTransparencyCache);
 
   useEffect(() => {
+    let mounted = true;
+    // Panels mounted before the module-level query resolves would otherwise be
+    // stuck on the stale `false` seed (the change listener only fires on later
+    // toggles). Re-query on mount and adopt the result.
+    AccessibilityInfo.isReduceTransparencyEnabled()
+      .then((v) => {
+        reduceTransparencyCache = v;
+        if (mounted) setReduceTransparency(v);
+      })
+      .catch(() => {});
     const sub = AccessibilityInfo.addEventListener('reduceTransparencyChanged', (v) => {
       reduceTransparencyCache = v;
       setReduceTransparency(v);
     });
-    return () => sub.remove();
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
   }, []);
 
   if (glassSupported && !reduceTransparency) {

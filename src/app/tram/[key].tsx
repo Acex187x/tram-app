@@ -142,7 +142,22 @@ export default function TramDetailSheet() {
 
   const followTramKey = useSelectionStore((s) => s.followTramKey);
   const setFollowTramKey = useSelectionStore((s) => s.setFollowTramKey);
+  const setSelectedTramKey = useSelectionStore((s) => s.setSelectedTramKey);
   const isFollowing = followTramKey === key;
+
+  // This sheet owns `selectedTramKey` (drives the map's gold halo). Set it on
+  // mount/key change regardless of how we got here (map tap, search, line
+  // screen, favorites) and clear it on dismiss — but only if the store still
+  // points at us, so a newer sheet that already claimed selection wins.
+  useEffect(() => {
+    if (!key) return;
+    setSelectedTramKey(key);
+    return () => {
+      if (useSelectionStore.getState().selectedTramKey === key) {
+        setSelectedTramKey(null);
+      }
+    };
+  }, [key, setSelectedTramKey]);
 
   const isFavorite = useFavoritesStore((s) => s.favoriteTrams.includes(key));
   const toggleTram = useFavoritesStore((s) => s.toggleTram);
@@ -300,6 +315,7 @@ export default function TramDetailSheet() {
               geometry={geometry}
               simDistM={state.simDistM}
               delaySeconds={state.snapshot.delaySeconds}
+              phase={state.phase}
             />
 
             {/* About */}

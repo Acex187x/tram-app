@@ -114,14 +114,36 @@ describe('section placement on an L-shaped track', () => {
     expect(haversineM(tailPos, metersToCoord(ORIGIN, 89, 0))).toBeLessThan(2);
   });
 
-  it('clamps section centers at the start of the shape', () => {
+  it('extrapolates rear sections behind the shape start, keeping physical spacing', () => {
+    // Head 5 m into the shape → section centers at s = 0, −10.5, −21. Negative
+    // centers extrapolate straight back along the first segment bearing (east)
+    // instead of piling up at vertex zero.
     const frame = buildFrame([makeState('9201', geo, 5)], WIDE, opts(geo));
     expect(frame.sections.features).toHaveLength(3);
+    const pos = frame.sections.features.map((f) => f.geometry.coordinates as [number, number]);
+    expect(haversineM(pos[0], metersToCoord(ORIGIN, 0, 0))).toBeLessThan(1);
+    expect(haversineM(pos[1], metersToCoord(ORIGIN, -10.5, 0))).toBeLessThan(1);
+    expect(haversineM(pos[2], metersToCoord(ORIGIN, -21, 0))).toBeLessThan(1);
+    // Spacing between consecutive centers = section length + joint gap.
+    expect(haversineM(pos[0], pos[1])).toBeCloseTo(10.5, 1);
+    expect(haversineM(pos[1], pos[2])).toBeCloseTo(10.5, 1);
+    // All sections keep the first-segment bearing (east).
     for (const f of frame.sections.features) {
-      const pos = f.geometry.coordinates as [number, number];
-      // No section may be placed before the shape start.
-      expect(haversineM(pos, metersToCoord(ORIGIN, 0, 0))).toBeLessThanOrEqual(5.1);
+      expect(angularDiff(f.properties.bearing, 90)).toBeLessThan(6);
     }
+  });
+
+  it('keeps the coupled trailer 14.5 m behind even at the shape start', () => {
+    const state = makeState('8123', geo, 5, { model: makeSpec1() });
+    const frame = buildFrame([state], WIDE, opts(geo, { coupledPairFn: () => true }));
+    expect(frame.sections.features).toHaveLength(2);
+    const [lead, trail] = frame.sections.features;
+    const d = haversineM(
+      lead.geometry.coordinates as [number, number],
+      trail.geometry.coordinates as [number, number],
+    );
+    expect(d).toBeCloseTo(COUPLED_OFFSET_M, 1);
+    expect(angularDiff(lead.properties.bearing, trail.properties.bearing)).toBeLessThan(1);
   });
 
   it('emits stable feature ids across frames', () => {

@@ -18,6 +18,12 @@ export interface GolemioRequestOptions {
   signal?: AbortSignal;
   /** Appended as query string; undefined values are dropped. */
   searchParams?: Record<string, string | number | boolean | undefined>;
+  /**
+   * Opaque label used to find & promote this request while it is still queued
+   * (see {@link promoteTag}). When omitted, a queued request can still be
+   * promoted by matching its URL path (e.g. a trip id embedded in the path).
+   */
+  tag?: string;
 }
 
 /** Non-2xx HTTP response from Golemio. */
@@ -55,10 +61,19 @@ export class GolemioAbortError extends Error {
 const MAX_CONCURRENT = 4;
 const MAX_PER_WINDOW = 16;
 const WINDOW_MS = 8000;
+/** A priority-2 (background) waiter older than this is aged up one level so a
+ * sustained higher-priority stream cannot starve it forever. */
+const AGING_MS = 30_000;
 
 interface Waiter {
   priority: number;
   seq: number;
+  /** Wall-clock ms the waiter was enqueued (for starvation aging). */
+  enqueuedAt: number;
+  /** Request URL path — used to promote a queued waiter by path predicate. */
+  path: string;
+  /** Optional caller-supplied promotion label. */
+  tag?: string;
   resolve: () => void;
 }
 
@@ -83,6 +98,22 @@ function pump(): void {
   const now = Date.now();
   pruneWindow(now);
 
+  // Starvation aging: bump long-waiting background requests up one level so a
+  // sustained stream of higher-priority work cannot keep them queued forever.
+  let nextAgingDueInMs = Number.POSITIVE_INFINITY;
+  for (const w of waiters) {
+    if (w.priority <= 0) continue;
+    const age = now - w.enqueuedAt;
+    if (age >= AGING_MS) {
+      w.priority = (w.priority - 1) as GolemioPriority;
+      // Reset the aging clock so it can climb another level after another window.
+      w.enqueuedAt = now;
+      nextAgingDueInMs = Math.min(nextAgingDueInMs, AGING_MS);
+    } else {
+      nextAgingDueInMs = Math.min(nextAgingDueInMs, AGING_MS - age);
+    }
+  }
+
   while (
     waiters.length > 0 &&
     inFlight < MAX_CONCURRENT &&
@@ -103,20 +134,37 @@ function pump(): void {
     w.resolve();
   }
 
-  // Blocked only by the rolling window: wake up when the oldest start expires.
-  if (
-    waiters.length > 0 &&
-    inFlight < MAX_CONCURRENT &&
-    recentStarts.length >= MAX_PER_WINDOW
-  ) {
-    const wait = WINDOW_MS - (now - recentStarts[0]) + 1;
-    pumpTimer = setTimeout(pump, Math.max(wait, 1));
+  if (waiters.length === 0) return;
+
+  // Compute the soonest moment we must wake to make progress:
+  //  • when the rolling window frees a start slot (if window-blocked), and
+  //  • when the next background waiter becomes eligible for aging.
+  let wakeInMs = Number.POSITIVE_INFINITY;
+  if (inFlight < MAX_CONCURRENT && recentStarts.length >= MAX_PER_WINDOW) {
+    wakeInMs = Math.min(wakeInMs, WINDOW_MS - (now - recentStarts[0]) + 1);
+  }
+  if (Number.isFinite(nextAgingDueInMs)) {
+    wakeInMs = Math.min(wakeInMs, nextAgingDueInMs);
+  }
+  if (Number.isFinite(wakeInMs)) {
+    pumpTimer = setTimeout(pump, Math.max(wakeInMs, 1));
   }
 }
 
-function acquireSlot(priority: number): Promise<void> {
+function acquireSlot(
+  priority: GolemioPriority,
+  path: string,
+  tag?: string,
+): Promise<void> {
   return new Promise<void>((resolve) => {
-    waiters.push({ priority, seq: seqCounter++, resolve });
+    waiters.push({
+      priority,
+      seq: seqCounter++,
+      enqueuedAt: Date.now(),
+      path,
+      tag,
+      resolve,
+    });
     pump();
   });
 }
@@ -124,6 +172,37 @@ function acquireSlot(priority: number): Promise<void> {
 function releaseSlot(): void {
   inFlight--;
   pump();
+}
+
+/** True when a still-queued waiter matches the given promotion label. */
+function waiterMatchesTag(w: Waiter, tag: string): boolean {
+  if (w.tag !== undefined && w.tag === tag) return true;
+  // Fall back to a URL-path match so callers can promote by an id embedded in
+  // the request path (e.g. a trip id) without threading a tag through every
+  // intermediate module.
+  return w.path.includes(tag) || w.path.includes(encodeURIComponent(tag));
+}
+
+/**
+ * Raise the priority of a request that is still waiting in the scheduler queue
+ * (e.g. because the user selected the tram whose geometry was enqueued at
+ * background priority). Matches by explicit {@link GolemioRequestOptions.tag}
+ * or, failing that, by the request path containing `tag`.
+ *
+ * Returns true if at least one queued waiter matched — meaning the request is
+ * already in flight or queued, so the caller need not re-issue it. Returns
+ * false if nothing matched (the request has not been enqueued yet, or already
+ * left the queue).
+ */
+export function promoteTag(tag: string, priority: GolemioPriority): boolean {
+  let matched = false;
+  for (const w of waiters) {
+    if (!waiterMatchesTag(w, tag)) continue;
+    matched = true;
+    if (priority < w.priority) w.priority = priority;
+  }
+  if (matched) pump();
+  return matched;
 }
 
 // ── URL + headers ────────────────────────────────────────────────────────────
@@ -172,7 +251,7 @@ export async function golemioFetch<T>(
 
   if (signal?.aborted) throw new GolemioAbortError();
 
-  await acquireSlot(priority);
+  await acquireSlot(priority, path, options?.tag);
   try {
     if (signal?.aborted) throw new GolemioAbortError();
 

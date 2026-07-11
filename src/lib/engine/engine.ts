@@ -16,7 +16,7 @@ import {
   createSim,
   nextUndwelledStop,
   reanchorSim,
-  scheduleDistAt,
+  targetDistAt,
   tick as tickSim,
   TELEPORT_THRESHOLD_M,
   type TramSim,
@@ -151,13 +151,15 @@ export class TramEngine {
         const oldPos = pointAt(oldSim.geometry.coordinates, oldSim.geometry.cumDistM, oldSim.sM);
         const newSim = createSim(geometry, profile, snapshot, nowMs);
         const proj = projectPointToPolyline(oldPos, geometry.coordinates, geometry.cumDistM);
-        const sSched = scheduleDistAt(newSim, nowMs);
+        const sTarget = targetDistAt(newSim, nowMs);
         if (
           proj.offsetM <= REANCHOR_MAX_OFFSET_M &&
-          Math.abs(sSched - proj.distM) <= TELEPORT_THRESHOLD_M
+          Math.abs(sTarget - proj.distM) <= TELEPORT_THRESHOLD_M
         ) {
-          reanchorSim(newSim, proj.distM);
-          newSim.vMs = oldSim.vMs;
+          reanchorSim(newSim, proj.distM, nowMs);
+          // Keep the old momentum only when the reanchor left the sim cruising
+          // (it may have seeded a dwell/terminal at a nearby stop).
+          if (newSim.phase === 'cruise') newSim.vMs = oldSim.vMs;
         }
         entry.sim = newSim;
       } else {

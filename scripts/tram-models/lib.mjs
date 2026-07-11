@@ -173,11 +173,14 @@ export class MeshBuilder {
     }
     for (let i = 0; i < seg; i++) {
       const j = (i + 1) % seg;
-      // outward winding determined per-face by fan/quad normal calc: use
-      // explicit ordering that yields outward normals for CCW rings.
+      // Outward side winding depends on how the ring's radial axes map to the
+      // world axes. For x/z the base ring order (a→b→c→d) already winds CCW as
+      // seen from outside; for y it's mirrored, so that branch is reversed.
+      // (Getting z wrong flips the wall normals inward and single-sided
+      // materials cull them — see the cylinder-normals regression check.)
       const a = ring0[i], b = ring0[j], c = ring1[j], d = ring1[i];
-      if (axis === 'x') this.quad(mat, a, b, c, d);
-      else this.quad(mat, b, a, d, c);
+      if (axis === 'y') this.quad(mat, b, a, d, c);
+      else this.quad(mat, a, b, c, d);
     }
     if (caps) {
       const axisVec = axis === 'y' ? [0, 1, 0] : axis === 'x' ? [1, 0, 0] : [0, 0, 1];

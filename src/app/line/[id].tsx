@@ -76,8 +76,15 @@ export default function LineSheet() {
       .map(([h]) => h);
   }, [lineGeometries]);
 
-  const [dirIndex, setDirIndex] = useState(0);
-  const headsign = headsigns[Math.min(dirIndex, Math.max(headsigns.length - 1, 0))];
+  // Track the chosen direction by its headsign STRING, not by index: when new
+  // geometry streams in the headsign ordering (by frequency) can shift, and an
+  // index would silently flip the user's choice. Fall back to the top headsign
+  // when the selected one is no longer present.
+  const [selectedHeadsign, setSelectedHeadsign] = useState<string | null>(null);
+  const headsign =
+    selectedHeadsign && headsigns.includes(selectedHeadsign)
+      ? selectedHeadsign
+      : headsigns[0];
 
   // Longest geometry for the chosen headsign = the fullest stop list.
   const geometry = useMemo<RouteGeometry | null>(() => {
@@ -89,14 +96,26 @@ export default function LineSheet() {
     return best;
   }, [lineGeometries, headsign]);
 
+  // tripId → shapeId for every loaded geometry, so we can tell whether a tram's
+  // simDistM is measured against the SAME shape we're displaying.
+  const tripShapeId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const g of geometries) m.set(g.tripId, g.shapeId);
+    return m;
+  }, [geometries]);
+
   // Interleave stops and the live trams heading this direction, ordered by
-  // distance along the shape (state.simDistM vs each stop's distM).
-  const rows = useMemo<LineRow[]>(() => {
-    if (!geometry || geometry.stops.length === 0) return [];
-    const stops = geometry.stops;
-    const trams = lineStates
-      .filter((s) => s.hasGeometry && s.snapshot.headsign === headsign)
+  // distance along the shape (state.simDistM vs each stop's distM). Only trams
+  // driven by the SAME shape can be placed — distance-along-shape is meaningless
+  // across shape variants/diversions. Same-direction trams on other shapes are
+  // reported as a footer count instead of being mis-placed.
+  const { rows, offShapeCount } = useMemo<{ rows: LineRow[]; offShapeCount: number }>(() => {
+    if (!geometry || geometry.stops.length === 0) return { rows: [], offShapeCount: 0 };
+    const directionStates = lineStates.filter((s) => s.snapshot.headsign === headsign);
+    const trams = directionStates
+      .filter((s) => s.hasGeometry && tripShapeId.get(s.snapshot.tripId) === geometry.shapeId)
       .sort((a, b) => a.simDistM - b.simDistM);
+    const stops = geometry.stops;
     const out: LineRow[] = [];
     let t = 0;
     for (const stop of stops) {
@@ -110,8 +129,8 @@ export default function LineSheet() {
       out.push({ kind: 'tram', state: trams[t] });
       t += 1;
     }
-    return out;
-  }, [geometry, lineStates, headsign]);
+    return { rows: out, offShapeCount: directionStates.length - trams.length };
+  }, [geometry, lineStates, headsign, tripShapeId]);
 
   const onStopPress = (stop: RouteStop): void => {
     void Haptics.selectionAsync();
@@ -121,7 +140,8 @@ export default function LineSheet() {
 
   const onTramPress = (state: TramPublicState): void => {
     void Haptics.selectionAsync();
-    router.push(`/tram/${state.key}` as Href);
+    // Encode: keys can fall back to trip ids with URL-hostile characters.
+    router.push(`/tram/${encodeURIComponent(state.key)}` as Href);
   };
 
   const header = (
@@ -164,15 +184,15 @@ export default function LineSheet() {
 
       {headsigns.length > 1 && (
         <View style={[styles.segmented, { backgroundColor: c.backgroundElement }]}>
-          {headsigns.map((h, i) => {
-            const selected = i === dirIndex;
+          {headsigns.map((h) => {
+            const selected = h === headsign;
             return (
               <Pressable
                 key={h}
                 onPress={() => {
-                  if (i !== dirIndex) {
+                  if (h !== headsign) {
                     void Haptics.selectionAsync();
-                    setDirIndex(i);
+                    setSelectedHeadsign(h);
                   }
                 }}
                 style={[
@@ -205,6 +225,18 @@ export default function LineSheet() {
       )}
     </View>
   );
+
+  const footer =
+    offShapeCount > 0 ? (
+      <View style={styles.footerNote}>
+        <SymbolView name="arrow.triangle.branch" size={12} tintColor={c.textSecondary} />
+        <Text style={[styles.footerNoteText, { color: c.textSecondary }]}>
+          {offShapeCount === 1
+            ? '1 more tram this direction on a different route variant'
+            : `${offShapeCount} more trams this direction on different route variants`}
+        </Text>
+      </View>
+    ) : null;
 
   const empty = (
     <View style={styles.empty}>
@@ -247,6 +279,7 @@ export default function LineSheet() {
         }
         ListHeaderComponent={header}
         ListEmptyComponent={empty}
+        ListFooterComponent={rows.length > 0 ? footer : null}
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
@@ -510,4 +543,13 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontSize: 16, fontWeight: '600' },
   emptyBody: { fontSize: 13, textAlign: 'center' },
+  footerNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: Spacing.four,
+    paddingTop: Spacing.three,
+  },
+  footerNoteText: { fontSize: 12, flexShrink: 1, textAlign: 'center' },
 });

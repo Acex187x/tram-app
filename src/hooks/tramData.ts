@@ -10,6 +10,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import { getModelSpec, isLikelyCoupledPair, regNumberToModelId } from '@/lib/fleet/registry';
 import { TramEngine } from '@/lib/engine/engine';
+import { promoteTag } from '@/lib/golemio/client';
 import * as shapeCache from '@/lib/golemio/shapeCache';
 import { fetchTramSnapshots } from '@/lib/golemio/vehicles';
 import type { RouteGeometry, TramPublicState, TramSnapshot } from '@/lib/types';
@@ -30,8 +31,16 @@ class TramRuntime {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
   private uiNotifyTimer: ReturnType<typeof setInterval> | null = null;
+  private nudgeTimer: ReturnType<typeof setTimeout> | null = null;
   private appStateSub: { remove(): void } | null = null;
   private pollInFlight = false;
+  private pollAbort: AbortController | null = null;
+  /**
+   * Bumped whenever the runtime is paused/torn down. Async work (in-flight
+   * poll, the 2.5s nudge) captures the generation at start and no-ops if it
+   * changed — so stale completions can't mutate the engine after teardown.
+   */
+  private generation = 0;
   private lastSnapshots: TramSnapshot[] = [];
 
   private frameListeners = new Set<FrameListener>();
@@ -51,15 +60,27 @@ class TramRuntime {
 
   retain(): void {
     this.refCount += 1;
-    if (this.refCount === 1) this.start();
+    if (this.refCount === 1) {
+      // The AppState subscription lives for the whole retained lifetime, so the
+      // later 'active' transition is always observed (previously stop() removed
+      // it, stranding the runtime dead after the first backgrounding).
+      this.appStateSub = AppState.addEventListener('change', this.onAppState);
+      const state = AppState.currentState;
+      if (state !== 'background' && state !== 'inactive') this.resume();
+    }
   }
 
   release(): void {
     this.refCount = Math.max(0, this.refCount - 1);
-    if (this.refCount === 0) this.stop();
+    if (this.refCount === 0) {
+      this.pause();
+      this.appStateSub?.remove();
+      this.appStateSub = null;
+    }
   }
 
-  private start(): void {
+  /** Start the timer loops + an immediate poll. Idempotent. */
+  private resume(): void {
     if (this.tickTimer) return;
     this.tickTimer = setInterval(() => {
       const now = Date.now();
@@ -69,31 +90,46 @@ class TramRuntime {
     this.uiNotifyTimer = setInterval(() => this.bumpUi(), UI_NOTIFY_MS);
     this.pollTimer = setInterval(() => void this.poll(), POLL_MS);
     void this.poll();
-    this.appStateSub = AppState.addEventListener('change', this.onAppState);
   }
 
-  private stop(): void {
+  /**
+   * Halt timers and all outstanding async work WITHOUT removing the AppState
+   * subscription (used on background). Aborts the in-flight poll, cancels the
+   * pending nudge, and bumps the generation so any late completions no-op.
+   */
+  private pause(): void {
+    this.generation += 1;
     for (const t of [this.pollTimer, this.tickTimer, this.uiNotifyTimer]) {
       if (t) clearInterval(t);
     }
     this.pollTimer = this.tickTimer = this.uiNotifyTimer = null;
-    this.appStateSub?.remove();
-    this.appStateSub = null;
+    if (this.nudgeTimer) {
+      clearTimeout(this.nudgeTimer);
+      this.nudgeTimer = null;
+    }
+    this.pollAbort?.abort();
+    this.pollAbort = null;
+    this.pollInFlight = false;
   }
 
   private readonly onAppState = (status: AppStateStatus): void => {
+    if (this.refCount === 0) return;
     if (status === 'active') {
-      if (this.refCount > 0 && !this.tickTimer) this.start();
+      if (!this.tickTimer) this.resume();
     } else if (this.tickTimer) {
-      this.stop();
+      this.pause();
     }
   };
 
   private async poll(): Promise<void> {
     if (this.pollInFlight) return;
     this.pollInFlight = true;
+    const gen = this.generation;
+    const abort = new AbortController();
+    this.pollAbort = abort;
     try {
-      const snapshots = await fetchTramSnapshots();
+      const snapshots = await fetchTramSnapshots({ signal: abort.signal });
+      if (gen !== this.generation) return; // paused/torn down mid-flight
       this.lastSnapshots = snapshots;
       this.lastPollAtMs = Date.now();
       this.lastError = null;
@@ -105,23 +141,34 @@ class TramRuntime {
         shapeCache.requestPrefetch(missing, 2);
         // As geometries arrive, they are adopted on the next ingest; nudge one
         // extra ingest shortly after so early geometries apply without waiting
-        // a full poll cycle.
-        setTimeout(() => {
+        // a full poll cycle. Tracked so teardown can cancel it.
+        this.nudgeTimer = setTimeout(() => {
+          this.nudgeTimer = null;
+          if (gen !== this.generation) return;
           this.engine.ingest(this.lastSnapshots, (tripId) => shapeCache.getLoaded(tripId), Date.now());
           this.bumpUi();
         }, 2_500);
       }
       this.bumpUi();
     } catch (e) {
+      if (gen !== this.generation) return; // aborted by pause(): swallow
       this.lastError = e instanceof Error ? e.message : String(e);
     } finally {
-      this.pollInFlight = false;
+      // Only the still-current generation may clear the in-flight flag / abort
+      // handle; a stale completion must not disturb a freshly resumed poll.
+      if (gen === this.generation) this.pollInFlight = false;
+      if (this.pollAbort === abort) this.pollAbort = null;
     }
   }
 
   /** Raise fetch priority for the selected/followed tram's geometry. */
   prioritizeTrip(tripId: string | null | undefined): void {
-    if (tripId && !shapeCache.has(tripId)) shapeCache.requestPrefetch([tripId], 0);
+    if (!tripId || shapeCache.has(tripId)) return;
+    // First try to promote an already-queued waiter (the common cold-cache
+    // case: the citywide poll enqueued this trip at background priority and it
+    // is stuck behind the 16-starts/8s queue). If nothing is queued yet, ask
+    // the cache to issue it at urgent priority.
+    if (!promoteTag(tripId, 0)) shapeCache.requestPrefetch([tripId], 0);
   }
 
   subscribeFrame(listener: FrameListener): () => void {

@@ -3,6 +3,7 @@
 import {
   A_BRK,
   buildSpeedProfile,
+  cruiseCapAt,
   curveCap,
   V_CENTER_MS,
   V_CURVE_MIN_MS,
@@ -83,6 +84,37 @@ describe('buildSpeedProfile', () => {
     expect(profile.vLimit[1]).toBeLessThan(4.2); // < 30% of vmax
     expect(profile.vLimit[0]).toBeCloseTo(V_MAX_MS, 1);
     expect(profile.vLimit[2]).toBeCloseTo(V_MAX_MS, 1);
+  });
+});
+
+describe('cruiseCapAt (cruise reference, no envelope)', () => {
+  it('ignores stops entirely — they are envelope constraints, not cruise caps', () => {
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [1000, 0],
+      ],
+      [{ atM: 500, arrivalMs: 0 }],
+    );
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    expect(cruiseCapAt(profile, geo, 499)).toBeCloseTo(V_MAX_MS, 1);
+    expect(vAllowedAt(profile, geo, 499)).toBeLessThan(2); // envelope DOES brake
+  });
+
+  it('uses the point-constraint segment cap (max of endpoints) at a corner', () => {
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [500, 0],
+        [500, 500],
+      ],
+      [],
+    );
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    // On the straight leading to the corner the cruise cap stays vmax…
+    expect(cruiseCapAt(profile, geo, 100)).toBeCloseTo(V_MAX_MS, 1);
+    // …and matches the envelope's base cap semantics far from limits.
+    expect(cruiseCapAt(profile, geo, 100)).toBeCloseTo(vAllowedAt(profile, geo, 100), 1);
   });
 });
 

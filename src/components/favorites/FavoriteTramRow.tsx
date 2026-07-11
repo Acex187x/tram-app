@@ -34,8 +34,10 @@ export function FavoriteTramRow({ regKey }: { regKey: string }) {
     void Haptics.selectionAsync();
     setSelectedTramKey(regKey);
     getRuntime().prioritizeTrip(state.snapshot.tripId);
-    // Cast: typed-routes d.ts regenerates on the next `expo start`.
-    router.push(('/tram/' + regKey) as Href);
+    // Keys are usually registration numbers but can fall back to trip ids with
+    // URL-hostile characters — encode like the map does. Cast: typed-routes
+    // d.ts regenerates on the next `expo start`.
+    router.push(('/tram/' + encodeURIComponent(regKey)) as Href);
   };
 
   const remove = (): void => {

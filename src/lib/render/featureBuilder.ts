@@ -71,6 +71,30 @@ function sectionFeature(
   };
 }
 
+/**
+ * Position + bearing at a SIGNED distance along the shape. Negative distances
+ * extrapolate straight back from the shape origin along the first segment's
+ * bearing so rear sections/coupled cars keep their physical spacing near the
+ * start of a trip instead of piling up at vertex zero.
+ */
+function placeAt(
+  coordinates: [number, number][],
+  cumDistM: number[],
+  d: number,
+): { position: [number, number]; bearing: number } {
+  if (d >= 0 || coordinates.length === 0) {
+    return {
+      position: pointAt(coordinates, cumDistM, d),
+      bearing: bearingAt(coordinates, cumDistM, d),
+    };
+  }
+  const bearing = bearingAt(coordinates, cumDistM, 0);
+  return {
+    position: destinationPoint(coordinates[0], (bearing + 180) % 360, -d),
+    bearing,
+  };
+}
+
 /** Sections for a tram with known geometry: each body section placed along the shape. */
 function sectionsAlongShape(
   state: TramPublicState,
@@ -84,28 +108,20 @@ function sectionsAlongShape(
   let precedingLengths = 0;
   for (let i = 0; i < spec.sections.length; i++) {
     const section = spec.sections[i];
-    const centerDist = Math.max(
-      0,
-      sHead - (precedingLengths + i * spec.jointGapM) - section.lengthM / 2,
-    );
+    const centerDist = sHead - (precedingLengths + i * spec.jointGapM) - section.lengthM / 2;
+    const placed = placeAt(coordinates, cumDistM, centerDist);
     out.push(
-      sectionFeature(
-        `${state.key}#${i}`,
-        state.key,
-        section.modelKey,
-        pointAt(coordinates, cumDistM, centerDist),
-        bearingAt(coordinates, cumDistM, centerDist),
-      ),
+      sectionFeature(`${state.key}#${i}`, state.key, section.modelKey, placed.position, placed.bearing),
     );
     if (coupled) {
-      const trailDist = Math.max(0, centerDist - COUPLED_OFFSET_M);
+      const trailed = placeAt(coordinates, cumDistM, centerDist - COUPLED_OFFSET_M);
       out.push(
         sectionFeature(
           `${state.key}#c${i}`,
           state.key,
           section.modelKey,
-          pointAt(coordinates, cumDistM, trailDist),
-          bearingAt(coordinates, cumDistM, trailDist),
+          trailed.position,
+          trailed.bearing,
         ),
       );
     }

@@ -6,7 +6,11 @@
 import { Directory, File, Paths } from 'expo-file-system';
 
 import type { RouteGeometry } from '@/lib/types';
-import { fetchTripGeometry } from './gtfs';
+import {
+  fetchTripGeometry,
+  geometryServiceMidnight,
+  serviceDayShiftMs,
+} from './gtfs';
 import type { GolemioPriority } from './client';
 
 const CACHE_DIR_NAME = 'tripgeo';
@@ -14,9 +18,22 @@ const TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
 interface DiskEntry {
   savedAt: number;
+  /**
+   * Prague-local-midnight epoch of the service day the geometry's stop epochs
+   * were anchored to when written. Lets `readDisk` re-anchor an entry that is
+   * still within TTL but was fetched on an earlier service day.
+   */
+  serviceMidnightMs: number;
   geometry: RouteGeometry;
 }
 
+// NOTE: in-memory entries are anchored to the service day they were fetched on
+// and are NOT re-anchored while resident. A session running uninterrupted
+// across a service-day rollover (~03:00 Prague) keeps replaying that day's
+// timetable until the entry is evicted (app restart / cold start re-reads disk,
+// which re-anchors via readDisk). Trip_ids roll over every ~12 days, so in
+// practice a fresh trip_id forces a re-fetch well before this matters; a
+// dedicated long-running app would need periodic memCache invalidation.
 const memCache = new Map<string, RouteGeometry>();
 const inFlight = new Map<string, Promise<RouteGeometry>>();
 
@@ -58,16 +75,49 @@ async function readDisk(tripId: string): Promise<RouteGeometry | null> {
       }
       return null;
     }
-    return entry.geometry;
+    return reanchor(entry.geometry, entry.serviceMidnightMs);
   } catch {
     return null;
   }
 }
 
+/**
+ * Re-anchor a cached geometry's stop epochs onto the current service day. The
+ * timetable (seconds-of-service-day) is invariant; only which calendar service
+ * day it applies to changes. Without this a within-TTL hit on a later day
+ * replays a past-dated schedule, so the engine's schedule anchor runs off the
+ * end of the trip and trams teleport or stick. `serviceMidnightMs` may be
+ * absent on entries written before this field existed — fall back to deriving
+ * it from the geometry.
+ */
+function reanchor(
+  geometry: RouteGeometry,
+  storedServiceMidnightMs: number | undefined,
+): RouteGeometry {
+  const stored =
+    typeof storedServiceMidnightMs === 'number'
+      ? storedServiceMidnightMs
+      : geometryServiceMidnight(geometry);
+  const shift = serviceDayShiftMs(geometry, stored, Date.now());
+  if (shift === 0) return geometry;
+  return {
+    ...geometry,
+    stops: geometry.stops.map((s) => ({
+      ...s,
+      arrivalMs: s.arrivalMs + shift,
+      departureMs: s.departureMs + shift,
+    })),
+  };
+}
+
 function writeDisk(tripId: string, geometry: RouteGeometry): void {
   try {
     ensureDir();
-    const entry: DiskEntry = { savedAt: Date.now(), geometry };
+    const entry: DiskEntry = {
+      savedAt: Date.now(),
+      serviceMidnightMs: geometryServiceMidnight(geometry),
+      geometry,
+    };
     tripFile(tripId).write(JSON.stringify(entry));
   } catch {
     // Disk persistence is best-effort; in-memory cache still serves the session.
