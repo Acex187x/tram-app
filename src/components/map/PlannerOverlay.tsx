@@ -58,10 +58,10 @@ export function PlannerOverlay({ cameraRef }: PlannerOverlayProps) {
   if (!legsFC) return null;
 
   return (
-    <ShapeSource id="planner-legs" shape={legsFC}>
+    <ShapeSource key={`planner-${legsFC.features.length}-${legsFC.features[0]?.properties?.line ?? ""}`} id="planner-legs" shape={legsFC}>
       <LineLayer
         id="planner-leg-casing"
-        slot="middle"
+        slot="top"
         style={{
           lineColor: Tram.gold,
           lineWidth: 9,
@@ -72,7 +72,7 @@ export function PlannerOverlay({ cameraRef }: PlannerOverlayProps) {
       />
       <LineLayer
         id="planner-leg-inner"
-        slot="middle"
+        slot="top"
         style={{
           lineColor: [
             'case',

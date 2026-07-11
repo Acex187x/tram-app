@@ -17,11 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import {
-  buildMapStyleJSON,
-  resolveLightPreset,
-  STANDARD_CONFIG,
-} from '@/components/map/mapStyle';
+import { resolveLightPreset, STANDARD_CONFIG } from '@/components/map/mapStyle';
 import { BottomDock, ControlStack, FollowBanner, StatusChip } from '@/components/map/MapChrome';
 import { PlannerOverlay } from '@/components/map/PlannerOverlay';
 import { RouteNetwork } from '@/components/map/RouteNetwork';
@@ -54,6 +50,7 @@ export default function MapScreen() {
   const viewportRef = useRef<Viewport>({ ...INITIAL_VIEWPORT });
   const splashHiddenRef = useRef(false);
   const [is3D, setIs3D] = useState(true);
+  const [styleLoaded, setStyleLoaded] = useState(false);
   const [locationGranted, setLocationGranted] = useState(false);
   const modelUris = useTramModels();
 
@@ -65,10 +62,6 @@ export default function MapScreen() {
     return () => clearInterval(iv);
   }, []);
   const lightPreset = resolveLightPreset(lightPresetSetting, lightClock);
-  // Style JSON is created once; later preset changes flow through StyleImport
-  // so the style never reloads (reload would drop runtime layers/models).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const styleJSON = useMemo(() => buildMapStyleJSON(lightPreset), []);
 
   // ── Splash: hide when the base map is in, failsafe either way ──────────────
   const hideSplash = useCallback(() => {
@@ -165,12 +158,13 @@ export default function MapScreen() {
     <View style={styles.container}>
       <MapView
         style={styles.map}
-        styleJSON={styleJSON}
+        styleURL="mapbox://styles/mapbox/standard"
         scaleBarEnabled={false}
         compassEnabled
         compassPosition={{ top: insets.top + 178, right: 21 }}
         pitchEnabled
         onDidFinishLoadingMap={hideSplash}
+        onDidFinishLoadingStyle={() => setStyleLoaded(true)}
         onCameraChanged={onCameraChanged}
         onTouchStart={onMapTouchStart}
       >
@@ -182,12 +176,16 @@ export default function MapScreen() {
             pitch: INITIAL_PITCH,
           }}
         />
-        {/* Live re-lighting of the Standard basemap (import id defined in styleJSON). */}
-        <StyleImport
-          id="basemap"
-          existing
-          config={{ ...STANDARD_CONFIG, lightPreset }}
-        />
+        {/* Live re-lighting of Standard. Mounted only after the style loads —
+            applying import config before that logs "Import basemap does not
+            exist" and is dropped (verified on-device). */}
+        {styleLoaded && (
+          <StyleImport
+            id="basemap"
+            existing
+            config={{ ...STANDARD_CONFIG, lightPreset }}
+          />
+        )}
         <RouteNetwork />
         <PlannerOverlay cameraRef={cameraRef} />
         <TramLayers cameraRef={cameraRef} viewportRef={viewportRef} modelUris={modelUris} />
