@@ -22,6 +22,7 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from 'rea
 import { AppState, useColorScheme } from 'react-native';
 
 import { Tram } from '@/constants/theme';
+import { bearingAt } from '@/lib/geo/polyline';
 import * as shapeCache from '@/lib/golemio/shapeCache';
 import { normalizeName } from '@/lib/planner/network';
 import { usePlannerStore } from '@/stores/planner';
@@ -36,6 +37,16 @@ const TOTEM_MIN_ZOOM = 16;
 /** GLB registry key for the stop totem (shipped by the models workstream). */
 export const STOP_TOTEM_MODEL_KEY = 'stop-totem';
 const REFRESH_MS = 2_000;
+/**
+ * Real označníky stand on the platform, which in Prague is (almost always) to
+ * the RIGHT of the track in the direction of travel — the 3D totem is shifted
+ * perpendicular-right of the shape bearing by this much. The circle markers
+ * stay at the true stop coordinates; only the totem moves.
+ */
+const TOTEM_RIGHT_OFFSET_M = 2.2;
+const DEG2RAD = Math.PI / 180;
+/** Meters per degree of latitude (WGS84, good enough at a 2 m scale). */
+const M_PER_DEG_LAT = 111_320;
 
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
@@ -52,9 +63,11 @@ function networkFingerprint(geometries: ReturnType<typeof shapeCache.getAllLoade
 function buildFCs(geometries: ReturnType<typeof shapeCache.getAllLoaded>): {
   routes: string;
   stops: string;
+  totems: string;
 } {
   const routeFeatures: GeoJSON.Feature[] = [];
   const stopFeatures: GeoJSON.Feature[] = [];
+  const totemFeatures: GeoJSON.Feature[] = [];
   const seenShapes = new Set<string>();
   const seenStops = new Set<string>();
   for (const g of geometries) {
@@ -78,16 +91,46 @@ function buildFCs(geometries: ReturnType<typeof shapeCache.getAllLoaded>): {
           // Station key convention shared with the planner network + the
           // /stop/[key] screen: normalized stop NAME groups platforms.
           stationKey: normalizeName(stop.name),
-          // Data-driven model reference for the totem ModelLayer (the same
-          // ['get','modelKey'] pattern the tram ModelLayer uses — verified).
-          modelKey: STOP_TOTEM_MODEL_KEY,
         },
       });
+      // 3D totem twin of the stop. Platform stop ids are direction-specific,
+      // so each stop belongs to exactly ONE travel direction — the shape
+      // bearing at the stop's dist-along-shape IS its direction of travel.
+      // Real označníky face AGAINST travel (info side toward the approaching
+      // driver's cab): the model's front is authored toward −Z and the
+      // ModelLayer sets modelRotation z = totemBearing (spike convention:
+      // z = β makes the −Z front face compass bearing β).
+      if (g.coordinates.length >= 2) {
+        const bearing = bearingAt(g.coordinates, g.cumDistM, stop.distM);
+        const totemBearing = (bearing + 180) % 360;
+        // Shift perpendicular-RIGHT of travel onto the platform.
+        const rightRad = (bearing + 90) * DEG2RAD;
+        const lat = stop.coordinates[1];
+        const dLat = (TOTEM_RIGHT_OFFSET_M * Math.cos(rightRad)) / M_PER_DEG_LAT;
+        const dLng =
+          (TOTEM_RIGHT_OFFSET_M * Math.sin(rightRad)) /
+          (M_PER_DEG_LAT * Math.cos(lat * DEG2RAD));
+        totemFeatures.push({
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [stop.coordinates[0] + dLng, lat + dLat],
+          },
+          properties: {
+            stopId: stop.stopId,
+            totemBearing,
+            // Data-driven model reference for the totem ModelLayer (the same
+            // ['get','modelKey'] pattern the tram ModelLayer uses — verified).
+            modelKey: STOP_TOTEM_MODEL_KEY,
+          },
+        });
+      }
     }
   }
   return {
     routes: JSON.stringify({ type: 'FeatureCollection', features: routeFeatures }),
     stops: JSON.stringify({ type: 'FeatureCollection', features: stopFeatures }),
+    totems: JSON.stringify({ type: 'FeatureCollection', features: totemFeatures }),
   };
 }
 
@@ -109,7 +152,11 @@ export function RouteNetwork({ stopTotemReady = false }: RouteNetworkProps) {
 
   const routesRef = useRef<ShapeSource>(null);
   const stopsRef = useRef<ShapeSource>(null);
+  const totemsRef = useRef<ShapeSource>(null);
   const fingerprintRef = useRef('');
+  // Latest built totems FC, kept so the late-mounting totem source (it waits
+  // for the GLB to register) can be seeded without rebuilding everything.
+  const lastTotemsRef = useRef<string | null>(null);
 
   // Defer totem-layer mount until after the commit that registered the model.
   const [totemMounted, setTotemMounted] = useState(false);
@@ -122,6 +169,21 @@ export function RouteNetwork({ stopTotemReady = false }: RouteNetworkProps) {
     return () => clearTimeout(t);
   }, [stopTotemReady]);
 
+  // The totem source mounts AFTER the first data push (it waits for the GLB
+  // registration) — seed it with the latest built FC once it exists.
+  useEffect(() => {
+    if (!totemMounted) return;
+    const t = setTimeout(() => {
+      if (lastTotemsRef.current) {
+        totemsRef.current?.setNativeProps({
+          id: 'route-stop-totems-src',
+          shape: lastTotemsRef.current,
+        });
+      }
+    }, 60);
+    return () => clearTimeout(t);
+  }, [totemMounted]);
+
   useEffect(() => {
     const push = () => {
       // Thermal: no work while backgrounded, and the expensive feature build
@@ -131,9 +193,11 @@ export function RouteNetwork({ stopTotemReady = false }: RouteNetworkProps) {
       const fingerprint = networkFingerprint(geometries);
       if (fingerprint === fingerprintRef.current) return;
       fingerprintRef.current = fingerprint;
-      const { routes, stops } = buildFCs(geometries);
+      const { routes, stops, totems } = buildFCs(geometries);
+      lastTotemsRef.current = totems;
       routesRef.current?.setNativeProps({ id: 'route-network', shape: routes });
       stopsRef.current?.setNativeProps({ id: 'route-stops', shape: stops });
+      totemsRef.current?.setNativeProps({ id: 'route-stop-totems-src', shape: totems });
     };
     // First push soon after mount (cache warm from disk), then poll for growth.
     const first = setTimeout(push, 800);
@@ -230,39 +294,6 @@ export function RouteNetwork({ stopTotemReady = false }: RouteNetworkProps) {
       }}
     />,
   ];
-  if (totemMounted) {
-    // 3D stop totem at close zooms. Mounted only once the GLB is registered —
-    // skipped entirely if the asset isn't shipped.
-    stopLayers.push(
-      <ModelLayer
-        key="route-stop-totems"
-        id="route-stop-totems"
-        slot="top"
-        minZoomLevel={TOTEM_MIN_ZOOM}
-        style={{
-          modelId: ['get', 'modelKey'],
-          modelRotation: [0, 0, 0],
-          // Like the trams: oversized on entry, real-world 1.0 when close.
-          modelScale: [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            TOTEM_MIN_ZOOM,
-            ['literal', [1.8, 1.8, 1.8]],
-            18,
-            ['literal', [1, 1, 1]],
-          ],
-          modelOpacity: plannerActive
-            ? 0
-            : ['interpolate', ['linear'], ['zoom'], TOTEM_MIN_ZOOM, 0, TOTEM_MIN_ZOOM + 0.3, 1],
-          modelEmissiveStrength: 1,
-          modelElevationReference: 'ground',
-          modelType: 'common-3d',
-        }}
-      />,
-    );
-  }
-
   return (
     <>
       <ShapeSource ref={routesRef} id="route-network" shape={EMPTY_FC}>
@@ -296,6 +327,53 @@ export function RouteNetwork({ stopTotemReady = false }: RouteNetworkProps) {
       <ShapeSource ref={stopsRef} id="route-stops" shape={EMPTY_FC} onPress={onPressStop}>
         {stopLayers}
       </ShapeSource>
+
+      {/* 3D stop totems live in their OWN source: positions are shifted ~2.2 m
+          perpendicular-right of the track (onto the platform) while the circle
+          markers above stay at the true stop coords. Mounted only once the GLB
+          is registered — skipped entirely if the asset isn't shipped. */}
+      {totemMounted && (
+        <ShapeSource ref={totemsRef} id="route-stop-totems-src" shape={EMPTY_FC}>
+          {[
+            <ModelLayer
+              key="route-stop-totems"
+              id="route-stop-totems"
+              slot="top"
+              minZoomLevel={TOTEM_MIN_ZOOM}
+              style={{
+                modelId: ['get', 'modelKey'],
+                // Front (−Z) faces AGAINST the direction of travel — toward
+                // the approaching tram — like a real označník.
+                modelRotation: [0, 0, ['get', 'totemBearing']] as unknown as number[],
+                // Like the trams: oversized on entry, real-world 1.0 when close.
+                modelScale: [
+                  'interpolate',
+                  ['linear'],
+                  ['zoom'],
+                  TOTEM_MIN_ZOOM,
+                  ['literal', [1.8, 1.8, 1.8]],
+                  18,
+                  ['literal', [1, 1, 1]],
+                ],
+                modelOpacity: plannerActive
+                  ? 0
+                  : [
+                      'interpolate',
+                      ['linear'],
+                      ['zoom'],
+                      TOTEM_MIN_ZOOM,
+                      0,
+                      TOTEM_MIN_ZOOM + 0.3,
+                      1,
+                    ],
+                modelEmissiveStrength: 1,
+                modelElevationReference: 'ground',
+                modelType: 'common-3d',
+              }}
+            />,
+          ]}
+        </ShapeSource>
+      )}
     </>
   );
 }
