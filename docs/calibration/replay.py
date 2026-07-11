@@ -91,6 +91,22 @@ A_BRK, A_ACC = 1.2, 1.0
 DT = 1.0
 FRESH_FIX_COUNT = 2  # first N scored fixes of a segment = "fresh sim" events
 
+TZ_OFFSET_H = 2  # Europe/Prague in summer (CEST); log timestamps are epoch ms
+
+
+def tod_factor(tod, t_ms):
+    """Hour-blended TOD lookup at epoch ms, mirroring todTableFactor()."""
+    if tod is None:
+        return 1.0
+    frac = (t_ms / 3600000.0 + TZ_OFFSET_H) % 24
+    h0 = int(frac)
+    if isinstance(tod, dict):
+        a = tod.get(h0, 1.0)
+        b = tod.get((h0 + 1) % 24, 1.0)
+    else:
+        a, b = tod[h0], tod[(h0 + 1) % 24]
+    return a if a == b else a + (b - a) * (frac - h0)
+
 
 def replay(cfg):
     """cfg: v_max, v_center, prior, trail, half_life, clamp_lo, clamp_hi,
@@ -104,12 +120,21 @@ def replay(cfg):
                       the tram's next segment (trip change), like the engine's
                       teleport inheritance + per-key memory. Default False =
                       reset to prior (legacy/old engine).
+      tod           — 24-entry list (or {hour: factor} dict, missing hours =
+                      1.0) modeling TOD_PACE_TABLE: vt *= tod(t) (hour-blended
+                      like todTableFactor) AND the learning ratio divides by
+                      tod(t) — i.e. this models the engine WITH the
+                      updatePaceBias composition fix (expected speed scaled by
+                      todPaceFactor), the only correct way to ship a non-1.0
+                      entry (otherwise bias double-counts the TOD factor).
+                      Default None = neutral.
     Fresh-sim events are the first FRESH_FIX_COUNT scored fixes per segment —
     structural, so the subset is identical across configs."""
     at_fix_err = []       # (err, fresh) at fix arrival; err = s - freshObs
     dev_style = []        # |s - staleObs| every 5 s (comparable to logged devM)
     hard_cap = cfg.get("hard_cap")
     inherit = cfg.get("inherit_bias", False)
+    tod = cfg.get("tod")
     for key, (fixes, loc) in trams.items():
         # split on trip changes (obs drops > 2 km)
         segs = [[fixes[0]]]
@@ -147,7 +172,7 @@ def replay(cfg):
                     else:
                         mf = cfg["catchup_max"] if e > 40 else cfg["gentle_max"]
                         fac = min(mf, max(cfg["min_factor"], 1 + e / cfg["gain"]))
-                        vt = cap * fac * bias
+                        vt = cap * fac * bias * tod_factor(tod, t)
                         if hard_cap is not None:
                             vt = min(hard_cap, vt)
                     a = min(A_ACC, max(-A_BRK, (vt - v) / DT))
@@ -166,7 +191,11 @@ def replay(cfg):
                     v_real = ds / dt_s
                     v_proj += 0.5 * (v_real - v_proj)   # projection-pace EWMA
                     cap = cfg["v_center"] if in_center_at(loc, of) else cfg["v_max"]
-                    ratio = min(cfg["clamp_hi"], max(cfg["clamp_lo"], v_real / cap))
+                    # expected speed scaled by TOD (the updatePaceBias
+                    # composition fix) so bias learns only the residual
+                    ratio = min(cfg["clamp_hi"],
+                                max(cfg["clamp_lo"],
+                                    v_real / (cap * tod_factor(tod, tf))))
                     alpha = 1 - 0.5 ** (dt_s / cfg["half_life"])
                     bias += alpha * (ratio - bias)
                 fi = i
@@ -208,6 +237,10 @@ CONFIGS = [
                                 "prior": 0.75, "trail": 20, "half_life": 60}),
     ("OLD gate (pre-round-1 constants)", OLD),
     ("NEW gate (R1+R3 shipped)", NEW),
+    # Night-round candidates (TOD modeled WITH the updatePaceBias fix):
+    ("N1 tod h0=0.97 h1=0.95 (rec-wtd)", {**NEW, "tod": {0: 0.97, 1: 0.95}}),
+    ("N2 tod h0=h1=1.15 (plan's guess)", {**NEW, "tod": {0: 1.15, 1: 1.15}}),
+    ("N3 tod h0=h1=0.95", {**NEW, "tod": {0: 0.95, 1: 0.95}}),
 ]
 
 print(f"trams replayed: {len(trams)}")

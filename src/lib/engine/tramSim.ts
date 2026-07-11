@@ -491,16 +491,18 @@ function updatePaceBias(
   }
   const effDtS = Math.max(dtObsS - dwellS, dtObsS * 0.25);
 
-  // Expected speed against the CRUISE REFERENCE (V_CRUISE_REF_MS-capped), the
-  // same reference tick() multiplies by paceBias — so converged ref × bias
-  // equals the tram's real motion pace by construction.
-  const expected = meanCruiseCapOver(
-    sim.profile,
-    sim.geometry,
-    prevObsDistM,
-    obsDistM,
-    V_CRUISE_REF_MS,
-  );
+  // Expected speed against the CRUISE REFERENCE (V_CRUISE_REF_MS-capped)
+  // TIMES the time-of-day pace factor — the exact product tick() multiplies
+  // paceBias into. The calibration must measure against the same expectation,
+  // or the bias would re-learn the TOD factor into itself and the factor
+  // would apply twice once TOD_PACE_TABLE ships non-1.0 entries (night round
+  // 2026-07-12); bias learns only the per-vehicle RESIDUAL. Evaluated at the
+  // inter-fix midpoint (the factor is hour-blended and the span can cross an
+  // hour boundary). With the shipped all-1.0 table the factor is exactly 1
+  // and `expected` is bit-identical to the pre-fix value.
+  const expected =
+    meanCruiseCapOver(sim.profile, sim.geometry, prevObsDistM, obsDistM, V_CRUISE_REF_MS) *
+    todPaceFactor((prevObsAtMs + snapshot.observedAtMs) / 2);
   if (expected < 0.1) return;
   const ratio = Math.min(
     PACE_BIAS_MAX_RATIO,

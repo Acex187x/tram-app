@@ -21,6 +21,8 @@ import {
   CATCHUP_MAX_FACTOR,
   createSim,
   dwellDurationMs,
+  PACE_BIAS_HALF_LIFE_S,
+  PACE_BIAS_PRIOR,
   tick,
   type TramSim,
 } from '@/lib/engine/tramSim';
@@ -263,6 +265,76 @@ describe('default dwell composition', () => {
     const doubled = runToDwell(geo, 120);
     expect(doubled).not.toBeNull();
     expect(doubled!).toBeCloseTo(neutral! * 2, 3);
+  });
+});
+
+// ── paceBias × TOD composition (updatePaceBias residual learning) ───────────
+//
+// tick() multiplies the cruise target by ref × factor × paceBias × TOD, so
+// updatePaceBias must measure the ratio against expected × TOD as well —
+// otherwise the bias re-learns the TOD factor into itself and the factor
+// applies TWICE once the table ships non-1.0 entries (night calibration round
+// 2026-07-12: composition fixed BEFORE any non-neutral entry lands).
+
+/** Expected EWMA value after one `ratio` sample spanning `totalS` seconds. */
+function ewma(from: number, ratio: number, totalS: number): number {
+  return ratio + (from - ratio) * Math.pow(0.5, totalS / PACE_BIAS_HALF_LIFE_S);
+}
+
+/** Straight geometry, terminal stops only (nothing strictly inside the span). */
+function longStraight(lengthM: number): RouteGeometry {
+  return makeGeometry(
+    [
+      [0, 0],
+      [lengthM, 0],
+    ],
+    [
+      { atM: 0, arrivalMs: T0 },
+      { atM: lengthM, arrivalMs: T0 + 1_000_000 },
+    ],
+  );
+}
+
+/** Feed a fix with the sim pinned onto it (no teleport interference). */
+function applyFixPinned(sim: TramSim, shapeDistM: number, atMs: number): void {
+  sim.sM = Math.min(Math.max(shapeDistM, sim.sM), sim.geometry.totalM);
+  applySnapshot(sim, makeSnapshot({ shapeDistM, observedAtMs: atMs }), atMs);
+}
+
+describe('updatePaceBias measures against expected × todPaceFactor (residual learning)', () => {
+  it('under a uniform 0.5 table a tram at 45% of the reference is ratio 0.9, not 0.45', () => {
+    TOD_PACE_TABLE.fill(0.5);
+    const vReal = 0.45 * V_CRUISE_REF_MS;
+    const geo = longStraight(6000);
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 100, observedAtMs: T0 }), T0);
+    applyFixPinned(sim, 100 + vReal * 100, T0 + 100_000);
+    // real / (expected × tod) = 0.45·ref / (ref × 0.5) = 0.9 — the residual.
+    expect(sim.paceBias).toBeCloseTo(ewma(PACE_BIAS_PRIOR, 0.9, 100), 6);
+  });
+
+  it('evaluates the hour-blended factor at the inter-fix MIDPOINT', () => {
+    TOD_PACE_TABLE[7] = 0.5;
+    TOD_PACE_TABLE[8] = 1.5;
+    // Fix span 07:10 → 07:20 Prague (winter): midpoint 07:15 blends h7..h8 at
+    // the quarter point → 0.5 + (1.5 − 0.5) × 0.25 = 0.75.
+    const t1 = winterUtc(6, 10);
+    const t2 = winterUtc(6, 20);
+    const vReal = 0.675 * V_CRUISE_REF_MS; // ratio = 0.675 / 0.75 = 0.9
+    const geo = longStraight(8000);
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 100, observedAtMs: t1 }), t1);
+    applyFixPinned(sim, 100 + vReal * 600, t2);
+    expect(sim.paceBias).toBeCloseTo(ewma(PACE_BIAS_PRIOR, 0.9, 600), 6);
+  });
+
+  it('with the shipped neutral table the learned ratio is unchanged (regression guard)', () => {
+    const vReal = 0.9 * V_CRUISE_REF_MS;
+    const geo = longStraight(6000);
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 100, observedAtMs: T0 }), T0);
+    applyFixPinned(sim, 100 + vReal * 100, T0 + 100_000);
+    expect(sim.paceBias).toBeCloseTo(ewma(PACE_BIAS_PRIOR, 0.9, 100), 6);
   });
 });
 
