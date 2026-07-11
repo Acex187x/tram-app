@@ -31,6 +31,10 @@ export default function RootLayout() {
         <Stack.Screen name="planner" options={sheet([0.6, 0.95])} />
         <Stack.Screen name="search" options={sheet([0.5, 0.95])} />
         <Stack.Screen name="settings" options={sheet([0.55, 0.95])} />
+        <Stack.Screen
+          name="model/[id]"
+          options={{ presentation: 'fullScreenModal', headerShown: false, animation: 'fade' }}
+        />
       </Stack>
     </ThemeProvider>
   );
