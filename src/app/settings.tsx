@@ -36,19 +36,19 @@ const ATTRIBUTIONS: { icon: SFSymbol; iconColor: string; label: string; url: str
   {
     icon: 'antenna.radiowaves.left.and.right',
     iconColor: Tram.onTime,
-    label: 'Golemio API — live positions',
-    url: 'https://api.golemio.cz/docs/openapi/',
+    label: 'Golemio — Prague data platform',
+    url: 'https://golemio.cz',
   },
   {
     icon: 'tram.fill',
     iconColor: Tram.pidRed,
-    label: 'PID open data — routes & stops',
+    label: 'PID open data',
     url: 'https://pid.cz/o-systemu/opendata/',
   },
   {
     icon: 'globe.europe.africa.fill',
     iconColor: Tram.night,
-    label: 'Mapbox — maps & 3D terrain',
+    label: 'Mapbox',
     url: 'https://www.mapbox.com/about/maps/',
   },
 ];
@@ -219,15 +219,15 @@ export default function SettingsScreen() {
                 models over the city.
               </Text>
             </View>
-            <RowSeparator inset={SEPARATOR_INSET} />
-            <Row icon="info.circle.fill" iconColor={palette.textSecondary} label="Version">
-              <Text style={[styles.rowValue, { color: palette.textSecondary }]}>
-                {version}
-              </Text>
-            </Row>
-            {ATTRIBUTIONS.map((item) => (
+          </InsetGroup>
+        </View>
+
+        <View>
+          <SectionLabel>Data & attribution</SectionLabel>
+          <InsetGroup>
+            {ATTRIBUTIONS.map((item, i) => (
               <Fragment key={item.url}>
-                <RowSeparator inset={SEPARATOR_INSET} />
+                {i > 0 && <RowSeparator inset={SEPARATOR_INSET} />}
                 <Row
                   icon={item.icon}
                   iconColor={item.iconColor}
@@ -243,6 +243,12 @@ export default function SettingsScreen() {
                 </Row>
               </Fragment>
             ))}
+            <RowSeparator inset={SEPARATOR_INSET} />
+            <Row icon="info.circle.fill" iconColor={palette.textSecondary} label="Version">
+              <Text style={[styles.rowValue, { color: palette.textSecondary }]}>
+                {version}
+              </Text>
+            </Row>
           </InsetGroup>
         </View>
 

@@ -21,6 +21,7 @@ import { GlassPanel } from '@/components/ui/GlassPanel';
 import { isNightLine, LineBadge } from '@/components/ui/LineBadge';
 import { Colors, Fonts, Spacing, Tram } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
+import { useFavoritesStore } from '@/stores/favorites';
 import { useSelectionStore } from '@/stores/selection';
 import type { RouteGeometry, RouteStop, TramPublicState } from '@/lib/types';
 
@@ -44,6 +45,14 @@ export default function LineSheet() {
 
   const setSelectedLineId = useSelectionStore((s) => s.setSelectedLineId);
   const requestFlyTo = useSelectionStore((s) => s.requestFlyTo);
+
+  // Line favorites: star in the header, gold when favorited (populates /favorites).
+  const isFavorite = useFavoritesStore((s) => s.favoriteLines.includes(lineId));
+  const toggleLine = useFavoritesStore((s) => s.toggleLine);
+  const onToggleFavorite = (): void => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    toggleLine(lineId);
+  };
 
   // Highlight this line on the map while the sheet is open.
   useEffect(() => {
@@ -167,6 +176,21 @@ export default function LineSheet() {
             )}
           </View>
         </View>
+        <Pressable
+          onPress={onToggleFavorite}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={isFavorite ? `Unfavorite line ${lineId}` : `Favorite line ${lineId}`}
+          accessibilityState={{ selected: isFavorite }}
+          style={({ pressed }) => pressed && styles.pressed}
+        >
+          <SymbolView
+            name={isFavorite ? 'star.fill' : 'star'}
+            size={26}
+            type="hierarchical"
+            tintColor={isFavorite ? Tram.gold : c.textSecondary}
+          />
+        </Pressable>
         <Pressable
           onPress={() => router.back()}
           hitSlop={8}

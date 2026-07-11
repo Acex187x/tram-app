@@ -13,6 +13,7 @@
       "supportsTablet": false,
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Tram Spotter shows your position on the map so you can find trams near you.",
+        "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": []
       }
     },

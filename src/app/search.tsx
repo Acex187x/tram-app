@@ -88,17 +88,35 @@ export default function SearchSheet() {
     return allLines.filter((l) => l === q || l.startsWith(q)).slice(0, 12);
   }, [q, allLines]);
 
+  // A 1–2 digit query that names a line the network actually runs. In that case
+  // the TRAMS section should list trams operating ON that line, not registration
+  // substring coincidences from other lines (e.g. '22' must not surface 9224/9322).
+  const lineTramQuery = useMemo(
+    () => (/^\d{1,2}$/.test(q) && allLines.includes(q) ? q : null),
+    [q, allLines],
+  );
+
   const tramMatches = useMemo(() => {
+    // Line query → trams currently on that line, sorted by registration.
+    if (lineTramQuery != null) {
+      return states
+        .filter((s) => s.snapshot.line === lineTramQuery)
+        .sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }))
+        .slice(0, 20);
+    }
+    // Otherwise, registration matching for 2+ digit queries: prefix beats substring.
     if (!/^\d{2,}$/.test(q)) return [];
     return states
       .filter((s) => s.key.includes(q))
       .sort((a, b) => {
         const aw = a.key.startsWith(q) ? 0 : 1;
         const bw = b.key.startsWith(q) ? 0 : 1;
-        return aw - bw || a.key.localeCompare(b.key);
+        return aw - bw || a.key.localeCompare(b.key, undefined, { numeric: true });
       })
       .slice(0, 10);
-  }, [q, states]);
+  }, [q, states, lineTramQuery]);
+
+  const tramSectionLabel = lineTramQuery != null ? `Trams on line ${lineTramQuery}` : 'Trams';
 
   const stopMatches = useMemo(() => {
     if (q.length < 2) return [];
@@ -215,7 +233,7 @@ export default function SearchSheet() {
 
             {tramMatches.length > 0 && (
               <View style={styles.section}>
-                <SectionHeader label="Trams" color={c.textSecondary as string} />
+                <SectionHeader label={tramSectionLabel} color={c.textSecondary as string} />
                 {tramMatches.map((s) => (
                   <ResultRow
                     key={s.key}

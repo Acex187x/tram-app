@@ -14,9 +14,15 @@ import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
 import { Colors, Fonts, Spacing, Tram } from '@/constants/theme';
 import { getRuntime, useAllTramStates, useTramState } from '@/hooks/tramData';
+import { usePlannerStore } from '@/stores/planner';
 import { useSelectionStore } from '@/stores/selection';
 
 const STALE_AFTER_MS = 30_000;
+
+/** Vertical footprint of one stacked bottom chip (banner height + gap). */
+const CHIP_STACK_H = 56;
+/** Bottom offset of the follow-banner slot, above the dock. */
+const BANNER_SLOT = Spacing.three + 68;
 
 function useTextColors() {
   const scheme = useColorScheme();
@@ -183,18 +189,35 @@ export function BottomDock() {
   );
 }
 
-// ── Follow banner ─────────────────────────────────────────────────────────────
+// ── Bottom banners: follow + planner-route clear ─────────────────────────────
+//
+// Both are stacked glass chips above the dock. The planner chip owns the base
+// slot (where the follow banner used to sit); when a follow is also active the
+// follow banner floats one row above it. Rendered together from a single
+// exported node so `app/index.tsx` keeps its one `<FollowBanner />`.
 
 export function FollowBanner() {
+  return (
+    <>
+      <FollowChip />
+      <PlannerChip />
+    </>
+  );
+}
+
+function FollowChip() {
   const insets = useSafeAreaInsets();
   const followKey = useSelectionStore((s) => s.followTramKey);
   const state = useTramState(followKey);
+  const plannerActive = usePlannerStore((s) => s.itinerary != null);
   const colors = useTextColors();
   if (!followKey || !state) return null;
 
+  // Float above the planner chip when both are visible.
+  const bottom = insets.bottom + BANNER_SLOT + (plannerActive ? CHIP_STACK_H : 0);
   const reg = state.snapshot.registrationNumber;
   return (
-    <View style={[styles.followWrap, { bottom: insets.bottom + Spacing.three + 68 }]}>
+    <View style={[styles.followWrap, { bottom }]}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Stop following"
@@ -213,6 +236,47 @@ export function FollowBanner() {
           <DelayPill delaySeconds={state.snapshot.delaySeconds} />
           <Text style={[styles.followHint, { color: colors.secondary }]} allowFontScaling={false}>
             Following — tap to stop
+          </Text>
+          <SymbolView name="xmark.circle.fill" size={16} tintColor={colors.secondary} />
+        </GlassPanel>
+      </Pressable>
+    </View>
+  );
+}
+
+/** Shown whenever a planned route is drawn on the map; taps clear the overlay. */
+function PlannerChip() {
+  const insets = useSafeAreaInsets();
+  const itinerary = usePlannerStore((s) => s.itinerary);
+  const colors = useTextColors();
+  if (!itinerary) return null;
+
+  const legs = itinerary.legs;
+  const from = legs[0]?.fromStopName ?? '';
+  const to = legs[legs.length - 1]?.toStopName ?? '';
+  const label = from && to ? `${from} → ${to}` : 'Planned route';
+
+  return (
+    <View style={[styles.followWrap, { bottom: insets.bottom + BANNER_SLOT }]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Clear planned route"
+        onPress={() => {
+          tapLight();
+          usePlannerStore.getState().setItinerary(null);
+        }}
+      >
+        <GlassPanel variant="regular" interactive style={styles.followBanner}>
+          <SymbolView name="arrow.triangle.swap" size={15} tintColor={Tram.gold} />
+          <Text
+            style={[styles.plannerRoute, { color: colors.text }]}
+            numberOfLines={1}
+            allowFontScaling={false}
+          >
+            {label}
+          </Text>
+          <Text style={[styles.followHint, { color: colors.secondary }]} allowFontScaling={false}>
+            Clear
           </Text>
           <SymbolView name="xmark.circle.fill" size={16} tintColor={colors.secondary} />
         </GlassPanel>
@@ -285,4 +349,5 @@ const styles = StyleSheet.create({
   },
   followReg: { fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
   followHint: { fontSize: 12, fontWeight: '500' },
+  plannerRoute: { fontSize: 13, fontWeight: '600', maxWidth: 200, flexShrink: 1 },
 });

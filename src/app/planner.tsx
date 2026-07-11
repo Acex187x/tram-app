@@ -216,7 +216,9 @@ export default function PlannerScreen() {
             size={17}
             tintColor={Tram.cream}
           />
-          <Text style={styles.planButtonText}>Plan</Text>
+          <Text style={styles.planButtonText}>
+            {results && results.length > 0 ? 'Update route' : 'Plan'}
+          </Text>
         </Pressable>
 
         {loading ? (
