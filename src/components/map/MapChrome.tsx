@@ -216,17 +216,21 @@ function FollowChip() {
   // Float above the planner chip when both are visible.
   const bottom = insets.bottom + BANNER_SLOT + (plannerActive ? CHIP_STACK_H : 0);
   const reg = state.snapshot.registrationNumber;
+  // Chip body reopens the tram sheet (same pattern as the planner chip —
+  // users kept losing the sheet while following); only the ✕ stops the follow.
   return (
     <View style={[styles.followWrap, { bottom }]}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Stop following"
-        onPress={() => {
-          tapLight();
-          useSelectionStore.getState().setFollowTramKey(null);
-        }}
-      >
-        <GlassPanel variant="regular" interactive style={styles.followBanner}>
+      <GlassPanel variant="regular" interactive style={styles.followBanner}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Open tram ${reg ?? followKey} details`}
+          style={styles.followBody}
+          onPress={() => {
+            tapLight();
+            useSelectionStore.getState().setSelectedTramKey(followKey);
+            router.push(`/tram/${encodeURIComponent(followKey)}`);
+          }}
+        >
           <LineBadge line={state.snapshot.line} size="sm" />
           {reg != null && (
             <Text style={[styles.followReg, { color: colors.text }]} allowFontScaling={false}>
@@ -235,11 +239,22 @@ function FollowChip() {
           )}
           <DelayPill delaySeconds={state.snapshot.delaySeconds} />
           <Text style={[styles.followHint, { color: colors.secondary }]} allowFontScaling={false}>
-            Following — tap to stop
+            Following
           </Text>
-          <SymbolView name="xmark.circle.fill" size={16} tintColor={colors.secondary} />
-        </GlassPanel>
-      </Pressable>
+          <SymbolView name="chevron.up" size={12} tintColor={colors.secondary} />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Stop following"
+          hitSlop={10}
+          onPress={() => {
+            tapLight();
+            useSelectionStore.getState().setFollowTramKey(null);
+          }}
+        >
+          <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.secondary} />
+        </Pressable>
+      </GlassPanel>
     </View>
   );
 }
@@ -370,6 +385,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 999,
   },
+  followBody: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   followReg: { fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
   followHint: { fontSize: 12, fontWeight: '500' },
   plannerRoute: { fontSize: 13, fontWeight: '600', maxWidth: 200, flexShrink: 1 },
