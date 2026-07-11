@@ -1,7 +1,9 @@
 // Search sheet — /search. Glass search field + live sections as you type:
 // lines (badge grid), trams (reg-number match), stops (diacritics-insensitive,
-// opening the live arrivals board). Keeps the last 6 searches in a
-// module-level in-memory list (not persisted).
+// opening the live arrivals board). While the query is EMPTY the sheet is a
+// fleet browser instead: every live tram, filterable by model and line,
+// client-side paginated (src/components/search/FleetBrowser.tsx). Filter state
+// lives here so it survives typing and clearing the query (sheet-lifetime only).
 import * as Haptics from 'expo-haptics';
 import { useRouter, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
@@ -17,6 +19,8 @@ import {
   View,
 } from 'react-native';
 
+import { FleetBrowser } from '@/components/search/FleetBrowser';
+import { EMPTY_FLEET_FILTERS, type FleetFilters } from '@/components/search/fleetFilter';
 import { AcSnowflake } from '@/components/tram/TramModelImage';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
@@ -25,31 +29,8 @@ import { Colors, Fonts, Spacing, Tram } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
 import { normalizeName } from '@/lib/planner/network';
 import { searchStops } from '@/lib/planner/planner';
+import { useSelectionStore } from '@/stores/selection';
 import type { TramPublicState } from '@/lib/types';
-
-// ── Recent searches (in-memory only; survives sheet close, not app restart) ──
-
-type Recent =
-  | { type: 'line'; id: string }
-  | { type: 'tram'; key: string; line: string }
-  | { type: 'stop'; name: string; coordinates: [number, number] };
-
-let RECENTS: Recent[] = [];
-
-function recentId(r: Recent): string {
-  switch (r.type) {
-    case 'line':
-      return `line:${r.id}`;
-    case 'tram':
-      return `tram:${r.key}`;
-    case 'stop':
-      return `stop:${normalizeName(r.name)}`;
-  }
-}
-
-function addRecent(r: Recent): void {
-  RECENTS = [r, ...RECENTS.filter((x) => recentId(x) !== recentId(r))].slice(0, 6);
-}
 
 // ── Screen ───────────────────────────────────────────────────────────────────
 
@@ -62,8 +43,13 @@ export default function SearchSheet() {
   const [query, setQuery] = useState('');
   const q = query.trim();
 
+  // Fleet-browser filters: kept while the sheet is open (component state), so
+  // typing a query and clearing it returns to the browser with filters intact.
+  const [filters, setFilters] = useState<FleetFilters>(EMPTY_FLEET_FILTERS);
+
   const states = useAllTramStates();
   const geometries = useLoadedGeometries();
+  const setSelectedTramKey = useSelectionStore((s) => s.setSelectedTramKey);
 
   // Every line we know about — live trams plus loaded geometries.
   const allLines = useMemo(() => {
@@ -72,18 +58,6 @@ export default function SearchSheet() {
     for (const g of geometries) set.add(g.line);
     return [...set].sort((a, b) => Number(a) - Number(b) || a.localeCompare(b));
   }, [states, geometries]);
-
-  // Station name → representative coordinates, for stop fly-to.
-  const stopCoords = useMemo(() => {
-    const m = new Map<string, [number, number]>();
-    for (const g of geometries) {
-      for (const s of g.stops) {
-        const key = normalizeName(s.name);
-        if (!m.has(key)) m.set(key, s.coordinates);
-      }
-    }
-    return m;
-  }, [geometries]);
 
   const lineMatches = useMemo(() => {
     if (!/^\d{1,2}$/.test(q)) return [];
@@ -128,54 +102,28 @@ export default function SearchSheet() {
   const openLine = (id: string): void => {
     Keyboard.dismiss();
     void Haptics.selectionAsync();
-    addRecent({ type: 'line', id });
     router.push(`/line/${id}` as Href);
   };
 
   const openTram = (state: TramPublicState): void => {
     Keyboard.dismiss();
     void Haptics.selectionAsync();
-    addRecent({ type: 'tram', key: state.key, line: state.snapshot.line });
+    setSelectedTramKey(state.key);
     router.push(`/tram/${encodeURIComponent(state.key)}` as Href);
   };
 
   // Stop result → the live arrivals board sheet (which has its own
-  // "Show on map" action). Falls back to a plain fly-to when we somehow don't
-  // know the stop (should not happen — matches come from loaded geometries).
-  const openStop = (name: string, coordinates?: [number, number]): void => {
+  // "Show on map" action); matches come from loaded geometries.
+  const openStop = (name: string): void => {
     Keyboard.dismiss();
     const key = normalizeName(name);
-    const coords = coordinates ?? stopCoords.get(key);
     void Haptics.selectionAsync();
-    addRecent({ type: 'stop', name, coordinates: coords ?? [0, 0] });
     router.push(`/stop/${encodeURIComponent(key)}` as Href);
   };
 
   const closeSheet = (): void => {
     Keyboard.dismiss();
     router.back();
-  };
-
-  const openRecent = (r: Recent): void => {
-    switch (r.type) {
-      case 'line':
-        openLine(r.id);
-        break;
-      case 'tram': {
-        const live = states.find((s) => s.key === r.key);
-        if (live) openTram(live);
-        else {
-          Keyboard.dismiss();
-          void Haptics.selectionAsync();
-          addRecent(r);
-          router.push(`/tram/${encodeURIComponent(r.key)}` as Href);
-        }
-        break;
-      }
-      case 'stop':
-        openStop(r.name, r.coordinates);
-        break;
-    }
   };
 
   const hasResults = lineMatches.length > 0 || tramMatches.length > 0 || stopMatches.length > 0;
@@ -216,6 +164,16 @@ export default function SearchSheet() {
       </View>
       </SheetContent>
 
+      {q.length === 0 ? (
+        // Empty query → the fleet browser (all live trams, filters, pagination).
+        <FleetBrowser
+          states={states}
+          geometries={geometries}
+          filters={filters}
+          onChangeFilters={setFilters}
+          onOpenTram={openTram}
+        />
+      ) : (
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
@@ -224,9 +182,7 @@ export default function SearchSheet() {
         showsVerticalScrollIndicator={false}
       >
         <SheetContent style={styles.listContent}>
-        {q.length === 0 ? (
-          <RecentsSection dark={dark} onOpen={openRecent} />
-        ) : hasResults ? (
+        {hasResults ? (
           <>
             {lineMatches.length > 0 && (
               <View style={styles.section}>
@@ -307,6 +263,7 @@ export default function SearchSheet() {
         )}
         </SheetContent>
       </ScrollView>
+      )}
     </GlassPanel>
   );
 }
@@ -372,74 +329,6 @@ function ResultRow({
       {trailing}
       <SymbolView name="chevron.right" size={11} tintColor={secondaryColor} />
     </Pressable>
-  );
-}
-
-function RecentsSection({ dark, onOpen }: { dark: boolean; onOpen: (r: Recent) => void }) {
-  const c = Colors[dark ? 'dark' : 'light'];
-  // Local snapshot; the parent re-renders ~1 Hz via useAllTramStates, and a
-  // manual clear updates it immediately through this state.
-  const [, setVersion] = useState(0);
-  const recents = RECENTS;
-
-  if (recents.length === 0) {
-    return (
-      <View style={styles.empty}>
-        <SymbolView
-          name="tram.fill"
-          size={30}
-          tintColor={c.textSecondary}
-          style={styles.emptyIcon}
-        />
-        <Text style={[styles.emptyTitle, { color: c.text }]}>Find anything on the network</Text>
-        <Text style={[styles.emptyBody, { color: c.textSecondary }]}>
-          Search a line number like 22, a tram registration like 9265, or a stop like Malostranská.
-        </Text>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.section}>
-      <View style={styles.recentHeaderRow}>
-        <SectionHeader label="Recent" color={c.textSecondary as string} />
-        <Pressable
-          onPress={() => {
-            RECENTS = [];
-            setVersion((v) => v + 1);
-          }}
-          hitSlop={8}
-          style={({ pressed }) => pressed && styles.pressed}
-        >
-          <Text style={[styles.clearText, { color: c.textSecondary }]}>Clear</Text>
-        </Pressable>
-      </View>
-      {recents.map((r) => (
-        <ResultRow
-          key={recentId(r)}
-          onPress={() => onOpen(r)}
-          dark={dark}
-          leading={
-            r.type === 'line' ? (
-              <LineBadge line={r.id} size="sm" />
-            ) : r.type === 'tram' ? (
-              <View style={styles.stopIcon}>
-                <SymbolView name="tram.fill" size={13} tintColor={Tram.cream} />
-              </View>
-            ) : (
-              <View style={[styles.stopIcon, { backgroundColor: Tram.night }]}>
-                <SymbolView name="mappin.and.ellipse" size={13} tintColor="#FFFFFF" />
-              </View>
-            )
-          }
-          title={r.type === 'line' ? `Line ${r.id}` : r.type === 'tram' ? `Tram ${r.key}` : r.name}
-          subtitle={r.type === 'tram' ? `Line ${r.line}` : undefined}
-          titleTabular={r.type === 'tram'}
-          textColor={c.text as string}
-          secondaryColor={c.textSecondary as string}
-        />
-      ))}
-    </View>
   );
 }
 
@@ -509,12 +398,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  recentHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  clearText: { fontSize: 13, fontWeight: '600' },
   pressed: { opacity: 0.55 },
   empty: {
     alignItems: 'center',
