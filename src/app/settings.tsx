@@ -21,7 +21,7 @@ import { SheetHeader } from '@/components/favorites/SheetHeader';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { SheetContent } from '@/components/ui/SheetContent';
 import { Colors, Tram } from '@/constants/theme';
-import { useSettingsStore, type LightPreset } from '@/stores/settings';
+import { useSettingsStore, type LightPreset, type PositionMode } from '@/stores/settings';
 
 /** Left inset aligning separators with row text (padding + icon + gap). */
 const SEPARATOR_INSET = 16 + 29 + 12;
@@ -31,6 +31,11 @@ const LIGHT_PRESETS: { value: LightPreset; label: string }[] = [
   { value: 'day', label: 'Day' },
   { value: 'dusk', label: 'Dusk' },
   { value: 'night', label: 'Night' },
+];
+
+const POSITION_MODES: { value: PositionMode; label: string }[] = [
+  { value: 'smooth', label: 'Smooth' },
+  { value: 'live', label: 'Live' },
 ];
 
 const ATTRIBUTIONS: { icon: SFSymbol; iconColor: string; label: string; url: string }[] = [
@@ -104,12 +109,18 @@ function Row({
   );
 }
 
-/** iOS-style segmented control for the map light preset. */
-function LightPresetSegments() {
+/** iOS-style segmented control (light preset, position mode). */
+function Segments<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = Colors[scheme];
-  const lightPreset = useSettingsStore((s) => s.lightPreset);
-  const setLightPreset = useSettingsStore((s) => s.setLightPreset);
   return (
     <View
       style={[
@@ -120,17 +131,17 @@ function LightPresetSegments() {
         },
       ]}
     >
-      {LIGHT_PRESETS.map((preset) => {
-        const selected = preset.value === lightPreset;
+      {options.map((option) => {
+        const selected = option.value === value;
         return (
           <Pressable
-            key={preset.value}
+            key={option.value}
             accessibilityRole="button"
             accessibilityState={{ selected }}
             onPress={() => {
               if (selected) return;
               void Haptics.selectionAsync();
-              setLightPreset(preset.value);
+              onChange(option.value);
             }}
             style={[
               styles.segment,
@@ -148,13 +159,25 @@ function LightPresetSegments() {
                 fontWeight: selected ? '600' : '500',
               }}
             >
-              {preset.label}
+              {option.label}
             </Text>
           </Pressable>
         );
       })}
     </View>
   );
+}
+
+function LightPresetSegments() {
+  const lightPreset = useSettingsStore((s) => s.lightPreset);
+  const setLightPreset = useSettingsStore((s) => s.setLightPreset);
+  return <Segments options={LIGHT_PRESETS} value={lightPreset} onChange={setLightPreset} />;
+}
+
+function PositionModeSegments() {
+  const positionMode = useSettingsStore((s) => s.positionMode);
+  const setPositionMode = useSettingsStore((s) => s.setPositionMode);
+  return <Segments options={POSITION_MODES} value={positionMode} onChange={setPositionMode} />;
 }
 
 export default function SettingsScreen() {
@@ -183,6 +206,23 @@ export default function SettingsScreen() {
         showsVerticalScrollIndicator={false}
       >
         <SheetContent style={styles.content}>
+        <View>
+          <SectionLabel>Positioning</SectionLabel>
+          <InsetGroup>
+            <View style={styles.presetCell}>
+              <View style={styles.presetHeader}>
+                <IconSquare name="scope" color={Tram.onTime} />
+                <Text style={[styles.rowLabel, { color: palette.text }]}>Tram positions</Text>
+              </View>
+              <PositionModeSegments />
+            </View>
+          </InsetGroup>
+          <Text style={[styles.footnote, { color: palette.textSecondary }]}>
+            Smooth interpolates motion between updates. Live shows exact reported
+            positions and jumps on every update.
+          </Text>
+        </View>
+
         <View>
           <SectionLabel>Map</SectionLabel>
           <InsetGroup>
@@ -336,6 +376,12 @@ const styles = StyleSheet.create({
   blurb: {
     fontSize: 14,
     lineHeight: 20,
+  },
+  footnote: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginHorizontal: 16,
+    marginTop: 8,
   },
   footer: {
     fontSize: 13,

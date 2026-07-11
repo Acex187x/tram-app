@@ -6,6 +6,7 @@
 // departs in order. Different shapeIds are intentionally unconstrained.
 
 import { QUEUE_GAP_M, COUPLED_TRAILER_OFFSET_M, TramEngine } from '@/lib/engine/engine';
+import { bearingAt, pointAt } from '@/lib/geo/polyline';
 import type { RouteGeometry, TramPublicState, TramSnapshot } from '@/lib/types';
 import { makeGeometry, makeSnapshot, makeSpec1 } from './helpers';
 
@@ -278,6 +279,58 @@ describe('sim bookkeeping for queueing', () => {
     const via = engine.getStates(now);
     expect(viaAt).toHaveLength(1);
     expect(viaAt[0].simDistM).toBe(via[0].simDistM);
+  });
+});
+
+describe('observed (raw AVL fix) public state', () => {
+  const geo = makeGeometry(
+    [
+      [0, 0],
+      [1000, 0],
+    ],
+    [
+      { atM: 0, arrivalMs: T0 - 10_000 },
+      { atM: 1000, arrivalMs: T0 + 290_000, isTerminal: true },
+    ],
+  );
+
+  it('places the fix on the shape and reports along-shape deviation from the sim', () => {
+    const engine = makeEngine();
+    engine.ingest([makeSnapshot({ key: 'solo', shapeDistM: 300, observedAtMs: T0 })], () => geo, T0);
+    engine.tick(T0);
+    const now = run(engine, T0, 10); // sim moves on; the observation must NOT
+    const s = state(engine, 'solo', now);
+    expect(s.simDistM).toBeGreaterThan(300);
+    // Observed = pointAt/bearingAt(300): on the eastbound track, NOT projected
+    // forward with the sim.
+    expect(s.observedPosition).toEqual(pointAt(geo.coordinates, geo.cumDistM, 300));
+    expect(s.observedBearing).toBe(bearingAt(geo.coordinates, geo.cumDistM, 300));
+    expect(s.observedBearing).toBeCloseTo(90, 0);
+    expect(s.deviationM).toBe(Math.abs(s.simDistM - 300));
+  });
+
+  it('clamps an out-of-range fix to the geometry length', () => {
+    const engine = makeEngine();
+    engine.ingest([makeSnapshot({ key: 'solo', shapeDistM: 5000, observedAtMs: T0 })], () => geo, T0);
+    engine.tick(T0);
+    const s = state(engine, 'solo', T0);
+    expect(s.observedPosition).toEqual(pointAt(geo.coordinates, geo.cumDistM, geo.totalM));
+    expect(s.deviationM).toBe(Math.abs(s.simDistM - geo.totalM));
+  });
+
+  it('falls back to raw coordinates/bearing with null deviation without geometry', () => {
+    const engine = makeEngine();
+    engine.ingest(
+      [makeSnapshot({ key: 'raw', coordinates: [14.61, 50.06], bearing: 123, shapeDistM: 42 })],
+      () => undefined,
+      T0,
+    );
+    engine.tick(T0);
+    const s = state(engine, 'raw', T0);
+    expect(s.hasGeometry).toBe(false);
+    expect(s.observedPosition).toEqual([14.61, 50.06]);
+    expect(s.observedBearing).toBe(123);
+    expect(s.deviationM).toBeNull();
   });
 });
 

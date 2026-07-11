@@ -319,6 +319,7 @@ export class TramEngine {
 
     if (!sim) {
       // No geometry: hold the raw API position (featureBuilder renders as-is).
+      // The observation IS the position — the sim can't deviate from it.
       return {
         key: entry.key,
         snapshot,
@@ -328,6 +329,9 @@ export class TramEngine {
         position: [snapshot.coordinates[0], snapshot.coordinates[1]],
         bearing: snapshot.bearing ?? 0,
         phase: 'unknown',
+        observedPosition: [snapshot.coordinates[0], snapshot.coordinates[1]],
+        observedBearing: snapshot.bearing ?? 0,
+        deviationM: null,
         nextStopName: null,
         nextStopEtaS:
           snapshot.nextStopArrivalMs !== null
@@ -339,6 +343,8 @@ export class TramEngine {
 
     const { geometry } = sim;
     const next = nextUndwelledStop(sim);
+    // Honest last AVL fix, placed on the shape (NOT projected forward in time).
+    const observedDistM = Math.min(Math.max(snapshot.shapeDistM, 0), geometry.totalM);
     return {
       key: entry.key,
       snapshot,
@@ -348,6 +354,9 @@ export class TramEngine {
       position: pointAt(geometry.coordinates, geometry.cumDistM, sim.sM),
       bearing: bearingAt(geometry.coordinates, geometry.cumDistM, sim.sM),
       phase: sim.phase,
+      observedPosition: pointAt(geometry.coordinates, geometry.cumDistM, observedDistM),
+      observedBearing: bearingAt(geometry.coordinates, geometry.cumDistM, observedDistM),
+      deviationM: Math.abs(sim.sM - observedDistM),
       nextStopName: next ? next.name : null,
       nextStopEtaS: next
         ? Math.max(0, (next.arrivalMs + snapshot.delaySeconds * 1000 - nowMs) / 1000)

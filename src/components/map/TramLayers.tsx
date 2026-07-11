@@ -103,6 +103,10 @@ export function TramLayers({ cameraRef, viewportRef, modelUris }: TramLayersProp
       // push it at ~15 Hz; sections + camera run at full tick rate.
       const wantPoints = nowMs - lastPointsPushMsRef.current >= POINTS_PUSH_MS;
 
+      // Cheap getState() read per frame — the toggle lives in a form sheet and
+      // changes rarely; no subscription bookkeeping needed.
+      const positionMode = useSettingsStore.getState().positionMode;
+
       const frame = buildFrame(rt.engine.getStates(nowMs), viewport, {
         selectedKey: selection.selectedTramKey,
         favoriteKeys: favSetRef.current.set,
@@ -110,6 +114,7 @@ export function TramLayers({ cameraRef, viewportRef, modelUris }: TramLayersProp
         getGeometry,
         lineFilter: lineFilterRef.current.set,
         skipPoints: !wantPoints,
+        positionMode,
         nowMs,
       });
 
@@ -145,13 +150,15 @@ export function TramLayers({ cameraRef, viewportRef, modelUris }: TramLayersProp
       if (followKey) {
         const state = rt.engine.getState(followKey, nowMs);
         if (state) {
+          // Track where the tram is RENDERED: raw fix in live mode, sim otherwise.
+          const isLive = positionMode === 'live';
           cameraRef.current?.setCamera({
-            centerCoordinate: state.position,
+            centerCoordinate: isLive ? state.observedPosition : state.position,
             zoomLevel: FOLLOW_ZOOM,
             pitch: FOLLOW_PITCH,
             // Heading lock: look at the tram from ahead-side; otherwise north-up.
             heading: useSettingsStore.getState().followHeadingLock
-              ? (state.bearing + FOLLOW_HEADING_AHEAD) % 360
+              ? ((isLive ? state.observedBearing : state.bearing) + FOLLOW_HEADING_AHEAD) % 360
               : 0,
             animationMode: 'linearTo',
             animationDuration: TICK_MS,

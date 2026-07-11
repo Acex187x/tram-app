@@ -16,15 +16,24 @@ function makeState(
   simDistM: number,
   overrides: Partial<TramPublicState> = {},
 ): TramPublicState {
+  // Observed fields mirror the engine: the merged snapshot's shapeDistM placed
+  // on the shape (defaults to simDistM → zero deviation), raw coords otherwise.
+  const snapshot = overrides.snapshot ?? makeSnapshot({ key, shapeDistM: simDistM });
+  const obsDistM = geo ? Math.min(Math.max(snapshot.shapeDistM, 0), geo.totalM) : 0;
   const base: TramPublicState = {
     key,
-    snapshot: makeSnapshot({ key }),
+    snapshot,
     model: makeSpec3(),
     simDistM,
     simSpeedKmh: 20,
     position: geo ? pointAt(geo.coordinates, geo.cumDistM, simDistM) : [ORIGIN[0], ORIGIN[1]],
     bearing: geo ? bearingAt(geo.coordinates, geo.cumDistM, simDistM) : 45,
     phase: geo ? 'cruise' : 'unknown',
+    observedPosition: geo
+      ? pointAt(geo.coordinates, geo.cumDistM, obsDistM)
+      : [snapshot.coordinates[0], snapshot.coordinates[1]],
+    observedBearing: geo ? bearingAt(geo.coordinates, geo.cumDistM, obsDistM) : (snapshot.bearing ?? 0),
+    deviationM: geo ? Math.abs(simDistM - obsDistM) : null,
     nextStopName: null,
     nextStopEtaS: null,
     hasGeometry: geo !== null,
@@ -378,6 +387,153 @@ describe('planner route-only mode (lineFilter)', () => {
     });
     const frame = buildFrame([a, b], WIDE, opts(geo, { lineFilter: null }));
     expect(frame.points.features).toHaveLength(2);
+  });
+});
+
+describe('position mode (smooth vs live)', () => {
+  // Straight east 1 km track; the sim (s=300) has run ahead of the last
+  // reported AVL fix (shapeDistM=250).
+  const geo = makeGeometry(
+    [
+      [0, 0],
+      [1000, 0],
+    ],
+    [],
+  );
+  const state = makeState('9201', geo, 300, {
+    snapshot: makeSnapshot({ key: '9201', shapeDistM: 250 }),
+  });
+
+  it("default/'smooth' anchors at the simulated position (unchanged)", () => {
+    const byDefault = buildFrame([state], WIDE, opts(geo));
+    const explicit = buildFrame([state], WIDE, opts(geo, { positionMode: 'smooth' }));
+    expect(explicit).toEqual(byDefault);
+
+    const point = byDefault.points.features[0].geometry.coordinates as [number, number];
+    expect(haversineM(point, rightOf(metersToCoord(ORIGIN, 300, 0), 90))).toBeLessThan(0.5);
+    // Head section center at simDistM − 5.
+    const head = byDefault.sections.features[0];
+    expect(
+      haversineM(
+        head.geometry.coordinates as [number, number],
+        rightOf(metersToCoord(ORIGIN, 295, 0), 90),
+      ),
+    ).toBeLessThan(1);
+  });
+
+  it("'live' anchors the point AND all sections at the observed fix", () => {
+    const frame = buildFrame([state], WIDE, opts(geo, { positionMode: 'live' }));
+
+    const point = frame.points.features[0];
+    expect(
+      haversineM(
+        point.geometry.coordinates as [number, number],
+        rightOf(state.observedPosition, state.observedBearing),
+      ),
+    ).toBeLessThan(0.5);
+    expect(angularDiff(point.properties.bearing, state.observedBearing)).toBeLessThan(1);
+
+    // Sections laid back along the shape from observedDist (250): centers at
+    // 245, 234.5, 224 — same section math as smooth, just re-anchored.
+    expect(frame.sections.features).toHaveLength(3);
+    const pos = frame.sections.features.map((f) => f.geometry.coordinates as [number, number]);
+    expect(haversineM(pos[0], rightOf(metersToCoord(ORIGIN, 245, 0), 90))).toBeLessThan(1);
+    expect(haversineM(pos[1], rightOf(metersToCoord(ORIGIN, 234.5, 0), 90))).toBeLessThan(1);
+    expect(haversineM(pos[2], rightOf(metersToCoord(ORIGIN, 224, 0), 90))).toBeLessThan(1);
+  });
+
+  it("'live' clamps an out-of-range fix to the geometry end", () => {
+    const past = makeState('9201', geo, 900, {
+      snapshot: makeSnapshot({ key: '9201', shapeDistM: 5000 }),
+    });
+    const frame = buildFrame([past], WIDE, opts(geo, { positionMode: 'live' }));
+    const point = frame.points.features[0].geometry.coordinates as [number, number];
+    expect(haversineM(point, rightOf(metersToCoord(ORIGIN, 1000, 0), 90))).toBeLessThan(0.5);
+    // Head section center at totalM − 5, still on the track.
+    const head = frame.sections.features[0];
+    expect(
+      haversineM(
+        head.geometry.coordinates as [number, number],
+        rightOf(metersToCoord(ORIGIN, 995, 0), 90),
+      ),
+    ).toBeLessThan(1);
+  });
+
+  it("'live' without geometry renders at the raw fix, trailing back along its bearing", () => {
+    // Sim position/bearing deliberately differ from the raw fix so the modes
+    // are distinguishable.
+    const raw = makeState('9201', null, 0, {
+      snapshot: makeSnapshot({
+        key: '9201',
+        coordinates: metersToCoord(ORIGIN, 100, 0),
+        bearing: 90,
+      }),
+      position: metersToCoord(ORIGIN, 50, 50),
+      bearing: 45,
+    });
+    const frame = buildFrame([raw], WIDE, opts(null, { positionMode: 'live' }));
+
+    const point = frame.points.features[0];
+    expect(
+      haversineM(
+        point.geometry.coordinates as [number, number],
+        rightOf(metersToCoord(ORIGIN, 100, 0), 90),
+      ),
+    ).toBeLessThan(0.5);
+
+    // All 3 sections trail straight back (west) from the fix along bearing 90.
+    expect(frame.sections.features).toHaveLength(3);
+    const pos = frame.sections.features.map((f) => f.geometry.coordinates as [number, number]);
+    expect(haversineM(pos[0], rightOf(metersToCoord(ORIGIN, 100, 0), 90))).toBeLessThan(0.5);
+    expect(haversineM(pos[0], pos[1])).toBeCloseTo(10.5, 1);
+    expect(haversineM(pos[1], pos[2])).toBeCloseTo(10.5, 1);
+    for (const f of frame.sections.features) {
+      expect(f.properties.bearing).toBe(90);
+    }
+  });
+
+  it("'live' keeps the coupled trailer 14.5 m behind the observed anchor", () => {
+    const coupledState = makeState('8123', geo, 300, {
+      model: makeSpec1(),
+      snapshot: makeSnapshot({ key: '8123', shapeDistM: 250 }),
+    });
+    const frame = buildFrame(
+      [coupledState],
+      WIDE,
+      opts(geo, { positionMode: 'live', coupledPairFn: () => true }),
+    );
+    expect(frame.sections.features).toHaveLength(2);
+    const [lead, trail] = frame.sections.features;
+    // Lead center at 250 − 14.1/2, trailer 14.5 m further back.
+    expect(
+      haversineM(
+        lead.geometry.coordinates as [number, number],
+        rightOf(metersToCoord(ORIGIN, 250 - 14.1 / 2, 0), 90),
+      ),
+    ).toBeLessThan(1);
+    const d = haversineM(
+      lead.geometry.coordinates as [number, number],
+      trail.geometry.coordinates as [number, number],
+    );
+    expect(d).toBeCloseTo(COUPLED_OFFSET_M, 1);
+  });
+
+  it("'live' culls sections by the OBSERVED position", () => {
+    // Sim head far east at 900 m; observed fix back at 100 m. A viewport around
+    // x=900 must NOT render sections in live mode (the tram is drawn at 100 m).
+    const drifted = makeState('9201', geo, 900, {
+      snapshot: makeSnapshot({ key: '9201', shapeDistM: 100 }),
+    });
+    const nearSim = buildFrame([drifted], viewportM(700, -200, 1100, 200, 16), {
+      ...opts(geo),
+      positionMode: 'live',
+    });
+    expect(nearSim.sections.features).toHaveLength(0);
+    const nearObserved = buildFrame([drifted], viewportM(-100, -200, 300, 200, 16), {
+      ...opts(geo),
+      positionMode: 'live',
+    });
+    expect(nearObserved.sections.features.length).toBeGreaterThan(0);
   });
 });
 

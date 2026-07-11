@@ -57,6 +57,13 @@ export interface BuildFrameOptions {
    * sections FC — the caller only needs points on some frames).
    */
   skipPoints?: boolean;
+  /**
+   * 'smooth' (default): render at the simulated/interpolated position.
+   * 'live': render exactly at the last reported AVL fix (observedPosition /
+   * observedBearing, sections anchored at the observed shape distance) — no
+   * simulated motion between polls, positions jump on each data update.
+   */
+  positionMode?: 'smooth' | 'live';
   /** Frame timestamp; defaults to Date.now(). */
   nowMs?: number;
 }
@@ -132,16 +139,20 @@ function placeAt(
   };
 }
 
-/** Sections for a tram with known geometry: each body section placed along the shape. */
+/**
+ * Sections for a tram with known geometry: each body section placed along the
+ * shape, head anchored at sHead (sim distance in smooth mode, the observed
+ * fix's shape distance in live mode).
+ */
 function sectionsAlongShape(
   state: TramPublicState,
   spec: TramModelSpec,
   geometry: RouteGeometry,
+  sHead: number,
   coupled: boolean,
   out: SectionFeature[],
 ): void {
   const { coordinates, cumDistM } = geometry;
-  const sHead = state.simDistM;
   let precedingLengths = 0;
   for (let i = 0; i < spec.sections.length; i++) {
     const section = spec.sections[i];
@@ -168,17 +179,19 @@ function sectionsAlongShape(
 
 /**
  * Fallback for trams without geometry: ALL sections rendered in a straight
- * line trailing behind the raw API position along the raw bearing. (Rendering
+ * line trailing behind the given anchor position along its bearing. (Rendering
  * only the head section here was the "tram cut off — only the front piece
  * visible" bug for multi-section trams whose shape hadn't loaded yet.)
  */
 function sectionsAtRawPosition(
   state: TramPublicState,
   spec: TramModelSpec,
+  anchor: [number, number],
+  bearing: number,
   coupled: boolean,
   out: SectionFeature[],
 ): void {
-  const back = (state.bearing + 180) % 360;
+  const back = (bearing + 180) % 360;
   const headHalf = spec.sections.length > 0 ? spec.sections[0].lengthM / 2 : 0;
   let precedingLengths = 0;
   for (let i = 0; i < spec.sections.length; i++) {
@@ -186,10 +199,9 @@ function sectionsAtRawPosition(
     // Distance of this section's center behind the FIRST section's center, so
     // section 0 stays exactly at the raw API position.
     const behindM = precedingLengths + i * spec.jointGapM + section.lengthM / 2 - headHalf;
-    const position =
-      behindM > 0 ? destinationPoint(state.position, back, behindM) : state.position;
+    const position = behindM > 0 ? destinationPoint(anchor, back, behindM) : anchor;
     out.push(
-      sectionFeature(`${state.key}#${i}`, state.key, section.modelKey, position, state.bearing),
+      sectionFeature(`${state.key}#${i}`, state.key, section.modelKey, position, bearing),
     );
     if (coupled) {
       out.push(
@@ -197,8 +209,8 @@ function sectionsAtRawPosition(
           `${state.key}#c${i}`,
           state.key,
           section.modelKey,
-          destinationPoint(state.position, back, behindM + COUPLED_OFFSET_M),
-          state.bearing,
+          destinationPoint(anchor, back, behindM + COUPLED_OFFSET_M),
+          bearing,
         ),
       );
     }
@@ -217,10 +229,16 @@ export function buildFrame(
   const sectionsEnabled = viewport.zoom >= SECTION_MIN_ZOOM;
   const cullBbox = sectionsEnabled ? expandBbox(viewport.bbox, CULL_MARGIN_M) : viewport.bbox;
   const lineFilter = opts.lineFilter ?? null;
+  const live = opts.positionMode === 'live';
 
   for (const state of states) {
     // Planner route-only mode: trams off the itinerary's lines vanish entirely.
     if (lineFilter && !lineFilter.has(state.snapshot.line)) continue;
+
+    // Live mode anchors everything at the last reported AVL fix instead of the
+    // simulated position — honest raw data, jumping on each poll.
+    const anchor = live ? state.observedPosition : state.position;
+    const bearing = live ? state.observedBearing : state.bearing;
 
     if (!opts.skipPoints) {
       points.push({
@@ -228,12 +246,12 @@ export function buildFrame(
         id: state.key,
         geometry: {
           type: 'Point',
-          coordinates: offsetRight(state.position, state.bearing),
+          coordinates: offsetRight(anchor, bearing),
         },
         properties: {
           key: state.key,
           line: state.snapshot.line,
-          bearing: state.bearing,
+          bearing,
           modelId: state.model.id,
           selected: state.key === opts.selectedKey ? 1 : 0,
           favorite: opts.favoriteKeys.has(state.key) ? 1 : 0,
@@ -243,15 +261,21 @@ export function buildFrame(
 
     // Whole-tram cull by head position; the margin covers the longest possible
     // body + coupled trailer, so a partially-visible tram keeps all sections.
-    if (!sectionsEnabled || !inBbox(state.position, cullBbox)) continue;
+    if (!sectionsEnabled || !inBbox(anchor, cullBbox)) continue;
 
     const spec = opts.getSpec?.(state.key) ?? state.model;
     const geometry = state.hasGeometry ? opts.getGeometry(state.key) : undefined;
     const coupled = opts.coupledPairFn(state.key);
     if (geometry) {
-      sectionsAlongShape(state, spec, geometry, coupled, sections);
+      // Head anchor along the shape: sim distance, or in live mode the raw
+      // fix's shape distance clamped to the geometry (same as the engine's
+      // observedPosition — kept on the track).
+      const sHead = live
+        ? Math.min(Math.max(state.snapshot.shapeDistM, 0), geometry.totalM)
+        : state.simDistM;
+      sectionsAlongShape(state, spec, geometry, sHead, coupled, sections);
     } else {
-      sectionsAtRawPosition(state, spec, coupled, sections);
+      sectionsAtRawPosition(state, spec, anchor, bearing, coupled, sections);
     }
   }
 

@@ -19,6 +19,7 @@ import { getRuntime, useLoadedGeometries, useTramState } from '@/hooks/tramData'
 import type { TramPublicState } from '@/lib/types';
 import { useFavoritesStore } from '@/stores/favorites';
 import { useSelectionStore } from '@/stores/selection';
+import { useSettingsStore } from '@/stores/settings';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -179,6 +180,7 @@ export default function TramDetailSheet() {
 
   const isFavorite = useFavoritesStore((s) => s.favoriteTrams.includes(key));
   const toggleTram = useFavoritesStore((s) => s.toggleTram);
+  const positionMode = useSettingsStore((s) => s.positionMode);
 
   // If the followed tram leaves service, stop following it.
   useEffect(() => {
@@ -333,6 +335,19 @@ export default function TramDetailSheet() {
               </View>
             </View>
 
+            {/* Sim honesty: how far the interpolation drifts from the last
+                real AVL fix — or, in live mode, that raw fixes are shown. */}
+            {(positionMode === 'live' || state.deviationM != null) && (
+              <View style={styles.deviationRow}>
+                <SymbolView name="scope" size={12} tintColor={c.textSecondary} />
+                <Text style={[styles.deviationText, { color: c.textSecondary }]}>
+                  {positionMode === 'live'
+                    ? 'Showing raw reported position'
+                    : `Sim offset ±${Math.round(state.deviationM ?? 0)} m from last fix`}
+                </Text>
+              </View>
+            )}
+
             {/* Actions */}
             <View style={styles.actionsRow}>
               <ActionButton
@@ -422,6 +437,14 @@ const styles = StyleSheet.create({
   liveCaption: { fontSize: 11 },
   liveNextName: { fontSize: 14, fontWeight: '600', maxWidth: '100%' },
   liveEta: { fontSize: 17, fontVariant: ['tabular-nums'], fontWeight: '700' },
+  deviationRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: -8,
+    paddingHorizontal: 12,
+  },
+  deviationText: { fontSize: 12, fontVariant: ['tabular-nums'] },
   actionsRow: {
     flexDirection: 'row',
     gap: 10,

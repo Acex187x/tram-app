@@ -111,6 +111,12 @@ export interface TramPublicState {
   position: [number, number];
   bearing: number;
   phase: 'cruise' | 'dwell' | 'terminal' | 'unknown';
+  /** Last REAL reported position (raw AVL fix), on-shape when geometry known. */
+  observedPosition: [number, number];
+  /** Bearing at the observed position (shape tangent; falls back to AVL bearing). */
+  observedBearing: number;
+  /** Distance between simulated and observed positions, meters (null w/o geometry). */
+  deviationM: number | null;
   /** Next stop name + eta if geometry known. */
   nextStopName: string | null;
   nextStopEtaS: number | null;
