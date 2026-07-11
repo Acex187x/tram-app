@@ -1,0 +1,85 @@
+// Liquid Glass surface with graceful degradation:
+// iOS 26+ → real glass (expo-glass-effect); older iOS → blur; last resort → solid.
+import { BlurView } from 'expo-blur';
+import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from 'expo-glass-effect';
+import { type ReactNode, useEffect, useState } from 'react';
+import {
+  AccessibilityInfo,
+  StyleSheet,
+  useColorScheme,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
+
+const glassSupported = isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
+
+let reduceTransparencyCache = false;
+AccessibilityInfo.isReduceTransparencyEnabled()
+  .then((v) => {
+    reduceTransparencyCache = v;
+  })
+  .catch(() => {});
+
+export interface GlassPanelProps {
+  children?: ReactNode;
+  style?: StyleProp<ViewStyle>;
+  /** 'regular' (default) for legible chrome over the map, 'clear' for thin pills. */
+  variant?: 'regular' | 'clear';
+  /** Glass reacts to touches (buttons). */
+  interactive?: boolean;
+  tintColor?: string;
+}
+
+export function GlassPanel({ children, style, variant = 'regular', interactive, tintColor }: GlassPanelProps) {
+  const scheme = useColorScheme();
+  const [reduceTransparency, setReduceTransparency] = useState(reduceTransparencyCache);
+
+  useEffect(() => {
+    const sub = AccessibilityInfo.addEventListener('reduceTransparencyChanged', (v) => {
+      reduceTransparencyCache = v;
+      setReduceTransparency(v);
+    });
+    return () => sub.remove();
+  }, []);
+
+  if (glassSupported && !reduceTransparency) {
+    return (
+      <GlassView
+        glassEffectStyle={variant}
+        isInteractive={interactive}
+        tintColor={tintColor}
+        style={[styles.rounded, style]}
+      >
+        {children}
+      </GlassView>
+    );
+  }
+  if (!reduceTransparency) {
+    return (
+      <BlurView
+        intensity={variant === 'clear' ? 35 : 60}
+        tint={scheme === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
+        style={[styles.rounded, styles.clipped, style]}
+      >
+        {children}
+      </BlurView>
+    );
+  }
+  return (
+    <View
+      style={[
+        styles.rounded,
+        { backgroundColor: scheme === 'dark' ? 'rgba(28,28,30,0.94)' : 'rgba(248,248,250,0.96)' },
+        style,
+      ]}
+    >
+      {children}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  rounded: { borderRadius: 20 },
+  clipped: { overflow: 'hidden' },
+});
