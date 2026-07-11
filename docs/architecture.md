@@ -24,7 +24,10 @@ src/
   components/map/          # MapScreen composition: layers, camera controller, glass chrome
   components/ui/           # GlassPanel (guarded expo-glass-effect w/ blur fallback), badges, rows
   stores/                  # zustand: favorites (persisted), selection/follow, settings (persisted)
-  hooks/                   # useTramEngine (poll + tick loop + setNativeProps push), useZoomMode
+  hooks/tramData.ts        # TramRuntime singleton: poll + thermal-adaptive tick loop + frame/UI
+                           #   subscriptions (useTramRuntime/useAllTramStates/useTramState)
+  lib/motionlog/           # opt-in ride/motion recorder (settings) — logs polls + device GPS,
+                           #   persisted via expo-file-system; decoupled behind a require() guard
   app/                     # expo-router routes (see UI section)
 scripts/generate-tram-models.mjs  → assets/models/*.glb
 ```
@@ -43,7 +46,12 @@ Shared contracts: `src/lib/types.ts` — single source of truth, all modules imp
    stop_times.shape_dist_traveled (number, km) + arrival/departure + dwell). Disk-cache by
    `shape_id`; stop-times cache by `trip_id` (TTL 24h — trip_ids roll over ~12 days).
 4. `TramEngine.ingest(snapshots, tripDetails)` updates per-tram anchors; `tick(now)` advances
-   physics; `getFrame(viewport, zoomMode)` emits GeoJSON at ~15fps → `ShapeSource.setNativeProps`.
+   physics; `featureBuilder` emits GeoJSON → `ShapeSource.setNativeProps`. **Thermal-adaptive
+   cadence** (`tramData.ts`, iteration 4 — iPad ran hot after an hour): the sim ticks at 60 Hz
+   (`TICK_MS` 16) ONLY while the 3D model band is on screen (`setDetailMode` from camera events),
+   ~10 Hz (`TICK_IDLE_MS` 100) otherwise. The whole-fleet points FC is pushed at a zoom-dependent
+   rate (`pointsPushIntervalMs`: ~15 Hz close, 1 s mid, 5 s far); the sections FC only while the
+   band is visible; empty FCs skip stringify+push entirely.
 
 ## Interpolation engine (the heart)
 
@@ -61,13 +69,27 @@ Runtime per tick (dt ≤ 100 ms):
   `A_BRK = 1.2 m/s²`, `A_ACC = 1.0 m/s²`. → accelerates on straights, brakes before curves/stops.
 - Dwell: reaching a stop (within 2 m) → hold `v=0` for `computed_dwell_time_seconds` (fallback
   18 s ± deterministic jitter by stop id hash). Terminal stop → hold until new trip data arrives.
-- Schedule anchor: `sSched(t)` = piecewise-linear distance-vs-time through stops using
-  timetable times shifted by `delay.actual` seconds, updated on every poll. Pace controller:
-  `e = sSched(now) − s`; cruise target `vTarget = vAllowed · clamp(1 + e/120, 0.55, 1.65)`.
-  |e| > 500 m → hard teleport to `sSched(now)` (with 300ms opacity dip if visible).
-  `s` NEVER decreases.
-- New poll data → recompute sSched + delay; convergence happens via the pace controller
-  (no position jumps).
+- Anchors (see `tramSim.ts` for the live constants): the pace controller is
+  **observation-primary**, not timetable-primary. Each poll re-anchors the raw AVL fix
+  (`obsDistM` @ `obsAtMs`). The schedule anchor `sSched(t)` (piecewise-linear dist-vs-time over
+  stops, shifted by `delay.actual`) is only a **low-gain reference** used to project the
+  observation forward: `sObs(now) = obsDistM + max(0, sSched(now) − sSched(obsAtMs))`.
+- Pace target = a blend that rides slightly BEHIND reality:
+  `target = OBS_BLEND_WEIGHT·sObs + (1−OBS_BLEND_WEIGHT)·sSched − TRAIL_M`
+  (`OBS_BLEND_WEIGHT = 0.75`, systematic `TRAIL_M = 10 m`). Error `e = target − s` drives an
+  **asymmetric three-regime** controller:
+  - `e < −HARD_BRAKE_ENTER_M` (40 m, sim overran reality) → **crawl regime**: `vTarget ≤ CRAWL_V_MS`
+    (1.0 m/s), latched with hysteresis until `e` recovers above `−HARD_BRAKE_EXIT_M` (12 m).
+  - `e > BOLD_CATCHUP_ERR_M` (40 m, sim behind) → **bold catch-up**: pace factor up to
+    `CATCHUP_MAX_FACTOR` (1.5).
+  - between → **gentle proportional**: factor `clamp(1 + e/PACE_GAIN_M, MIN_PACE_FACTOR, GENTLE_MAX_FACTOR)`
+    = `clamp(1 + e/120, 0.55, 1.35)`.
+  All regimes stay under the braking envelope (`vTarget ≤ vAllowed`) — catch-up can never overrun
+  a curve/stop. `s` NEVER decreases.
+- Hard teleport: only when the projected OBSERVATION (`sObs`, not the timetable) disagrees with `s`
+  by more than `TELEPORT_THRESHOLD_M` (500 m) → snap to `sObs`, reseed stop state, stamp
+  `lastTeleportMs` (renderer may dip opacity). New poll data otherwise converges via the pace
+  controller with no position jumps.
 
 Sections (articulated bending): model spec gives section lengths `L_i` and gaps. Head at `s`;
 section i center at `s − (Σ previous lengths + gaps) − L_i/2`; its position/bearing from
@@ -100,11 +122,19 @@ Layers stacked, banded by zoom with opacity crossfades:
 |---|---|---|
 | 1 | < 13.2 | CircleLayer dots (PID red, white stroke) |
 | 2 | 13.2–14.8 | CircleLayer badge circle + SymbolLayer line number text |
-| 3 | 14.8–16.6 | ModelLayer, modelScale interpolated 2.6→1.0 by zoom (comically large → real) |
-| 4 | ≥ 16.6 | ModelLayer real scale 1.0 |
+| 3 | 14.8–17.0 | ModelLayer, modelScale on a deliberately cartoonish `exponential(1.6)` curve: **5×** at band entry (14.8, toy trams) → 3.2× (15.6) → 1.6× (16.4) → real-world **1×** only at z17 |
+| 4 | ≥ 17.0 | ModelLayer real scale 1.0 |
+
+Band edges live in `mapStyle.ts` (`BAND_DOTS_TO_BADGES` 13.2, `BAND_BADGES_TO_MODELS` 14.8,
+`BAND_FADE` 0.3 crossfade); sections source feeds from `SECTIONS_FEED_MIN_ZOOM` 14.6 (warm-up
+before the band). Comic curve top zoom is `MODEL_COMIC_REAL_SCALE_ZOOM` 17.0 in `TramLayers.tsx`
+(the older `MODEL_REAL_SCALE_ZOOM` 16.6 const in `mapStyle.ts` is now vestigial — the live curve
+is in TramLayers).
 
 - ModelLayer style: `modelId: ['get','modelKey']`, `modelRotation: [0,0,['get','bearing']]`
-  (+ HEADING_OFFSET calibration const), `modelEmissiveStrength: 1.2`.
+  (NO heading offset — trams authored front-toward −Z so `z = bearing` faces correctly),
+  `modelEmissiveStrength: 1.2`. `modelCastShadows`/`modelReceiveShadows` are **off** (iteration-4
+  thermal fix — per-model shadow passes were the top GPU cost at pitch).
 
 ### SPIKE-VERIFIED conventions (2026-07-11, simulator, rnmapbox 10.3.2 / Mapbox iOS 11.20.1)
 - Data-driven `modelId: ['get','modelKey']` AND `modelRotation: [0,0,['get','bearing']]` WORK.
@@ -116,17 +146,52 @@ Layers stacked, banded by zoom with opacity crossfades:
   ⇒ CONVENTION: author trams with FRONT toward **−Z**; then `z = bearing` faces correctly.
 - `ModelLayer` needs `slot="top"` over the Standard style; add layers only after style load
   (models registered before layers — <Models> first works).
-- Do NOT use `<StyleImport id="basemap">` with a direct `styleURL: StyleURL.Standard` — that
-  import id does not exist ("Import basemap does not exist"). Either skip Standard config or use
-  a styleJSON with `imports: [{id:'basemap', url:'mapbox://styles/mapbox/standard', config:{...}}]`.
 - Hot reload does NOT re-register models/layers reliably — restart the app when iterating on map code.
+
+### POST-SPIKE quirks (verified on-device during the fix waves — supersede the spike notes)
+- **Base style — styleURL, NOT a custom styleJSON.** The spike guessed a custom styleJSON with
+  `imports:[{id:'basemap', url:'…/standard'}]` would enable live re-lighting. On device that path
+  rendered a **black basemap**. Live layout (`index.tsx`) uses `styleURL="mapbox://styles/mapbox/standard"`
+  directly and mounts `<StyleImport id="basemap" existing config={…}>` **only after
+  `onDidFinishLoadingStyle`** — applying config before the style loads logs "Import basemap does
+  not exist" and is silently dropped. (`buildMapStyleJSON` in `mapStyle.ts` is the abandoned
+  styleJSON path, kept for reference; it is not mounted.)
+- **Sources are imperative-push-only (Fabric + rnmapbox quirk).** Every data ShapeSource
+  (`trams-points`, `trams-sections`, `route-network`, `route-stops`, planner overlay) is mounted
+  ONCE with a stable empty FeatureCollection and receives data ONLY via `setNativeProps` on a
+  timer/frame. If React ever commits a changing `shape` prop the native source reverts or never
+  applies. Layer STYLE props may still change through React freely.
+- **ShapeSource children must be a plain element array** — no `false`/`undefined` holes. rnmapbox
+  clones each child to inject `sourceID`; a hole crashes it. Optional layers (3D totem, extra model
+  layer) are pushed into an array conditionally, never rendered as `{cond && <Layer/>}` inline.
+- **Data-driven `modelId: ['get','modelKey']` works for the stop totem too**, not just trams — one
+  totem GLB registered under `stop-totem`, every stop feature carries `modelKey: 'stop-totem'`
+  (`RouteNetwork.tsx`). The totem ModelLayer is mounted one commit AFTER the GLB registers
+  (`stopTotemReady` → 150 ms defer) to honor the models-before-ModelLayers rule.
+- **GLB asset URIs must resolve before `<Models>` mounts** — `useTramModels` downloads every GLB via
+  `Asset.fromModule().downloadAsync()` and passes `file://` `localUri` strings; `<Models>` (and any
+  ModelLayer) render only once the whole map is non-null (`require()` query-stripping bug from the
+  spike still applies in dev).
 - Transparent CircleLayer across all zooms for hit-testing (ModelLayer taps unreliable).
-- Route lines: LineLayer over union of loaded shapes (dark red 7A0603 + lighter casing),
-  below tram layers; selected line highlighted.
-- Stops: CircleLayer small, visible ≥ zoom 14, from stops of loaded shapes.
-- Camera follow: per engine frame `camera.setCamera({centerCoordinate, animationMode:'linearTo',
-  animationDuration: frameMs})`, optional heading-lock. Style: Mapbox Standard via StyleImport
-  `config={{lightPreset: auto by time, show3dObjects:'true'}}`.
+- Route lines: LineLayer over union of loaded shapes (PID red), below tram layers; selected line
+  highlighted gold.
+- Stops: CircleLayer small, visible ≥ zoom 14, from stops of loaded shapes; NAME labels ≥ 15.8;
+  3D totem ModelLayer ≥ 16.
+- Camera follow (`TramLayers.tsx`): **NOT per-frame**. Retargeting `setCamera` on every 16 ms tick
+  restarts the native Mapbox animator 60×/s and chokes it into ~1 Hz stutter (device-reported
+  regression). Instead: retarget every `CAMERA_RETARGET_MS` (80 ms, ~12.5 Hz) with a longer
+  `CAMERA_GLIDE_MS` (170 ms) `linearTo` glide — each glide starts before the previous ends, so
+  they overlap into continuous motion. Default chase view is FROM BEHIND (`heading = tram bearing`,
+  `FOLLOW_ZOOM` 17.5, `FOLLOW_PITCH` 60) so buildings don't occlude the tram; the center is
+  lead-projected (`leadTarget`) toward where the tram will be at the next retarget.
+- Follow gestures **persist and do NOT cancel follow** (iteration 4): while the user's fingers are
+  on the map the retarget loop yields; their zoom/pitch and heading-**offset** (relative to the
+  tram bearing) are captured via `FollowGestureState` (owned by the map screen's `onCameraChanged`)
+  and re-applied on every subsequent retarget for the rest of that follow session. A new follow (or
+  follow end) resets to defaults. Follow is stopped only from the banner (tap-to-stop), the tram
+  disappearing, or another fly-to.
+- Style: Mapbox Standard. `config={{...STANDARD_CONFIG, lightPreset}}` (auto by Prague time, or a
+  settings override), re-lit live via StyleImport.
 
 ## UI (iOS 26 Liquid Glass)
 
