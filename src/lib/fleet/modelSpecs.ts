@@ -175,3 +175,25 @@ export const MODEL_ASSETS: Record<string, number> = {
   '52t-d': glbAsset(() => require('../../../assets/models/52t-d.glb')),
   '52t-e': glbAsset(() => require('../../../assets/models/52t-e.glb')),
 };
+
+/**
+ * Prague tram-stop totem GLB (JŽP-style sign pole), for the map's stop markers.
+ * Kept as its own export rather than in MODEL_ASSETS on purpose: the model-specs
+ * test asserts MODEL_ASSETS has no keys that a TramModelSpec doesn't reference,
+ * and the totem is not a tram. Register it alongside MODEL_ASSETS when loading
+ * <Models>, e.g. `{ ...MODEL_ASSETS, 'stop-totem': STOP_TOTEM_ASSET }`.
+ */
+export const STOP_TOTEM_ASSET: number = glbAsset(
+  () => require('../../../assets/models/stop-totem.glb'),
+);
+
+/** UI thumbnail (3/4-front, transparent bg) per tram model, for lists/sheets. */
+export const MODEL_IMAGES: Record<TramModelId, number> = {
+  t3: glbAsset(() => require('../../../assets/images/trams/t3.png')),
+  t3rp: glbAsset(() => require('../../../assets/images/trams/t3rp.png')),
+  t3rplf: glbAsset(() => require('../../../assets/images/trams/t3rplf.png')),
+  kt8d5: glbAsset(() => require('../../../assets/images/trams/kt8d5.png')),
+  '14t': glbAsset(() => require('../../../assets/images/trams/14t.png')),
+  '15t': glbAsset(() => require('../../../assets/images/trams/15t.png')),
+  '52t': glbAsset(() => require('../../../assets/images/trams/52t.png')),
+};

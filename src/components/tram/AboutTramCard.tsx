@@ -4,6 +4,7 @@
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { StyleSheet, Text, useColorScheme, View } from 'react-native';
 
+import { TramModelImage, tramModelImageSource } from '@/components/tram/TramModelImage';
 import { Colors, Tram } from '@/constants/theme';
 import type { TramModelSpec, TramSnapshot } from '@/lib/types';
 
@@ -67,6 +68,11 @@ export function AboutTramCard({ model, snapshot }: AboutTramCardProps) {
 
   return (
     <View style={[styles.card, { backgroundColor: cardFill }]}>
+      {tramModelImageSource(model.id) != null && (
+        <View style={[styles.illustrationWrap, { borderBottomColor: separator }]}>
+          <TramModelImage modelId={model.id} height={110} style={styles.illustration} />
+        </View>
+      )}
       <SpecRow icon="building.2" label="Manufacturer" value={model.manufacturer} />
       <SpecRow icon="calendar" label="Built" value={model.yearsBuilt} />
       <SpecRow
@@ -120,6 +126,14 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     borderRadius: 16,
     paddingHorizontal: 14,
+  },
+  illustrationWrap: {
+    alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 12,
+  },
+  illustration: {
+    maxWidth: '100%',
   },
   specRow: {
     alignItems: 'center',

@@ -1,11 +1,13 @@
 // Search sheet — /search. Glass search field + live sections as you type:
-// lines (badge grid), trams (reg-number match), stops (diacritics-insensitive).
-// Keeps the last 6 searches in a module-level in-memory list (not persisted).
+// lines (badge grid), trams (reg-number match), stops (diacritics-insensitive,
+// opening the live arrivals board). Keeps the last 6 searches in a
+// module-level in-memory list (not persisted).
 import * as Haptics from 'expo-haptics';
 import { useRouter, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useMemo, useState } from 'react';
 import {
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,13 +17,14 @@ import {
   View,
 } from 'react-native';
 
+import { AcSnowflake } from '@/components/tram/TramModelImage';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
+import { SheetContent } from '@/components/ui/SheetContent';
 import { Colors, Fonts, Spacing, Tram } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
 import { normalizeName } from '@/lib/planner/network';
 import { searchStops } from '@/lib/planner/planner';
-import { useSelectionStore } from '@/stores/selection';
 import type { TramPublicState } from '@/lib/types';
 
 // ── Recent searches (in-memory only; survives sheet close, not app restart) ──
@@ -56,7 +59,6 @@ export default function SearchSheet() {
   const dark = scheme === 'dark';
   const c = Colors[dark ? 'dark' : 'light'];
 
-  const requestFlyTo = useSelectionStore((s) => s.requestFlyTo);
   const [query, setQuery] = useState('');
   const q = query.trim();
 
@@ -124,23 +126,33 @@ export default function SearchSheet() {
   }, [q, geometries]);
 
   const openLine = (id: string): void => {
+    Keyboard.dismiss();
     void Haptics.selectionAsync();
     addRecent({ type: 'line', id });
     router.push(`/line/${id}` as Href);
   };
 
   const openTram = (state: TramPublicState): void => {
+    Keyboard.dismiss();
     void Haptics.selectionAsync();
     addRecent({ type: 'tram', key: state.key, line: state.snapshot.line });
-    router.push(`/tram/${state.key}` as Href);
+    router.push(`/tram/${encodeURIComponent(state.key)}` as Href);
   };
 
+  // Stop result → the live arrivals board sheet (which has its own
+  // "Show on map" action). Falls back to a plain fly-to when we somehow don't
+  // know the stop (should not happen — matches come from loaded geometries).
   const openStop = (name: string, coordinates?: [number, number]): void => {
-    const coords = coordinates ?? stopCoords.get(normalizeName(name));
-    if (!coords) return;
+    Keyboard.dismiss();
+    const key = normalizeName(name);
+    const coords = coordinates ?? stopCoords.get(key);
     void Haptics.selectionAsync();
-    addRecent({ type: 'stop', name, coordinates: coords });
-    requestFlyTo({ coordinates: coords, zoom: 16.5 });
+    addRecent({ type: 'stop', name, coordinates: coords ?? [0, 0] });
+    router.push(`/stop/${encodeURIComponent(key)}` as Href);
+  };
+
+  const closeSheet = (): void => {
+    Keyboard.dismiss();
     router.back();
   };
 
@@ -153,9 +165,10 @@ export default function SearchSheet() {
         const live = states.find((s) => s.key === r.key);
         if (live) openTram(live);
         else {
+          Keyboard.dismiss();
           void Haptics.selectionAsync();
           addRecent(r);
-          router.push(`/tram/${r.key}` as Href);
+          router.push(`/tram/${encodeURIComponent(r.key)}` as Href);
         }
         break;
       }
@@ -169,6 +182,7 @@ export default function SearchSheet() {
 
   return (
     <GlassPanel style={styles.root}>
+      <SheetContent>
       <View style={styles.fieldWrap}>
         <GlassPanel variant="clear" style={styles.field}>
           <SymbolView name="magnifyingglass" size={17} tintColor={c.textSecondary} />
@@ -187,7 +201,7 @@ export default function SearchSheet() {
           />
         </GlassPanel>
         <Pressable
-          onPress={() => router.back()}
+          onPress={closeSheet}
           hitSlop={8}
           accessibilityLabel="Close"
           style={({ pressed }) => pressed && styles.pressed}
@@ -200,14 +214,16 @@ export default function SearchSheet() {
           />
         </Pressable>
       </View>
+      </SheetContent>
 
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={styles.scrollBottom}
         showsVerticalScrollIndicator={false}
       >
+        <SheetContent style={styles.listContent}>
         {q.length === 0 ? (
           <RecentsSection dark={dark} onOpen={openRecent} />
         ) : hasResults ? (
@@ -243,6 +259,7 @@ export default function SearchSheet() {
                     title={s.key}
                     titleTabular
                     subtitle={s.model.name}
+                    trailing={<AcSnowflake airConditioned={s.snapshot.airConditioned} />}
                     textColor={c.text as string}
                     secondaryColor={c.textSecondary as string}
                   />
@@ -288,6 +305,7 @@ export default function SearchSheet() {
             </Text>
           </View>
         )}
+        </SheetContent>
       </ScrollView>
     </GlassPanel>
   );
@@ -309,6 +327,7 @@ function ResultRow({
   title,
   subtitle,
   titleTabular,
+  trailing,
   textColor,
   secondaryColor,
   dark,
@@ -318,6 +337,7 @@ function ResultRow({
   title: string;
   subtitle?: string;
   titleTabular?: boolean;
+  trailing?: React.ReactNode;
   textColor: string;
   secondaryColor: string;
   dark: boolean;
@@ -349,6 +369,7 @@ function ResultRow({
           </Text>
         )}
       </View>
+      {trailing}
       <SymbolView name="chevron.right" size={11} tintColor={secondaryColor} />
     </Pressable>
   );
@@ -446,9 +467,11 @@ const styles = StyleSheet.create({
     fontSize: 17,
     padding: 0,
   },
+  scrollBottom: {
+    paddingBottom: Spacing.six,
+  },
   listContent: {
     paddingHorizontal: Spacing.three,
-    paddingBottom: Spacing.six,
     gap: Spacing.four,
   },
   section: { gap: Spacing.one },

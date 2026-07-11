@@ -1,6 +1,6 @@
 // Tram detail form sheet — floats over the live map (transparent formSheet,
 // detents [0.38, 0.95]). Live data via useTramState(key) at ~1 Hz with a local
-// 1 s ticker for the next-stop ETA countdown between runtime updates.
+// 1 s ticker for the next-stop ETA countdown and the "Updated Ns ago" stat.
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
@@ -9,9 +9,11 @@ import { Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'r
 
 import { AboutTramCard } from '@/components/tram/AboutTramCard';
 import { StopsTimeline } from '@/components/tram/StopsTimeline';
+import { AcSnowflake, TramModelImage } from '@/components/tram/TramModelImage';
 import { DelayPill } from '@/components/ui/DelayPill';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
+import { SheetContent } from '@/components/ui/SheetContent';
 import { Colors, Tram } from '@/constants/theme';
 import { getRuntime, useLoadedGeometries, useTramState } from '@/hooks/tramData';
 import type { TramPublicState } from '@/lib/types';
@@ -48,6 +50,22 @@ function useEtaCountdown(etaS: number | null): number | null {
 function fmtEta(s: number): string {
   if (s < 60) return `${s} s`;
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/** Now-ms ticking every second, for the "Updated Ns ago" stat. */
+function useNowTick(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return now;
+}
+
+/** '4s' / '2m' age label for the last real AVL observation. */
+function fmtAge(ageS: number): string {
+  if (ageS < 120) return `${ageS}s`;
+  return `${Math.floor(ageS / 60)}m`;
 }
 
 const PHASE_META: Record<TramPublicState['phase'], { label: string; icon: SFSymbol }> = {
@@ -184,6 +202,11 @@ export default function TramDetailSheet() {
   );
 
   const etaS = useEtaCountdown(state?.nextStopEtaS ?? null);
+  const nowMs = useNowTick();
+  // Age of the last REAL AVL observation (origin_timestamp), live-ticking.
+  const updatedAgoS = state
+    ? Math.max(0, Math.round((nowMs - state.snapshot.observedAtMs) / 1000))
+    : null;
 
   const onFollow = () => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -209,9 +232,9 @@ export default function TramDetailSheet() {
     <GlassPanel style={styles.root}>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
+        <SheetContent style={styles.content}>
         {!state && !gone && (
           <View style={styles.goneWrap}>
             <SymbolView name="antenna.radiowaves.left.and.right" size={36} tintColor={c.textSecondary} />
@@ -227,16 +250,25 @@ export default function TramDetailSheet() {
             <View style={styles.header}>
               <LineBadge line={state.snapshot.line} size="lg" />
               <View style={styles.headerText}>
-                <Text style={[styles.headsign, { color: c.text }]} numberOfLines={1}>
-                  {state.snapshot.headsign}
-                </Text>
-                <Text style={[styles.subtitle, { color: c.textSecondary }]} numberOfLines={1}>
-                  {state.model.name}
-                  {state.snapshot.registrationNumber != null &&
-                    ` · #${state.snapshot.registrationNumber}`}
-                </Text>
+                <View style={styles.headsignRow}>
+                  <Text
+                    style={[styles.headsign, { color: c.text }]}
+                    numberOfLines={1}
+                  >
+                    {state.snapshot.headsign}
+                  </Text>
+                  <DelayPill delaySeconds={state.snapshot.delaySeconds} />
+                </View>
+                <View style={styles.subtitleRow}>
+                  <Text style={[styles.subtitle, { color: c.textSecondary }]} numberOfLines={1}>
+                    {state.model.name}
+                    {state.snapshot.registrationNumber != null &&
+                      ` · #${state.snapshot.registrationNumber}`}
+                  </Text>
+                  <AcSnowflake airConditioned={state.snapshot.airConditioned} size={11} />
+                </View>
               </View>
-              <DelayPill delaySeconds={state.snapshot.delaySeconds} />
+              <TramModelImage modelId={state.model.id} height={72} style={styles.headerImage} />
             </View>
 
             {/* Live row */}
@@ -246,12 +278,21 @@ export default function TramDetailSheet() {
                 { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.55)' },
               ]}
             >
-              <View style={styles.liveCell}>
-                <SymbolView name="speedometer" size={15} tintColor={c.textSecondary} />
+              <View
+                style={styles.liveCell}
+                accessibilityLabel={
+                  updatedAgoS != null ? `Updated ${updatedAgoS} seconds ago` : 'Updating'
+                }
+              >
+                <SymbolView
+                  name="antenna.radiowaves.left.and.right"
+                  size={15}
+                  tintColor={updatedAgoS != null && updatedAgoS <= 15 ? Tram.onTime : c.textSecondary}
+                />
                 <Text style={[styles.liveBig, { color: c.text }]} allowFontScaling={false}>
-                  {Math.round(state.simSpeedKmh)}
+                  {updatedAgoS != null ? fmtAge(updatedAgoS) : '· ·'}
                 </Text>
-                <Text style={[styles.liveCaption, { color: c.textSecondary }]}>km/h</Text>
+                <Text style={[styles.liveCaption, { color: c.textSecondary }]}>updated ago</Text>
               </View>
               <View
                 style={[
@@ -323,6 +364,7 @@ export default function TramDetailSheet() {
             <AboutTramCard model={state.model} snapshot={state.snapshot} />
           </>
         )}
+        </SheetContent>
       </ScrollView>
     </GlassPanel>
   );
@@ -342,8 +384,19 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   headerText: { flex: 1, gap: 2 },
-  headsign: { fontSize: 20, fontWeight: '700', letterSpacing: -0.3 },
-  subtitle: { fontSize: 13 },
+  headsignRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  headsign: { flexShrink: 1, fontSize: 20, fontWeight: '700', letterSpacing: -0.3 },
+  subtitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 5,
+  },
+  subtitle: { flexShrink: 1, fontSize: 13 },
+  headerImage: { width: 116 },
   liveRow: {
     alignItems: 'stretch',
     borderCurve: 'continuous',

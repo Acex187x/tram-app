@@ -13,11 +13,14 @@ import {
   StyleSheet,
   Text,
   useColorScheme,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
+import { AcSnowflake } from '@/components/tram/TramModelImage';
 import { DelayPill } from '@/components/ui/DelayPill';
 import { GlassPanel } from '@/components/ui/GlassPanel';
+import { SHEET_CONTENT_MAX_WIDTH } from '@/components/ui/SheetContent';
 import { isNightLine, LineBadge } from '@/components/ui/LineBadge';
 import { Colors, Fonts, Spacing, Tram } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
@@ -42,6 +45,9 @@ export default function LineSheet() {
   const router = useRouter();
   const scheme = useColorScheme();
   const c = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  // iPad: the sheet's glass is full-width; cap + center the list content.
+  const { width } = useWindowDimensions();
+  const wide = width > SHEET_CONTENT_MAX_WIDTH;
 
   const setSelectedLineId = useSelectionStore((s) => s.setSelectedLineId);
   const requestFlyTo = useSelectionStore((s) => s.requestFlyTo);
@@ -305,7 +311,10 @@ export default function LineSheet() {
         ListEmptyComponent={empty}
         ListFooterComponent={rows.length > 0 ? footer : null}
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[
+          styles.listContent,
+          wide && { alignSelf: 'center' as const, width: SHEET_CONTENT_MAX_WIDTH },
+        ]}
         showsVerticalScrollIndicator={false}
       />
     </GlassPanel>
@@ -413,6 +422,7 @@ function TramRow({
         <Text numberOfLines={1} style={[styles.tramModel, { color: c.textSecondary }]}>
           {shortModelName(state.model.name)}
         </Text>
+        <AcSnowflake airConditioned={state.snapshot.airConditioned} />
         <DelayPill delaySeconds={state.snapshot.delaySeconds} />
         <SymbolView name="chevron.right" size={11} tintColor={c.textSecondary} />
       </Pressable>

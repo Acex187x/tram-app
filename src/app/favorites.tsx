@@ -1,8 +1,16 @@
 // /favorites form sheet — starred trams (with live in-service status) and
 // starred lines (with live active-tram counts), floating over the live map.
+// On iPad the content column is capped and the lines become a 2-up grid.
 import { SymbolView } from 'expo-symbols';
 import { Fragment, useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  useColorScheme,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import {
   FavoriteLineRow,
@@ -20,6 +28,7 @@ import {
 } from '@/components/favorites/InsetGroup';
 import { SheetHeader } from '@/components/favorites/SheetHeader';
 import { GlassPanel } from '@/components/ui/GlassPanel';
+import { SheetContent, SHEET_CONTENT_MAX_WIDTH } from '@/components/ui/SheetContent';
 import { Colors, Tram } from '@/constants/theme';
 import { useAllTramStates } from '@/hooks/tramData';
 import { useFavoritesStore } from '@/stores/favorites';
@@ -30,6 +39,10 @@ export default function FavoritesScreen() {
   const favoriteTrams = useFavoritesStore((s) => s.favoriteTrams);
   const favoriteLines = useFavoritesStore((s) => s.favoriteLines);
   const states = useAllTramStates();
+  // iPad: the sheet glass is full-width; grid-ify the lines section when the
+  // (already width-capped) content column is wide enough for two columns.
+  const { width } = useWindowDimensions();
+  const gridLines = width > SHEET_CONTENT_MAX_WIDTH;
 
   const trams = useMemo(
     () => [...favoriteTrams].sort((a, b) => Number(a) - Number(b)),
@@ -51,12 +64,15 @@ export default function FavoritesScreen() {
 
   return (
     <GlassPanel style={styles.sheet}>
-      <SheetHeader title="Favorites" />
+      <SheetContent>
+        <SheetHeader title="Favorites" />
+      </SheetContent>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={styles.content}
+        contentContainerStyle={styles.scrollBottom}
         showsVerticalScrollIndicator={false}
       >
+        <SheetContent style={styles.content}>
         {nothingStarred ? (
           <View style={styles.empty}>
             <SymbolView name="star" size={46} weight="light" tintColor={Tram.gold} />
@@ -94,6 +110,14 @@ export default function FavoritesScreen() {
                     icon="star"
                     text="Open a line from any tram and star it to track it here."
                   />
+                ) : gridLines ? (
+                  <View style={styles.lineGrid}>
+                    {lines.map((line) => (
+                      <View key={line} style={styles.lineGridCell}>
+                        <FavoriteLineRow line={line} activeCount={lineCounts.get(line) ?? 0} />
+                      </View>
+                    ))}
+                  </View>
                 ) : (
                   lines.map((line, i) => (
                     <Fragment key={line}>
@@ -106,6 +130,7 @@ export default function FavoritesScreen() {
             </View>
           </>
         )}
+        </SheetContent>
       </ScrollView>
     </GlassPanel>
   );
@@ -115,10 +140,19 @@ const styles = StyleSheet.create({
   sheet: {
     flex: 1,
   },
+  scrollBottom: {
+    paddingBottom: 48,
+  },
   content: {
     gap: 24,
     padding: 16,
-    paddingBottom: 48,
+  },
+  lineGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  lineGridCell: {
+    width: '50%',
   },
   empty: {
     alignItems: 'center',

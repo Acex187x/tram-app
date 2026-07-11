@@ -26,6 +26,7 @@ export default function RootLayout() {
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="tram/[key]" options={sheet([0.38, 0.95])} />
         <Stack.Screen name="line/[id]" options={sheet([0.45, 0.95])} />
+        <Stack.Screen name="stop/[key]" options={sheet([0.45, 0.95])} />
         <Stack.Screen name="favorites" options={sheet([0.5, 0.95])} />
         <Stack.Screen name="planner" options={sheet([0.6, 0.95])} />
         <Stack.Screen name="search" options={sheet([0.5, 0.95])} />

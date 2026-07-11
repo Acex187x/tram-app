@@ -19,6 +19,7 @@ import {
 import { InsetGroup, RowSeparator, SectionLabel } from '@/components/favorites/InsetGroup';
 import { SheetHeader } from '@/components/favorites/SheetHeader';
 import { GlassPanel } from '@/components/ui/GlassPanel';
+import { SheetContent } from '@/components/ui/SheetContent';
 import { Colors, Tram } from '@/constants/theme';
 import { useSettingsStore, type LightPreset } from '@/stores/settings';
 
@@ -173,12 +174,15 @@ export default function SettingsScreen() {
 
   return (
     <GlassPanel style={styles.sheet}>
-      <SheetHeader title="Settings" />
+      <SheetContent>
+        <SheetHeader title="Settings" />
+      </SheetContent>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={styles.content}
+        contentContainerStyle={styles.scrollBottom}
         showsVerticalScrollIndicator={false}
       >
+        <SheetContent style={styles.content}>
         <View>
           <SectionLabel>Map</SectionLabel>
           <InsetGroup>
@@ -255,6 +259,7 @@ export default function SettingsScreen() {
         <Text style={[styles.footer, { color: palette.textSecondary }]}>
           Made with ❤️ for Prague trams
         </Text>
+        </SheetContent>
       </ScrollView>
     </GlassPanel>
   );
@@ -264,10 +269,12 @@ const styles = StyleSheet.create({
   sheet: {
     flex: 1,
   },
+  scrollBottom: {
+    paddingBottom: 48,
+  },
   content: {
     gap: 24,
     padding: 16,
-    paddingBottom: 48,
   },
   row: {
     alignItems: 'center',

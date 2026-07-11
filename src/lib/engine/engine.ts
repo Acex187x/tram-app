@@ -10,7 +10,7 @@ import type {
   TramSnapshot,
 } from '@/lib/types';
 import { bearingAt, pointAt, projectPointToPolyline } from '../geo/polyline';
-import { buildSpeedProfile, type SpeedProfile } from './speedProfile';
+import { A_BRK, buildSpeedProfile, type SpeedProfile } from './speedProfile';
 import {
   applySnapshot,
   createSim,
@@ -28,12 +28,39 @@ export const STALE_AFTER_MS = 90_000;
 const REANCHOR_MAX_OFFSET_M = 100;
 /** Max dt for one engine tick, seconds (larger gaps are clamped). */
 const MAX_ENGINE_DT_S = 0.25;
+/** Min clearance between a follower's nose and its leader's tail, meters. */
+export const QUEUE_GAP_M = 3;
+/**
+ * Second unit of a coupled two-car set trails this far behind the first, m.
+ * Mirrors render/featureBuilder's COUPLED_OFFSET_M (engine must not import
+ * render modules) — a coupled set occupies totalLengthM + this along the track.
+ */
+export const COUPLED_TRAILER_OFFSET_M = 14.5;
 
 export interface TramEngineOptions {
   /** Maps a snapshot to its fleet model spec (injected — keeps engine pure). */
   resolveModel: (snapshot: TramSnapshot) => TramModelSpec;
   /** Override daytime detection (07:00–19:00 Prague time by default). */
   isDaytime?: (nowMs: number) => boolean;
+  /**
+   * Whether this tram runs as a coupled two-car set (adds trailer length to
+   * queue spacing). Default mirrors fleet/registry's isLikelyCoupledPair:
+   * runsCoupled models on numeric day lines 1–26, excluding line 23.
+   */
+  isCoupled?: (snapshot: TramSnapshot, model: TramModelSpec) => boolean;
+}
+
+/** Default coupled-pair rule (kept in sync with fleet/registry). */
+function defaultIsCoupled(snapshot: TramSnapshot, model: TramModelSpec): boolean {
+  if (!model.runsCoupled || snapshot.line === '23') return false;
+  const n = Number(snapshot.line);
+  return Number.isInteger(n) && n >= 1 && n <= 26;
+}
+
+/** Queue order within one shape: ascending s, deterministic tie-break by key. */
+function compareBySimDist(a: TramSim, b: TramSim): number {
+  if (a.sM !== b.sM) return a.sM - b.sM;
+  return a.snapshot.key < b.snapshot.key ? -1 : a.snapshot.key > b.snapshot.key ? 1 : 0;
 }
 
 interface Entry {
@@ -79,6 +106,13 @@ export class TramEngine {
   private daytime: boolean | null = null;
   private lastTickMs: number | null = null;
   private readonly opts: TramEngineOptions;
+  /**
+   * Sims sharing a shapeId (only groups of ≥ 2 — singletons need no queue),
+   * rebuilt lazily after every ingest (sims are created/replaced/dropped only
+   * there). Persisted so tick() allocates nothing on the hot path.
+   */
+  private queueGroups: TramSim[][] = [];
+  private queueDirty = true;
 
   constructor(opts: TramEngineOptions) {
     this.opts = opts;
@@ -86,6 +120,13 @@ export class TramEngine {
 
   private isDaytime(nowMs: number): boolean {
     return (this.opts.isDaytime ?? defaultIsDaytime)(nowMs);
+  }
+
+  /** Physical track length occupied by a tram, incl. any coupled trailer, m. */
+  private tramLengthM(snapshot: TramSnapshot): number {
+    const model = this.opts.resolveModel(snapshot);
+    const coupled = (this.opts.isCoupled ?? defaultIsCoupled)(snapshot, model);
+    return model.totalLengthM + (coupled ? COUPLED_TRAILER_OFFSET_M : 0);
   }
 
   private getProfile(geometry: RouteGeometry, daytime: boolean): SpeedProfile {
@@ -141,15 +182,17 @@ export class TramEngine {
       }
 
       const profile = this.getProfile(geometry, daytime);
+      const lengthM = this.tramLengthM(snapshot);
 
       if (entry.sim && entry.tripId === snapshot.tripId) {
         applySnapshot(entry.sim, snapshot, nowMs);
+        entry.sim.lengthM = lengthM; // line (→ coupling) may change mid-trip
       } else if (entry.sim) {
         // Trip changed: swap geometry, keeping a smooth position when the old
         // world position lies close to the new shape and near the schedule.
         const oldSim = entry.sim;
         const oldPos = pointAt(oldSim.geometry.coordinates, oldSim.geometry.cumDistM, oldSim.sM);
-        const newSim = createSim(geometry, profile, snapshot, nowMs);
+        const newSim = createSim(geometry, profile, snapshot, nowMs, lengthM);
         const proj = projectPointToPolyline(oldPos, geometry.coordinates, geometry.cumDistM);
         const sTarget = targetDistAt(newSim, nowMs);
         if (
@@ -163,7 +206,7 @@ export class TramEngine {
         }
         entry.sim = newSim;
       } else {
-        entry.sim = createSim(geometry, profile, snapshot, nowMs);
+        entry.sim = createSim(geometry, profile, snapshot, nowMs, lengthM);
       }
       entry.tripId = snapshot.tripId;
     }
@@ -172,6 +215,12 @@ export class TramEngine {
     for (const [key, entry] of this.entries) {
       if (nowMs - entry.lastSeenMs > STALE_AFTER_MS) this.entries.delete(key);
     }
+
+    // Membership may have changed (created/replaced/dropped sims) and
+    // applySnapshot may have hard-teleported a sim into another tram — resolve
+    // overlaps right away rather than waiting for the next tick.
+    this.queueDirty = true;
+    this.applyQueueConstraints();
   }
 
   /** Advance all sims to nowMs. dt derives from the previous tick (clamped). */
@@ -186,6 +235,59 @@ export class TramEngine {
     for (const entry of this.entries.values()) {
       if (entry.sim) tickSim(entry.sim, nowMs, dtS);
     }
+    // Car-following runs AFTER all position updates so queues compress
+    // correctly regardless of iteration order.
+    this.applyQueueConstraints();
+  }
+
+  /** Rebuild shapeId → sims queue groups (only groups of ≥ 2 members). */
+  private rebuildQueueGroups(): void {
+    this.queueDirty = false;
+    const byShape = new Map<string, TramSim[]>();
+    for (const entry of this.entries.values()) {
+      const sim = entry.sim;
+      if (!sim) continue;
+      const shapeId = sim.geometry.shapeId;
+      const group = byShape.get(shapeId);
+      if (group) group.push(sim);
+      else byShape.set(shapeId, [sim]);
+    }
+    this.queueGroups.length = 0;
+    for (const group of byShape.values()) {
+      if (group.length > 1) this.queueGroups.push(group);
+    }
+  }
+
+  /**
+   * Car-following/queueing: within one shapeId, a follower's nose may never
+   * come closer than QUEUE_GAP_M to its leader's tail (leader.sM − leader
+   * length incl. coupled trailer). Iterates each queue leader → follower so a
+   * dwelling/teleported leader compresses the whole queue in one pass:
+   *  - inside the buffer → clamp s to the limit and cap speed to the leader's
+   *    (a follower queues behind a dwelling leader and departs after it clears);
+   *  - approaching it → cap speed to leader speed + braking envelope over the
+   *    remaining gap, so followers decelerate smoothly instead of slamming.
+   * Trams on different shapeIds (opposite direction / other variants) are
+   * intentionally NOT constrained.
+   */
+  private applyQueueConstraints(): void {
+    if (this.queueDirty) this.rebuildQueueGroups();
+    for (const group of this.queueGroups) {
+      group.sort(compareBySimDist);
+      for (let i = group.length - 2; i >= 0; i--) {
+        const leader = group[i + 1];
+        const follower = group[i];
+        const limit = leader.sM - leader.lengthM - QUEUE_GAP_M;
+        const gap = limit - follower.sM;
+        if (gap <= 0) {
+          follower.sM = Math.max(0, limit);
+          follower.vMs = Math.min(follower.vMs, leader.vMs);
+        } else {
+          const vCap = leader.vMs + Math.sqrt(2 * A_BRK * gap);
+          if (follower.vMs > vCap) follower.vMs = vCap;
+        }
+      }
+    }
   }
 
   /** Public state for every tracked tram (UI lists, feature builder input). */
@@ -193,6 +295,11 @@ export class TramEngine {
     const out: TramPublicState[] = [];
     for (const entry of this.entries.values()) out.push(this.toPublicState(entry, nowMs));
     return out;
+  }
+
+  /** Explicit-timestamp alias of getStates (render-side callers). */
+  getStatesAt(nowMs: number): TramPublicState[] {
+    return this.getStates(nowMs);
   }
 
   /** Public state for one tram, or undefined if unknown. */

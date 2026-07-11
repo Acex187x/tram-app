@@ -21,6 +21,8 @@ export const STOP_BEHIND_EPS_M = 0.5;
 export const OBS_BLEND_WEIGHT = 0.75;
 /** Max |stop.distM − s| for trusting an at_stop feed state when seeding a dwell, m. */
 const AT_STOP_MATCH_M = 50;
+/** Fallback physical tram length when the caller passes none (T3-sized), m. */
+export const DEFAULT_TRAM_LENGTH_M = 14.1;
 
 /** Piecewise-linear distance-vs-time schedule through the trip's stops. */
 export interface ScheduleAnchor {
@@ -49,6 +51,17 @@ export interface TramSim {
   obsDistM: number;
   /** ms epoch of that observation (snapshot.observedAtMs). */
   obsAtMs: number;
+  /**
+   * Cached evalScheduleAnchor(lastAnchor, obsAtMs). Recomputed only when the
+   * anchor/observation change (createSim/applySnapshot) — the pace controller
+   * reads it every tick, so this saves a binary search per evaluation.
+   */
+  obsSchedDistM: number;
+  /**
+   * Total physical length incl. any coupled trailer, m (head at sM, tail at
+   * sM − lengthM). Drives car-following spacing in TramEngine.
+   */
+  lengthM: number;
   /** Stops with distM below this are never treated as 0-limits. */
   minStopDist: number;
   /** ms timestamp of the last hard teleport (renderer may dip opacity), 0 if never. */
@@ -109,10 +122,7 @@ export function scheduleDistAt(sim: TramSim, nowMs: number): number {
  * timetable — is the primary anchor for a live sim.
  */
 export function observedDistAt(sim: TramSim, nowMs: number): number {
-  const advance = Math.max(
-    0,
-    evalScheduleAnchor(sim.lastAnchor, nowMs) - evalScheduleAnchor(sim.lastAnchor, sim.obsAtMs),
-  );
+  const advance = Math.max(0, evalScheduleAnchor(sim.lastAnchor, nowMs) - sim.obsSchedDistM);
   return clampS(sim.geometry, sim.obsDistM + advance);
 }
 
@@ -121,8 +131,8 @@ export function observedDistAt(sim: TramSim, nowMs: number): number {
  * AVL observation with the timetable anchor (low-gain reference).
  */
 export function targetDistAt(sim: TramSim, nowMs: number): number {
-  const sObs = observedDistAt(sim, nowMs);
   const sSched = evalScheduleAnchor(sim.lastAnchor, nowMs);
+  const sObs = clampS(sim.geometry, sim.obsDistM + Math.max(0, sSched - sim.obsSchedDistM));
   return OBS_BLEND_WEIGHT * sObs + (1 - OBS_BLEND_WEIGHT) * sSched;
 }
 
@@ -245,12 +255,11 @@ export function createSim(
   profile: SpeedProfile,
   snapshot: TramSnapshot,
   nowMs: number,
+  lengthM: number = DEFAULT_TRAM_LENGTH_M,
 ): TramSim {
   const anchor = buildScheduleAnchor(geometry.stops, snapshot.delaySeconds);
-  const schedAdvance = Math.max(
-    0,
-    evalScheduleAnchor(anchor, nowMs) - evalScheduleAnchor(anchor, snapshot.observedAtMs),
-  );
+  const obsSchedDistM = evalScheduleAnchor(anchor, snapshot.observedAtMs);
+  const schedAdvance = Math.max(0, evalScheduleAnchor(anchor, nowMs) - obsSchedDistM);
   const sim: TramSim = {
     geometry,
     profile,
@@ -263,6 +272,8 @@ export function createSim(
     lastAnchor: anchor,
     obsDistM: clampS(geometry, snapshot.shapeDistM),
     obsAtMs: snapshot.observedAtMs,
+    obsSchedDistM,
+    lengthM,
     minStopDist: 0,
     lastTeleportMs: 0,
   };
@@ -291,6 +302,7 @@ export function applySnapshot(sim: TramSim, snapshot: TramSnapshot, nowMs: numbe
   sim.lastAnchor = buildScheduleAnchor(sim.geometry.stops, snapshot.delaySeconds);
   sim.obsDistM = clampS(sim.geometry, snapshot.shapeDistM);
   sim.obsAtMs = snapshot.observedAtMs;
+  sim.obsSchedDistM = evalScheduleAnchor(sim.lastAnchor, snapshot.observedAtMs);
   const sObs = observedDistAt(sim, nowMs);
   if (Math.abs(sObs - sim.sM) > TELEPORT_THRESHOLD_M) {
     sim.sM = sObs;

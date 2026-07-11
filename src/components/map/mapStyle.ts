@@ -11,7 +11,9 @@ export const STANDARD_CONFIG = {
   theme: 'default',
   show3dObjects: true,
   showPointOfInterestLabels: false,
-  showTransitLabels: true,
+  // Hide Mapbox's own transit POIs — Golemio stop positions differ, and OUR
+  // clickable stop markers are the source of truth.
+  showTransitLabels: false,
   showPlaceLabels: true,
   showRoadLabels: true,
 } as const;

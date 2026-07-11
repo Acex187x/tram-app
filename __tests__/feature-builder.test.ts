@@ -1,7 +1,12 @@
 /// <reference types="jest" />
 
-import { bearingAt, haversineM, pointAt } from '@/lib/geo/polyline';
-import { buildFrame, COUPLED_OFFSET_M, type BuildFrameOptions } from '@/lib/render/featureBuilder';
+import { bearingAt, destinationPoint, haversineM, pointAt, type LngLat } from '@/lib/geo/polyline';
+import {
+  buildFrame,
+  COUPLED_OFFSET_M,
+  TRACK_OFFSET_M,
+  type BuildFrameOptions,
+} from '@/lib/render/featureBuilder';
 import type { RouteGeometry, TramPublicState, Viewport } from '@/lib/types';
 import { angularDiff, makeGeometry, makeSnapshot, makeSpec1, makeSpec3, metersToCoord, ORIGIN } from './helpers';
 
@@ -46,6 +51,11 @@ function opts(geo: RouteGeometry | null, extra: Partial<BuildFrameOptions> = {})
 }
 
 const WIDE = viewportM(-2000, -2000, 2000, 2000, 16);
+
+/** Expected rendered position: track position shifted right of bearing. */
+function rightOf(p: LngLat, bearing: number): LngLat {
+  return destinationPoint(p, (bearing + 90) % 360, TRACK_OFFSET_M);
+}
 
 describe('points collection', () => {
   const geo = makeGeometry(
@@ -107,11 +117,16 @@ describe('section placement on an L-shaped track', () => {
     expect(angularDiff(tail.properties.bearing, 90)).toBeLessThan(6);
     expect(angularDiff(head.properties.bearing, tail.properties.bearing)).toBeGreaterThan(80);
 
-    // Positions match the polyline at the expected center distances.
+    // Positions match the polyline at the expected center distances (shifted
+    // right of the local bearing by the track offset).
     const headPos = head.geometry.coordinates as [number, number];
-    expect(haversineM(headPos, metersToCoord(ORIGIN, 100, 10))).toBeLessThan(2);
+    expect(
+      haversineM(headPos, rightOf(metersToCoord(ORIGIN, 100, 10), head.properties.bearing)),
+    ).toBeLessThan(1);
     const tailPos = tail.geometry.coordinates as [number, number];
-    expect(haversineM(tailPos, metersToCoord(ORIGIN, 89, 0))).toBeLessThan(2);
+    expect(
+      haversineM(tailPos, rightOf(metersToCoord(ORIGIN, 89, 0), tail.properties.bearing)),
+    ).toBeLessThan(1);
   });
 
   it('extrapolates rear sections behind the shape start, keeping physical spacing', () => {
@@ -121,9 +136,10 @@ describe('section placement on an L-shaped track', () => {
     const frame = buildFrame([makeState('9201', geo, 5)], WIDE, opts(geo));
     expect(frame.sections.features).toHaveLength(3);
     const pos = frame.sections.features.map((f) => f.geometry.coordinates as [number, number]);
-    expect(haversineM(pos[0], metersToCoord(ORIGIN, 0, 0))).toBeLessThan(1);
-    expect(haversineM(pos[1], metersToCoord(ORIGIN, -10.5, 0))).toBeLessThan(1);
-    expect(haversineM(pos[2], metersToCoord(ORIGIN, -21, 0))).toBeLessThan(1);
+    // Track runs east (bearing 90) → rendered positions sit TRACK_OFFSET_M south.
+    expect(haversineM(pos[0], rightOf(metersToCoord(ORIGIN, 0, 0), 90))).toBeLessThan(1);
+    expect(haversineM(pos[1], rightOf(metersToCoord(ORIGIN, -10.5, 0), 90))).toBeLessThan(1);
+    expect(haversineM(pos[2], rightOf(metersToCoord(ORIGIN, -21, 0), 90))).toBeLessThan(1);
     // Spacing between consecutive centers = section length + joint gap.
     expect(haversineM(pos[0], pos[1])).toBeCloseTo(10.5, 1);
     expect(haversineM(pos[1], pos[2])).toBeCloseTo(10.5, 1);
@@ -228,7 +244,37 @@ describe('trams without geometry', () => {
     expect(f.id).toBe('8123#0');
     expect(f.properties.modelKey).toBe('t3rp');
     expect(f.properties.bearing).toBe(45);
-    expect(haversineM(f.geometry.coordinates as [number, number], metersToCoord(ORIGIN, 50, 50))).toBeLessThan(0.5);
+    expect(
+      haversineM(
+        f.geometry.coordinates as [number, number],
+        rightOf(metersToCoord(ORIGIN, 50, 50), 45),
+      ),
+    ).toBeLessThan(0.5);
+  });
+
+  it('renders ALL sections of an articulated tram trailing behind the raw bearing', () => {
+    // Regression: multi-section trams without loaded geometry used to render
+    // only the head section — "only the front piece visible" on device.
+    const state = makeState('9201', null, 0, {
+      position: metersToCoord(ORIGIN, 0, 0),
+      bearing: 0, // heading north → body trails south
+    });
+    const frame = buildFrame([state], WIDE, opts(null));
+    expect(frame.sections.features).toHaveLength(3);
+    expect(frame.sections.features.map((f) => f.properties.modelKey)).toEqual([
+      '15t-a',
+      '15t-b',
+      '15t-c',
+    ]);
+    const pos = frame.sections.features.map((f) => f.geometry.coordinates as [number, number]);
+    // Section centers 10.5 m apart (10 m body + 0.5 m gap), straight south.
+    expect(haversineM(pos[0], pos[1])).toBeCloseTo(10.5, 1);
+    expect(haversineM(pos[1], pos[2])).toBeCloseTo(10.5, 1);
+    expect(pos[1][1]).toBeLessThan(pos[0][1]);
+    expect(pos[2][1]).toBeLessThan(pos[1][1]);
+    for (const f of frame.sections.features) {
+      expect(f.properties.bearing).toBe(0);
+    }
   });
 
   it('places the coupled trailer behind along the raw bearing', () => {
@@ -249,5 +295,104 @@ describe('trams without geometry', () => {
     expect((trail.geometry.coordinates as [number, number])[0]).toBeLessThan(
       (frame.sections.features[0].geometry.coordinates as [number, number])[0],
     );
+  });
+});
+
+describe('right-hand traffic offset', () => {
+  // Track heading due north → "right" is due east.
+  const geo = makeGeometry(
+    [
+      [0, -500],
+      [0, 500],
+    ],
+    [],
+  );
+
+  it('shifts points and every section TRACK_OFFSET_M east of a northbound track', () => {
+    const state = makeState('9201', geo, 540); // head at local y = +40
+    const frame = buildFrame([state], WIDE, opts(geo));
+
+    const point = frame.points.features[0].geometry.coordinates as [number, number];
+    expect(haversineM(point, rightOf(state.position, state.bearing))).toBeLessThan(0.05);
+    // Eastward (positive lng) shift of ~1.35 m from the on-track position.
+    expect(point[0]).toBeGreaterThan(state.position[0]);
+    expect(haversineM(point, state.position)).toBeCloseTo(TRACK_OFFSET_M, 1);
+
+    for (const f of frame.sections.features) {
+      const p = f.geometry.coordinates as [number, number];
+      // Each section sits TRACK_OFFSET_M east of the track (the lng of the
+      // vertical line at local x=0); shifting it back west lands on the track.
+      expect(p[0]).toBeGreaterThan(geo.coordinates[0][0]);
+      const backOnTrack = destinationPoint(p, 270, TRACK_OFFSET_M);
+      expect(Math.abs(backOnTrack[0] - geo.coordinates[0][0])).toBeLessThan(1e-7);
+    }
+  });
+
+  it('opposite directions separate by ~2× the offset', () => {
+    const north = makeState('9201', geo, 500); // heading north at y=0
+    const southGeo = makeGeometry(
+      [
+        [0, 500],
+        [0, -500],
+      ],
+      [],
+    );
+    const south = makeState('9301', southGeo, 500, {
+      position: pointAt(southGeo.coordinates, southGeo.cumDistM, 500),
+      bearing: bearingAt(southGeo.coordinates, southGeo.cumDistM, 500),
+    });
+    const a = buildFrame([north], WIDE, opts(geo)).points.features[0];
+    const b = buildFrame([south], WIDE, opts(southGeo)).points.features[0];
+    const d = haversineM(
+      a.geometry.coordinates as [number, number],
+      b.geometry.coordinates as [number, number],
+    );
+    expect(d).toBeCloseTo(2 * TRACK_OFFSET_M, 1);
+  });
+});
+
+describe('planner route-only mode (lineFilter)', () => {
+  const geo = makeGeometry(
+    [
+      [0, 0],
+      [1000, 0],
+    ],
+    [],
+  );
+
+  it('hides trams whose line is not in the filter, points AND sections', () => {
+    const on = makeState('9201', geo, 300); // line '9'
+    const off = makeState('8123', geo, 400, {
+      snapshot: makeSnapshot({ key: '8123', line: '22', routeId: 'L22' }),
+    });
+    const frame = buildFrame([on, off], WIDE, opts(geo, { lineFilter: new Set(['9']) }));
+    expect(frame.points.features.map((f) => f.id)).toEqual(['9201']);
+    expect(frame.sections.features.every((f) => f.properties.key === '9201')).toBe(true);
+    expect(frame.sections.features.length).toBeGreaterThan(0);
+  });
+
+  it('renders everything when the filter is null/undefined', () => {
+    const a = makeState('9201', geo, 300);
+    const b = makeState('8123', geo, 400, {
+      snapshot: makeSnapshot({ key: '8123', line: '22' }),
+    });
+    const frame = buildFrame([a, b], WIDE, opts(geo, { lineFilter: null }));
+    expect(frame.points.features).toHaveLength(2);
+  });
+});
+
+describe('skipPoints (low-cadence points push)', () => {
+  const geo = makeGeometry(
+    [
+      [0, 0],
+      [1000, 0],
+    ],
+    [],
+  );
+
+  it('omits point features but still builds sections', () => {
+    const frame = buildFrame([makeState('9201', geo, 300)], WIDE, opts(geo, { skipPoints: true }));
+    expect(frame.points.features).toHaveLength(0);
+    expect(frame.sections.features.length).toBeGreaterThan(0);
   });
 });

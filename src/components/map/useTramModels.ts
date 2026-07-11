@@ -6,7 +6,8 @@
 import { Asset } from 'expo-asset';
 import { useEffect, useState } from 'react';
 
-import { MODEL_ASSETS } from '@/lib/fleet/modelSpecs';
+import { MODEL_ASSETS, STOP_TOTEM_ASSET } from '@/lib/fleet/modelSpecs';
+import { STOP_TOTEM_MODEL_KEY } from './RouteNetwork';
 
 /** modelKey → local URI for <Models>, or null while any GLB is still loading. */
 export function useTramModels(): Record<string, string> | null {
@@ -15,8 +16,13 @@ export function useTramModels(): Record<string, string> | null {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Falsy ids only occur under jest (see modelSpecs.glbAsset); skip them.
-      const entries = Object.entries(MODEL_ASSETS).filter(([, moduleId]) => !!moduleId);
+      // Tram GLBs + the stop totem (kept out of MODEL_ASSETS — it's not a
+      // tram). Falsy ids occur under jest or when an asset is missing (see
+      // modelSpecs.glbAsset); skip them — consumers detect the absent key.
+      const entries = Object.entries({
+        ...MODEL_ASSETS,
+        [STOP_TOTEM_MODEL_KEY]: STOP_TOTEM_ASSET,
+      }).filter(([, moduleId]) => !!moduleId);
       const pairs = await Promise.all(
         entries.map(async ([key, moduleId]) => {
           const asset = Asset.fromModule(moduleId);

@@ -1,6 +1,6 @@
 // TramRuntime — the single live-data spine of the app.
 // Polls Golemio every POLL_MS, feeds TramEngine, drives simulation ticks at
-// TICK_MS, prefetches trip geometries, and exposes:
+// TICK_MS (~60 Hz), prefetches trip geometries, and exposes:
 //   • imperative frame access for the map (getRuntime().engine / subscribeFrame)
 //   • React hooks (1 Hz) for screens/lists — useAllTramStates, useTramState, …
 // The map screen renders frames imperatively via ShapeSource.setNativeProps;
@@ -16,7 +16,9 @@ import { fetchTramSnapshots } from '@/lib/golemio/vehicles';
 import type { RouteGeometry, TramPublicState, TramSnapshot } from '@/lib/types';
 
 export const POLL_MS = 5_000;
-export const TICK_MS = 66; // ~15 fps simulation
+export const TICK_MS = 16; // ~60 fps simulation (sections + follow camera update per tick)
+/** Points FC (badges/dots, whole fleet) is pushed at this lower cadence. */
+export const POINTS_PUSH_MS = 66; // ~15 Hz
 const UI_NOTIFY_MS = 1_000;
 
 export type FrameListener = (nowMs: number) => void;

@@ -545,6 +545,40 @@ export function jointFrame(mb, { z, width, y0, yTop }) {
 }
 
 /**
+ * Closed dark gasket end-cap over an articulated (joint / bellows) face — so a
+ * lone section reads as *finished* instead of showing the open black interior
+ * of the hull (the "трамваи обрезаются, сзади чёрная внутренность" report).
+ *
+ * Fully seals the whole cross-section (side walls + roof dome + underside)
+ * across the joint region [zWall → zEnd] with a slightly-recessed dark-grey
+ * plug, then insets a darker diaphragm panel for the rubber-bellows look. A few
+ * dozen tris; guaranteed-outward normals (prism + box primitives only).
+ *
+ * dir: -1 → −Z end (front joint), +1 → +Z end (rear joint / bellows).
+ *   zWall — z where the section's own walls stop (z0 for front, z1 for rear).
+ *   zEnd  — the section's physical end plane on that side (±length/2).
+ */
+export function jointCap(mb, { zWall, zEnd, dir, width, y0, yTop, roofTop, roofShrink = 0.22 }) {
+  const hw = width / 2;
+  const zN = Math.min(zWall, zEnd);
+  const zF = Math.max(zWall, zEnd);
+  // Full-section plug (same house-shaped outline as the roof slab), dark grey.
+  // Closed prism → seals sides, roof dome, underside and both z faces.
+  const profile = [
+    [-hw, y0], [hw, y0],
+    [hw, yTop], [hw - roofShrink, roofTop],
+    [-hw + roofShrink, roofTop], [-hw, yTop],
+  ];
+  mb.prismZ('trim', profile, zN, zF, { capStart: true, capEnd: true });
+  // Darker diaphragm panel, sitting a hair proud of the plug's outer face so it
+  // reads as an inset gasket framed by the grey bellows rim.
+  mb.box('black', {
+    x: 0, y: (y0 + yTop) / 2 + 0.02, z: zEnd - dir * 0.013,
+    w: width - 0.16, h: yTop - y0 - 0.06, d: 0.03,
+  });
+}
+
+/**
  * Destination display: black casing + emissive warm-white face.
  * dir: -1 → faces −Z (front), +1 → faces +Z (rear cab).
  */
@@ -640,16 +674,13 @@ export function buildSectionShell(mb, cfg) {
   underframe(mb, { z0: z0 + 0.15, z1: z1 - 0.15, width, y0 });
   for (const bz of bogieZs) bogie(mb, { z: bz, width });
 
+  // Every articulated end gets a closed dark gasket cap so a lone section never
+  // shows the open black hull interior (see jointCap).
   if (front === 'joint') {
-    jointFrame(mb, { z: -L2, width, y0, yTop });
-    endWall(mb, { z: z0, xw: hw, y0, sill, yTop, dir: -1, matLower: mats.lower, matUpper: mats.upper });
+    jointCap(mb, { zWall: z0, zEnd: -L2, dir: -1, width, y0, yTop, roofTop, roofShrink });
   }
-  if (rear === 'bellows') {
-    endWall(mb, { z: z1, xw: hw, y0, sill, yTop, dir: 1, matLower: mats.lower, matUpper: mats.upper });
-    bellows(mb, { zEnd: L2, width, y0: y0 + 0.05, yTop: yTop - 0.02 });
-  } else if (rear === 'joint') {
-    jointFrame(mb, { z: L2 - 0.06, width, y0, yTop });
-    endWall(mb, { z: z1, xw: hw, y0, sill, yTop, dir: 1, matLower: mats.lower, matUpper: mats.upper });
+  if (rear === 'bellows' || rear === 'joint') {
+    jointCap(mb, { zWall: z1, zEnd: L2, dir: 1, width, y0, yTop, roofTop, roofShrink });
   }
   return { z0, z1 };
 }

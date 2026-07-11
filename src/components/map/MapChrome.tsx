@@ -312,8 +312,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  dockWrap: { position: 'absolute', left: Spacing.three, right: Spacing.three },
+  // Wide layouts (iPad): the dock caps at 560 pt and centers instead of
+  // stretching edge-to-edge; on phones maxWidth never binds.
+  dockWrap: {
+    position: 'absolute',
+    left: Spacing.three,
+    right: Spacing.three,
+    alignItems: 'center',
+  },
   dock: {
+    width: '100%',
+    maxWidth: 560,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,

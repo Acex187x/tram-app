@@ -12,8 +12,8 @@
 //     the articulations; clean dome over the cab.
 
 import {
-  MeshBuilder, arcAt, arcZAtX, bellows, bogie, buildSectionShell, buildWall,
-  destinationDisplay, endWall, floorPlate, jointFrame, mirrorArcZ, noseBands,
+  MeshBuilder, arcAt, arcZAtX, bogie, buildSectionShell, buildWall,
+  destinationDisplay, floorPlate, jointCap, mirrorArcZ, noseBands,
   roofSlab, roundLamp, singleArmPantograph, underframe, wallSegs, wedgeArc,
 } from './lib.mjs';
 
@@ -169,8 +169,7 @@ function head() {
   floorPlate(mb, { z0, z1, xw: HW, y0: Y0 });
   underframe(mb, { z0: z0 + 0.15, z1: z1 - 0.15, width: W, y0: Y0 });
   bogie(mb, { z: 0.5, width: W });
-  endWall(mb, { z: z1, xw: HW, y0: Y0, sill: SILL, yTop: YTOP, dir: 1, matLower: 'silver', matUpper: 'silver' });
-  bellows(mb, { zEnd: LLONG / 2, width: W, y0: Y0 + 0.05, yTop: YTOP - 0.02 });
+  jointCap(mb, { zWall: z1, zEnd: LLONG / 2, dir: 1, width: W, y0: Y0, yTop: YTOP, roofTop: ROOFTOP, roofShrink: 0.3 });
   cabEnd(mb, { dirZ: -1, zJoin: z0 });
   // roof gear behind the clean cab dome
   mb.box('trim', { x: 0, y: 3.13, z: 1.0, w: 1.35, h: 0.26, d: 1.7, bevel: 0.05 });
@@ -245,8 +244,7 @@ function tail() {
   floorPlate(mb, { z0, z1, xw: HW, y0: Y0 });
   underframe(mb, { z0: z0 + 0.15, z1: z1 - 0.15, width: W, y0: Y0 });
   bogie(mb, { z: -0.5, width: W });
-  jointFrame(mb, { z: -LLONG / 2, width: W, y0: Y0, yTop: YTOP });
-  endWall(mb, { z: z0, xw: HW, y0: Y0, sill: SILL, yTop: YTOP, dir: -1, matLower: 'redClassic', matUpper: 'redClassic' });
+  jointCap(mb, { zWall: z0, zEnd: -LLONG / 2, dir: -1, width: W, y0: Y0, yTop: YTOP, roofTop: ROOFTOP, roofShrink: 0.3 });
   cabEnd(mb, { dirZ: 1, zJoin: z1 });
   mb.box('trim', { x: 0, y: 3.13, z: -1.7, w: 1.35, h: 0.26, d: 1.7, bevel: 0.05 });
   mb.box('roof', { x: 0, y: 3.1, z: -0.3, w: 1.1, h: 0.2, d: 1.1, bevel: 0.05 });

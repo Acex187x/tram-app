@@ -19,8 +19,11 @@ import {
 import { ItineraryCard } from '@/components/planner/ItineraryCard';
 import { StopSearchCard } from '@/components/planner/StopSearchCard';
 import { GlassPanel } from '@/components/ui/GlassPanel';
+import { SheetContent } from '@/components/ui/SheetContent';
 import { Colors, Spacing, Tram } from '@/constants/theme';
-import { useLoadedGeometries } from '@/hooks/tramData';
+import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
+import { computeItineraryTiming } from '@/lib/arrivals';
+import { formatPragueClock } from '@/lib/format/pragueTime';
 import { buildNetwork, normalizeName } from '@/lib/planner/network';
 import { planItineraries, searchStops } from '@/lib/planner/planner';
 import type { PlannerItinerary } from '@/lib/types';
@@ -34,6 +37,9 @@ export default function PlannerScreen() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = Colors[scheme];
   const geometries = useLoadedGeometries();
+  // Live tram states (~1 Hz) drive the wall-clock departure/arrival times on
+  // the itinerary cards + active banner.
+  const states = useAllTramStates();
   const itinerary = usePlannerStore((s) => s.itinerary);
   const setItinerary = usePlannerStore((s) => s.setItinerary);
 
@@ -129,6 +135,7 @@ export default function PlannerScreen() {
 
   const handlePick = useCallback(
     (it: PlannerItinerary) => {
+      Keyboard.dismiss();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setItinerary(it);
       router.back(); // map draws the route + fits bounds
@@ -136,29 +143,54 @@ export default function PlannerScreen() {
     [setItinerary],
   );
 
+  const handleClose = useCallback(() => {
+    Keyboard.dismiss();
+    router.back();
+  }, []);
+
   const handleClearItinerary = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setItinerary(null);
   }, [setItinerary]);
+
+  // Live wall-clock timing per result card + for the active-route banner.
+  // Recomputed each ~1 Hz states tick so the times stay current.
+  const resultTimings = useMemo(
+    () =>
+      results?.map((it) => computeItineraryTiming(it.legs, states, geometries, Date.now())) ??
+      [],
+    [results, states, geometries],
+  );
+  const activeTiming = useMemo(
+    () =>
+      itinerary ? computeItineraryTiming(itinerary.legs, states, geometries, Date.now()) : null,
+    [itinerary, states, geometries],
+  );
 
   const activeLegs = itinerary?.legs ?? [];
   const bannerLabel =
     activeLegs.length > 0
       ? `${activeLegs[0].fromStopName} → ${activeLegs[activeLegs.length - 1].toStopName}`
       : '';
+  const bannerTimes =
+    activeTiming?.departureMs != null && activeTiming?.arrivalMs != null
+      ? `${formatPragueClock(activeTiming.departureMs)} → ${formatPragueClock(activeTiming.arrivalMs)}`
+      : null;
 
   return (
     <GlassPanel style={styles.root}>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         automaticallyAdjustKeyboardInsets
-        contentContainerStyle={styles.content}
+        contentContainerStyle={styles.scrollBottom}
       >
+        <SheetContent style={styles.content}>
         <View style={styles.header}>
           <Text style={[styles.title, { color: palette.text }]}>Journey Planner</Text>
           <Pressable
-            onPress={() => router.back()}
+            onPress={handleClose}
             hitSlop={8}
             accessibilityLabel="Close"
             style={({ pressed }) => [
@@ -178,9 +210,18 @@ export default function PlannerScreen() {
             ]}
           >
             <SymbolView name="map.fill" size={17} tintColor={Tram.gold} />
-            <Text numberOfLines={1} style={[styles.bannerText, { color: palette.text }]}>
-              {bannerLabel}
-            </Text>
+            <View style={styles.bannerBody}>
+              <Text numberOfLines={1} style={[styles.bannerText, { color: palette.text }]}>
+                {bannerLabel}
+              </Text>
+              <Text
+                numberOfLines={1}
+                style={[styles.bannerTimes, { color: palette.textSecondary }]}
+                allowFontScaling={false}
+              >
+                {bannerTimes ?? 'Awaiting a live tram for departure times'}
+              </Text>
+            </View>
             <Pressable
               onPress={handleClearItinerary}
               style={({ pressed }) => [styles.bannerClear, { opacity: pressed ? 0.7 : 1 }]}
@@ -261,11 +302,13 @@ export default function PlannerScreen() {
               <ItineraryCard
                 key={`${i}-${it.legs.map((l) => l.line).join('-')}`}
                 itinerary={it}
+                timing={resultTimings[i]}
                 onPress={() => handlePick(it)}
               />
             ))}
           </View>
         )}
+        </SheetContent>
       </ScrollView>
     </GlassPanel>
   );
@@ -276,10 +319,12 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     flex: 1,
   },
+  scrollBottom: {
+    paddingBottom: Spacing.five,
+  },
   content: {
     gap: Spacing.three,
     padding: Spacing.three,
-    paddingBottom: Spacing.five,
   },
   header: {
     alignItems: 'center',
@@ -308,10 +353,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two + 2,
   },
-  bannerText: {
+  bannerBody: {
     flex: 1,
+    gap: 1,
+  },
+  bannerText: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  bannerTimes: {
+    fontSize: 12,
+    fontVariant: ['tabular-nums'],
   },
   bannerClear: {
     backgroundColor: Tram.pidRed,

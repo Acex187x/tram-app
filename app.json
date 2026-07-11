@@ -10,7 +10,7 @@
     "ios": {
       "icon": "./assets/tram.icon",
       "bundleIdentifier": "cz.zabolotny.tramspotter",
-      "supportsTablet": false,
+      "supportsTablet": true,
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Tram Spotter shows your position on the map so you can find trams near you.",
         "ITSAppUsesNonExemptEncryption": false,

@@ -2,7 +2,12 @@
 // and agents can SEE the model without launching the app.
 // Usage: node scripts/render-model.mjs assets/models/15t-a.glb [out.png]
 //        node scripts/render-model.mjs assets/models/15t-*.glb        (composes a whole tram)
+//        node scripts/render-model.mjs assets/models/15t-*.glb --thumb out.png
 // Multiple GLBs are laid end-to-end along Z (head first) like a real consist.
+//
+// --thumb  → a single beautiful 3/4-front view on a TRANSPARENT background
+//            (no grid/cone), az≈-32° el≈14°, tight crop, ~700×450 — the UI
+//            thumbnail used by MODEL_IMAGES in modelSpecs.ts.
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -11,15 +16,17 @@ import puppeteer from 'puppeteer';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
-if (args.length === 0) {
-  console.error('usage: node scripts/render-model.mjs <model.glb> [more.glb ...] [out.png]');
+const thumb = args.includes('--thumb');
+const rest = args.filter((a) => a !== '--thumb');
+if (rest.length === 0) {
+  console.error('usage: node scripts/render-model.mjs <model.glb> [more.glb ...] [--thumb] [out.png]');
   process.exit(1);
 }
-const out = args[args.length - 1].endsWith('.png') ? args.pop() : 'model-render.png';
-const glbs = args.map((p) => readFileSync(resolve(p)).toString('base64'));
+const out = rest[rest.length - 1].endsWith('.png') ? rest.pop() : 'model-render.png';
+const glbs = rest.map((p) => readFileSync(resolve(p)).toString('base64'));
 
-// Bundle three + loader once (cached).
-const bundlePath = join(root, 'node_modules/.cache/render-model-bundle.js');
+// Bundle three + loader once (cached). Cache key bumped when the entry changes.
+const bundlePath = join(root, 'node_modules/.cache/render-model-bundle-v3.js');
 if (!existsSync(bundlePath)) {
   mkdirSync(dirname(bundlePath), { recursive: true });
   const entry = join(dirname(bundlePath), 'render-model-entry.mjs');
@@ -92,6 +99,68 @@ window.renderGLBs = async function (base64List) {
   document.body.appendChild(sheet);
   return sheet.toDataURL('image/png');
 };
+window.renderThumb = async function (base64List) {
+  const W = 700, H = 450;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+  renderer.setSize(W, H);
+  renderer.setClearColor(0x000000, 0); // transparent
+  const scene = new THREE.Scene();
+  scene.background = null;
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8088a0, 1.15));
+  const sun = new THREE.DirectionalLight(0xfff4e0, 2.1);
+  sun.position.set(28, 46, 30);
+  scene.add(sun);
+  const fill = new THREE.DirectionalLight(0xdde8ff, 0.75);
+  fill.position.set(-26, 18, -22);
+  scene.add(fill);
+  const loader = new GLTFLoader();
+  let zCursor = 0;
+  const group = new THREE.Group();
+  for (const b64 of base64List) {
+    const buf = Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
+    const gltf = await loader.parseAsync(buf, '');
+    const obj = gltf.scene;
+    const box = new THREE.Box3().setFromObject(obj);
+    obj.position.z = zCursor - box.min.z;
+    zCursor += (box.max.z - box.min.z) + 0.35;
+    group.add(obj);
+  }
+  scene.add(group);
+  const total = new THREE.Box3().setFromObject(group);
+  const c = total.getCenter(new THREE.Vector3());
+  const size = total.getSize(new THREE.Vector3());
+  const cam = new THREE.PerspectiveCamera(34, W / H, 0.1, 500);
+  const vFov = cam.fov * Math.PI / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * cam.aspect);
+  const az = -32 * Math.PI / 180, el = 14 * Math.PI / 180;
+  // unit vector center→camera
+  const dir = new THREE.Vector3(
+    Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az) * -1,
+  ).normalize();
+  // camera-space basis (forward = camera→center)
+  const forward = dir.clone().negate();
+  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+  const up = new THREE.Vector3().crossVectors(right, forward).normalize();
+  // project the 8 bbox corners onto the camera axes → tight screen-space fit so
+  // even a 32 m consist fills the frame width (no clipping)
+  let halfW = 0, halfH = 0, halfD = 0;
+  for (const sx of [total.min.x, total.max.x]) {
+    for (const sy of [total.min.y, total.max.y]) {
+      for (const sz of [total.min.z, total.max.z]) {
+        const v = new THREE.Vector3(sx, sy, sz).sub(c);
+        halfW = Math.max(halfW, Math.abs(v.dot(right)));
+        halfH = Math.max(halfH, Math.abs(v.dot(up)));
+        halfD = Math.max(halfD, Math.abs(v.dot(forward)));
+      }
+    }
+  }
+  const m = 1.06; // small margin so nothing touches the edge
+  const dist = Math.max(halfW * m / Math.tan(hFov / 2), halfH * m / Math.tan(vFov / 2)) + halfD;
+  cam.position.copy(dir).multiplyScalar(dist).add(c);
+  cam.lookAt(c);
+  renderer.render(scene, cam);
+  return renderer.domElement.toDataURL('image/png');
+};
 window.__ready = true;
 `);
   execSync(`npx esbuild ${entry} --bundle --format=iife --outfile=${bundlePath}`, { cwd: root, stdio: 'inherit' });
@@ -110,9 +179,10 @@ try {
   await page.addScriptTag({ content: bundle });
   await page.waitForFunction('window.__ready === true', { timeout: 15000 });
   const dataUrl = await page.evaluate(
-    (list) => window.renderGLBs(list),
-    glbs
+    (list, isThumb) => (isThumb ? window.renderThumb(list) : window.renderGLBs(list)),
+    glbs, thumb
   );
+  mkdirSync(dirname(resolve(out)), { recursive: true });
   writeFileSync(resolve(out), Buffer.from(dataUrl.split(',')[1], 'base64'));
   console.log('wrote', resolve(out));
 } finally {

@@ -7,6 +7,7 @@ import { useRouter, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
+import { AcSnowflake } from '@/components/tram/TramModelImage';
 import { DelayPill } from '@/components/ui/DelayPill';
 import { LineBadge } from '@/components/ui/LineBadge';
 import { Colors, Tram } from '@/constants/theme';
@@ -89,6 +90,7 @@ export function FavoriteTramRow({ regKey }: { regKey: string }) {
           >
             {spec.name}
           </Text>
+          {state ? <AcSnowflake airConditioned={state.snapshot.airConditioned} size={11} /> : null}
         </View>
         <Text
           style={[styles.subtitle, { color: palette.textSecondary }]}
