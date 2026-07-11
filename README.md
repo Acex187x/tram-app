@@ -42,6 +42,9 @@ cp .env.example .env       # EXPO_PUBLIC_MAPBOX_KEY, EXPO_PUBLIC_GOLEMIO_KEY, EX
 npx expo prebuild --platform ios
 npx expo run:ios           # dev client on the iOS simulator
 npm test                   # engine/data/planner unit tests
+# 3D-model tooling is not in package.json (sharp/puppeteer would slow & break EAS builds);
+# install it ad hoc when regenerating models:
+npm i -D --no-save @gltf-transform/core @gltf-transform/functions puppeteer three esbuild
 node scripts/generate-tram-models.mjs         # regenerate 3D models
 node scripts/render-model.mjs assets/models/15t-*.glb out.png  # preview a model
 ```
