@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "fable-spots-the-tram",
+    "name": "Tram Spotter",
     "slug": "fable-spots-the-tram",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -8,7 +8,13 @@
     "scheme": "fablespotsthetram",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "cz.zabolotny.tramspotter",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Tram Spotter shows your position on the map so you can find trams near you.",
+        "UIBackgroundModes": []
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -28,11 +34,18 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#7A0603",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
-      ]
+      ],
+      [
+        "@rnmapbox/maps",
+        {
+          "RNMapboxMapsVersion": "11.20.1"
+        }
+      ],
+      "expo-location"
     ],
     "experiments": {
       "typedRoutes": true,

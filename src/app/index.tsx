@@ -1,98 +1,122 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+// SPIKE SCREEN — validates the riskiest assumptions before real implementation:
+// 1. @rnmapbox/maps builds & renders Standard 3D style on Expo SDK 57
+// 2. ModelLayer renders bundled GLBs with data-driven modelRotation ['get','bearing']
+// 3. ShapeSource.setNativeProps sustains ~15fps updates
+// Will be replaced by the real map screen.
+import Mapbox, {
+  Camera,
+  MapView,
+  ModelLayer,
+  Models,
+  ShapeSource,
+  StyleImport,
+} from '@rnmapbox/maps';
+import { useEffect, useRef } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+Mapbox.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_KEY ?? null);
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
+// Národní třída area — tram tracks run roughly east-west here.
+const CENTER: [number, number] = [14.4189, 50.0813];
+
+function feature(id: string, lng: number, lat: number, bearing: number) {
+  return {
+    type: 'Feature' as const,
+    id,
+    properties: { bearing, modelKey: 'arrow' },
+    geometry: { type: 'Point' as const, coordinates: [lng, lat] },
+  };
 }
 
-export default function HomeScreen() {
+// Static calibration row: bearings 0/90/180/270 west-to-east.
+const staticFeatures = [
+  feature('b0', 14.4165, 50.0813, 0),
+  feature('b90', 14.417, 50.0813, 90),
+  feature('b180', 14.4175, 50.0813, 180),
+  feature('b270', 14.418, 50.0813, 270),
+];
+
+export default function SpikeScreen() {
+  const movingRef = useRef<ShapeSource>(null);
+
+  useEffect(() => {
+    let t = 0;
+    const iv = setInterval(() => {
+      t += 1;
+      const lng = 14.4185 + (t % 150) * 0.00002;
+      movingRef.current?.setNativeProps({
+        // @ts-expect-error shape accepts stringified GeoJSON
+        shape: JSON.stringify({
+          type: 'FeatureCollection',
+          features: [feature('mover', lng, 50.0817, 90)],
+        }),
+      });
+    }, 66);
+    return () => clearInterval(iv);
+  }, []);
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
+    <View style={styles.container}>
+      <MapView
+        style={styles.map}
+        styleURL={Mapbox.StyleURL.Standard}
+        scaleBarEnabled={false}
+      >
+        <StyleImport
+          id="basemap"
+          existing
+          config={{ lightPreset: 'day', show3dObjects: 'true' }}
+        />
+        <Camera
+          defaultSettings={{ centerCoordinate: CENTER, zoomLevel: 16.5, pitch: 55, heading: 0 }}
+        />
+        <Models models={{ arrow: require('../../assets/models/spike-arrow.glb') }} />
+        <ShapeSource
+          id="calib"
+          shape={{ type: 'FeatureCollection', features: staticFeatures }}
+        >
+          <ModelLayer
+            id="calib-models"
+            style={{
+              modelId: ['get', 'modelKey'],
+              modelRotation: [0, 0, ['get', 'bearing']],
+              modelScale: [1, 1, 1],
+            }}
           />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
+        </ShapeSource>
+        <ShapeSource
+          id="mover"
+          ref={movingRef}
+          shape={{ type: 'FeatureCollection', features: [feature('mover', 14.4185, 50.0817, 90)] }}
+        >
+          <ModelLayer
+            id="mover-model"
+            style={{
+              modelId: 'arrow',
+              modelRotation: [0, 0, 90],
+              modelScale: [1, 1, 1],
+            }}
           />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+        </ShapeSource>
+      </MapView>
+      <View style={styles.badge} pointerEvents="none">
+        <Text style={styles.badgeText}>SPIKE: red nose = model front, row bearings 0/90/180/270</Text>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
+  container: { flex: 1 },
+  map: { flex: 1 },
+  badge: {
+    position: 'absolute',
+    top: 60,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
   },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
-  },
+  badgeText: { color: 'white', fontSize: 12 },
 });
