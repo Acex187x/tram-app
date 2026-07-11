@@ -45,19 +45,15 @@ describe('regNumberToModelId', () => {
 });
 
 describe('isLikelyCoupledPair', () => {
-  it('is true for T3-family cars on numeric day lines 1–26 except 23', () => {
+  // Product decision (2026-07-11): the API exposes no consist size and only the
+  // lead car reports, so T3-family cars are ALWAYS assumed to be two-car sets.
+  it('is true for T3-family cars on any line', () => {
     expect(isLikelyCoupledPair('t3rp', '5')).toBe(true);
     expect(isLikelyCoupledPair('t3', '1')).toBe(true);
     expect(isLikelyCoupledPair('t3rplf', '26')).toBe(true);
-  });
-
-  it('is false for line 23', () => {
-    expect(isLikelyCoupledPair('t3rp', '23')).toBe(false);
-  });
-
-  it('is false for night lines and lines above 26', () => {
-    expect(isLikelyCoupledPair('t3rp', '91')).toBe(false);
-    expect(isLikelyCoupledPair('t3rp', '31')).toBe(false);
+    expect(isLikelyCoupledPair('t3rp', '23')).toBe(true);
+    expect(isLikelyCoupledPair('t3rp', '91')).toBe(true);
+    expect(isLikelyCoupledPair('t3rp', '31')).toBe(true);
   });
 
   it('is false for non-T3 models', () => {

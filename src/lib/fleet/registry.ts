@@ -49,13 +49,16 @@ const T3_FAMILY: ReadonlySet<TramModelId> = new Set<TramModelId>([
 
 /**
  * Whether a vehicle of `modelId` on `line` is likely a coupled two-car T3 set.
- * True for T3-family cars on numeric day lines 1–26, excluding line 23.
+ *
+ * Golemio reports only the LEAD car of a consist (verified live 2026-07-11:
+ * zero trips with more than one vehicle entry) and exposes no consist-size
+ * field anywhere in the API, so this cannot be derived from data. Per product
+ * decision, T3-family cars are assumed to ALWAYS run as two-car sets — a
+ * solo T3 rendered as a pair is less wrong than a pair rendered solo, which
+ * was the common visible error with the old day-line heuristic.
  */
-export function isLikelyCoupledPair(modelId: TramModelId, line: string): boolean {
-  if (!T3_FAMILY.has(modelId)) return false;
-  if (line === '23') return false;
-  const n = Number(line);
-  return Number.isInteger(n) && n >= 1 && n <= 26;
+export function isLikelyCoupledPair(modelId: TramModelId, _line: string): boolean {
+  return T3_FAMILY.has(modelId);
 }
 
 /**
