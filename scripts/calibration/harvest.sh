@@ -6,7 +6,14 @@ while true; do
   C=$(xcrun simctl get_app_container $UDID cz.zabolotny.tramspotter data 2>/dev/null)
   if [ -n "$C" ] && [ -d "$C/Documents/tramspotter-motion/motionlogs" ]; then
     for f in "$C/Documents/tramspotter-motion/motionlogs"/*.jsonl; do
-      [ -f "$f" ] && cp "$f" "$DEST/sim-$(basename $f)"
+      [ -f "$f" ] || continue
+      d="$DEST/sim-$(basename $f)"
+      if [ -f "$d" ]; then
+        # app truncates its log on relaunch -> MERGE (dedupe lines), never overwrite
+        awk '!seen[$0]++' "$d" "$f" > "$d.tmp" && mv "$d.tmp" "$d"
+      else
+        cp "$f" "$d"
+      fi
     done
     date +"%H:%M harvested $(du -sh $DEST | cut -f1)" >> $DEST/harvest.log
   fi
