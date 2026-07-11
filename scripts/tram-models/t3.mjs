@@ -294,8 +294,10 @@ function sweepPanel(mb, side, z0, z1, yMask, ySide, maskEnd) {
  * roofline pinstripe are drawn as CONTINUOUS runs between doors/sweeps
  * (fewer quads); segments only add their middle band.
  * Doors: 4 tall narrow panes reaching low, red leaf panel below.
+ * doorsOpen: folding leaves bunched at the jambs (~80% open), dark doorway
+ * with a warm interior glow behind (map-scale dwell read).
  */
-function t3Wall(mb, side, items) {
+function t3Wall(mb, side, items, doorsOpen = false) {
   const x = side * HW;
   const xg = side * (HW - 0.05); // glass plane
 
@@ -369,28 +371,52 @@ function t3Wall(mb, side, items) {
       const xdg = side * (HW - 0.06); // pane plane
       mb.rectX('t3hCream', x, z, z + f, yd, WINTOP, side);
       mb.rectX('t3hCream', x, z1 - f, z1, yd, WINTOP, side);
-      // red leaf panel below the panes
-      mb.rectX('t3hRed', xd, z + f, z1 - f, yd, gLo, side);
-      // 4 narrow panes separated by cream mullions
-      const span = it.len - 2 * f;
-      const mull = 0.045;
-      const paneW = (span - 5 * mull) / 4;
-      let pz = z + f;
-      for (let p = 0; p < 5; p++) {
-        mb.rectX('t3hCream', xd, pz, pz + mull, gLo, gHi, side);
-        if (p < 4) mb.rectX('t3hGlass', xdg, pz + mull, pz + mull + paneW, gLo, gHi, side);
-        pz += mull + paneW;
-      }
       mb.rectX('t3hCream', xd, z + f, z1 - f, gHi, WINTOP, side); // header strip
-      // center fold groove
-      const zc = (z + z1) / 2;
-      mb.rectX('black', side * (HW - 0.028), zc - 0.012, zc + 0.012, yd, gHi, side);
       // jambs + underside step filler
       const [xi, xo] = side > 0 ? [xd, x] : [x, xd];
       mb.rectZ('t3hCream', z + f, xi, xo, yd, WINTOP, 1);
       mb.rectZ('t3hCream', z1 - f, xi, xo, yd, WINTOP, -1);
-      mb.rectY('t3hCream', yd, xi, xo, z + f, z1 - f, -1);
       mb.rectX('black', side * (HW - 0.06), z + f, z1 - f, SK_BOT, yd, side);
+      if (!doorsOpen) {
+        // red leaf panel below the panes
+        mb.rectX('t3hRed', xd, z + f, z1 - f, yd, gLo, side);
+        // 4 narrow panes separated by cream mullions
+        const span = it.len - 2 * f;
+        const mull = 0.045;
+        const paneW = (span - 5 * mull) / 4;
+        let pz = z + f;
+        for (let p = 0; p < 5; p++) {
+          mb.rectX('t3hCream', xd, pz, pz + mull, gLo, gHi, side);
+          if (p < 4) mb.rectX('t3hGlass', xdg, pz + mull, pz + mull + paneW, gLo, gHi, side);
+          pz += mull + paneW;
+        }
+        // center fold groove
+        const zc = (z + z1) / 2;
+        mb.rectX('black', side * (HW - 0.028), zc - 0.012, zc + 0.012, yd, gHi, side);
+        mb.rectY('t3hCream', yd, xi, xo, z + f, z1 - f, -1);
+      } else {
+        // OPEN: folding leaves bunched at the jambs — a narrow stub each side
+        const zc0 = z + f;
+        const zc1 = z1 - f;
+        const stub = 0.2 * ((zc1 - zc0) / 2);
+        for (const [za, zb] of [[zc0, zc0 + stub], [zc1 - stub, zc1]]) {
+          mb.rectX('t3hRed', xd, za, zb, yd, gLo, side);
+          mb.rectX('t3hCream', xd, za, zb, gLo, gHi, side);
+        }
+        const zo0 = zc0 + stub;
+        const zo1 = zc1 - stub;
+        const xb = side * (HW - 0.30); // doorway back plane
+        const [pi, po] = side > 0 ? [xb, xd] : [xd, xb];
+        mb.rectX('doorwayDark', xb, zo0, zo1, yd, gHi, side);
+        mb.rectX('doorGlow', side * (HW - 0.28), zo0 + 0.04, zo1 - 0.04,
+          yd + 0.08, gHi - 0.3, side);
+        // seal the doorway pocket
+        mb.rectY('doorwayDark', yd + 0.01, pi, po, zo0, zo1, 1);
+        mb.rectY('doorwayDark', gHi, pi, po, zo0, zo1, -1);
+        mb.rectZ('doorwayDark', zo0, pi, po, yd, gHi, 1);
+        mb.rectZ('doorwayDark', zo1, pi, po, yd, gHi, -1);
+        mb.rectY('doorwayDark', yd, xi, xo, zc0, zc1, -1);
+      }
     }
     z = z1;
   }
@@ -468,7 +494,7 @@ function t3Pantograph(mb, { z, yRoof }) {
   }
 }
 
-export function buildT3Historic() {
+export function buildT3Historic({ doorsOpen = false } = {}) {
   const mb = new MeshBuilder();
 
   // right side (front→rear): cab sweep, door, 2 windows, door, 3 windows,
@@ -499,7 +525,7 @@ export function buildT3Historic() {
     if (Math.abs(d) > 1e-9) throw new Error(`${name} wall off by ${d.toFixed(4)} m`);
   }
 
-  t3Wall(mb, 1, rightItems);
+  t3Wall(mb, 1, rightItems, doorsOpen);
   t3Wall(mb, -1, leftItems);
 
   // skirts: solid between the bogies + tail pieces; cutouts expose the wheels
@@ -539,5 +565,10 @@ export function buildT3Historic() {
 }
 
 export function sections() {
-  return [{ key: 't3', build: () => buildT3Historic(), expect: EXPECT }];
+  return [{
+    key: 't3',
+    build: () => buildT3Historic(),
+    buildOpen: () => buildT3Historic({ doorsOpen: true }),
+    expect: EXPECT,
+  }];
 }

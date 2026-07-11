@@ -10,6 +10,8 @@ export interface TramSection {
   modelKey: string;
   /** Section body length in meters (along track). */
   lengthM: number;
+  /** Doors-open GLB variant key (rendered while dwelling), when authored. */
+  openModelKey?: string;
 }
 
 export interface TramModelSpec {
@@ -117,6 +119,12 @@ export interface TramPublicState {
   observedBearing: number;
   /** Distance between simulated and observed positions, meters (null w/o geometry). */
   deviationM: number | null;
+  /**
+   * Last observation dead-reckoned forward to `now` by the physics engine
+   * (anchored strictly to the fix — jumps when a new fix arrives). Along-shape
+   * meters; null without geometry. Drives 'live' position mode rendering.
+   */
+  projectedObservedDistM: number | null;
   /** Next stop name + eta if geometry known. */
   nextStopName: string | null;
   nextStopEtaS: number | null;
@@ -143,6 +151,11 @@ export interface EngineFrame {
   points: GeoJSON.FeatureCollection<GeoJSON.Point, PointFeatureProps>;
   /** One feature per visible tram section — drives the ModelLayer. */
   sections: GeoJSON.FeatureCollection<GeoJSON.Point, SectionFeatureProps>;
+  /**
+   * Last-real-fix visualization for the SELECTED/followed tram: the raw fix
+   * point + a connector line to the rendered position (empty when none).
+   */
+  fixOverlay: GeoJSON.FeatureCollection;
   /** ms timestamp of the frame. */
   atMs: number;
 }

@@ -10,7 +10,7 @@ import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native'
 import { AcSnowflake, TramModelImage } from '@/components/tram/TramModelImage';
 import { LineBadge } from '@/components/ui/LineBadge';
 import { Colors, Spacing, Tram } from '@/constants/theme';
-import type { ItineraryTiming, LegTiming } from '@/lib/arrivals';
+import { formatCountdown, type ItineraryTiming, type LegTiming } from '@/lib/arrivals';
 import { formatPragueClock } from '@/lib/format/pragueTime';
 import type { PlannerItinerary } from '@/lib/types';
 
@@ -27,10 +27,12 @@ export interface ItineraryCardProps {
   itinerary: PlannerItinerary;
   /** Live wall-clock timing (computeItineraryTiming); optional while loading. */
   timing?: ItineraryTiming;
+  /** Current time (ms) for the 'in N min' departure countdown; defaults to now. */
+  nowMs?: number;
   onPress: () => void;
 }
 
-export function ItineraryCard({ itinerary, timing, onPress }: ItineraryCardProps) {
+export function ItineraryCard({ itinerary, timing, nowMs, onPress }: ItineraryCardProps) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = Colors[scheme];
   const separatorColor = scheme === 'dark' ? 'rgba(84,84,88,0.5)' : 'rgba(60,60,67,0.24)';
@@ -39,6 +41,7 @@ export function ItineraryCard({ itinerary, timing, onPress }: ItineraryCardProps
 
   const departureMs = timing?.departureMs ?? null;
   const arrivalMs = timing?.arrivalMs ?? null;
+  const now = nowMs ?? Date.now();
 
   return (
     <Pressable
@@ -67,6 +70,13 @@ export function ItineraryCard({ itinerary, timing, onPress }: ItineraryCardProps
           <Text style={[styles.timeBig, { color: palette.text }]} allowFontScaling={false}>
             {formatPragueClock(arrivalMs)}
           </Text>
+          <Text
+            style={[styles.countdown, { color: accent }]}
+            allowFontScaling={false}
+            numberOfLines={1}
+          >
+            {formatCountdown(departureMs - now)}
+          </Text>
           <Text style={[styles.timeDuration, { color: palette.textSecondary }]} allowFontScaling={false}>
             {fmtDurationMin((arrivalMs - departureMs) / 1000)}
           </Text>
@@ -82,6 +92,13 @@ export function ItineraryCard({ itinerary, timing, onPress }: ItineraryCardProps
 
       {legs.map((leg, i) => {
         const legTiming: LegTiming | undefined = timing?.legs[i];
+        // Transfer wait = this leg's departure − previous leg's arrival, when
+        // both wall times are live.
+        const prevArrivalMs = timing?.legs[i - 1]?.arrivalMs ?? null;
+        const waitMs =
+          i > 0 && prevArrivalMs != null && legTiming?.departureMs != null
+            ? legTiming.departureMs - prevArrivalMs
+            : null;
         return (
           <Fragment key={`${i}-${leg.line}-${leg.fromStopId}`}>
             {i > 0 && (
@@ -93,6 +110,11 @@ export function ItineraryCard({ itinerary, timing, onPress }: ItineraryCardProps
                 <Text numberOfLines={1} style={[styles.transferText, { color: palette.textSecondary }]}>
                   Transfer at {leg.fromStopName}
                 </Text>
+                {waitMs != null && (
+                  <Text style={[styles.transferWait, { color: palette.textSecondary }]} allowFontScaling={false}>
+                    {waitMs < 60_000 ? '<1 min wait' : `${Math.round(waitMs / 60_000)} min wait`}
+                  </Text>
+                )}
               </View>
             )}
             <View style={styles.legRow}>
@@ -179,10 +201,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.3,
   },
+  countdown: {
+    fontSize: 13,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '600',
+    marginLeft: 'auto',
+  },
   timeDuration: {
     fontSize: 13,
     fontVariant: ['tabular-nums'],
-    marginLeft: 'auto',
   },
   timesFallback: {
     flex: 1,
@@ -240,6 +267,11 @@ const styles = StyleSheet.create({
   transferText: {
     flex: 1,
     fontSize: 12,
+  },
+  transferWait: {
+    fontSize: 12,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '600',
   },
   footer: {
     alignItems: 'center',

@@ -4,8 +4,10 @@
 import {
   computeArrivals,
   computeItineraryTiming,
+  formatCountdown,
   formatEtaMinutes,
   MAX_ARRIVALS,
+  nearestStation,
   scheduleTravelS,
   stationStops,
 } from '@/lib/arrivals';
@@ -88,6 +90,7 @@ function makeState(opts: {
     observedPosition: [14.6, 50.05],
     observedBearing: 90,
     deviationM: 0,
+    projectedObservedDistM: opts.simDistM,
     nextStopName: null,
     nextStopEtaS: null,
     hasGeometry: true,
@@ -294,5 +297,66 @@ describe('formatEtaMinutes', () => {
     expect(formatEtaMinutes(44)).toBe('now');
     expect(formatEtaMinutes(45)).toBe('1 min');
     expect(formatEtaMinutes(130)).toBe('2 min');
+  });
+});
+
+describe('formatCountdown', () => {
+  it("reads 'now' when imminent or already departed", () => {
+    expect(formatCountdown(0)).toBe('now');
+    expect(formatCountdown(29_000)).toBe('now');
+    expect(formatCountdown(-60_000)).toBe('now');
+  });
+  it("reads 'in N min' rounded to the nearest minute (≥ 1)", () => {
+    expect(formatCountdown(30_000)).toBe('in 1 min');
+    expect(formatCountdown(90_000)).toBe('in 2 min'); // 1.5 min rounds up
+    expect(formatCountdown(5 * 60_000)).toBe('in 5 min');
+  });
+});
+
+// ── nearestStation ───────────────────────────────────────────────────────────
+
+/** Three distinct stations along ~50.08 N with real, spread-out coordinates. */
+function spreadGeo(): RouteGeometry {
+  return {
+    shapeId: 'shape-near',
+    tripId: 'trip-near',
+    routeId: 'L5',
+    line: '5',
+    headsign: 'East',
+    coordinates: [
+      [14.4, 50.08],
+      [14.42, 50.08],
+      [14.44, 50.08],
+    ],
+    cumDistM: [0, 1000, 2000],
+    totalM: 2000,
+    stops: [
+      { stopId: 'w', name: 'West', sequence: 1, coordinates: [14.4, 50.08], distM: 0, arrivalMs: BASE, departureMs: BASE, dwellSeconds: 0, isTerminal: false },
+      { stopId: 'm', name: 'Mid', sequence: 2, coordinates: [14.42, 50.08], distM: 1000, arrivalMs: BASE + 60 * S, departureMs: BASE + 60 * S, dwellSeconds: 0, isTerminal: false },
+      { stopId: 'e', name: 'East', sequence: 3, coordinates: [14.44, 50.08], distM: 2000, arrivalMs: BASE + 120 * S, departureMs: BASE + 120 * S, dwellSeconds: 0, isTerminal: true },
+    ],
+  };
+}
+
+describe('nearestStation', () => {
+  it('returns null when no geometry is loaded', () => {
+    expect(nearestStation([14.42, 50.08], [])).toBeNull();
+  });
+
+  it('picks the closest station by great-circle distance', () => {
+    const geo = spreadGeo();
+    expect(nearestStation([14.401, 50.0805], [geo])?.name).toBe('West');
+    expect(nearestStation([14.4195, 50.0799], [geo])?.name).toBe('Mid');
+    expect(nearestStation([14.4442, 50.081], [geo])?.name).toBe('East');
+  });
+
+  it('returns the normalized key, display name, representative coord and serving lines', () => {
+    const other: RouteGeometry = { ...spreadGeo(), tripId: 'trip-near2', line: '17' };
+    const near = nearestStation([14.4201, 50.08], [spreadGeo(), other]);
+    expect(near).not.toBeNull();
+    expect(near!.name).toBe('Mid');
+    expect(near!.key).toBe('mid');
+    expect(near!.coordinates).toEqual([14.42, 50.08]);
+    expect(near!.lines).toEqual(['5', '17']);
   });
 });

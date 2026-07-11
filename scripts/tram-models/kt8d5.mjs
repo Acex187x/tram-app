@@ -120,12 +120,16 @@ function semiPant(mb, { z, yRoof, dir }) {
  * over the shell's red lower zone. Door segments: extend the door glass
  * below the sill (KT8 door windows drop lower than the side windows).
  */
-function liveryStrips(mb, { side, z0, segments }) {
+function liveryStrips(mb, { side, z0, segments, doorsOpen }) {
   let z = z0;
   for (const s of segments) {
     if (s.t === 'door') {
+      // door-leaf glass drops below the side-window sill — but not on an OPEN
+      // doorway (right side, doors-open variant): the leaves are slid aside
       const f = 0.05;
-      mb.rectX('glass', side * (HW - 0.026), z + f + 0.09, z + s.len - f - 0.09, 1.30, SILL, side);
+      if (!(doorsOpen && side > 0)) {
+        mb.rectX('glass', side * (HW - 0.026), z + f + 0.09, z + s.len - f - 0.09, 1.30, SILL, side);
+      }
     } else {
       mb.rectX('kt8White', side * HW, z, z + s.len, SKB, Y0, side);
       mb.rectX('kt8White', side * (HW + 0.002), z, z + s.len, RED_TOP, BAND_BOT, side);
@@ -297,7 +301,7 @@ function endItems(dirZ) {
   return dirZ < 0 ? items : items.reverse();
 }
 
-function buildEnd(dirZ) {
+function buildEnd(dirZ, { doorsOpen = false } = {}) {
   const mb = new MeshBuilder();
   const items = endItems(dirZ);
   const { z0, z1 } = buildSectionShell(mb, {
@@ -314,9 +318,10 @@ function buildEnd(dirZ) {
     doorLowY: DOOR_LOW,
     winOpts: WIN,
     ventY: VENT_Y,
+    doorsOpen,
   });
   const segments = wallSegs(z1 - z0, items, WIN);
-  for (const side of [-1, 1]) liveryStrips(mb, { side, z0, segments });
+  for (const side of [-1, 1]) liveryStrips(mb, { side, z0, segments, doorsOpen });
 
   kt8Mask(mb, { length: LA, dirZ });
   cabFlank(mb, { dirZ });
@@ -340,7 +345,7 @@ function buildEnd(dirZ) {
 const buildA = () => buildEnd(-1);
 const buildC = () => buildEnd(1);
 
-function buildB() {
+function buildB({ doorsOpen = false } = {}) {
   const mb = new MeshBuilder();
   const items = [
     seg('panel', 0.45),
@@ -360,9 +365,10 @@ function buildB() {
     doorLowY: DOOR_LOW,
     winOpts: WIN,
     ventY: VENT_Y,
+    doorsOpen,
   });
   const segments = wallSegs(z1 - z0, items, WIN);
-  for (const side of [-1, 1]) liveryStrips(mb, { side, z0, segments });
+  for (const side of [-1, 1]) liveryStrips(mb, { side, z0, segments, doorsOpen });
   jointFiller(mb, { zEnd: -(LB / 2 - 0.07) });
   jointFiller(mb, { zEnd: LB / 2 - 0.34 });
 
@@ -374,8 +380,20 @@ function buildB() {
 
 export function sections() {
   return [
-    { key: 'kt8d5-a', build: buildA, expect: { length: LA, width: W } },
-    { key: 'kt8d5-b', build: buildB, expect: { length: LB, width: W } },
-    { key: 'kt8d5-c', build: buildC, expect: { length: LA, width: W } },
+    {
+      key: 'kt8d5-a', expect: { length: LA, width: W },
+      build: buildA,
+      buildOpen: () => buildEnd(-1, { doorsOpen: true }),
+    },
+    {
+      key: 'kt8d5-b', expect: { length: LB, width: W },
+      build: buildB,
+      buildOpen: () => buildB({ doorsOpen: true }),
+    },
+    {
+      key: 'kt8d5-c', expect: { length: LA, width: W },
+      build: buildC,
+      buildOpen: () => buildEnd(1, { doorsOpen: true }),
+    },
   ];
 }

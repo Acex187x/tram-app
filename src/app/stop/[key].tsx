@@ -3,11 +3,13 @@
 // Live arrivals board over the runtime states + loaded geometries, refreshed
 // ~1 Hz by the tramData hooks; tap an arrival → that tram's sheet.
 import * as Haptics from 'expo-haptics';
+import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,7 +24,14 @@ import { LineBadge } from '@/components/ui/LineBadge';
 import { SheetContent } from '@/components/ui/SheetContent';
 import { Colors, Fonts, Spacing, Tram } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
-import { computeArrivals, formatEtaMinutes, stationStops, type StopArrival } from '@/lib/arrivals';
+import {
+  computeArrivals,
+  formatEtaMinutes,
+  nearestStation,
+  stationStops,
+  type StopArrival,
+} from '@/lib/arrivals';
+import { usePlannerStore } from '@/stores/planner';
 import { useSelectionStore } from '@/stores/selection';
 
 /** 'Tatra T3R.P' → 'T3R.P', 'Škoda 15T ForCity Alfa' → '15T ForCity Alfa'. */
@@ -40,6 +49,8 @@ export default function StopSheet() {
   const states = useAllTramStates();
   const geometries = useLoadedGeometries();
   const requestFlyTo = useSelectionStore((s) => s.requestFlyTo);
+  const requestPrefill = usePlannerStore((s) => s.requestPrefill);
+  const [routing, setRouting] = useState(false);
 
   const station = useMemo(
     () => stationStops(stationKey, geometries),
@@ -64,6 +75,42 @@ export default function StopSheet() {
   const onOpenTram = (arrival: StopArrival): void => {
     void Haptics.selectionAsync();
     router.push(('/tram/' + encodeURIComponent(arrival.tramKey)) as Href);
+  };
+
+  // "Route here": nearest stop to the user → this stop, handed to the planner
+  // which auto-plans on open. Permission denial + errors surface as an alert.
+  const onRouteHere = async (): Promise<void> => {
+    if (!station || routing) return;
+    setRouting(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Location off',
+          'Allow location access in Settings to route here from your nearest stop.',
+        );
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const origin = nearestStation([pos.coords.longitude, pos.coords.latitude], geometries);
+      if (!origin) {
+        Alert.alert('No nearby stop', 'No tram stop is loaded near you yet — try again shortly.');
+        return;
+      }
+      if (origin.key === stationKey) {
+        Alert.alert('Already here', "Your nearest tram stop is this one — you're already here.");
+        return;
+      }
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      requestPrefill(origin.name, station.name);
+      router.replace('/planner');
+    } catch {
+      Alert.alert('Location unavailable', "Couldn't read your location. Please try again.");
+    } finally {
+      setRouting(false);
+    }
   };
 
   return (
@@ -129,6 +176,27 @@ export default function StopSheet() {
                 </Text>
               </Pressable>
             </View>
+          )}
+
+          {station && (
+            <Pressable
+              onPress={() => void onRouteHere()}
+              disabled={routing}
+              accessibilityRole="button"
+              accessibilityLabel="Route here from my nearest stop"
+              style={({ pressed }) => [styles.routeButton, { opacity: pressed || routing ? 0.75 : 1 }]}
+            >
+              {routing ? (
+                <ActivityIndicator color={Tram.cream} />
+              ) : (
+                <>
+                  <SymbolView name="location.fill" size={16} tintColor={Tram.cream} />
+                  <Text style={styles.routeButtonText} allowFontScaling={false}>
+                    Route here
+                  </Text>
+                </>
+              )}
+            </Pressable>
           )}
 
           {/* Arrivals */}
@@ -273,6 +341,21 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   mapButtonText: { fontSize: 12, fontWeight: '600' },
+  routeButton: {
+    alignItems: 'center',
+    backgroundColor: Tram.pidRed,
+    borderCurve: 'continuous',
+    borderRadius: 14,
+    flexDirection: 'row',
+    gap: Spacing.two,
+    justifyContent: 'center',
+    minHeight: 50,
+  },
+  routeButtonText: {
+    color: Tram.cream,
+    fontSize: 16,
+    fontWeight: '600',
+  },
   sectionHeader: {
     fontSize: 12,
     fontWeight: '600',

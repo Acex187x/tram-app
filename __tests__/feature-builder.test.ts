@@ -34,6 +34,9 @@ function makeState(
       : [snapshot.coordinates[0], snapshot.coordinates[1]],
     observedBearing: geo ? bearingAt(geo.coordinates, geo.cumDistM, obsDistM) : (snapshot.bearing ?? 0),
     deviationM: geo ? Math.abs(simDistM - obsDistM) : null,
+    // Default projection = the raw fix distance (a just-arrived fix); tests
+    // override it to exercise live-mode dead-reckoned anchoring.
+    projectedObservedDistM: geo ? obsDistM : null,
     nextStopName: null,
     nextStopEtaS: null,
     hasGeometry: geo !== null,
@@ -534,6 +537,238 @@ describe('position mode (smooth vs live)', () => {
       positionMode: 'live',
     });
     expect(nearObserved.sections.features.length).toBeGreaterThan(0);
+  });
+});
+
+describe("'live' projected-observation anchoring", () => {
+  const geo = makeGeometry(
+    [
+      [0, 0],
+      [1000, 0],
+    ],
+    [],
+  );
+
+  it('anchors point and sections at projectedObservedDistM when it differs from the raw fix', () => {
+    // Raw fix at 250, engine dead-reckoned it forward to 400.
+    const state = makeState('9201', geo, 300, {
+      snapshot: makeSnapshot({ key: '9201', shapeDistM: 250 }),
+      projectedObservedDistM: 400,
+    });
+    const frame = buildFrame([state], WIDE, opts(geo, { positionMode: 'live' }));
+
+    const point = frame.points.features[0].geometry.coordinates as [number, number];
+    expect(haversineM(point, rightOf(metersToCoord(ORIGIN, 400, 0), 90))).toBeLessThan(0.5);
+
+    // Sections trail back from the PROJECTED head: centers at 395, 384.5, 374.
+    const pos = frame.sections.features.map((f) => f.geometry.coordinates as [number, number]);
+    expect(haversineM(pos[0], rightOf(metersToCoord(ORIGIN, 395, 0), 90))).toBeLessThan(1);
+    expect(haversineM(pos[1], rightOf(metersToCoord(ORIGIN, 384.5, 0), 90))).toBeLessThan(1);
+    expect(haversineM(pos[2], rightOf(metersToCoord(ORIGIN, 374, 0), 90))).toBeLessThan(1);
+  });
+
+  it('falls back to the raw fix distance when the projection is null', () => {
+    const state = makeState('9201', geo, 300, {
+      snapshot: makeSnapshot({ key: '9201', shapeDistM: 250 }),
+      projectedObservedDistM: null,
+    });
+    const frame = buildFrame([state], WIDE, opts(geo, { positionMode: 'live' }));
+    const point = frame.points.features[0].geometry.coordinates as [number, number];
+    expect(haversineM(point, rightOf(metersToCoord(ORIGIN, 250, 0), 90))).toBeLessThan(0.5);
+  });
+
+  it('clamps a runaway projection to the geometry end', () => {
+    const state = makeState('9201', geo, 900, {
+      snapshot: makeSnapshot({ key: '9201', shapeDistM: 950 }),
+      projectedObservedDistM: 5000,
+    });
+    const frame = buildFrame([state], WIDE, opts(geo, { positionMode: 'live' }));
+    const point = frame.points.features[0].geometry.coordinates as [number, number];
+    expect(haversineM(point, rightOf(metersToCoord(ORIGIN, 1000, 0), 90))).toBeLessThan(0.5);
+  });
+});
+
+describe('doors open while dwelling (openModelKey)', () => {
+  const geo = makeGeometry(
+    [
+      [0, 0],
+      [1000, 0],
+    ],
+    [],
+  );
+  /** 3-section spec with doors-open variants authored for sections 0 and 2. */
+  function specWithDoors() {
+    const spec = makeSpec3();
+    spec.sections[0] = { ...spec.sections[0], openModelKey: '15t-a-open' };
+    spec.sections[2] = { ...spec.sections[2], openModelKey: '15t-c-open' };
+    return spec;
+  }
+
+  it('a dwelling tram emits open keys where authored, normal keys otherwise', () => {
+    const state = makeState('9201', geo, 300, { model: specWithDoors(), phase: 'dwell' });
+    const frame = buildFrame([state], WIDE, opts(geo));
+    expect(frame.sections.features.map((f) => f.properties.modelKey)).toEqual([
+      '15t-a-open',
+      '15t-b', // no openModelKey authored → defensively falls back to normal
+      '15t-c-open',
+    ]);
+  });
+
+  it('doors close (normal keys) outside the dwell phase', () => {
+    for (const phase of ['cruise', 'terminal', 'unknown'] as const) {
+      const state = makeState('9201', geo, 300, { model: specWithDoors(), phase });
+      const frame = buildFrame([state], WIDE, opts(geo));
+      expect(frame.sections.features.map((f) => f.properties.modelKey)).toEqual([
+        '15t-a',
+        '15t-b',
+        '15t-c',
+      ]);
+    }
+  });
+
+  it('the coupled trailer opens its doors too', () => {
+    const spec = makeSpec1();
+    spec.sections[0] = { ...spec.sections[0], openModelKey: 't3rp-open' };
+    const state = makeState('8123', geo, 300, { model: spec, phase: 'dwell' });
+    const frame = buildFrame([state], WIDE, opts(geo, { coupledPairFn: () => true }));
+    expect(frame.sections.features.map((f) => f.properties.modelKey)).toEqual([
+      't3rp-open',
+      't3rp-open',
+    ]);
+  });
+
+  it('dwelling without geometry opens doors at the raw position as well', () => {
+    const state = makeState('9201', null, 0, {
+      model: specWithDoors(),
+      phase: 'dwell',
+      position: metersToCoord(ORIGIN, 0, 0),
+      bearing: 0,
+    });
+    const frame = buildFrame([state], WIDE, opts(null));
+    expect(frame.sections.features.map((f) => f.properties.modelKey)).toEqual([
+      '15t-a-open',
+      '15t-b',
+      '15t-c-open',
+    ]);
+  });
+});
+
+describe('fixOverlay (raw last fix + connector)', () => {
+  const geo = makeGeometry(
+    [
+      [0, 0],
+      [1000, 0],
+    ],
+    [],
+  );
+  // Sim at 300, raw fix back at 250.
+  const state = makeState('9201', geo, 300, {
+    snapshot: makeSnapshot({ key: '9201', shapeDistM: 250 }),
+  });
+
+  it('is empty without a selected or followed tram', () => {
+    const frame = buildFrame([state], WIDE, opts(geo));
+    expect(frame.fixOverlay.features).toHaveLength(0);
+  });
+
+  it('emits the raw fix point + shape-sliced connector for the selected tram (smooth)', () => {
+    const frame = buildFrame([state], WIDE, opts(geo, { selectedKey: '9201' }));
+    expect(frame.fixOverlay.features).toHaveLength(2);
+    const [fix, connector] = frame.fixOverlay.features;
+
+    // Point at the RAW fix position — on the track, NOT offset.
+    expect(fix.geometry.type).toBe('Point');
+    const fixPos = (fix.geometry as GeoJSON.Point).coordinates as [number, number];
+    expect(haversineM(fixPos, metersToCoord(ORIGIN, 250, 0))).toBeLessThan(0.5);
+    expect(fix.properties?.key).toBe('9201');
+
+    // Connector runs along the shape from the fix to the rendered (sim) dist.
+    expect(connector.geometry.type).toBe('LineString');
+    const line = (connector.geometry as GeoJSON.LineString).coordinates as [number, number][];
+    expect(line.length).toBeGreaterThanOrEqual(2);
+    expect(haversineM(line[0] as [number, number], metersToCoord(ORIGIN, 250, 0))).toBeLessThan(0.5);
+    expect(
+      haversineM(line[line.length - 1] as [number, number], metersToCoord(ORIGIN, 300, 0)),
+    ).toBeLessThan(0.5);
+  });
+
+  it('includes intermediate shape vertices between fix and rendered position', () => {
+    // L-shaped track: fix before the corner, sim after it → the connector must
+    // bend through the corner vertex instead of cutting across.
+    const bent = makeGeometry(
+      [
+        [0, 0],
+        [100, 0],
+        [100, 100],
+      ],
+      [],
+    );
+    const s = makeState('9201', bent, 150, {
+      snapshot: makeSnapshot({ key: '9201', shapeDistM: 50 }),
+    });
+    const frame = buildFrame([s], WIDE, opts(bent, { selectedKey: '9201' }));
+    const line = (frame.fixOverlay.features[1].geometry as GeoJSON.LineString)
+      .coordinates as [number, number][];
+    expect(line).toHaveLength(3);
+    expect(haversineM(line[1] as [number, number], metersToCoord(ORIGIN, 100, 0))).toBeLessThan(0.5);
+  });
+
+  it('connects to the projected observation in live mode', () => {
+    const projected = makeState('9201', geo, 300, {
+      snapshot: makeSnapshot({ key: '9201', shapeDistM: 250 }),
+      projectedObservedDistM: 400,
+    });
+    const frame = buildFrame(
+      [projected],
+      WIDE,
+      opts(geo, { selectedKey: '9201', positionMode: 'live' }),
+    );
+    const line = (frame.fixOverlay.features[1].geometry as GeoJSON.LineString)
+      .coordinates as [number, number][];
+    expect(haversineM(line[0] as [number, number], metersToCoord(ORIGIN, 250, 0))).toBeLessThan(0.5);
+    expect(
+      haversineM(line[line.length - 1] as [number, number], metersToCoord(ORIGIN, 400, 0)),
+    ).toBeLessThan(0.5);
+  });
+
+  it('followedKey wins over selectedKey', () => {
+    const other = makeState('8123', geo, 600, {
+      snapshot: makeSnapshot({ key: '8123', shapeDistM: 580 }),
+    });
+    const frame = buildFrame(
+      [state, other],
+      WIDE,
+      opts(geo, { selectedKey: '9201', followedKey: '8123' }),
+    );
+    expect(frame.fixOverlay.features.map((f) => f.properties?.key)).toEqual(['8123', '8123']);
+  });
+
+  it('emits even below the sections zoom band and outside the viewport', () => {
+    const frame = buildFrame([state], viewportM(5000, 5000, 6000, 6000, 12), {
+      ...opts(geo),
+      selectedKey: '9201',
+    });
+    expect(frame.sections.features).toHaveLength(0);
+    expect(frame.fixOverlay.features).toHaveLength(2);
+  });
+
+  it('falls back to a straight connector without geometry', () => {
+    const raw = makeState('9201', null, 0, {
+      snapshot: makeSnapshot({
+        key: '9201',
+        coordinates: metersToCoord(ORIGIN, 100, 0),
+        bearing: 90,
+      }),
+      position: metersToCoord(ORIGIN, 50, 50),
+      bearing: 45,
+    });
+    const frame = buildFrame([raw], WIDE, opts(null, { selectedKey: '9201' }));
+    expect(frame.fixOverlay.features).toHaveLength(2);
+    const line = (frame.fixOverlay.features[1].geometry as GeoJSON.LineString)
+      .coordinates as [number, number][];
+    expect(line).toHaveLength(2);
+    expect(haversineM(line[0] as [number, number], metersToCoord(ORIGIN, 100, 0))).toBeLessThan(0.5);
+    expect(haversineM(line[1] as [number, number], metersToCoord(ORIGIN, 50, 50))).toBeLessThan(0.5);
   });
 });
 

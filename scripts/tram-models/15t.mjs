@@ -245,9 +245,10 @@ function jointCovers(mb, { zWall, zEnd }) {
 
 // ── Section assembly ─────────────────────────────────────────────────────────
 
-function build({ cab, tail, pantograph }) {
+function build({ cab, tail, pantograph, doorsOpen }) {
   const mb = new MeshBuilder();
-  const driverDoor = { t: 'door', len: 0.78, lowY: Y0 }; // steps over bogie — no drop
+  // driver door steps over a bogie (no drop) and never opens for boarding
+  const driverDoor = { t: 'door', len: 0.78, lowY: Y0, noOpen: true };
   const door = () => ({ t: 'door', len: 1.32 });
   // run weights tuned so no drop-door overlaps a bogie cover
   const rightItems = cab
@@ -275,6 +276,7 @@ function build({ cab, tail, pantograph }) {
     bogies,
     roofShrink: 0.32,
     winOpts: WIN,
+    doorsOpen,
   });
 
   sideFurniture(mb, {
@@ -311,8 +313,20 @@ function build({ cab, tail, pantograph }) {
 export function sections() {
   const expect = { length: L, width: W };
   return [
-    { key: '15t-a', build: () => build({ cab: true }), expect },
-    { key: '15t-b', build: () => build({ pantograph: true }), expect },
-    { key: '15t-c', build: () => build({ tail: true }), expect },
+    {
+      key: '15t-a', expect,
+      build: () => build({ cab: true }),
+      buildOpen: () => build({ cab: true, doorsOpen: true }),
+    },
+    {
+      key: '15t-b', expect,
+      build: () => build({ pantograph: true }),
+      buildOpen: () => build({ pantograph: true, doorsOpen: true }),
+    },
+    {
+      key: '15t-c', expect,
+      build: () => build({ tail: true }),
+      buildOpen: () => build({ tail: true, doorsOpen: true }),
+    },
   ];
 }

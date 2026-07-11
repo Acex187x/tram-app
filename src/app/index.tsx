@@ -13,15 +13,19 @@ import Mapbox, {
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
 import * as SplashScreen from 'expo-splash-screen';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { resolveLightPreset, STANDARD_CONFIG } from '@/components/map/mapStyle';
+import {
+  resolveLightPreset,
+  SECTIONS_FEED_MIN_ZOOM,
+  STANDARD_CONFIG,
+} from '@/components/map/mapStyle';
 import { BottomDock, ControlStack, FollowBanner, StatusChip } from '@/components/map/MapChrome';
 import { PlannerOverlay } from '@/components/map/PlannerOverlay';
 import { RouteNetwork, STOP_TOTEM_MODEL_KEY } from '@/components/map/RouteNetwork';
-import { TramLayers } from '@/components/map/TramLayers';
+import { TramLayers, type FollowGestureState } from '@/components/map/TramLayers';
 import { useTramModels } from '@/components/map/useTramModels';
 import { getRuntime, useTramRuntime } from '@/hooks/tramData';
 import type { Viewport } from '@/lib/types';
@@ -75,19 +79,46 @@ export default function MapScreen() {
   }, [hideSplash]);
 
   // ── Viewport tracking (feeds frame culling + zoom banding via ref) ─────────
+  const followGestureRef = useRef<FollowGestureState>({ gestureActive: false, overrides: null });
   const onCameraChanged = useCallback((state: MapState) => {
-    // Ref assignment only — no React work per camera event.
+    // Ref assignments only — no React work per camera event.
     const { ne, sw } = state.properties.bounds;
+    const zoom = state.properties.zoom;
     viewportRef.current = {
       bbox: [sw[0], sw[1], ne[0], ne[1]],
-      zoom: state.properties.zoom,
+      zoom,
     };
+    // Zoom-adaptive simulation rate (thermal): 60 Hz only in the model band.
+    getRuntime().setDetailMode(zoom >= SECTIONS_FEED_MIN_ZOOM);
+
+    // Follow-mode gestures do NOT cancel follow: while the user's fingers are
+    // on the map we capture their chosen zoom/pitch/heading-offset (relative
+    // to the tram bearing) and keep applying them on subsequent retargets.
+    const gesture = followGestureRef.current;
+    const isGestureActive = state.gestures.isGestureActive;
+    const followKey = useSelectionStore.getState().followTramKey;
+    if (followKey && isGestureActive) {
+      gesture.gestureActive = true;
+      const tram = getRuntime().engine.getState(followKey);
+      if (tram) {
+        const live = useSettingsStore.getState().positionMode === 'live';
+        const bearing = live ? tram.observedBearing : tram.bearing;
+        gesture.overrides = {
+          zoom,
+          pitch: state.properties.pitch,
+          // Normalized to (-180, 180] so the shortest-way offset persists.
+          headingOffset:
+            ((((state.properties.heading - bearing) % 360) + 540) % 360) - 180,
+        };
+      }
+    } else if (!isGestureActive) {
+      gesture.gestureActive = false;
+    }
   }, []);
 
-  // Any touch on the map cancels tram-follow.
-  const onMapTouchStart = useCallback(() => {
-    const selection = useSelectionStore.getState();
-    if (selection.followTramKey) selection.setFollowTramKey(null);
+  // Belt-and-braces: some gesture-end paths only surface via onMapIdle.
+  const onMapIdle = useCallback(() => {
+    followGestureRef.current.gestureActive = false;
   }, []);
 
   // ── One-shot fly-to requests from search/line/favorites sheets ─────────────
@@ -105,9 +136,12 @@ export default function MapScreen() {
     selection.requestFlyTo(null);
   }, [flyToTarget]);
 
-  // Followed tram's geometry loads first (smooth on-shape follow ASAP).
+  // Followed tram's geometry loads first (smooth on-shape follow ASAP); each
+  // new follow (or follow end) starts from the default chase view — gesture
+  // overrides belong to a single follow session.
   const followTramKey = useSelectionStore((s) => s.followTramKey);
   useEffect(() => {
+    followGestureRef.current = { gestureActive: false, overrides: null };
     if (!followTramKey) return;
     const state = getRuntime().engine.getState(followTramKey);
     if (state) getRuntime().prioritizeTrip(state.snapshot.tripId);
@@ -166,7 +200,7 @@ export default function MapScreen() {
         onDidFinishLoadingMap={hideSplash}
         onDidFinishLoadingStyle={() => setStyleLoaded(true)}
         onCameraChanged={onCameraChanged}
-        onTouchStart={onMapTouchStart}
+        onMapIdle={onMapIdle}
       >
         <Camera
           ref={cameraRef}
@@ -190,7 +224,12 @@ export default function MapScreen() {
           stopTotemReady={modelUris != null && STOP_TOTEM_MODEL_KEY in modelUris}
         />
         <PlannerOverlay cameraRef={cameraRef} />
-        <TramLayers cameraRef={cameraRef} viewportRef={viewportRef} modelUris={modelUris} />
+        <TramLayers
+          cameraRef={cameraRef}
+          viewportRef={viewportRef}
+          followGestureRef={followGestureRef}
+          modelUris={modelUris}
+        />
         {locationGranted && <LocationPuck puckBearingEnabled puckBearing="heading" />}
       </MapView>
 

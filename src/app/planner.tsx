@@ -1,12 +1,16 @@
 // /planner — journey planner form sheet floating over the live map.
-// Pick two stops, plan over the tram network graph built from loaded
-// geometries, then hand the chosen itinerary to the map via usePlannerStore.
+// Pick two stops (or a recent pair / your nearest stop), plan over the tram
+// network graph built from loaded geometries, then hand the chosen itinerary to
+// the map via usePlannerStore. Google-Maps-style: recent searches, nearest-stop
+// fill, live departure/arrival wall times with a 1 Hz 'in N min' countdown.
 import * as Haptics from 'expo-haptics';
+import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Keyboard,
   Pressable,
   ScrollView,
@@ -17,12 +21,18 @@ import {
 } from 'react-native';
 
 import { ItineraryCard } from '@/components/planner/ItineraryCard';
+import { RecentRoutes } from '@/components/planner/RecentRoutes';
 import { StopSearchCard } from '@/components/planner/StopSearchCard';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { SheetContent } from '@/components/ui/SheetContent';
 import { Colors, Spacing, Tram } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
-import { computeItineraryTiming } from '@/lib/arrivals';
+import {
+  computeItineraryTiming,
+  formatCountdown,
+  nearestStation,
+  type ItineraryTiming,
+} from '@/lib/arrivals';
 import { formatPragueClock } from '@/lib/format/pragueTime';
 import { buildNetwork, normalizeName } from '@/lib/planner/network';
 import { planItineraries, searchStops } from '@/lib/planner/planner';
@@ -33,6 +43,11 @@ type PlanError =
   | { type: 'same' }
   | { type: 'unknown'; field: 'from' | 'to'; name: string };
 
+interface RankedResult {
+  itinerary: PlannerItinerary;
+  timing: ItineraryTiming;
+}
+
 export default function PlannerScreen() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = Colors[scheme];
@@ -42,13 +57,27 @@ export default function PlannerScreen() {
   const states = useAllTramStates();
   const itinerary = usePlannerStore((s) => s.itinerary);
   const setItinerary = usePlannerStore((s) => s.setItinerary);
+  const recents = usePlannerStore((s) => s.recents);
+  const addRecent = usePlannerStore((s) => s.addRecent);
+  const removeRecent = usePlannerStore((s) => s.removeRecent);
+  const prefill = usePlannerStore((s) => s.prefill);
+  const clearPrefill = usePlannerStore((s) => s.clearPrefill);
 
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [results, setResults] = useState<PlannerItinerary[] | null>(null);
   const [error, setError] = useState<PlanError | null>(null);
+  const [locating, setLocating] = useState(false);
+  // Wall-clock second tick — refreshes the 'in N min' countdowns while the sheet
+  // is open (independent of the ~1 Hz states cadence).
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const loading = geometries.length === 0;
+
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Station index for suggestion badges + input validation. Rebuilt only when
   // the geometry set changes (~1 Hz re-render at most while shapes stream in).
@@ -95,48 +124,118 @@ export default function PlannerScreen() {
     invalidate();
   }, [from, to, invalidate]);
 
+  // Core planning routine, driven by explicit values so button press, keyboard
+  // submit, recent-pick and prefill auto-plan all share one path. BFS runs ONLY
+  // here (never during render).
+  const runPlan = useCallback(
+    (fromVal: string, toVal: string): boolean => {
+      Keyboard.dismiss();
+      const fromKey = normalizeName(fromVal);
+      const toKey = normalizeName(toVal);
+      if (!network.stations.has(fromKey)) {
+        setResults(null);
+        setError({ type: 'unknown', field: 'from', name: fromVal.trim() });
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        return false;
+      }
+      if (!network.stations.has(toKey)) {
+        setResults(null);
+        setError({ type: 'unknown', field: 'to', name: toVal.trim() });
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        return false;
+      }
+      if (fromKey === toKey) {
+        setResults(null);
+        setError({ type: 'same' });
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        return false;
+      }
+
+      const found = planItineraries(fromVal, toVal, geometries);
+      setError(null);
+      setResults(found);
+      if (found.length > 0) addRecent(fromVal, toVal);
+      void Haptics.notificationAsync(
+        found.length > 0
+          ? Haptics.NotificationFeedbackType.Success
+          : Haptics.NotificationFeedbackType.Warning,
+      );
+      return found.length > 0;
+    },
+    [network, geometries, addRecent],
+  );
+
   const canPlan = !loading && from.trim().length > 0 && to.trim().length > 0;
 
-  // BFS runs ONLY here (button press / keyboard submit), never during render.
   const handlePlan = useCallback(() => {
     if (!canPlan) return;
-    Keyboard.dismiss();
+    runPlan(from, to);
+  }, [canPlan, from, to, runPlan]);
 
-    const fromKey = normalizeName(from);
-    const toKey = normalizeName(to);
-    if (!network.stations.has(fromKey)) {
-      setResults(null);
-      setError({ type: 'unknown', field: 'from', name: from.trim() });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      return;
-    }
-    if (!network.stations.has(toKey)) {
-      setResults(null);
-      setError({ type: 'unknown', field: 'to', name: to.trim() });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      return;
-    }
-    if (fromKey === toKey) {
-      setResults(null);
-      setError({ type: 'same' });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      return;
-    }
+  const handlePickRecent = useCallback(
+    (recentFrom: string, recentTo: string) => {
+      setFrom(recentFrom);
+      setTo(recentTo);
+      runPlan(recentFrom, recentTo);
+    },
+    [runPlan],
+  );
 
-    const found = planItineraries(from, to, geometries);
-    setError(null);
-    setResults(found);
-    Haptics.notificationAsync(
-      found.length > 0
-        ? Haptics.NotificationFeedbackType.Success
-        : Haptics.NotificationFeedbackType.Warning,
-    );
-  }, [canPlan, from, to, network, geometries]);
+  // Nearest stop → From field, via device location. Permission denial + errors
+  // surface as a friendly alert; never throws into render.
+  const handleLocate = useCallback(async () => {
+    if (loading) return;
+    setLocating(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Location off',
+          'Allow location access in Settings to fill the nearest stop automatically.',
+        );
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const station = nearestStation([pos.coords.longitude, pos.coords.latitude], geometries);
+      if (!station) {
+        Alert.alert('No nearby stop', 'No tram stop is loaded near you yet — try again shortly.');
+        return;
+      }
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setFrom(station.name);
+      invalidate();
+    } catch {
+      Alert.alert('Location unavailable', "Couldn't read your location. Please try again.");
+    } finally {
+      setLocating(false);
+    }
+  }, [loading, geometries, invalidate]);
+
+  // One-shot prefill handoff from the stop sheet's "Route here": fill both
+  // fields, plan immediately once geometry is ready, then clear the handoff.
+  const [autoPlanPending, setAutoPlanPending] = useState(false);
+  useEffect(() => {
+    if (!prefill) return;
+    setFrom(prefill.from);
+    setTo(prefill.to);
+    setAutoPlanPending(true);
+    clearPrefill();
+  }, [prefill, clearPrefill]);
+
+  useEffect(() => {
+    if (!autoPlanPending || loading) return;
+    setAutoPlanPending(false);
+    runPlan(from, to);
+    // from/to were just set from the prefill; runPlan reads them explicitly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPlanPending, loading]);
 
   const handlePick = useCallback(
     (it: PlannerItinerary) => {
       Keyboard.dismiss();
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setItinerary(it);
       router.back(); // map draws the route + fits bounds
     },
@@ -149,22 +248,37 @@ export default function PlannerScreen() {
   }, []);
 
   const handleClearItinerary = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setItinerary(null);
   }, [setItinerary]);
 
-  // Live wall-clock timing per result card + for the active-route banner.
-  // Recomputed each ~1 Hz states tick so the times stay current.
-  const resultTimings = useMemo(
-    () =>
-      results?.map((it) => computeItineraryTiming(it.legs, states, geometries, Date.now())) ??
-      [],
-    [results, states, geometries],
-  );
+  // Live wall-clock timing per result, then sort by EARLIEST ARRIVAL (live
+  // arrival first; schedule-only itineraries fall back to fewest transfers /
+  // stops). Recomputed each 1 Hz tick so times + countdowns stay current.
+  const ranked = useMemo<RankedResult[]>(() => {
+    if (!results) return [];
+    const withTiming = results.map((it) => ({
+      itinerary: it,
+      timing: computeItineraryTiming(it.legs, states, geometries, nowMs),
+    }));
+    withTiming.sort((a, b) => {
+      const aa = a.timing.arrivalMs;
+      const bb = b.timing.arrivalMs;
+      if (aa != null && bb != null) return aa - bb;
+      if (aa != null) return -1;
+      if (bb != null) return 1;
+      return (
+        a.itinerary.transferCount - b.itinerary.transferCount ||
+        a.itinerary.totalStops - b.itinerary.totalStops
+      );
+    });
+    return withTiming;
+  }, [results, states, geometries, nowMs]);
+
   const activeTiming = useMemo(
     () =>
-      itinerary ? computeItineraryTiming(itinerary.legs, states, geometries, Date.now()) : null,
-    [itinerary, states, geometries],
+      itinerary ? computeItineraryTiming(itinerary.legs, states, geometries, nowMs) : null,
+    [itinerary, states, geometries, nowMs],
   );
 
   const activeLegs = itinerary?.legs ?? [];
@@ -172,10 +286,14 @@ export default function PlannerScreen() {
     activeLegs.length > 0
       ? `${activeLegs[0].fromStopName} → ${activeLegs[activeLegs.length - 1].toStopName}`
       : '';
-  const bannerTimes =
-    activeTiming?.departureMs != null && activeTiming?.arrivalMs != null
-      ? `${formatPragueClock(activeTiming.departureMs)} → ${formatPragueClock(activeTiming.arrivalMs)}`
-      : null;
+  const bannerLive = activeTiming?.departureMs != null && activeTiming?.arrivalMs != null;
+  const bannerTimes = bannerLive
+    ? `${formatPragueClock(activeTiming!.departureMs!)} → ${formatPragueClock(
+        activeTiming!.arrivalMs!,
+      )} · ${formatCountdown(activeTiming!.departureMs! - nowMs)}`
+    : null;
+
+  const showRecents = !loading && error === null && results === null && recents.length > 0;
 
   return (
     <GlassPanel style={styles.root}>
@@ -240,6 +358,8 @@ export default function PlannerScreen() {
           search={search}
           linesFor={linesFor}
           onSubmit={handlePlan}
+          onLocate={() => void handleLocate()}
+          locating={locating}
         />
 
         <Pressable
@@ -262,6 +382,14 @@ export default function PlannerScreen() {
           </Text>
         </Pressable>
 
+        {showRecents && (
+          <RecentRoutes
+            recents={recents}
+            onPick={handlePickRecent}
+            onRemove={removeRecent}
+          />
+        )}
+
         {loading ? (
           <View style={styles.stateBlock}>
             <ActivityIndicator />
@@ -282,10 +410,12 @@ export default function PlannerScreen() {
             </Text>
           </View>
         ) : results === null ? (
-          <Text style={[styles.hint, { color: palette.textSecondary }]}>
-            Plan a journey across {network.stations.size} stops on{' '}
-            {network.sequencesByLine.size} tram lines
-          </Text>
+          recents.length === 0 ? (
+            <Text style={[styles.hint, { color: palette.textSecondary }]}>
+              Plan a journey across {network.stations.size} stops on{' '}
+              {network.sequencesByLine.size} tram lines
+            </Text>
+          ) : null
         ) : results.length === 0 ? (
           <View style={styles.stateBlock}>
             <SymbolView name="tram.fill" size={34} tintColor={palette.textSecondary} />
@@ -297,12 +427,15 @@ export default function PlannerScreen() {
           </View>
         ) : (
           <View style={styles.results}>
-            <Text style={[styles.sectionLabel, { color: palette.textSecondary }]}>Routes</Text>
-            {results.map((it, i) => (
+            <Text style={[styles.sectionLabel, { color: palette.textSecondary }]}>
+              Routes · earliest arrival first
+            </Text>
+            {ranked.map(({ itinerary: it, timing }, i) => (
               <ItineraryCard
-                key={`${i}-${it.legs.map((l) => l.line).join('-')}`}
+                key={`${i}-${it.legs.map((l) => l.line).join('-')}-${it.legs[0]?.fromStopId}`}
                 itinerary={it}
-                timing={resultTimings[i]}
+                timing={timing}
+                nowMs={nowMs}
                 onPress={() => handlePick(it)}
               />
             ))}

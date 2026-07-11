@@ -387,7 +387,7 @@ function head() {
  * b → door at the FRONT + green display window (pantograph over the front),
  * d → window first, door at the REAR (mirror). Photos: 9149 side.
  */
-function short({ pantograph = false } = {}) {
+function short({ pantograph = false, doorsOpen = false } = {}) {
   const mb = new MeshBuilder();
   const z0 = -LSHORT / 2 + GAITER;
   const z1 = LSHORT / 2 - GAITER;
@@ -395,7 +395,7 @@ function short({ pantograph = false } = {}) {
   const items = pantograph
     ? [{ t: 'panel', len: 0.12 }, { t: 'door', len: DOOR }, { t: 'run' }]
     : [{ t: 'run' }, { t: 'door', len: DOOR }, { t: 'panel', len: 0.12 }];
-  buildWall(mb, { ...common, side: 1, z0, segments: wallSegs(z1 - z0, items, { targetWin: 1.5, pillar: 0.14 }) });
+  buildWall(mb, { ...common, side: 1, z0, doorsOpen, segments: wallSegs(z1 - z0, items, { targetWin: 1.5, pillar: 0.14 }) });
   buildWall(mb, { ...common, side: -1, z0, segments: wallSegs(z1 - z0, [{ t: 'run' }], { targetWin: 1.4, pillar: 0.14 }) });
   sideDisplay(mb, { side: 1, z: pantograph ? z0 + DOOR + 0.6 : z1 - DOOR - 0.6 });
 
@@ -419,13 +419,13 @@ function short({ pantograph = false } = {}) {
 }
 
 /** Section c — long middle, red, TWO grey doors on the right, center bogie. */
-function mid() {
+function mid({ doorsOpen = false } = {}) {
   const mb = new MeshBuilder();
   const z0 = -LLONG / 2 + GAITER;
   const z1 = LLONG / 2 - GAITER;
   const common = { xw: HW, y0: Y0, sill: SILL, winTop: WINTOP, yTop: YTOP, mats: RED, doorLowY: DOORLOW };
   buildWall(mb, {
-    ...common, side: 1, z0,
+    ...common, side: 1, z0, doorsOpen,
     segments: wallSegs(z1 - z0, [
       { t: 'panel', len: 0.12 },
       { t: 'door', len: DOOR },
@@ -453,7 +453,7 @@ function mid() {
 }
 
 /** Section e — tail cab: grey door at the FRONT, red to the rear helmet. */
-function tail() {
+function tail({ doorsOpen = false } = {}) {
   const mb = new MeshBuilder();
   const z0 = -LLONG / 2 + GAITER;
   const z1 = LLONG / 2 - NOSE;
@@ -461,7 +461,7 @@ function tail() {
   const common = { xw: HW, y0: Y0, sill: SILL, winTop: WINTOP, yTop: YTOP, doorLowY: DOORLOW };
   // right: grey door at the front, then windows, silver stub at the tail
   buildWall(mb, {
-    ...common, side: 1, z0, mats: RED,
+    ...common, side: 1, z0, mats: RED, doorsOpen,
     segments: wallSegs(zSil - z0, [
       { t: 'panel', len: 0.12 },
       { t: 'door', len: DOOR },
@@ -500,11 +500,28 @@ function tail() {
 export function sections() {
   const eLong = { length: LLONG, width: W };
   const eShort = { length: LSHORT, width: W };
+  // 14t-a carries only the narrow silver DRIVER door → no doors-open variant
   return [
     { key: '14t-a', build: head, expect: eLong },
-    { key: '14t-b', build: () => short({ pantograph: true }), expect: eShort },
-    { key: '14t-c', build: mid, expect: eLong },
-    { key: '14t-d', build: () => short(), expect: eShort },
-    { key: '14t-e', build: tail, expect: eLong },
+    {
+      key: '14t-b', expect: eShort,
+      build: () => short({ pantograph: true }),
+      buildOpen: () => short({ pantograph: true, doorsOpen: true }),
+    },
+    {
+      key: '14t-c', expect: eLong,
+      build: () => mid(),
+      buildOpen: () => mid({ doorsOpen: true }),
+    },
+    {
+      key: '14t-d', expect: eShort,
+      build: () => short(),
+      buildOpen: () => short({ doorsOpen: true }),
+    },
+    {
+      key: '14t-e', expect: eLong,
+      build: () => tail(),
+      buildOpen: () => tail({ doorsOpen: true }),
+    },
   ];
 }

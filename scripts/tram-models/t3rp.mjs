@@ -174,7 +174,7 @@ function mask(mb, { dirZ, isFront }) {
   coupler(mb, { zEnd: dirZ * (L / 2), dir: dirZ });
 }
 
-export function buildT3RP() {
+export function buildT3RP({ doorsOpen = false } = {}) {
   const mb = new MeshBuilder();
   const mats = {
     lower: 't3rpRed',
@@ -208,6 +208,7 @@ export function buildT3RP() {
     winOpts: { targetWin: 1.2, pillar: 0.11 }, // T3 window rhythm, thin pillars
     ventY: 2.26, // sliding-vent divider ~72% up the window
     roofMat: 'cream',
+    doorsOpen,
   });
 
   mask(mb, { dirZ: -1, isFront: true });
@@ -252,5 +253,10 @@ export function buildT3RP() {
 }
 
 export function sections() {
-  return [{ key: 't3rp', build: buildT3RP, expect: EXPECT }];
+  return [{
+    key: 't3rp',
+    build: () => buildT3RP(),
+    buildOpen: () => buildT3RP({ doorsOpen: true }),
+    expect: EXPECT,
+  }];
 }

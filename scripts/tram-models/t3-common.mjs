@@ -86,7 +86,7 @@ function t3Mask(mb, { dirZ, palette, hasDisplay }) {
 }
 
 /** @param {'t3' | 't3rp' | 't3rplf'} variant */
-export function buildT3(variant) {
+export function buildT3(variant, { doorsOpen = false } = {}) {
   const mb = new MeshBuilder();
   const plf = variant === 't3rplf';
   const mats = {
@@ -114,6 +114,7 @@ export function buildT3(variant) {
     winOpts: { targetWin: 1.18, pillar: 0.17 },
     ventY: 2.24,
     roofMat: plf ? 'roof' : 'cream',
+    doorsOpen,
   });
 
   // masks: classic cream fascia; PLF wears the modernized silver-grey mask

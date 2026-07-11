@@ -4,16 +4,21 @@
 // plus transparent hit-test circles on BOTH sources (tap anywhere on a tram
 // body) and a gold selection halo.
 //
-// Cadence (60 fps): the engine ticks at TICK_MS (~16 ms). Every tick pushes the
-// sections FC (small — viewport-culled); the points FC (whole fleet,
-// badges/dots) is pushed at ~15 Hz (POINTS_PUSH_MS). The follow camera is
-// retargeted at ~12.5 Hz (CAMERA_RETARGET_MS) with overlapping linear glides —
-// see the comment at CAMERA_RETARGET_MS. Stringify is skipped entirely while
-// the sections FC stays empty.
+// Cadence (zoom-adaptive, thermal-aware): the engine ticks at TICK_MS (~16 ms)
+// only while the map is inside the 3D sections band — below it the runtime
+// drops to ~10 Hz (see tramData.setDetailMode). Each tick pushes the sections
+// FC (small — viewport-culled) when the band is on screen; the points FC
+// (whole fleet, badges/dots) is pushed at a zoom-dependent cadence
+// (pointsPushIntervalMs: 15 Hz close, 1 s mid, 5 s far — far-zoom badges are
+// near-static and re-pushing burns GPU). The follow camera is retargeted at
+// ~12.5 Hz (CAMERA_RETARGET_MS) with overlapping linear glides — see the
+// comment at CAMERA_RETARGET_MS. Stringify is skipped entirely while a FC
+// stays empty, and frames that push nothing skip buildFrame altogether.
 
 import {
   Camera,
   CircleLayer,
+  LineLayer,
   ModelLayer,
   Models,
   ShapeSource,
@@ -24,7 +29,7 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, type ReactElement, type RefObject } from 'react';
 
 import { Tram } from '@/constants/theme';
-import { getRuntime, POINTS_PUSH_MS } from '@/hooks/tramData';
+import { getRuntime, pointsPushIntervalMs } from '@/hooks/tramData';
 import { buildFrame } from '@/lib/render/featureBuilder';
 import type { PlannerItinerary, Viewport } from '@/lib/types';
 import { useFavoritesStore } from '@/stores/favorites';
@@ -47,14 +52,28 @@ const MODEL_COMIC_REAL_SCALE_ZOOM = 17.0;
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 const EMPTY_FC_STRING = JSON.stringify(EMPTY_FC);
 
-/** Follow-camera: ahead-side chase view — zoom 17.1, pitch 56. */
-const FOLLOW_ZOOM = 17.1;
-const FOLLOW_PITCH = 56;
 /**
- * Heading offset from the tram's bearing so the camera looks at the tram from
- * ahead-and-slightly-to-the-side (only while followHeadingLock is on).
+ * Follow-camera defaults: close chase view from BEHIND the tram, looking
+ * forward over the roof (heading = tram bearing) — buildings no longer occlude
+ * the followed tram. User gestures during follow adjust zoom/pitch/heading as
+ * OFFSETS that persist for the rest of the follow (see FollowGestureState).
  */
-const FOLLOW_HEADING_AHEAD = 160;
+const FOLLOW_ZOOM = 17.5;
+const FOLLOW_PITCH = 60;
+
+/**
+ * Live gesture/override channel between the map screen (which owns
+ * onCameraChanged / onMapIdle) and the follow-camera retarget loop here.
+ * Gestures do NOT cancel follow — while a gesture is active the retarget loop
+ * yields, and the user's chosen zoom/pitch/heading-offset are captured and
+ * re-applied relative to the tram bearing on subsequent retargets.
+ */
+export interface FollowGestureState {
+  /** True while the user's fingers are on the map (retargeting pauses). */
+  gestureActive: boolean;
+  /** Camera overrides captured from the user's gesture; null = defaults. */
+  overrides: { zoom: number; pitch: number; headingOffset: number } | null;
+}
 
 /**
  * Follow-camera cadence. Retargeting `setCamera` on EVERY 16 ms tick restarts
@@ -100,15 +119,24 @@ const BADGE_COLOR = [
 export interface TramLayersProps {
   cameraRef: RefObject<Camera | null>;
   viewportRef: RefObject<Viewport>;
+  /** Gesture/override state for the follow camera (owned by the map screen). */
+  followGestureRef: RefObject<FollowGestureState>;
   /** modelKey → local GLB URI; null while still downloading (gates <Models>). */
   modelUris: Record<string, string> | null;
 }
 
-export function TramLayers({ cameraRef, viewportRef, modelUris }: TramLayersProps) {
+export function TramLayers({
+  cameraRef,
+  viewportRef,
+  followGestureRef,
+  modelUris,
+}: TramLayersProps) {
   const pointsRef = useRef<ShapeSource>(null);
   const sectionsRef = useRef<ShapeSource>(null);
+  const fixOverlayRef = useRef<ShapeSource>(null);
   const sectionsFedRef = useRef(false);
   const sectionsEmptyRef = useRef(true);
+  const fixEmptyRef = useRef(true);
   const lastPointsPushMsRef = useRef(0);
   const lastCameraPushMsRef = useRef(0);
   const favSetRef = useRef<{ source: string[]; set: Set<string> } | null>(null);
@@ -125,98 +153,127 @@ export function TramLayers({ cameraRef, viewportRef, modelUris }: TramLayersProp
     return rt.subscribeFrame((nowMs) => {
       const viewport = viewportRef.current;
       const selection = useSelectionStore.getState();
-      const favTrams = useFavoritesStore.getState().favoriteTrams;
-      if (!favSetRef.current || favSetRef.current.source !== favTrams) {
-        favSetRef.current = { source: favTrams, set: new Set(favTrams) };
-      }
-
-      // Planner route-only mode: while an itinerary is shown, only trams on its
-      // legs' lines render. The line set is cached per itinerary reference.
-      const itinerary = usePlannerStore.getState().itinerary;
-      if (lineFilterRef.current.source !== itinerary) {
-        lineFilterRef.current = {
-          source: itinerary,
-          set: itinerary ? new Set(itinerary.legs.map((leg) => leg.line)) : null,
-        };
-      }
-
-      // The whole-fleet points FC only changes visibly at badge/dot scale —
-      // push it at ~15 Hz; sections + camera run at full tick rate.
-      const wantPoints = nowMs - lastPointsPushMsRef.current >= POINTS_PUSH_MS;
 
       // Cheap getState() read per frame — the toggle lives in a form sheet and
       // changes rarely; no subscription bookkeeping needed.
       const positionMode = useSettingsStore.getState().positionMode;
 
-      const frame = buildFrame(rt.engine.getStates(nowMs), viewport, {
-        selectedKey: selection.selectedTramKey,
-        favoriteKeys: favSetRef.current.set,
-        coupledPairFn: rt.coupledPairFn,
-        getGeometry,
-        lineFilter: lineFilterRef.current.set,
-        skipPoints: !wantPoints,
-        positionMode,
-        nowMs,
-      });
+      // Zoom-adaptive push cadences (thermal): sections every tick but ONLY
+      // inside the model band; points at pointsPushIntervalMs(zoom).
+      const wantSections = viewport.zoom >= SECTIONS_FEED_MIN_ZOOM;
+      const wantPoints =
+        nowMs - lastPointsPushMsRef.current >= pointsPushIntervalMs(viewport.zoom);
 
-      if (wantPoints) {
-        lastPointsPushMsRef.current = nowMs;
-        pointsRef.current?.setNativeProps({
-          id: 'trams-points',
-          shape: JSON.stringify(frame.points),
-        });
-      }
-
-      // The sections source is fed only near/inside the model band; on leaving
-      // the band it is cleared once so stale models never linger. While the FC
-      // stays empty (no visible trams) the stringify+push is skipped.
-      if (viewport.zoom >= SECTIONS_FEED_MIN_ZOOM) {
-        const isEmpty = frame.sections.features.length === 0;
-        if (!isEmpty || !sectionsEmptyRef.current) {
-          sectionsRef.current?.setNativeProps({
-            id: 'trams-sections',
-            shape: isEmpty ? EMPTY_FC_STRING : JSON.stringify(frame.sections),
-          });
-        }
-        sectionsEmptyRef.current = isEmpty;
-        sectionsFedRef.current = true;
-      } else if (sectionsFedRef.current) {
+      // On leaving the band the sections source is cleared once so stale
+      // models never linger — no frame build needed for that.
+      if (!wantSections && sectionsFedRef.current) {
         sectionsFedRef.current = false;
         sectionsEmptyRef.current = true;
         sectionsRef.current?.setNativeProps({ id: 'trams-sections', shape: EMPTY_FC_STRING });
       }
 
-      // Follow camera: retarget every CAMERA_RETARGET_MS (NOT every tick — see
-      // the cadence comment above) with a longer overlapping glide. Engine
-      // state is read fresh at each retarget.
-      const followKey = selection.followTramKey;
-      if (followKey && nowMs - lastCameraPushMsRef.current >= CAMERA_RETARGET_MS) {
-        const state = rt.engine.getState(followKey, nowMs);
-        if (state) {
-          lastCameraPushMsRef.current = nowMs;
-          // Track where the tram is RENDERED: raw fix in live mode, sim otherwise.
-          const isLive = positionMode === 'live';
-          const bearing = isLive ? state.observedBearing : state.bearing;
-          cameraRef.current?.setCamera({
-            // Lead slightly toward where the tram will be at the next retarget.
-            centerCoordinate: leadTarget(
-              isLive ? state.observedPosition : state.position,
-              bearing,
-              state.simSpeedKmh,
-            ),
-            zoomLevel: FOLLOW_ZOOM,
-            pitch: FOLLOW_PITCH,
-            // Heading lock: look at the tram from ahead-side; otherwise north-up.
-            heading: useSettingsStore.getState().followHeadingLock
-              ? (bearing + FOLLOW_HEADING_AHEAD) % 360
-              : 0,
-            animationMode: 'linearTo',
-            animationDuration: CAMERA_GLIDE_MS,
+      if (wantPoints || wantSections) {
+        const favTrams = useFavoritesStore.getState().favoriteTrams;
+        if (!favSetRef.current || favSetRef.current.source !== favTrams) {
+          favSetRef.current = { source: favTrams, set: new Set(favTrams) };
+        }
+
+        // Planner route-only mode: while an itinerary is shown, only trams on
+        // its legs' lines render. The line set is cached per itinerary ref.
+        const itinerary = usePlannerStore.getState().itinerary;
+        if (lineFilterRef.current.source !== itinerary) {
+          lineFilterRef.current = {
+            source: itinerary,
+            set: itinerary ? new Set(itinerary.legs.map((leg) => leg.line)) : null,
+          };
+        }
+
+        const frame = buildFrame(rt.engine.getStates(nowMs), viewport, {
+          selectedKey: selection.selectedTramKey,
+          favoriteKeys: favSetRef.current.set,
+          coupledPairFn: rt.coupledPairFn,
+          getGeometry,
+          lineFilter: lineFilterRef.current.set,
+          skipPoints: !wantPoints,
+          positionMode,
+          nowMs,
+        });
+
+        if (wantPoints) {
+          lastPointsPushMsRef.current = nowMs;
+          pointsRef.current?.setNativeProps({
+            id: 'trams-points',
+            shape: JSON.stringify(frame.points),
           });
         }
+
+        // While the FC stays empty (no visible trams) the stringify+push is
+        // skipped.
+        if (wantSections) {
+          const isEmpty = frame.sections.features.length === 0;
+          if (!isEmpty || !sectionsEmptyRef.current) {
+            sectionsRef.current?.setNativeProps({
+              id: 'trams-sections',
+              shape: isEmpty ? EMPTY_FC_STRING : JSON.stringify(frame.sections),
+            });
+          }
+          sectionsEmptyRef.current = isEmpty;
+          sectionsFedRef.current = true;
+        }
+
+        // Last-real-fix overlay for the selected/followed tram (dashed
+        // connector + fix dot). Pushed at the sections cadence; defensive
+        // `??` until the featureBuilder workstream populates fixOverlay.
+        const fixFC = (frame.fixOverlay ?? EMPTY_FC) as GeoJSON.FeatureCollection;
+        const fixEmpty = fixFC.features.length === 0;
+        if (!fixEmpty || !fixEmptyRef.current) {
+          fixOverlayRef.current?.setNativeProps({
+            id: 'tram-fix-overlay',
+            shape: fixEmpty ? EMPTY_FC_STRING : JSON.stringify(fixFC),
+          });
+        }
+        fixEmptyRef.current = fixEmpty;
+      }
+
+      // Follow camera: runs ONLY while following. Retarget every
+      // CAMERA_RETARGET_MS (NOT every tick — see the cadence comment above)
+      // with a longer overlapping glide. Engine state is read fresh at each
+      // retarget. While the user's fingers are on the map the loop yields
+      // (gestures adjust the view WITHOUT cancelling follow); their captured
+      // zoom/pitch/heading-offset then override the defaults.
+      const followKey = selection.followTramKey;
+      if (followKey && nowMs - lastCameraPushMsRef.current >= CAMERA_RETARGET_MS) {
+        const gesture = followGestureRef.current;
+        if (gesture?.gestureActive) return;
+        const state = rt.engine.getState(followKey, nowMs);
+        if (!state) {
+          // The followed tram disappeared (left service / pruned) — end follow.
+          selection.setFollowTramKey(null);
+          return;
+        }
+        lastCameraPushMsRef.current = nowMs;
+        // Track where the tram is RENDERED: raw fix in live mode, sim otherwise.
+        const isLive = positionMode === 'live';
+        const bearing = isLive ? state.observedBearing : state.bearing;
+        const overrides = gesture?.overrides ?? null;
+        cameraRef.current?.setCamera({
+          // Lead slightly toward where the tram will be at the next retarget.
+          centerCoordinate: leadTarget(
+            isLive ? state.observedPosition : state.position,
+            bearing,
+            state.simSpeedKmh,
+          ),
+          zoomLevel: overrides?.zoom ?? FOLLOW_ZOOM,
+          pitch: overrides?.pitch ?? FOLLOW_PITCH,
+          // Camera behind the tram, looking forward over the roof; the user's
+          // rotation gesture persists as an offset from the tram bearing.
+          heading: (((bearing + (overrides?.headingOffset ?? 0)) % 360) + 360) % 360,
+          animationMode: 'linearTo',
+          animationDuration: CAMERA_GLIDE_MS,
+        });
       }
     });
-  }, [cameraRef, viewportRef]);
+  }, [cameraRef, viewportRef, followGestureRef]);
 
   // Tap ANY tram feature (badge/dot or any 3D body section): light haptic,
   // select + follow IMMEDIATELY, then open the sheet (its low detent keeps the
@@ -296,8 +353,10 @@ export function TramLayers({ cameraRef, viewportRef, modelUris }: TramLayersProp
           ],
           modelEmissiveStrength: 1.2,
           modelElevationReference: 'ground',
-          modelCastShadows: true,
-          modelReceiveShadows: true,
+          // Shadows OFF (thermal): per-model shadow passes are the biggest GPU
+          // cost at pitch; ambient occlusion stays on for grounding.
+          modelCastShadows: false,
+          modelReceiveShadows: false,
           modelType: 'common-3d',
         }}
       />,
@@ -450,6 +509,38 @@ export function TramLayers({ cameraRef, viewportRef, modelUris }: TramLayersProp
 
       <ShapeSource id="trams-sections" ref={sectionsRef} shape={EMPTY_FC} onPress={onPressTram}>
         {sectionLayers}
+      </ShapeSource>
+
+      {/* Last-real-fix overlay for the selected/followed tram: dashed gold
+          connector from the rendered position to the raw AVL fix + a small
+          white/gold fix dot. Fed imperatively at the sections cadence; the FC
+          is empty for everything but the selected tram. */}
+      <ShapeSource id="tram-fix-overlay" ref={fixOverlayRef} shape={EMPTY_FC}>
+        <LineLayer
+          id="tram-fix-connector"
+          slot="top"
+          style={{
+            lineColor: Tram.gold,
+            lineWidth: 2,
+            lineOpacity: 0.9,
+            lineDasharray: [1.5, 1.5],
+            lineCap: 'round',
+          }}
+        />
+        <CircleLayer
+          id="tram-fix-dot"
+          slot="top"
+          filter={['==', ['geometry-type'], 'Point']}
+          style={{
+            circleRadius: ['interpolate', ['linear'], ['zoom'], 13, 3, 17, 4.5],
+            circleColor: '#FFFFFF',
+            circleStrokeColor: Tram.gold,
+            circleStrokeWidth: 2,
+            circleOpacity: 0.95,
+            circleStrokeOpacity: 0.95,
+            circlePitchAlignment: 'map',
+          }}
+        />
       </ShapeSource>
     </>
   );

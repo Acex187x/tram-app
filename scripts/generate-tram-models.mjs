@@ -58,44 +58,52 @@ const selectedIds = requested.length > 0 ? requested : Object.keys(MODELS);
 let failures = 0;
 const rows = [];
 
+/** Build one GLB variant, read it back, gate it, and record a report row. */
+async function buildAndValidate(vKey, vBuild, expect) {
+  const outPath = join(OUT_DIR, `${vKey}.glb`);
+  const mb = vBuild();
+  const bytes = await writeSectionGlb({ outPath, name: vKey, mb });
+  const stats = await readGlbStats(outPath);
+
+  const problems = [];
+  const [sx, sy, sz] = stats.size;
+  if (Math.abs(sz - expect.length) > LENGTH_TOL) {
+    problems.push(`length ${sz.toFixed(2)}m vs spec ${expect.length}m`);
+  }
+  if (sy < HEIGHT_RANGE[0] || sy > HEIGHT_RANGE[1]) {
+    problems.push(`height ${sy.toFixed(2)}m outside [${HEIGHT_RANGE}]`);
+  }
+  if (sx < WIDTH_RANGE[0] || sx > WIDTH_RANGE[1]) {
+    problems.push(`width ${sx.toFixed(2)}m outside [${WIDTH_RANGE}]`);
+  }
+  if (stats.min[1] < -0.01) problems.push(`sinks below ground: minY ${stats.min[1].toFixed(3)}`);
+  if (Math.abs(stats.min[2] + stats.max[2]) > 0.05) {
+    problems.push(`not centered on z: [${stats.min[2].toFixed(2)}, ${stats.max[2].toFixed(2)}]`);
+  }
+  if (Math.abs(stats.min[0] + stats.max[0]) > 0.05) {
+    problems.push(`not centered on x: [${stats.min[0].toFixed(2)}, ${stats.max[0].toFixed(2)}]`);
+  }
+  if (bytes > MAX_BYTES) problems.push(`file ${(bytes / 1024).toFixed(0)}KB > 150KB`);
+  if (stats.tris > MAX_TRIS) problems.push(`${stats.tris} tris > ${MAX_TRIS}`);
+
+  rows.push({
+    model: vKey,
+    'len m': sz.toFixed(2),
+    'w m': sx.toFixed(2),
+    'h m': sy.toFixed(2),
+    tris: stats.tris,
+    KB: (bytes / 1024).toFixed(1),
+    ok: problems.length === 0 ? 'ok' : problems.join('; '),
+  });
+  if (problems.length > 0) failures++;
+}
+
 for (const id of selectedIds) {
-  for (const { key, build, expect } of MODELS[id].sections()) {
-    const outPath = join(OUT_DIR, `${key}.glb`);
-    const mb = build();
-    const bytes = await writeSectionGlb({ outPath, name: key, mb });
-    const stats = await readGlbStats(outPath);
-
-    const problems = [];
-    const [sx, sy, sz] = stats.size;
-    if (Math.abs(sz - expect.length) > LENGTH_TOL) {
-      problems.push(`length ${sz.toFixed(2)}m vs spec ${expect.length}m`);
-    }
-    if (sy < HEIGHT_RANGE[0] || sy > HEIGHT_RANGE[1]) {
-      problems.push(`height ${sy.toFixed(2)}m outside [${HEIGHT_RANGE}]`);
-    }
-    if (sx < WIDTH_RANGE[0] || sx > WIDTH_RANGE[1]) {
-      problems.push(`width ${sx.toFixed(2)}m outside [${WIDTH_RANGE}]`);
-    }
-    if (stats.min[1] < -0.01) problems.push(`sinks below ground: minY ${stats.min[1].toFixed(3)}`);
-    if (Math.abs(stats.min[2] + stats.max[2]) > 0.05) {
-      problems.push(`not centered on z: [${stats.min[2].toFixed(2)}, ${stats.max[2].toFixed(2)}]`);
-    }
-    if (Math.abs(stats.min[0] + stats.max[0]) > 0.05) {
-      problems.push(`not centered on x: [${stats.min[0].toFixed(2)}, ${stats.max[0].toFixed(2)}]`);
-    }
-    if (bytes > MAX_BYTES) problems.push(`file ${(bytes / 1024).toFixed(0)}KB > 150KB`);
-    if (stats.tris > MAX_TRIS) problems.push(`${stats.tris} tris > ${MAX_TRIS}`);
-
-    rows.push({
-      model: key,
-      'len m': sz.toFixed(2),
-      'w m': sx.toFixed(2),
-      'h m': sy.toFixed(2),
-      tris: stats.tris,
-      KB: (bytes / 1024).toFixed(1),
-      ok: problems.length === 0 ? 'ok' : problems.join('; '),
-    });
-    if (problems.length > 0) failures++;
+  for (const { key, build, buildOpen, expect } of MODELS[id].sections()) {
+    // Every section builds its closed GLB; sections with passenger doors also
+    // build a doors-OPEN variant '<key>-open.glb' held to the same gates.
+    await buildAndValidate(key, build, expect);
+    if (buildOpen) await buildAndValidate(`${key}-open`, buildOpen, expect);
   }
 }
 

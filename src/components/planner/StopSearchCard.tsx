@@ -4,6 +4,7 @@ import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
 import { useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Keyboard,
   Pressable,
   StyleSheet,
@@ -33,6 +34,10 @@ export interface StopSearchCardProps {
   linesFor: (name: string) => string[];
   /** Called when the user submits the To field from the keyboard. */
   onSubmit: () => void;
+  /** Fill the From field from the user's location (nearest stop). */
+  onLocate?: () => void;
+  /** Whether a location lookup is in flight (shows a spinner in the From field). */
+  locating?: boolean;
 }
 
 export function StopSearchCard({
@@ -44,6 +49,8 @@ export function StopSearchCard({
   search,
   linesFor,
   onSubmit,
+  onLocate,
+  locating = false,
 }: StopSearchCardProps) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = Colors[scheme];
@@ -114,6 +121,25 @@ export function StopSearchCard({
           }}
           accessibilityLabel={isFrom ? 'From stop' : 'To stop'}
         />
+        {isFrom && onLocate && (
+          <Pressable
+            onPress={() => {
+              Haptics.selectionAsync();
+              onLocate();
+            }}
+            disabled={locating}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Use nearest stop to my location"
+            style={({ pressed }) => [styles.locateButton, { opacity: pressed || locating ? 0.6 : 1 }]}
+          >
+            {locating ? (
+              <ActivityIndicator size="small" color={Tram.pidRed} />
+            ) : (
+              <SymbolView name="location.fill" size={17} tintColor={Tram.pidRed} />
+            )}
+          </Pressable>
+        )}
       </View>
     );
   };
@@ -209,6 +235,12 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 17,
     paddingVertical: 10,
+  },
+  locateButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 30,
+    width: 30,
   },
   swapButton: {
     alignItems: 'center',

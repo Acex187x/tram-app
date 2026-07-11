@@ -40,19 +40,53 @@ describe('MODEL_SPECS', () => {
     const keys = specs.flatMap(([, spec]) => spec.sections.map((s) => s.modelKey));
     expect(new Set(keys).size).toBe(keys.length);
   });
+
+  it('every openModelKey is "<modelKey>-open" and unique', () => {
+    const openKeys: string[] = [];
+    for (const [, spec] of specs) {
+      for (const sec of spec.sections) {
+        if (sec.openModelKey !== undefined) {
+          expect(sec.openModelKey).toBe(`${sec.modelKey}-open`);
+          openKeys.push(sec.openModelKey);
+        }
+      }
+    }
+    expect(openKeys.length).toBeGreaterThan(0);
+    expect(new Set(openKeys).size).toBe(openKeys.length);
+  });
+
+  it('only the door-less sections lack a doors-open variant', () => {
+    // 14t-a carries only the driver door; 52t-b/d are pantograph middles.
+    const noDoors = new Set(['14t-a', '52t-b', '52t-d']);
+    for (const [, spec] of specs) {
+      for (const sec of spec.sections) {
+        if (noDoors.has(sec.modelKey)) expect(sec.openModelKey).toBeUndefined();
+        else expect(sec.openModelKey).toBe(`${sec.modelKey}-open`);
+      }
+    }
+  });
 });
 
 describe('MODEL_ASSETS', () => {
-  it('has an entry for every sections[].modelKey', () => {
+  it('has an entry for every sections[].modelKey and openModelKey', () => {
     for (const [, spec] of specs) {
       for (const sec of spec.sections) {
         expect(MODEL_ASSETS).toHaveProperty(sec.modelKey);
+        if (sec.openModelKey !== undefined) {
+          expect(MODEL_ASSETS).toHaveProperty(sec.openModelKey);
+        }
       }
     }
   });
 
   it('has no orphan entries that no spec references', () => {
-    const referenced = new Set(specs.flatMap(([, spec]) => spec.sections.map((s) => s.modelKey)));
+    const referenced = new Set(
+      specs.flatMap(([, spec]) =>
+        spec.sections.flatMap((s) =>
+          s.openModelKey !== undefined ? [s.modelKey, s.openModelKey] : [s.modelKey],
+        ),
+      ),
+    );
     for (const key of Object.keys(MODEL_ASSETS)) {
       expect(referenced.has(key)).toBe(true);
     }

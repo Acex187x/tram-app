@@ -64,6 +64,62 @@ function sortLines(lines: Iterable<string>): string[] {
   return [...lines].sort((a, b) => Number(a) - Number(b) || a.localeCompare(b));
 }
 
+/**
+ * Nearest station to a coordinate over the loaded geometries. Stations are
+ * grouped by normalized name (all platforms of a name share one station, using
+ * the first-seen platform coordinate as the representative). Great-circle
+ * distance; returns null when no geometry is loaded.
+ */
+export function nearestStation(
+  coords: [number, number],
+  geometries: RouteGeometry[],
+): StationInfo | null {
+  // Group platforms into stations once, tracking a representative coordinate
+  // and the serving lines, exactly like stationStops does for a single key.
+  const byKey = new Map<
+    string,
+    { name: string; coordinates: [number, number]; lines: Set<string> }
+  >();
+  for (const geo of geometries) {
+    for (const stop of geo.stops) {
+      const key = normalizeName(stop.name);
+      let station = byKey.get(key);
+      if (!station) {
+        station = { name: stop.name, coordinates: stop.coordinates, lines: new Set() };
+        byKey.set(key, station);
+      }
+      station.lines.add(geo.line);
+    }
+  }
+
+  let bestKey: string | null = null;
+  let bestDist = Infinity;
+  for (const [key, station] of byKey) {
+    const d = haversineM(coords, station.coordinates);
+    if (d < bestDist) {
+      bestDist = d;
+      bestKey = key;
+    }
+  }
+  if (bestKey === null) return null;
+  const best = byKey.get(bestKey)!;
+  return { key: bestKey, name: best.name, coordinates: best.coordinates, lines: sortLines(best.lines) };
+}
+
+/** Great-circle distance in meters between two [lng, lat] points. */
+function haversineM(a: [number, number], b: [number, number]): number {
+  const R = 6371008.8; // mean Earth radius (matches polyline.ts)
+  const toRad = Math.PI / 180;
+  const dLat = (b[1] - a[1]) * toRad;
+  const dLng = (b[0] - a[0]) * toRad;
+  const lat1 = a[1] * toRad;
+  const lat2 = b[1] * toRad;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
 // ── Arrivals board ───────────────────────────────────────────────────────────
 
 export interface StopArrival {
@@ -292,4 +348,14 @@ export function scheduleTravelS(
 export function formatEtaMinutes(etaS: number): string {
   if (etaS < 45) return 'now';
   return `${Math.max(1, Math.round(etaS / 60))} min`;
+}
+
+/**
+ * Relative departure countdown for an itinerary — 'in N min' / 'now'. Takes the
+ * signed millisecond gap (departureMs − nowMs); already-departed or imminent
+ * (< 30 s) reads 'now'. Recompute at 1 Hz against a live `nowMs`.
+ */
+export function formatCountdown(deltaMs: number): string {
+  if (deltaMs < 30_000) return 'now';
+  return `in ${Math.max(1, Math.round(deltaMs / 60_000))} min`;
 }

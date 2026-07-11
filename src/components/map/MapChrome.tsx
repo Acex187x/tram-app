@@ -244,7 +244,12 @@ function FollowChip() {
   );
 }
 
-/** Shown whenever a planned route is drawn on the map; taps clear the overlay. */
+/**
+ * Shown whenever a planned route is drawn on the map. Tapping the chip body
+ * REOPENS the planner sheet (with the active itinerary — users kept losing the
+ * sheet with no way back); the ✕ clears the route. The chevron.up hints that
+ * the chip itself is tappable.
+ */
 function PlannerChip() {
   const insets = useSafeAreaInsets();
   const itinerary = usePlannerStore((s) => s.itinerary);
@@ -258,15 +263,16 @@ function PlannerChip() {
 
   return (
     <View style={[styles.followWrap, { bottom: insets.bottom + BANNER_SLOT }]}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Clear planned route"
-        onPress={() => {
-          tapLight();
-          usePlannerStore.getState().setItinerary(null);
-        }}
-      >
-        <GlassPanel variant="regular" interactive style={styles.followBanner}>
+      <GlassPanel variant="regular" interactive style={styles.followBanner}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Reopen trip planner"
+          style={styles.plannerBody}
+          onPress={() => {
+            tapLight();
+            router.push('/planner');
+          }}
+        >
           <SymbolView name="arrow.triangle.swap" size={15} tintColor={Tram.gold} />
           <Text
             style={[styles.plannerRoute, { color: colors.text }]}
@@ -275,12 +281,20 @@ function PlannerChip() {
           >
             {label}
           </Text>
-          <Text style={[styles.followHint, { color: colors.secondary }]} allowFontScaling={false}>
-            Clear
-          </Text>
+          <SymbolView name="chevron.up" size={12} tintColor={colors.secondary} />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Clear planned route"
+          hitSlop={8}
+          onPress={() => {
+            tapLight();
+            usePlannerStore.getState().setItinerary(null);
+          }}
+        >
           <SymbolView name="xmark.circle.fill" size={16} tintColor={colors.secondary} />
-        </GlassPanel>
-      </Pressable>
+        </Pressable>
+      </GlassPanel>
     </View>
   );
 }
@@ -359,4 +373,5 @@ const styles = StyleSheet.create({
   followReg: { fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
   followHint: { fontSize: 12, fontWeight: '500' },
   plannerRoute: { fontSize: 13, fontWeight: '600', maxWidth: 200, flexShrink: 1 },
+  plannerBody: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
 });

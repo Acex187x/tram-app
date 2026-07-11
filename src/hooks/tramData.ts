@@ -16,12 +16,57 @@ import { fetchTramSnapshots } from '@/lib/golemio/vehicles';
 import type { RouteGeometry, TramPublicState, TramSnapshot } from '@/lib/types';
 
 export const POLL_MS = 5_000;
-export const TICK_MS = 16; // ~60 fps simulation (sections + follow camera update per tick)
-/** Points FC (badges/dots, whole fleet) is pushed at this lower cadence. */
-export const POINTS_PUSH_MS = 66; // ~15 Hz
+export const TICK_MS = 16; // ~60 fps simulation while the 3D model band is on screen
+/**
+ * Idle tick (~10 Hz): below the sections zoom band nothing on screen moves
+ * faster than badge/dot updates, so full-rate simulation only burns CPU
+ * (thermal: iPad ran hot after an hour). The map switches rates via
+ * setDetailMode() from its camera events.
+ */
+export const TICK_IDLE_MS = 100;
 const UI_NOTIFY_MS = 1_000;
 
+/**
+ * Points FC (badges/dots, whole fleet) push cadence by zoom — at far zooms the
+ * badges are near-static and re-pushing GeoJSON 15×/s forces Mapbox to
+ * re-render constantly (GPU heat for zero visible change).
+ */
+export function pointsPushIntervalMs(zoom: number): number {
+  if (zoom >= 14) return 66; // ~15 Hz — badges visibly glide
+  if (zoom >= 12.5) return 1_000;
+  return 5_000; // dots at city scale: one push per poll
+}
+
 export type FrameListener = (nowMs: number) => void;
+
+/** Contract with src/lib/motionlog (ships in a parallel workstream). */
+interface MotionLogModule {
+  getMotionLog(): { onPoll(states: TramPublicState[], nowMs: number): void };
+}
+
+let motionLogModule: MotionLogModule | null | undefined;
+
+/**
+ * Feed each successful poll ingest to the motion logger. Defensive by
+ * contract: the module may not exist until integration, and logging must
+ * never break the poll loop.
+ */
+function notifyMotionLog(states: TramPublicState[], nowMs: number): void {
+  if (motionLogModule === undefined) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      motionLogModule = require('@/lib/motionlog') as MotionLogModule;
+    } catch {
+      motionLogModule = null;
+    }
+  }
+  if (!motionLogModule?.getMotionLog) return;
+  try {
+    motionLogModule.getMotionLog().onPoll(states, nowMs);
+  } catch {
+    // Logger errors must never disturb the runtime.
+  }
+}
 
 class TramRuntime {
   readonly engine = new TramEngine({
@@ -44,6 +89,8 @@ class TramRuntime {
    */
   private generation = 0;
   private lastSnapshots: TramSnapshot[] = [];
+  /** True while the map shows the 3D sections band (zoom ≥ band) → 60 Hz tick. */
+  private detailMode = false;
 
   private frameListeners = new Set<FrameListener>();
   private uiListeners = new Set<() => void>();
@@ -84,14 +131,36 @@ class TramRuntime {
   /** Start the timer loops + an immediate poll. Idempotent. */
   private resume(): void {
     if (this.tickTimer) return;
-    this.tickTimer = setInterval(() => {
-      const now = Date.now();
-      this.engine.tick(now);
-      this.frameListeners.forEach((l) => l(now));
-    }, TICK_MS);
+    this.startTickTimer();
     this.uiNotifyTimer = setInterval(() => this.bumpUi(), UI_NOTIFY_MS);
     this.pollTimer = setInterval(() => void this.poll(), POLL_MS);
     void this.poll();
+  }
+
+  private startTickTimer(): void {
+    this.tickTimer = setInterval(
+      () => {
+        const now = Date.now();
+        this.engine.tick(now);
+        this.frameListeners.forEach((l) => l(now));
+      },
+      this.detailMode ? TICK_MS : TICK_IDLE_MS,
+    );
+  }
+
+  /**
+   * Zoom-adaptive simulation rate (thermal): 60 Hz only while the map is in
+   * the 3D sections band; ~10 Hz otherwise. Called by the map screen from
+   * camera events; restarts the tick timer only on an actual mode change and
+   * only while running (a paused/backgrounded runtime stays fully idle).
+   */
+  setDetailMode(on: boolean): void {
+    if (this.detailMode === on) return;
+    this.detailMode = on;
+    if (__DEV__) console.log(`[tram-runtime] tick rate → ${on ? '60 Hz (model band)' : '10 Hz (idle)'}`);
+    if (!this.tickTimer) return; // paused — resume() picks up the new rate
+    clearInterval(this.tickTimer);
+    this.startTickTimer();
   }
 
   /**
@@ -137,6 +206,7 @@ class TramRuntime {
       this.lastError = null;
       const now = Date.now();
       this.engine.ingest(snapshots, (tripId) => shapeCache.getLoaded(tripId), now);
+      notifyMotionLog(this.engine.getStates(now), now);
       // Prefetch geometries for trips we don't have yet (background priority).
       const missing = snapshots.filter((s) => !shapeCache.has(s.tripId)).map((s) => s.tripId);
       if (missing.length > 0) {
@@ -181,6 +251,10 @@ class TramRuntime {
   // — React (1 Hz) subscriptions —
 
   private bumpUi(): void {
+    // No UI subscriber → skip entirely; bumping the version would only
+    // invalidate the states cache and force a full getStates() allocation
+    // for nobody (1 Hz background churn, thermal).
+    if (this.uiListeners.size === 0) return;
     this.uiVersion += 1;
     this.uiListeners.forEach((l) => l());
   }

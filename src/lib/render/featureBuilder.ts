@@ -1,7 +1,11 @@
 // Engine states → GeoJSON render frame:
 //  - points FC: ALL trams (circle/badge layers + hit testing)
 //  - sections FC: articulated body sections, only for trams inside the viewport
-//    (+300 m margin) at zoom >= 14.8 — drives the ModelLayer.
+//    (+300 m margin) at zoom >= 14.8 — drives the ModelLayer. While a tram
+//    dwells at a stop its sections render their doors-open GLB variants
+//    (TramSection.openModelKey, when authored).
+//  - fixOverlay FC: for the followed/selected tram only — the raw last AVL fix
+//    as a Point plus a connector LineString to the rendered position.
 //
 // Culling is ALWAYS per whole tram (by head position, margin far larger than
 // any tram + coupled trailer ≈ 46 m): a tram whose head is near the viewport
@@ -24,7 +28,7 @@ import type {
   TramPublicState,
   Viewport,
 } from '@/lib/types';
-import { bearingAt, destinationPoint, pointAt } from '../geo/polyline';
+import { bearingAt, destinationPoint, pointAt, segmentIndexAt } from '../geo/polyline';
 
 /** Sections render only at/above this zoom (mode 3+). */
 export const SECTION_MIN_ZOOM = 14.8;
@@ -40,6 +44,12 @@ const DEG2RAD = Math.PI / 180;
 
 export interface BuildFrameOptions {
   selectedKey: string | null;
+  /**
+   * Followed tram key: the fix overlay (raw last fix point + connector line to
+   * the rendered position) is emitted for this tram, falling back to
+   * selectedKey when unset. The overlay is empty when neither is set.
+   */
+  followedKey?: string | null;
   favoriteKeys: ReadonlySet<string>;
   /** True when this tram runs as a coupled two-car set → render a second unit. */
   coupledPairFn: (key: string) => boolean;
@@ -59,9 +69,11 @@ export interface BuildFrameOptions {
   skipPoints?: boolean;
   /**
    * 'smooth' (default): render at the simulated/interpolated position.
-   * 'live': render exactly at the last reported AVL fix (observedPosition /
-   * observedBearing, sections anchored at the observed shape distance) — no
-   * simulated motion between polls, positions jump on each data update.
+   * 'live': render at the engine's projected observation — the last AVL fix
+   * dead-reckoned forward to now (TramPublicState.projectedObservedDistM),
+   * falling back to the raw fix (observedPosition / raw shape distance) when
+   * no projection exists. Advances smoothly between polls and jumps (forward
+   * or back) whenever a new fix arrives — accepted live-mode UX.
    */
   positionMode?: 'smooth' | 'live';
   /** Frame timestamp; defaults to Date.now(). */
@@ -140,9 +152,18 @@ function placeAt(
 }
 
 /**
+ * GLB key for a section: while the tram dwells at a stop the doors-open
+ * variant renders (when authored); undefined openModelKey → normal key, and
+ * the doors close again (normal key) as the tram departs.
+ */
+function sectionModelKey(section: TramModelSpec['sections'][number], dwelling: boolean): string {
+  return dwelling && section.openModelKey !== undefined ? section.openModelKey : section.modelKey;
+}
+
+/**
  * Sections for a tram with known geometry: each body section placed along the
- * shape, head anchored at sHead (sim distance in smooth mode, the observed
- * fix's shape distance in live mode).
+ * shape, head anchored at sHead (sim distance in smooth mode, the projected
+ * observation in live mode).
  */
 function sectionsAlongShape(
   state: TramPublicState,
@@ -150,16 +171,18 @@ function sectionsAlongShape(
   geometry: RouteGeometry,
   sHead: number,
   coupled: boolean,
+  dwelling: boolean,
   out: SectionFeature[],
 ): void {
   const { coordinates, cumDistM } = geometry;
   let precedingLengths = 0;
   for (let i = 0; i < spec.sections.length; i++) {
     const section = spec.sections[i];
+    const modelKey = sectionModelKey(section, dwelling);
     const centerDist = sHead - (precedingLengths + i * spec.jointGapM) - section.lengthM / 2;
     const placed = placeAt(coordinates, cumDistM, centerDist);
     out.push(
-      sectionFeature(`${state.key}#${i}`, state.key, section.modelKey, placed.position, placed.bearing),
+      sectionFeature(`${state.key}#${i}`, state.key, modelKey, placed.position, placed.bearing),
     );
     if (coupled) {
       const trailed = placeAt(coordinates, cumDistM, centerDist - COUPLED_OFFSET_M);
@@ -167,7 +190,7 @@ function sectionsAlongShape(
         sectionFeature(
           `${state.key}#c${i}`,
           state.key,
-          section.modelKey,
+          modelKey,
           trailed.position,
           trailed.bearing,
         ),
@@ -189,6 +212,7 @@ function sectionsAtRawPosition(
   anchor: [number, number],
   bearing: number,
   coupled: boolean,
+  dwelling: boolean,
   out: SectionFeature[],
 ): void {
   const back = (bearing + 180) % 360;
@@ -196,19 +220,18 @@ function sectionsAtRawPosition(
   let precedingLengths = 0;
   for (let i = 0; i < spec.sections.length; i++) {
     const section = spec.sections[i];
+    const modelKey = sectionModelKey(section, dwelling);
     // Distance of this section's center behind the FIRST section's center, so
     // section 0 stays exactly at the raw API position.
     const behindM = precedingLengths + i * spec.jointGapM + section.lengthM / 2 - headHalf;
     const position = behindM > 0 ? destinationPoint(anchor, back, behindM) : anchor;
-    out.push(
-      sectionFeature(`${state.key}#${i}`, state.key, section.modelKey, position, bearing),
-    );
+    out.push(sectionFeature(`${state.key}#${i}`, state.key, modelKey, position, bearing));
     if (coupled) {
       out.push(
         sectionFeature(
           `${state.key}#c${i}`,
           state.key,
-          section.modelKey,
+          modelKey,
           destinationPoint(anchor, back, behindM + COUPLED_OFFSET_M),
           bearing,
         ),
@@ -216,6 +239,67 @@ function sectionsAtRawPosition(
     }
     precedingLengths += section.lengthM;
   }
+}
+
+/**
+ * Polyline slice between two along-shape distances (either order), inclusive
+ * of interpolated endpoints. Used for the fix-overlay connector line.
+ */
+function sliceShape(
+  coordinates: [number, number][],
+  cumDistM: number[],
+  dA: number,
+  dB: number,
+): [number, number][] {
+  const total = cumDistM.length > 0 ? cumDistM[cumDistM.length - 1] : 0;
+  const a = Math.min(Math.max(Math.min(dA, dB), 0), total);
+  const b = Math.min(Math.max(Math.max(dA, dB), 0), total);
+  const out: [number, number][] = [pointAt(coordinates, cumDistM, a)];
+  if (coordinates.length > 1) {
+    for (let i = segmentIndexAt(cumDistM, a) + 1; i < coordinates.length && cumDistM[i] < b; i++) {
+      if (cumDistM[i] > a) out.push(coordinates[i]);
+    }
+  }
+  out.push(pointAt(coordinates, cumDistM, b));
+  if (dA > dB) out.reverse();
+  return out;
+}
+
+/**
+ * Fix overlay for the selected/followed tram: the RAW last fix as a Point +
+ * a connector LineString from it to the rendered position — sliced along the
+ * shape when geometry is known, a straight line otherwise.
+ */
+function buildFixOverlay(
+  state: TramPublicState,
+  geometry: RouteGeometry | undefined,
+  renderedDist: number,
+  renderedAnchor: [number, number],
+): GeoJSON.FeatureCollection {
+  let line: [number, number][];
+  if (geometry) {
+    const obsDist = Math.min(Math.max(state.snapshot.shapeDistM, 0), geometry.totalM);
+    line = sliceShape(geometry.coordinates, geometry.cumDistM, obsDist, renderedDist);
+  } else {
+    line = [state.observedPosition, renderedAnchor];
+  }
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        id: `${state.key}#fix`,
+        geometry: { type: 'Point', coordinates: state.observedPosition },
+        properties: { key: state.key, kind: 'fix', bearing: state.observedBearing },
+      },
+      {
+        type: 'Feature',
+        id: `${state.key}#fix-connector`,
+        geometry: { type: 'LineString', coordinates: line },
+        properties: { key: state.key, kind: 'connector' },
+      },
+    ],
+  };
 }
 
 /** Build one render frame from engine states. */
@@ -230,15 +314,40 @@ export function buildFrame(
   const cullBbox = sectionsEnabled ? expandBbox(viewport.bbox, CULL_MARGIN_M) : viewport.bbox;
   const lineFilter = opts.lineFilter ?? null;
   const live = opts.positionMode === 'live';
+  const overlayKey = opts.followedKey ?? opts.selectedKey;
+  let fixOverlay: GeoJSON.FeatureCollection | null = null;
 
   for (const state of states) {
     // Planner route-only mode: trams off the itinerary's lines vanish entirely.
     if (lineFilter && !lineFilter.has(state.snapshot.line)) continue;
 
-    // Live mode anchors everything at the last reported AVL fix instead of the
-    // simulated position — honest raw data, jumping on each poll.
-    const anchor = live ? state.observedPosition : state.position;
-    const bearing = live ? state.observedBearing : state.bearing;
+    const isOverlayTarget = overlayKey !== null && state.key === overlayKey;
+    // Geometry is needed for sections, for live-mode anchoring at the
+    // projected observation, and for the fix-overlay connector slice.
+    const geometry =
+      state.hasGeometry && (sectionsEnabled || live || isOverlayTarget)
+        ? opts.getGeometry(state.key)
+        : undefined;
+
+    // Rendered anchor: simulated position in smooth mode; in live mode the
+    // engine's projected observation (dead-reckoned fix), falling back to the
+    // raw fix distance / observed position when no projection exists.
+    let sHead = state.simDistM;
+    let anchor = state.position;
+    let bearing = state.bearing;
+    if (live) {
+      if (geometry) {
+        sHead = Math.min(
+          Math.max(state.projectedObservedDistM ?? state.snapshot.shapeDistM, 0),
+          geometry.totalM,
+        );
+        anchor = pointAt(geometry.coordinates, geometry.cumDistM, sHead);
+        bearing = bearingAt(geometry.coordinates, geometry.cumDistM, sHead);
+      } else {
+        anchor = state.observedPosition;
+        bearing = state.observedBearing;
+      }
+    }
 
     if (!opts.skipPoints) {
       points.push({
@@ -259,29 +368,32 @@ export function buildFrame(
       });
     }
 
+    // Raw-fix overlay for the followed/selected tram — independent of the
+    // section zoom band and viewport cull.
+    if (isOverlayTarget) {
+      fixOverlay = buildFixOverlay(state, geometry, sHead, anchor);
+    }
+
     // Whole-tram cull by head position; the margin covers the longest possible
     // body + coupled trailer, so a partially-visible tram keeps all sections.
     if (!sectionsEnabled || !inBbox(anchor, cullBbox)) continue;
 
     const spec = opts.getSpec?.(state.key) ?? state.model;
-    const geometry = state.hasGeometry ? opts.getGeometry(state.key) : undefined;
     const coupled = opts.coupledPairFn(state.key);
+    // Doors open while dwelling at a stop (sections band only — this loop):
+    // sections with an authored openModelKey render it, closing on departure.
+    const dwelling = state.phase === 'dwell';
     if (geometry) {
-      // Head anchor along the shape: sim distance, or in live mode the raw
-      // fix's shape distance clamped to the geometry (same as the engine's
-      // observedPosition — kept on the track).
-      const sHead = live
-        ? Math.min(Math.max(state.snapshot.shapeDistM, 0), geometry.totalM)
-        : state.simDistM;
-      sectionsAlongShape(state, spec, geometry, sHead, coupled, sections);
+      sectionsAlongShape(state, spec, geometry, sHead, coupled, dwelling, sections);
     } else {
-      sectionsAtRawPosition(state, spec, anchor, bearing, coupled, sections);
+      sectionsAtRawPosition(state, spec, anchor, bearing, coupled, dwelling, sections);
     }
   }
 
   return {
     points: { type: 'FeatureCollection', features: points },
     sections: { type: 'FeatureCollection', features: sections },
+    fixOverlay: fixOverlay ?? { type: 'FeatureCollection', features: [] },
     atMs: opts.nowMs ?? Date.now(),
   };
 }

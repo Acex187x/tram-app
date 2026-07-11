@@ -15,10 +15,11 @@
 // source reverts/never applies (Fabric + rnmapbox quirk). This mirrors how the
 // tram layers push per-frame updates. (Layer STYLE props may change freely.)
 
-import { CircleLayer, LineLayer, ModelLayer, ShapeSource } from '@rnmapbox/maps';
+import { CircleLayer, LineLayer, ModelLayer, ShapeSource, SymbolLayer } from '@rnmapbox/maps';
 import * as Haptics from 'expo-haptics';
 import { router, type Href } from 'expo-router';
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import { AppState, useColorScheme } from 'react-native';
 
 import { Tram } from '@/constants/theme';
 import * as shapeCache from '@/lib/golemio/shapeCache';
@@ -28,6 +29,8 @@ import { useSelectionStore } from '@/stores/selection';
 import { useSettingsStore } from '@/stores/settings';
 
 const STOPS_MIN_ZOOM = 14;
+/** Stop NAME labels appear from this zoom (close enough to matter). */
+const STOP_LABEL_MIN_ZOOM = 15.8;
 /** 3D stop totems appear from this zoom. */
 const TOTEM_MIN_ZOOM = 16;
 /** GLB registry key for the stop totem (shipped by the models workstream). */
@@ -36,8 +39,20 @@ const REFRESH_MS = 2_000;
 
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
-function buildFCs(): { routes: string; stops: string; fingerprint: string } {
-  const geometries = shapeCache.getAllLoaded();
+/**
+ * Cheap growth detector so the expensive feature build + stringify only runs
+ * when the loaded-geometry set actually changed (the set only grows).
+ */
+function networkFingerprint(geometries: ReturnType<typeof shapeCache.getAllLoaded>): string {
+  let stops = 0;
+  for (const g of geometries) stops += g.stops.length;
+  return `${geometries.length}:${stops}`;
+}
+
+function buildFCs(geometries: ReturnType<typeof shapeCache.getAllLoaded>): {
+  routes: string;
+  stops: string;
+} {
   const routeFeatures: GeoJSON.Feature[] = [];
   const stopFeatures: GeoJSON.Feature[] = [];
   const seenShapes = new Set<string>();
@@ -73,7 +88,6 @@ function buildFCs(): { routes: string; stops: string; fingerprint: string } {
   return {
     routes: JSON.stringify({ type: 'FeatureCollection', features: routeFeatures }),
     stops: JSON.stringify({ type: 'FeatureCollection', features: stopFeatures }),
-    fingerprint: `${seenShapes.size}:${seenStops.size}`,
   };
 }
 
@@ -87,6 +101,7 @@ export interface RouteNetworkProps {
 }
 
 export function RouteNetwork({ stopTotemReady = false }: RouteNetworkProps) {
+  const scheme = useColorScheme();
   const showRouteLines = useSettingsStore((s) => s.showRouteLines);
   const selectedLineId = useSelectionStore((s) => s.selectedLineId);
   // Planner route-only mode: hide the whole network while an itinerary shows.
@@ -109,9 +124,14 @@ export function RouteNetwork({ stopTotemReady = false }: RouteNetworkProps) {
 
   useEffect(() => {
     const push = () => {
-      const { routes, stops, fingerprint } = buildFCs();
+      // Thermal: no work while backgrounded, and the expensive feature build
+      // + stringify only runs when the loaded-geometry set actually grew.
+      if (AppState.currentState !== 'active') return;
+      const geometries = shapeCache.getAllLoaded();
+      const fingerprint = networkFingerprint(geometries);
       if (fingerprint === fingerprintRef.current) return;
       fingerprintRef.current = fingerprint;
+      const { routes, stops } = buildFCs(geometries);
       routesRef.current?.setNativeProps({ id: 'route-network', shape: routes });
       stopsRef.current?.setNativeProps({ id: 'route-stops', shape: stops });
     };
@@ -175,6 +195,38 @@ export function RouteNetwork({ stopTotemReady = false }: RouteNetworkProps) {
         circleColor: '#000000',
         circleOpacity: 0.011,
         circleStrokeWidth: 0,
+      }}
+    />,
+    // Stop NAME labels at close zooms, anchored below the marker so the 3D
+    // totem (which rises above it) stays clear. textOptional lets crowded
+    // areas drop labels instead of markers; halo keeps them readable over the
+    // basemap in both light and dark presets.
+    <SymbolLayer
+      key="route-stop-labels"
+      id="route-stop-labels"
+      slot="top"
+      minZoomLevel={STOP_LABEL_MIN_ZOOM}
+      style={{
+        textField: ['get', 'name'],
+        textFont: ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+        textSize: ['interpolate', ['linear'], ['zoom'], STOP_LABEL_MIN_ZOOM, 11, 18, 13],
+        textAnchor: 'top',
+        textOffset: [0, 0.9],
+        textColor: scheme === 'dark' ? '#F3E9D2' : '#4A2C2A',
+        textHaloColor: scheme === 'dark' ? 'rgba(20,16,14,0.9)' : 'rgba(255,255,255,0.9)',
+        textHaloWidth: 1.2,
+        textOptional: true,
+        textOpacity: plannerActive
+          ? 0
+          : [
+              'interpolate',
+              ['linear'],
+              ['zoom'],
+              STOP_LABEL_MIN_ZOOM,
+              0,
+              STOP_LABEL_MIN_ZOOM + 0.3,
+              0.95,
+            ],
       }}
     />,
   ];

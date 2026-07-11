@@ -9,6 +9,7 @@ import { Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'r
 
 import { ModelPreviewButton } from '@/components/model/ModelPreviewButton';
 import { AboutTramCard } from '@/components/tram/AboutTramCard';
+import { RideRecorder } from '@/components/tram/RideRecorder';
 import { StopsTimeline } from '@/components/tram/StopsTimeline';
 import { AcSnowflake } from '@/components/tram/TramModelImage';
 import { DelayPill } from '@/components/ui/DelayPill';
@@ -366,6 +367,9 @@ export default function TramDetailSheet() {
               />
               <ActionButton icon="map.fill" label="Show line" onPress={onShowLine} />
             </View>
+
+            {/* Record ride — real-vs-sim telemetry (survives sheet close) */}
+            <RideRecorder tramKey={key} line={state.snapshot.line} />
 
             {/* Upcoming stops */}
             <SectionHeader title="Upcoming stops" />

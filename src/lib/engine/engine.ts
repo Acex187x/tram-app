@@ -15,6 +15,7 @@ import {
   applySnapshot,
   createSim,
   nextUndwelledStop,
+  observedDistAt,
   reanchorSim,
   targetDistAt,
   tick as tickSim,
@@ -69,6 +70,14 @@ interface Entry {
   tripId: string;
   lastSeenMs: number;
   sim: TramSim | null;
+  /**
+   * Live-mode dead-reckoning sim: re-seeded AT the raw fix whenever a NEW
+   * observation arrives (jumping to it — accepted live-mode UX), then advanced
+   * between polls by the same physics as the main sim (speed profile, dwells,
+   * pace capped by the schedule-projected observation). Its sM feeds
+   * TramPublicState.projectedObservedDistM.
+   */
+  projSim: TramSim | null;
 }
 
 let pragueHourFormatter: Intl.DateTimeFormat | null | undefined;
@@ -145,6 +154,7 @@ export class TramEngine {
     this.profiles.clear();
     for (const entry of this.entries.values()) {
       if (entry.sim) entry.sim.profile = this.getProfile(entry.sim.geometry, daytime);
+      if (entry.projSim) entry.projSim.profile = this.getProfile(entry.projSim.geometry, daytime);
     }
   }
 
@@ -167,7 +177,14 @@ export class TramEngine {
       const geometry = resolveGeometry(snapshot.tripId);
       let entry = this.entries.get(key);
       if (!entry) {
-        entry = { key, snapshot, tripId: snapshot.tripId, lastSeenMs: nowMs, sim: null };
+        entry = {
+          key,
+          snapshot,
+          tripId: snapshot.tripId,
+          lastSeenMs: nowMs,
+          sim: null,
+          projSim: null,
+        };
         this.entries.set(key, entry);
       }
       entry.snapshot = snapshot;
@@ -175,8 +192,11 @@ export class TramEngine {
 
       if (!geometry) {
         // No geometry (yet, or trip changed and the new shape isn't loaded):
-        // hold the raw API position; drop a sim that belongs to a stale trip.
-        if (entry.tripId !== snapshot.tripId) entry.sim = null;
+        // hold the raw API position; drop sims that belong to a stale trip.
+        if (entry.tripId !== snapshot.tripId) {
+          entry.sim = null;
+          entry.projSim = null;
+        }
         entry.tripId = snapshot.tripId;
         continue;
       }
@@ -209,6 +229,20 @@ export class TramEngine {
         entry.sim = createSim(geometry, profile, snapshot, nowMs, lengthM);
       }
       entry.tripId = snapshot.tripId;
+
+      // Dead-reckoning sim for the projected observation: re-seed ONLY when a
+      // genuinely new fix (or trip/geometry) arrives — that's the accepted
+      // live-mode jump. Between identical polls it keeps integrating smoothly.
+      const proj = entry.projSim;
+      if (
+        !proj ||
+        proj.geometry.shapeId !== geometry.shapeId ||
+        proj.snapshot.tripId !== snapshot.tripId ||
+        proj.obsAtMs !== snapshot.observedAtMs ||
+        proj.snapshot.shapeDistM !== snapshot.shapeDistM
+      ) {
+        entry.projSim = createSim(geometry, profile, snapshot, nowMs, lengthM);
+      }
     }
 
     // Remove trams unseen for 90 s.
@@ -234,6 +268,9 @@ export class TramEngine {
     if (dtS <= 0) return;
     for (const entry of this.entries.values()) {
       if (entry.sim) tickSim(entry.sim, nowMs, dtS);
+      // The projection sim advances with the same physics but is NOT queue-
+      // constrained: it dead-reckons the raw fix, not the rendered fleet.
+      if (entry.projSim) tickSim(entry.projSim, nowMs, dtS);
     }
     // Car-following runs AFTER all position updates so queues compress
     // correctly regardless of iteration order.
@@ -332,6 +369,7 @@ export class TramEngine {
         observedPosition: [snapshot.coordinates[0], snapshot.coordinates[1]],
         observedBearing: snapshot.bearing ?? 0,
         deviationM: null,
+        projectedObservedDistM: null,
         nextStopName: null,
         nextStopEtaS:
           snapshot.nextStopArrivalMs !== null
@@ -357,6 +395,9 @@ export class TramEngine {
       observedPosition: pointAt(geometry.coordinates, geometry.cumDistM, observedDistM),
       observedBearing: bearingAt(geometry.coordinates, geometry.cumDistM, observedDistM),
       deviationM: Math.abs(sim.sM - observedDistM),
+      // Physics-integrated dead-reckoning of the fix (projSim); the schedule-
+      // pace projection is a defensive fallback and normally never used.
+      projectedObservedDistM: entry.projSim ? entry.projSim.sM : observedDistAt(sim, nowMs),
       nextStopName: next ? next.name : null,
       nextStopEtaS: next
         ? Math.max(0, (next.arrivalMs + snapshot.delaySeconds * 1000 - nowMs) / 1000)

@@ -315,7 +315,7 @@ function doorMullions(mb, side, z0, z1, lowY) {
   mb.rectX('glass', side * (HW - 0.028), z0 + 0.16, z1 - 0.16, Math.max(lowY + 0.55, 0.92), SILL, side);
 }
 
-export function buildT3RPLF() {
+export function buildT3RPLF({ doorsOpen = false } = {}) {
   const mb = new MeshBuilder();
   const wallLen = 2 * ZW;
   const mats = {
@@ -329,7 +329,7 @@ export function buildT3RPLF() {
     xw: HW, z0: -ZW, y0: BELT0, sill: SILL, winTop: WINTOP, yTop: YTOP,
     mats, doorLowY: SKIRT, ventY: VENT_Y,
   };
-  buildWall(mb, { ...common, side: 1, segments: segsR });
+  buildWall(mb, { ...common, side: 1, doorsOpen, segments: segsR });
   buildWall(mb, { ...common, side: -1, segments: segsL });
 
   // door extents on the right wall (for skirt gaps + wings + mullions)
@@ -342,7 +342,10 @@ export function buildT3RPLF() {
   const [d1z0, d1z1] = doors[0];
   const [midZ0, midZ1] = doors[1];
   const [d3z0] = doors[2];
-  for (const [z0, z1, lowY] of doors) doorMullions(mb, 1, z0, z1, lowY);
+  // mullions + low glass hint sit on the folding leaves → skip when slid open
+  if (!doorsOpen) {
+    for (const [z0, z1, lowY] of doors) doorMullions(mb, 1, z0, z1, lowY);
+  }
 
   // cream skirt band between doors (right) and continuous (left)
   const cuts = [-ZW, d1z0, d1z1, midZ0, midZ1, d3z0, doors[2][1], ZW];
@@ -397,5 +400,10 @@ export function buildT3RPLF() {
 }
 
 export function sections() {
-  return [{ key: 't3rplf', build: buildT3RPLF, expect: EXPECT }];
+  return [{
+    key: 't3rplf',
+    build: () => buildT3RPLF(),
+    buildOpen: () => buildT3RPLF({ doorsOpen: true }),
+    expect: EXPECT,
+  }];
 }

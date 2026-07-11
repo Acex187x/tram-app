@@ -4,13 +4,17 @@ import { A_ACC, A_BRK, buildSpeedProfile, V_MAX_MS } from '@/lib/engine/speedPro
 import {
   applySnapshot,
   buildScheduleAnchor,
+  CRAWL_V_MS,
   createSim,
   dwellDurationMs,
   evalScheduleAnchor,
+  HARD_BRAKE_ENTER_M,
   observedDistAt,
+  OBS_BLEND_WEIGHT,
   STOP_REACH_M,
   targetDistAt,
   tick,
+  TRAIL_M,
   type TramSim,
 } from '@/lib/engine/tramSim';
 import type { RouteGeometry, RouteStop } from '@/lib/types';
@@ -101,7 +105,9 @@ describe('straight-line acceleration', () => {
 
 describe('braking before a sharp 90° curve', () => {
   it('crosses the corner below 30% of vmax and recovers after', () => {
-    // Slack schedule (3 m/s pace) → tram runs ahead, pace factor bottoms at 0.55.
+    // Slack schedule (3 m/s pace) → the tram cycles between gentle sprints and
+    // the hard-brake crawl, so its long-run average stays pace-bound (~3 m/s);
+    // the run must be long enough to reach the post-corner sampling window.
     const geo = makeGeometry(
       [
         [0, 0],
@@ -117,7 +123,7 @@ describe('braking before a sharp 90° curve', () => {
     const cornerSpeeds: number[] = [];
     const afterSpeeds: number[] = [];
     let vBefore = 0;
-    run(sim, T0, 240, () => {
+    run(sim, T0, 310, () => {
       if (sim.sM > 300 && sim.sM < 400) vBefore = Math.max(vBefore, sim.vMs);
       // Sample at/after the apex (incl. the trailing tram-length window): the
       // envelope only requires reaching the curve cap AT the apex point.
@@ -217,8 +223,8 @@ describe('dwell duration fallback', () => {
 });
 
 describe('pace controller', () => {
-  it('catches up when behind schedule and never reverses', () => {
-    // Departed 60 s ago at 5 m/s pace → sSched(T0) = 300, tram at 0 → e = 300.
+  it('catches up boldly when behind and never reverses', () => {
+    // Departed 60 s ago at 5 m/s pace → sSched(T0) = 300, tram at 0 → e ≈ 290.
     const geo = makeGeometry(
       [
         [0, 0],
@@ -244,10 +250,111 @@ describe('pace controller', () => {
       lastNow = now;
     });
 
-    const eEnd = evalScheduleAnchor(sim.lastAnchor, lastNow) - sim.sM;
-    expect(eEnd).toBeLessThan(50); // caught up
+    // Converged onto the (trail-biased) pace target: the crawl regime bounds
+    // any overshoot, so the error stays within the hard-brake band.
+    const eEnd = targetDistAt(sim, lastNow) - sim.sM;
+    expect(Math.abs(eEnd)).toBeLessThan(HARD_BRAKE_ENTER_M + 25);
     expect(vMax).toBeGreaterThan(13); // ran at (nearly) full allowed speed to catch up
     expect(vMax).toBeLessThanOrEqual(V_MAX_MS + 1e-6); // …never above the hard cap
+  });
+
+  it('trail bias: the target rides TRAIL_M behind the projected observation', () => {
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [3000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 100_000 },
+        { atM: 3000, arrivalMs: T0 + 200_000 }, // 10 m/s pace
+      ],
+    );
+    const sim = makeSim(geo, 800);
+    // Same trip/schedule: blend components coincide only when obs == sched;
+    // here obs (800) is behind sched (1000), so verify the exact blend − trail.
+    const sSched = evalScheduleAnchor(sim.lastAnchor, T0);
+    const expected = OBS_BLEND_WEIGHT * 800 + (1 - OBS_BLEND_WEIGHT) * sSched - TRAIL_M;
+    expect(targetDistAt(sim, T0)).toBeCloseTo(expected, 6);
+    // And 30 s later the projected observation has advanced at schedule pace.
+    const later = T0 + 30_000;
+    const sObs = observedDistAt(sim, later);
+    const sSchedLater = evalScheduleAnchor(sim.lastAnchor, later);
+    expect(targetDistAt(sim, later)).toBeCloseTo(
+      OBS_BLEND_WEIGHT * sObs + (1 - OBS_BLEND_WEIGHT) * sSchedLater - TRAIL_M,
+      6,
+    );
+  });
+});
+
+describe('hard-brake crawl when the sim ran ahead of reality', () => {
+  // Slow 2 m/s schedule: reality takes a while to catch back up, so the crawl
+  // regime is clearly observable.
+  const geo = makeGeometry(
+    [
+      [0, 0],
+      [3000, 0],
+    ],
+    [
+      { atM: 0, arrivalMs: T0 - 50_000 },
+      { atM: 3000, arrivalMs: T0 - 50_000 + 1_500_000 },
+    ],
+  );
+
+  it('sim 100 m ahead → crawls (< 1.5 m/s) until reality catches up, then resumes', () => {
+    // Sim spawned at 200 m; a fresh fix says the tram is really at 100 m.
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 200, observedAtMs: T0 }), T0);
+    expect(sim.sM).toBeCloseTo(200, 0);
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 100, observedAtMs: T0 }), T0);
+    expect(sim.lastTeleportMs).toBe(0); // 100 m error — no teleport
+
+    // e ≈ −(100 + TRAIL_M) → hard-brake regime.
+    expect(targetDistAt(sim, T0) - sim.sM).toBeLessThan(-HARD_BRAKE_ENTER_M);
+
+    // Crawl phase: after the brake settles, speed stays below 1.5 m/s while
+    // the projected observation slowly closes the gap. s NEVER decreases.
+    let sPrev = sim.sM;
+    let now = T0;
+    now = run(sim, now, 3, () => {
+      expect(sim.sM).toBeGreaterThanOrEqual(sPrev);
+      sPrev = sim.sM;
+    });
+    let vCrawlMax = 0;
+    now = run(sim, now, 60, () => {
+      expect(sim.sM).toBeGreaterThanOrEqual(sPrev);
+      sPrev = sim.sM;
+      vCrawlMax = Math.max(vCrawlMax, sim.vMs);
+    });
+    expect(vCrawlMax).toBeLessThan(1.5);
+    expect(vCrawlMax).toBeGreaterThan(0); // still creeping, never frozen/backwards
+    expect(sim.crawling).toBe(true);
+
+    // Reality catches up (target advances at 2 m/s vs the 1 m/s crawl): the
+    // regime exits and the tram accelerates well past crawl speed.
+    let vMaxAfter = 0;
+    let exited = false;
+    run(sim, now, 60, () => {
+      expect(sim.sM).toBeGreaterThanOrEqual(sPrev);
+      sPrev = sim.sM;
+      if (!sim.crawling) exited = true;
+      if (exited) vMaxAfter = Math.max(vMaxAfter, sim.vMs);
+    });
+    expect(exited).toBe(true);
+    expect(vMaxAfter).toBeGreaterThan(CRAWL_V_MS + 1);
+  });
+
+  it('never moves backwards through brake, crawl and recovery', () => {
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 100, observedAtMs: T0 }), T0);
+    run(sim, T0, 20); // pick up speed (and possibly already cycle into a crawl)
+    const now0 = T0 + 20_000;
+    applySnapshot(sim, makeSnapshot({ shapeDistM: sim.sM - 150, observedAtMs: now0 }), now0);
+    let sPrev = sim.sM;
+    run(sim, now0, 180, () => {
+      expect(sim.sM).toBeGreaterThanOrEqual(sPrev); // s NEVER decreases
+      expect(sim.vMs).toBeGreaterThanOrEqual(0);
+      sPrev = sim.sM;
+    });
   });
 });
 

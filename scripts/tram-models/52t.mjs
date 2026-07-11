@@ -267,7 +267,7 @@ function bogieCovers(mb, { z }) {
 // ── sections ─────────────────────────────────────────────────────────────────
 
 /** Shared shell call; returns wall extent for livery painting. */
-function shell(mb, { length, front, rear, rightItems, bogies }) {
+function shell(mb, { length, front, rear, rightItems, bogies, doorsOpen }) {
   const { z0, z1 } = buildSectionShell(mb, {
     length, width: W, y0: Y0, sill: SILL, winTop: WINTOP, yTop: YTOP, roofTop: ROOFTOP,
     front, rear,
@@ -279,11 +279,12 @@ function shell(mb, { length, front, rear, rightItems, bogies }) {
     roofMat: '52tRoof',
     bogies,
     winOpts: WIN,
+    doorsOpen,
   });
   return { z0, z1 };
 }
 
-function buildEnd({ tail }) {
+function buildEnd({ tail, doorsOpen }) {
   const mb = new MeshBuilder();
   const rightItems = tail
     ? [{ t: 'run', weight: 0.3 }, { ...DOOR }, { t: 'run', weight: 0.7 }, { ...DOOR }, { t: 'run', weight: 2.0 }]
@@ -294,6 +295,7 @@ function buildEnd({ tail }) {
     rear: tail ? 'cab' : 'bellows',
     rightItems,
     bogies: [tail ? 1.2 : -1.2],
+    doorsOpen,
   });
   cabMask(mb, { dirZ: tail ? 1 : -1 });
   bogieCovers(mb, { z: tail ? 1.2 : -1.2 });
@@ -315,7 +317,7 @@ function buildEnd({ tail }) {
   return mb;
 }
 
-function buildMid({ length, pantograph, redRoof }) {
+function buildMid({ length, pantograph, redRoof, doorsOpen }) {
   const mb = new MeshBuilder();
   const rightItems = pantograph
     ? [{ t: 'run' }]
@@ -326,6 +328,7 @@ function buildMid({ length, pantograph, redRoof }) {
     rear: 'bellows',
     rightItems,
     bogies: pantograph ? [0] : [], // b/d semi-swivel bogies, c suspended
+    doorsOpen,
   });
   if (pantograph) {
     singleArmPantograph(mb, { z: 0, yRoof: ROOFTOP });
@@ -347,11 +350,24 @@ function buildMid({ length, pantograph, redRoof }) {
 
 export function sections() {
   const eEnd = { length: LEND, width: W };
+  // b/d carry pantographs and have NO passenger doors → no open variant
   return [
-    { key: '52t-a', build: () => buildEnd({ tail: false }), expect: eEnd },
+    {
+      key: '52t-a', expect: eEnd,
+      build: () => buildEnd({ tail: false }),
+      buildOpen: () => buildEnd({ tail: false, doorsOpen: true }),
+    },
     { key: '52t-b', build: () => buildMid({ length: LMIDB, pantograph: true, redRoof: 'b' }), expect: { length: LMIDB, width: W } },
-    { key: '52t-c', build: () => buildMid({ length: LMIDC }), expect: { length: LMIDC, width: W } },
+    {
+      key: '52t-c', expect: { length: LMIDC, width: W },
+      build: () => buildMid({ length: LMIDC }),
+      buildOpen: () => buildMid({ length: LMIDC, doorsOpen: true }),
+    },
     { key: '52t-d', build: () => buildMid({ length: LMIDB, pantograph: true, redRoof: true }), expect: { length: LMIDB, width: W } },
-    { key: '52t-e', build: () => buildEnd({ tail: true }), expect: eEnd },
+    {
+      key: '52t-e', expect: eEnd,
+      build: () => buildEnd({ tail: true }),
+      buildOpen: () => buildEnd({ tail: true, doorsOpen: true }),
+    },
   ];
 }

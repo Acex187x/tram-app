@@ -37,6 +37,10 @@ export const MATERIALS = {
   headlight: { hex: 0xfff3d6, rough: 0.3, metal: 0, emissive: [1, 0.93, 0.72] },
   taillight: { hex: 0x9b1410, rough: 0.3, metal: 0, emissive: [1, 0.05, 0.03] },
   display: { hex: 0x201d16, rough: 0.4, metal: 0, emissive: [1, 0.82, 0.5] },
+  // warm cabin light spilling out of an OPEN doorway (doors-open variants)
+  doorGlow: { hex: 0x2a1c0e, rough: 0.6, metal: 0, emissive: [1.0, 0.72, 0.4] },
+  // near-black doorway interior behind the glow (slightly warm, not void-black)
+  doorwayDark: { hex: 0x17130f, rough: 0.8, metal: 0.02 },
 };
 
 // ── MeshBuilder: accumulates flat-shaded triangles per material key ──────────
@@ -361,13 +365,17 @@ export function wallSegs(wallLen, items, winOpts = {}) {
  *   z0: wall start (toward front), segments: [{t, len}],
  *   y0, sill, winTop, yTop  — wall bottom, window sill, window top, wall top
  *   mats: { lower, upper, pillar, glass, door, frame },
- *   doorLowY — doors drop to this y (defaults y0), glassInset, doorInset
+ *   doorLowY — doors drop to this y (defaults y0), glassInset, doorInset,
+ *   doorsOpen — render door segments OPEN: leaves slid ~80% aside into edge
+ *     pockets, dark doorway behind, warm emissive glow inside (map-scale read).
+ *     Segments with `noOpen: true` (driver doors) stay closed regardless.
  * }
  */
 export function buildWall(mb, cfg) {
   const {
     side, xw, z0, segments, y0, sill, winTop, yTop, mats,
     doorLowY = cfg.y0, glassInset = 0.05, doorInset = 0.03, ventY,
+    doorsOpen = false,
   } = cfg;
   const x = side * xw;
   const xg = side * (xw - glassInset);
@@ -397,33 +405,64 @@ export function buildWall(mb, cfg) {
       const f = 0.05; // frame strip width at outer plane
       const yd = s.lowY ?? doorLowY;
       const dm = s.mat ?? mats.door;
+      const open = doorsOpen && !s.noOpen;
       // outer frame strips
       mb.rectX(mats.frame ?? mats.lower, x, z, z + f, yd, yTop, side);
       mb.rectX(mats.frame ?? mats.lower, x, z1 - f, z1, yd, yTop, side);
       mb.rectX(s.topMat ?? mats.upper, x, z, z1, winTop, yTop, side);
-      // recessed door panel: solid below sill, glass above
-      mb.rectX(dm, xd, z + f, z1 - f, yd, sill, side);
-      const xdg = side * (xw - doorInset - 0.015);
-      mb.rectX(dm, xd, z + f, z + f + 0.09, sill, winTop, side);
-      mb.rectX(dm, xd, z1 - f - 0.09, z1 - f, sill, winTop, side);
-      mb.rectX(mats.glass, xdg, z + f + 0.09, z1 - f - 0.09, sill, winTop, side);
-      // center split groove + grab handles on the leaves
-      const zc = (z + z1) / 2;
-      mb.rectX('black', side * (xw - doorInset + 0.005), zc - 0.015, zc + 0.015, yd, winTop, side);
-      for (const dz of [-0.12, 0.12]) {
-        mb.box('trim', {
-          x: side * (xw - doorInset + 0.012), y: 1.35, z: zc + dz,
-          w: 0.02, h: 0.55, d: 0.035,
-        });
-      }
       // jambs
       const [xi, xo] = side > 0 ? [xd, x] : [x, xd];
       mb.rectY(mats.frame ?? mats.lower, yTop, xi, xo, z + f, z1 - f, -1);
       mb.rectZ(mats.frame ?? mats.lower, z + f, xi, xo, yd, winTop, 1);
       mb.rectZ(mats.frame ?? mats.lower, z1 - f, xi, xo, yd, winTop, -1);
-      // if the door drops below the wall bottom, close the underside
-      if (yd < y0 - 1e-6) {
-        mb.rectY(dm, yd, xi, xo, z + f, z1 - f, -1);
+      if (!open) {
+        // CLOSED: recessed door panel — solid below sill, glass above
+        mb.rectX(dm, xd, z + f, z1 - f, yd, sill, side);
+        const xdg = side * (xw - doorInset - 0.015);
+        mb.rectX(dm, xd, z + f, z + f + 0.09, sill, winTop, side);
+        mb.rectX(dm, xd, z1 - f - 0.09, z1 - f, sill, winTop, side);
+        mb.rectX(mats.glass, xdg, z + f + 0.09, z1 - f - 0.09, sill, winTop, side);
+        // center split groove + grab handles on the leaves
+        const zc = (z + z1) / 2;
+        mb.rectX('black', side * (xw - doorInset + 0.005), zc - 0.015, zc + 0.015, yd, winTop, side);
+        for (const dz of [-0.12, 0.12]) {
+          mb.box('trim', {
+            x: side * (xw - doorInset + 0.012), y: 1.35, z: zc + dz,
+            w: 0.02, h: 0.55, d: 0.035,
+          });
+        }
+        // if the door drops below the wall bottom, close the underside
+        if (yd < y0 - 1e-6) {
+          mb.rectY(dm, yd, xi, xo, z + f, z1 - f, -1);
+        }
+      } else {
+        // OPEN: each leaf slid ~80% aside — only a stub remains visible at the
+        // jambs; behind, a recessed dark doorway with a warm interior glow.
+        const zc0 = z + f;
+        const zc1 = z1 - f;
+        const stub = 0.2 * ((zc1 - zc0) / 2); // visible 20% of each leaf
+        for (const [za, zb] of [[zc0, zc0 + stub], [zc1 - stub, zc1]]) {
+          mb.rectX(dm, xd, za, zb, yd, winTop, side);
+        }
+        const zo0 = zc0 + stub;
+        const zo1 = zc1 - stub;
+        const inset = 0.26; // doorway pocket depth
+        const xb = side * (xw - inset); // interior back plane
+        const [pi, po] = side > 0 ? [xb, xd] : [xd, xb];
+        // dark interior back wall + warm glow panel floating just proud of it
+        mb.rectX('doorwayDark', xb, zo0, zo1, yd, winTop, side);
+        mb.rectX('doorGlow', side * (xw - inset + 0.02), zo0 + 0.04, zo1 - 0.04,
+          yd + 0.08, winTop - 0.34, side);
+        // seal the pocket: floor, ceiling, leaf-edge reveals
+        mb.rectY('doorwayDark', yd + 0.01, pi, po, zo0, zo1, 1);
+        mb.rectY('doorwayDark', winTop, pi, po, zo0, zo1, -1);
+        mb.rectZ('doorwayDark', zo0, pi, po, yd, winTop, 1);
+        mb.rectZ('doorwayDark', zo1, pi, po, yd, winTop, -1);
+        // if the door drops below the wall bottom, close the underside
+        if (yd < y0 - 1e-6) {
+          const [bi, bo] = side > 0 ? [xb, x] : [x, xb];
+          mb.rectY('doorwayDark', yd, bi, bo, zc0, zc1, -1);
+        }
       }
     }
     z = z1;
@@ -648,7 +687,8 @@ export function noseBands(mb, { bands, capMat = 'roof', capCorners }) {
  *   front: 'cab' | 'joint', rear: 'cab' | 'bellows' | 'joint',
  *   noseDepthF, noseDepthR, rightItems, leftItems (for wallSegs),
  *   mats { lower, upper, pillar?, glass, door, frame? }, roofMat,
- *   bogies: [z...], doorLowY?, roofShrink?, winOpts?
+ *   bogies: [z...], doorLowY?, roofShrink?, winOpts?,
+ *   doorsOpen? — open the RIGHT-side (boarding) doors; left wall unaffected
  * }
  * Returns { z0, z1 } — the wall extent (nose regions excluded).
  */
@@ -658,6 +698,7 @@ export function buildSectionShell(mb, cfg) {
     front, rear, noseDepthF = 0, noseDepthR = 0,
     rightItems, leftItems, mats, roofMat = 'roof',
     bogies: bogieZs = [], doorLowY, roofShrink = 0.22, winOpts,
+    doorsOpen = false,
   } = cfg;
   const hw = width / 2;
   const L2 = length / 2;
@@ -666,7 +707,7 @@ export function buildSectionShell(mb, cfg) {
   const wallLen = z1 - z0;
 
   const common = { xw: hw, z0, y0, sill, winTop, yTop, mats, doorLowY, ventY: cfg.ventY };
-  buildWall(mb, { ...common, side: 1, segments: wallSegs(wallLen, rightItems, winOpts) });
+  buildWall(mb, { ...common, side: 1, doorsOpen, segments: wallSegs(wallLen, rightItems, winOpts) });
   buildWall(mb, { ...common, side: -1, segments: wallSegs(wallLen, leftItems, winOpts) });
 
   roofSlab(mb, { z0, z1, xw: hw, yTop, roofTop, mat: roofMat, shrink: roofShrink });

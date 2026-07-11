@@ -19,6 +19,27 @@ export const MAX_TICK_DT_S = 0.25;
 export const STOP_BEHIND_EPS_M = 0.5;
 /** Observation weight in the pace-controller target blend (timetable gets the rest). */
 export const OBS_BLEND_WEIGHT = 0.75;
+/**
+ * Systematic trail bias, meters: the pace target is the projected observation
+ * MINUS this, so the sim rides slightly BEHIND reality rather than ahead.
+ */
+export const TRAIL_M = 10;
+/** Sim this far AHEAD of the target (e < −40) → enter the hard-brake crawl. */
+export const HARD_BRAKE_ENTER_M = 40;
+/** The crawl regime exits once the error recovers above −12 m. */
+export const HARD_BRAKE_EXIT_M = 12;
+/** Crawl speed while waiting for reality to catch back up, m/s. */
+export const CRAWL_V_MS = 1.0;
+/** Error beyond which the bold catch-up factor cap applies, meters. */
+export const BOLD_CATCHUP_ERR_M = 40;
+/** Pace factor cap in the bold catch-up regime (e > BOLD_CATCHUP_ERR_M). */
+export const CATCHUP_MAX_FACTOR = 1.5;
+/** Pace factor cap in the gentle proportional band (|e| ≤ 40). */
+export const GENTLE_MAX_FACTOR = 1.35;
+/** Pace factor floor (gentle band; the crawl regime undercuts it). */
+export const MIN_PACE_FACTOR = 0.55;
+/** Proportional gain divisor: factor = 1 + e / PACE_GAIN_M. */
+export const PACE_GAIN_M = 120;
 /** Max |stop.distM − s| for trusting an at_stop feed state when seeding a dwell, m. */
 const AT_STOP_MATCH_M = 50;
 /** Fallback physical tram length when the caller passes none (T3-sized), m. */
@@ -66,6 +87,12 @@ export interface TramSim {
   minStopDist: number;
   /** ms timestamp of the last hard teleport (renderer may dip opacity), 0 if never. */
   lastTeleportMs: number;
+  /**
+   * Hard-brake regime latch: the sim overran the target by more than
+   * HARD_BRAKE_ENTER_M and crawls (≤ CRAWL_V_MS) until the error recovers
+   * above −HARD_BRAKE_EXIT_M. Hysteresis avoids brake/sprint oscillation.
+   */
+  crawling: boolean;
 }
 
 // ── schedule anchor ──────────────────────────────────────────────────────────
@@ -128,12 +155,14 @@ export function observedDistAt(sim: TramSim, nowMs: number): number {
 
 /**
  * Pace-controller target position: observation-primary blend of the projected
- * AVL observation with the timetable anchor (low-gain reference).
+ * AVL observation with the timetable anchor (low-gain reference), minus the
+ * systematic TRAIL_M bias — the sim aims slightly BEHIND projected reality so
+ * it hurries less and never runs ahead of it under normal tracking.
  */
 export function targetDistAt(sim: TramSim, nowMs: number): number {
   const sSched = evalScheduleAnchor(sim.lastAnchor, nowMs);
   const sObs = clampS(sim.geometry, sim.obsDistM + Math.max(0, sSched - sim.obsSchedDistM));
-  return OBS_BLEND_WEIGHT * sObs + (1 - OBS_BLEND_WEIGHT) * sSched;
+  return Math.max(0, OBS_BLEND_WEIGHT * sObs + (1 - OBS_BLEND_WEIGHT) * sSched - TRAIL_M);
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -276,6 +305,7 @@ export function createSim(
     lengthM,
     minStopDist: 0,
     lastTeleportMs: 0,
+    crawling: false,
   };
   seedStopState(sim, nowMs);
   return sim;
@@ -286,6 +316,7 @@ export function reanchorSim(sim: TramSim, sM: number, nowMs: number): void {
   sim.sM = clampS(sim.geometry, sM);
   sim.phase = 'cruise';
   sim.dwellUntilMs = 0;
+  sim.crawling = false;
   sim.dwelledStopSeqs.clear();
   seedStopState(sim, nowMs);
 }
@@ -309,6 +340,7 @@ export function applySnapshot(sim: TramSim, snapshot: TramSnapshot, nowMs: numbe
     sim.vMs = 0;
     sim.phase = 'cruise';
     sim.dwellUntilMs = 0;
+    sim.crawling = false;
     sim.dwelledStopSeqs.clear();
     seedStopState(sim, nowMs);
     sim.lastTeleportMs = nowMs;
@@ -318,12 +350,16 @@ export function applySnapshot(sim: TramSim, snapshot: TramSnapshot, nowMs: numbe
 // ── physics tick ─────────────────────────────────────────────────────────────
 
 /**
- * Advance the sim by dtS seconds. Pace controller:
- *   e = target(now) − s;  vTarget = min(vAllowed, vCruise · clamp(1 + e/120, 0.55, 1.65))
- * where target(now) is the observation-primary blend (targetDistAt) and
- * vCruise is the zone/curve cruise cap WITHOUT the braking envelope — catch-up
- * scaling can never defeat the envelope (vTarget ≤ vAllowed always).
- * Acceleration is clamped to [−1.2, +1.0] m/s². s never decreases.
+ * Advance the sim by dtS seconds. Asymmetric pace controller around
+ * e = target(now) − s (target = observation-primary blend − TRAIL_M):
+ *  - e < −HARD_BRAKE_ENTER_M (sim ran ahead): hard-brake crawl regime —
+ *    vTarget ≤ CRAWL_V_MS until e recovers above −HARD_BRAKE_EXIT_M
+ *    (hysteresis latch on sim.crawling). The sim NEVER moves backwards.
+ *  - e > BOLD_CATCHUP_ERR_M (behind): bold catch-up, pace factor up to 1.5.
+ *  - between: gentle proportional control, factor clamp(1 + e/120, 0.55, 1.35).
+ * All regimes stay clamped by the braking envelope (vTarget ≤ vAllowed) —
+ * catch-up can never defeat curve/stop limits. Acceleration is clamped to
+ * [−1.2, +1.0] m/s². s never decreases.
  */
 export function tick(sim: TramSim, nowMs: number, dtS: number): void {
   const dt = Math.min(Math.max(dtS, 0), MAX_TICK_DT_S);
@@ -341,11 +377,26 @@ export function tick(sim: TramSim, nowMs: number, dtS: number): void {
 
   // Pace controller: observation-primary target, timetable as low-gain reference.
   const e = targetDistAt(sim, nowMs) - sim.sM;
-  const factor = Math.min(1.65, Math.max(0.55, 1 + e / 120));
   const vAllowed = vAllowedAt(sim.profile, sim.geometry, sim.sM, sim.minStopDist);
-  // Pace scaling applies to the cruise cap only; the braking envelope is a
-  // hard limit — a late tram may hold cruise speed but never overrun a stop.
-  const vTarget = Math.min(vAllowed, cruiseCapAt(sim.profile, sim.geometry, sim.sM) * factor);
+
+  // Hard-brake latch with hysteresis (enter at −40 m, exit at −12 m).
+  if (sim.crawling) {
+    if (e > -HARD_BRAKE_EXIT_M) sim.crawling = false;
+  } else if (e < -HARD_BRAKE_ENTER_M) {
+    sim.crawling = true;
+  }
+
+  let vTarget: number;
+  if (sim.crawling) {
+    // Ran ahead of reality: crawl until the projected observation catches up.
+    vTarget = Math.min(vAllowed, CRAWL_V_MS);
+  } else {
+    const maxFactor = e > BOLD_CATCHUP_ERR_M ? CATCHUP_MAX_FACTOR : GENTLE_MAX_FACTOR;
+    const factor = Math.min(maxFactor, Math.max(MIN_PACE_FACTOR, 1 + e / PACE_GAIN_M));
+    // Pace scaling applies to the cruise cap only; the braking envelope is a
+    // hard limit — a late tram may hold cruise speed but never overrun a stop.
+    vTarget = Math.min(vAllowed, cruiseCapAt(sim.profile, sim.geometry, sim.sM) * factor);
+  }
 
   // Acceleration clamp.
   const a = Math.min(A_ACC, Math.max(-A_BRK, (vTarget - sim.vMs) / dt));

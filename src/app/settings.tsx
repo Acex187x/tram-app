@@ -7,8 +7,11 @@ import { SymbolView, type SFSymbol } from 'expo-symbols';
 import * as WebBrowser from 'expo-web-browser';
 import { Fragment, type ReactNode } from 'react';
 import {
+  ActionSheetIOS,
+  Alert,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -21,6 +24,7 @@ import { SheetHeader } from '@/components/favorites/SheetHeader';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { SheetContent } from '@/components/ui/SheetContent';
 import { Colors, Tram } from '@/constants/theme';
+import { useMotionLog, type MotionFileInfo } from '@/lib/motionlog';
 import { useSettingsStore, type LightPreset, type PositionMode } from '@/stores/settings';
 
 /** Left inset aligning separators with row text (padding + icon + gap). */
@@ -180,6 +184,122 @@ function PositionModeSegments() {
   return <Segments options={POSITION_MODES} value={positionMode} onChange={setPositionMode} />;
 }
 
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function shareFile(uri: string): Promise<void> {
+  try {
+    await Share.share({ url: uri });
+  } catch {
+    // user cancelled or share unavailable — nothing to do
+  }
+}
+
+/** Share newest file directly; if several, pick from a native action sheet. */
+function pickAndShare(files: MotionFileInfo[], title: string): void {
+  if (files.length === 0) {
+    Alert.alert('Nothing to export', `No ${title.toLowerCase()} have been recorded yet.`);
+    return;
+  }
+  if (files.length === 1) {
+    void shareFile(files[0].uri);
+    return;
+  }
+  const options = [...files.map((f) => f.name), 'Cancel'];
+  ActionSheetIOS.showActionSheetWithOptions(
+    { title, options, cancelButtonIndex: options.length - 1 },
+    (index) => {
+      if (index != null && index < files.length) void shareFile(files[index].uri);
+    },
+  );
+}
+
+/** 'Motion data' group — export/clear the real-vs-sim telemetry logs. */
+function MotionDataSection() {
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const palette = Colors[scheme];
+  const log = useMotionLog();
+  const stats = log.stats();
+
+  const onExportLogs = () => {
+    void Haptics.selectionAsync();
+    log.flush();
+    pickAndShare(log.listLogFiles(), 'Motion logs');
+  };
+  const onExportRides = () => {
+    void Haptics.selectionAsync();
+    log.flush();
+    pickAndShare(log.listRideFiles(), 'Ride recordings');
+  };
+  const onClear = () => {
+    Alert.alert('Clear motion data', 'Delete all motion logs and ride recordings? This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Clear',
+        style: 'destructive',
+        onPress: () => {
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          log.clearAll();
+        },
+      },
+    ]);
+  };
+
+  const hasData = stats.totalBytes > 0 || stats.riding;
+
+  return (
+    <View>
+      <SectionLabel>Motion data</SectionLabel>
+      <InsetGroup>
+        <Row icon="waveform.path.ecg" iconColor={Tram.onTime} label="Export motion logs" onPress={onExportLogs}>
+          <Text style={[styles.rowValue, { color: palette.textSecondary }]}>
+            {stats.logCount > 0 ? `${stats.logCount}` : '—'}
+          </Text>
+          <SymbolView name="square.and.arrow.up" size={15} weight="semibold" tintColor={palette.textSecondary} />
+        </Row>
+        <RowSeparator inset={SEPARATOR_INSET} />
+        <Row icon="record.circle" iconColor={Tram.veryLate} label="Export ride recordings" onPress={onExportRides}>
+          <Text style={[styles.rowValue, { color: palette.textSecondary }]}>
+            {stats.rideCount > 0 ? `${stats.rideCount}` : '—'}
+          </Text>
+          <SymbolView name="square.and.arrow.up" size={15} weight="semibold" tintColor={palette.textSecondary} />
+        </Row>
+        <RowSeparator inset={SEPARATOR_INSET} />
+        <Row icon="internaldrive" iconColor={Tram.night} label="Storage used">
+          <Text style={[styles.rowValue, { color: palette.textSecondary }]}>
+            {formatBytes(stats.totalBytes)}
+          </Text>
+        </Row>
+        {hasData && (
+          <>
+            <RowSeparator inset={SEPARATOR_INSET} />
+            <Pressable
+              accessibilityRole="button"
+              onPress={onClear}
+              style={({ pressed }) => [
+                styles.row,
+                pressed && {
+                  backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
+                },
+              ]}
+            >
+              <IconSquare name="trash.fill" color={Tram.veryLate} />
+              <Text style={[styles.rowLabel, { color: Tram.veryLate }]}>Clear motion data</Text>
+            </Pressable>
+          </>
+        )}
+      </InsetGroup>
+      <Text style={[styles.footnote, { color: palette.textSecondary }]}>
+        Recordings capture GPS against the simulated position to recalibrate the
+        physics. Nothing leaves the device until you export it.
+      </Text>
+    </View>
+  );
+}
+
 export default function SettingsScreen() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = Colors[scheme];
@@ -251,6 +371,8 @@ export default function SettingsScreen() {
             </Row>
           </InsetGroup>
         </View>
+
+        <MotionDataSection />
 
         <View>
           <SectionLabel>About</SectionLabel>
