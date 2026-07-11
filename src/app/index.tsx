@@ -17,11 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import {
-  resolveLightPreset,
-  SECTIONS_FEED_MIN_ZOOM,
-  STANDARD_CONFIG,
-} from '@/components/map/mapStyle';
+import { resolveLightPreset, STANDARD_CONFIG } from '@/components/map/mapStyle';
 import { BottomDock, ControlStack, FollowBanner, StatusChip } from '@/components/map/MapChrome';
 import { PlannerOverlay } from '@/components/map/PlannerOverlay';
 import { RouteNetwork, STOP_TOTEM_MODEL_KEY } from '@/components/map/RouteNetwork';
@@ -88,8 +84,9 @@ export default function MapScreen() {
       bbox: [sw[0], sw[1], ne[0], ne[1]],
       zoom,
     };
-    // Zoom-adaptive simulation rate (thermal): 60 Hz only in the model band.
-    getRuntime().setDetailMode(zoom >= SECTIONS_FEED_MIN_ZOOM);
+    // Zoom-adaptive simulation rate (thermal): 60 Hz in the glide band
+    // (hysteresis inside setDetailZoom), ~10 Hz at far zooms.
+    getRuntime().setDetailZoom(zoom);
 
     // Follow-mode gestures do NOT cancel follow: while the user's fingers are
     // on the map we capture their chosen zoom/pitch/heading-offset (relative

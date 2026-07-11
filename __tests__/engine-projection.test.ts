@@ -187,3 +187,82 @@ describe('projectedObservedDistM', () => {
     expect(state(engine, 'raw', T0).projectedObservedDistM).toBeNull();
   });
 });
+
+describe('projection cadence (setProjectionCadence)', () => {
+  const makeGeo = () =>
+    makeGeometry(
+      [
+        [0, 0],
+        [3000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 20_000 },
+        { atM: 3000, arrivalMs: T0 + 280_000, isTerminal: true },
+      ],
+    );
+
+  function seed(engine: TramEngine): void {
+    const geo = makeGeo();
+    engine.ingest([makeSnapshot({ key: 't', shapeDistM: 100, observedAtMs: T0 })], () => geo, T0);
+    engine.tick(T0);
+  }
+
+  it("'coarse' advances the projection at ~500 ms steps while the main sim stays per-tick", () => {
+    const engine = makeEngine();
+    engine.setProjectionCadence('coarse');
+    seed(engine);
+
+    let projChanges = 0;
+    let simChanges = 0;
+    let prevProj = projected(engine, 't', T0);
+    let prevSim = state(engine, 't', T0).simDistM;
+    run(engine, T0, 10, (now) => {
+      const p = projected(engine, 't', now);
+      expect(p).toBeGreaterThanOrEqual(prevProj); // still monotone
+      if (p !== prevProj) projChanges++;
+      prevProj = p;
+      const sd = state(engine, 't', now).simDistM;
+      if (sd !== prevSim) simChanges++;
+      prevSim = sd;
+    });
+
+    // 100 ticks / 10 s: the projection moved ~every 5th tick (500 ms cadence)…
+    expect(projChanges).toBeGreaterThanOrEqual(15);
+    expect(projChanges).toBeLessThanOrEqual(25);
+    // …while the main (rendered) sim advanced essentially every tick.
+    expect(simChanges).toBeGreaterThan(90);
+  });
+
+  it("'coarse' integrates the same total motion as 'full' (batched, not dropped)", () => {
+    const fullEngine = makeEngine();
+    const coarseEngine = makeEngine();
+    coarseEngine.setProjectionCadence('coarse');
+    seed(fullEngine);
+    seed(coarseEngine);
+
+    const now = T0 + 10_000;
+    run(fullEngine, T0, 10);
+    run(coarseEngine, T0, 10);
+    const pFull = projected(fullEngine, 't', now);
+    const pCoarse = projected(coarseEngine, 't', now);
+    expect(pFull).toBeGreaterThan(110);
+    // Same physics over the same wall time; only integration granularity
+    // differs (≤ 0.25 s substeps vs 0.1 s ticks) plus at most one pending
+    // not-yet-due coarse interval (< 500 ms of motion).
+    expect(Math.abs(pFull - pCoarse)).toBeLessThan(8);
+  });
+
+  it('switching coarse → full integrates the pending gap instead of dropping it', () => {
+    const engine = makeEngine();
+    engine.setProjectionCadence('coarse');
+    seed(engine);
+    let now = run(engine, T0, 5);
+    engine.setProjectionCadence('full');
+    now = run(engine, now, 5);
+
+    const control = makeEngine();
+    seed(control);
+    run(control, T0, 10);
+    expect(Math.abs(projected(engine, 't', now) - projected(control, 't', now))).toBeLessThan(5);
+  });
+});

@@ -9,19 +9,20 @@ import { useEffect, useSyncExternalStore } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { getModelSpec, isLikelyCoupledPair, regNumberToModelId } from '@/lib/fleet/registry';
-import { TramEngine } from '@/lib/engine/engine';
+import { TramEngine, type ProjectionCadence } from '@/lib/engine/engine';
 import { promoteTag } from '@/lib/golemio/client';
 import * as shapeCache from '@/lib/golemio/shapeCache';
 import { fetchTramSnapshots } from '@/lib/golemio/vehicles';
 import type { RouteGeometry, TramPublicState, TramSnapshot } from '@/lib/types';
+import { useSettingsStore, type PositionMode } from '@/stores/settings';
 
 export const POLL_MS = 5_000;
-export const TICK_MS = 16; // ~60 fps simulation while the 3D model band is on screen
+export const TICK_MS = 16; // ~60 fps simulation while trams visibly glide (zoom ≥ 14)
 /**
- * Idle tick (~10 Hz): below the sections zoom band nothing on screen moves
- * faster than badge/dot updates, so full-rate simulation only burns CPU
- * (thermal: iPad ran hot after an hour). The map switches rates via
- * setDetailMode() from its camera events.
+ * Idle tick (~10 Hz): at far zooms nothing on screen moves faster than
+ * badge/dot updates, so full-rate simulation only burns CPU (thermal: iPad ran
+ * hot after an hour). The map switches rates via setDetailZoom() from its
+ * camera events.
  */
 export const TICK_IDLE_MS = 100;
 const UI_NOTIFY_MS = 1_000;
@@ -32,9 +33,26 @@ const UI_NOTIFY_MS = 1_000;
  * re-render constantly (GPU heat for zero visible change).
  */
 export function pointsPushIntervalMs(zoom: number): number {
-  if (zoom >= 14) return 66; // ~15 Hz — badges visibly glide
+  if (zoom >= DETAIL_ENTER_ZOOM) return 66; // ~15 Hz — badges visibly glide
   if (zoom >= 12.5) return 1_000;
   return 5_000; // dots at city scale: one push per poll
+}
+
+/**
+ * Detail-mode (60 Hz tick) zoom band, with hysteresis so hovering at the
+ * boundary doesn't thrash the tick timer. ENTER is aligned with the fast
+ * points cadence above: everywhere badges are pushed at ~15 Hz the engine also
+ * ticks at 60 Hz — ticking at 10 Hz under 15 Hz pushes aliased badge motion
+ * into visible 0-0-jump stutter (the iteration-4 smoothness regression).
+ */
+export const DETAIL_ENTER_ZOOM = 14.0;
+export const DETAIL_EXIT_ZOOM = 13.7;
+
+/** Pure hysteresis step: enter 60 Hz at ≥ 14.0, drop to 10 Hz only below 13.7. */
+export function detailModeForZoom(zoom: number, current: boolean): boolean {
+  if (zoom >= DETAIL_ENTER_ZOOM) return true;
+  if (zoom < DETAIL_EXIT_ZOOM) return false;
+  return current;
 }
 
 export type FrameListener = (nowMs: number) => void;
@@ -89,8 +107,10 @@ class TramRuntime {
    */
   private generation = 0;
   private lastSnapshots: TramSnapshot[] = [];
-  /** True while the map shows the 3D sections band (zoom ≥ band) → 60 Hz tick. */
+  /** True while the map is in the glide band (see detailModeForZoom) → 60 Hz tick. */
   private detailMode = false;
+  /** Unsubscribe from the settings store (projection cadence follows positionMode). */
+  private settingsUnsub: (() => void) | null = null;
 
   private frameListeners = new Set<FrameListener>();
   private uiListeners = new Set<() => void>();
@@ -114,6 +134,13 @@ class TramRuntime {
       // later 'active' transition is always observed (previously stop() removed
       // it, stranding the runtime dead after the first backgrounding).
       this.appStateSub = AppState.addEventListener('change', this.onAppState);
+      // Projection-sim cadence tracks the position-mode setting: full-rate
+      // dead-reckoning is only needed while 'live' renders it every frame; in
+      // 'smooth' it is consumed at ~1 Hz, so the engine coarsens it to 500 ms.
+      this.applyPositionMode(useSettingsStore.getState().positionMode);
+      this.settingsUnsub = useSettingsStore.subscribe((s) =>
+        this.applyPositionMode(s.positionMode),
+      );
       const state = AppState.currentState;
       if (state !== 'background' && state !== 'inactive') this.resume();
     }
@@ -125,7 +152,14 @@ class TramRuntime {
       this.pause();
       this.appStateSub?.remove();
       this.appStateSub = null;
+      this.settingsUnsub?.();
+      this.settingsUnsub = null;
     }
+  }
+
+  private applyPositionMode(mode: PositionMode): void {
+    const cadence: ProjectionCadence = mode === 'live' ? 'full' : 'coarse';
+    this.engine.setProjectionCadence(cadence);
   }
 
   /** Start the timer loops + an immediate poll. Idempotent. */
@@ -149,15 +183,18 @@ class TramRuntime {
   }
 
   /**
-   * Zoom-adaptive simulation rate (thermal): 60 Hz only while the map is in
-   * the 3D sections band; ~10 Hz otherwise. Called by the map screen from
-   * camera events; restarts the tick timer only on an actual mode change and
-   * only while running (a paused/backgrounded runtime stays fully idle).
+   * Zoom-adaptive simulation rate (thermal): 60 Hz while zoomed into the glide
+   * band (badges pushed at ~15 Hz and/or 3D models on screen), ~10 Hz at far
+   * zooms — with hysteresis (enter ≥ 14.0, exit < 13.7) so camera drift at the
+   * boundary can't thrash the timer. Called by the map screen from camera
+   * events; restarts the tick timer only on an actual mode change and only
+   * while running (a paused/backgrounded runtime stays fully idle).
    */
-  setDetailMode(on: boolean): void {
+  setDetailZoom(zoom: number): void {
+    const on = detailModeForZoom(zoom, this.detailMode);
     if (this.detailMode === on) return;
     this.detailMode = on;
-    if (__DEV__) console.log(`[tram-runtime] tick rate → ${on ? '60 Hz (model band)' : '10 Hz (idle)'}`);
+    if (__DEV__) console.log(`[tram-runtime] tick rate → ${on ? '60 Hz (glide band)' : '10 Hz (idle)'}`);
     if (!this.tickTimer) return; // paused — resume() picks up the new rate
     clearInterval(this.tickTimer);
     this.startTickTimer();

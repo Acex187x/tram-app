@@ -93,6 +93,40 @@ export function cruiseCapAt(profile: SpeedProfile, geometry: RouteGeometry, sM: 
 }
 
 /**
+ * Length-weighted mean of the cruise cap over the along-shape span [aM, bM]
+ * (same per-segment max-of-endpoints semantics as cruiseCapAt). This is the
+ * PROFILE-EXPECTED average cruise speed over the span — the reference the
+ * per-tram pace calibration compares real inter-fix speeds against.
+ */
+export function meanCruiseCapOver(
+  profile: SpeedProfile,
+  geometry: RouteGeometry,
+  aM: number,
+  bM: number,
+): number {
+  const cum = geometry.cumDistM;
+  const n = cum.length;
+  if (n === 0) return 0;
+  const a = Math.min(Math.max(Math.min(aM, bM), 0), geometry.totalM);
+  const b = Math.min(Math.max(Math.max(aM, bM), 0), geometry.totalM);
+  if (b - a < 1e-6 || n === 1) return cruiseCapAt(profile, geometry, a);
+
+  let sum = 0;
+  let covered = 0;
+  let pos = a;
+  for (let i = segmentIndexAt(cum, a); i < n - 1 && pos < b; i++) {
+    const segEnd = Math.min(cum[i + 1], b);
+    const len = segEnd - pos;
+    if (len > 0) {
+      sum += len * Math.max(profile.vLimit[i], profile.vLimit[i + 1]);
+      covered += len;
+    }
+    pos = segEnd;
+  }
+  return covered > 0 ? sum / covered : cruiseCapAt(profile, geometry, a);
+}
+
+/**
  * Braking envelope: the max speed permitted at sM so that every upcoming limit
  * within lookaheadM can be met with deceleration aBrk:
  *

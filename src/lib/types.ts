@@ -129,6 +129,12 @@ export interface TramPublicState {
   nextStopName: string | null;
   nextStopEtaS: number | null;
   hasGeometry: boolean;
+  /**
+   * Learned per-tram pace multiplier (recency-weighted EWMA of real vs
+   * profile-expected inter-fix speed; 1 = profile pace). Undefined without a
+   * sim (no geometry). Optional/additive — telemetry + diagnostics only.
+   */
+  paceBias?: number;
 }
 
 export interface PointFeatureProps {

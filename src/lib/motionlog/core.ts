@@ -145,6 +145,7 @@ export function pollRecord(s: TramPublicState, t: number): string {
     projDist: r(s.projectedObservedDistM),
     devM: r(s.deviationM, 1),
     kmh: r(s.simSpeedKmh, 1),
+    bias: r(s.paceBias, 2),
     lat: r(s.position[1], 6),
     lng: r(s.position[0], 6),
     mode: s.phase,

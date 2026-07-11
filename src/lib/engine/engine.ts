@@ -29,6 +29,19 @@ export const STALE_AFTER_MS = 90_000;
 const REANCHOR_MAX_OFFSET_M = 100;
 /** Max dt for one engine tick, seconds (larger gaps are clamped). */
 const MAX_ENGINE_DT_S = 0.25;
+/** In 'coarse' projection cadence the projSims advance at most this often. */
+export const PROJ_COARSE_INTERVAL_MS = 500;
+/** Max wall-clock gap integrated in one coarse projection advance, seconds. */
+const PROJ_COARSE_MAX_GAP_S = 1.5;
+
+/**
+ * Projection-sim tick cadence: 'full' advances the dead-reckoning projSims on
+ * every engine tick (needed while positionMode==='live' renders them at frame
+ * rate); 'coarse' advances them at most every PROJ_COARSE_INTERVAL_MS — in
+ * 'smooth' mode the projection is only consumed at ~1 Hz (deviation display),
+ * so ticking a second physics sim per tram at 60 Hz was pure thermal waste.
+ */
+export type ProjectionCadence = 'full' | 'coarse';
 /** Min clearance between a follower's nose and its leader's tail, meters. */
 export const QUEUE_GAP_M = 3;
 /**
@@ -114,6 +127,9 @@ export class TramEngine {
   private readonly profiles = new Map<string, SpeedProfile>();
   private daytime: boolean | null = null;
   private lastTickMs: number | null = null;
+  private projectionCadence: ProjectionCadence = 'full';
+  /** Wall clock the projSims were last advanced to (coarse-cadence bookkeeping). */
+  private lastProjTickMs: number | null = null;
   private readonly opts: TramEngineOptions;
   /**
    * Sims sharing a shapeId (only groups of ≥ 2 — singletons need no queue),
@@ -257,6 +273,15 @@ export class TramEngine {
     this.applyQueueConstraints();
   }
 
+  /**
+   * Switch the projection-sim tick cadence. Callers set 'full' while the map
+   * renders the live projection every frame (positionMode==='live') and
+   * 'coarse' otherwise. Idempotent; takes effect on the next tick().
+   */
+  setProjectionCadence(cadence: ProjectionCadence): void {
+    this.projectionCadence = cadence;
+  }
+
   /** Advance all sims to nowMs. dt derives from the previous tick (clamped). */
   tick(nowMs: number): void {
     this.refreshDaytime(nowMs);
@@ -266,11 +291,39 @@ export class TramEngine {
         : Math.min(Math.max((nowMs - this.lastTickMs) / 1000, 0), MAX_ENGINE_DT_S);
     this.lastTickMs = nowMs;
     if (dtS <= 0) return;
+
+    // Projection sims advance with the same physics but are NOT queue-
+    // constrained: they dead-reckon the raw fix, not the rendered fleet.
+    // In 'full' cadence they move with the main tick; in 'coarse' they are
+    // batch-advanced (in ≤ MAX_ENGINE_DT_S substeps, so physics integration
+    // stays identical) at most every PROJ_COARSE_INTERVAL_MS.
+    const full = this.projectionCadence === 'full';
+    const prevProjMs = this.lastProjTickMs;
+    let projSteps: { fromMs: number; toMs: number } | null = null;
+    if (prevProjMs === null) {
+      // First projection bookkeeping point; integrate this tick's dt in full
+      // mode, just anchor the clock in coarse mode.
+      if (full) projSteps = { fromMs: nowMs - dtS * 1000, toMs: nowMs };
+      this.lastProjTickMs = nowMs;
+    } else if (full || nowMs - prevProjMs >= PROJ_COARSE_INTERVAL_MS) {
+      // Integrate the whole elapsed span (bounded), so no time is dropped on a
+      // coarse→full cadence switch or across coarse intervals.
+      const fromMs = Math.max(prevProjMs, nowMs - PROJ_COARSE_MAX_GAP_S * 1000);
+      if (nowMs > fromMs) projSteps = { fromMs, toMs: nowMs };
+      this.lastProjTickMs = nowMs;
+    }
+
     for (const entry of this.entries.values()) {
       if (entry.sim) tickSim(entry.sim, nowMs, dtS);
-      // The projection sim advances with the same physics but is NOT queue-
-      // constrained: it dead-reckons the raw fix, not the rendered fleet.
-      if (entry.projSim) tickSim(entry.projSim, nowMs, dtS);
+      if (entry.projSim && projSteps) {
+        // Substep the accumulated gap so the per-step dt clamp never drops time.
+        let t = projSteps.fromMs;
+        while (t < projSteps.toMs) {
+          const step = Math.min(MAX_ENGINE_DT_S * 1000, projSteps.toMs - t);
+          t += step;
+          tickSim(entry.projSim, t, step / 1000);
+        }
+      }
     }
     // Car-following runs AFTER all position updates so queues compress
     // correctly regardless of iteration order.
@@ -403,6 +456,7 @@ export class TramEngine {
         ? Math.max(0, (next.arrivalMs + snapshot.delaySeconds * 1000 - nowMs) / 1000)
         : null,
       hasGeometry: true,
+      paceBias: sim.paceBias,
     };
   }
 }

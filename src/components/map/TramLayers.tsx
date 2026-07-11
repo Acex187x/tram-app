@@ -5,8 +5,10 @@
 // body) and a gold selection halo.
 //
 // Cadence (zoom-adaptive, thermal-aware): the engine ticks at TICK_MS (~16 ms)
-// only while the map is inside the 3D sections band — below it the runtime
-// drops to ~10 Hz (see tramData.setDetailMode). Each tick pushes the sections
+// while the map is in the glide band (zoom ≥ 14, hysteresis down to 13.7 —
+// aligned with the fast points cadence so 15 Hz pushes never sample 10 Hz
+// motion); at far zooms the runtime drops to ~10 Hz (see
+// tramData.setDetailZoom). Each tick pushes the sections
 // FC (small — viewport-culled) when the band is on screen; the points FC
 // (whole fleet, badges/dots) is pushed at a zoom-dependent cadence
 // (pointsPushIntervalMs: 15 Hz close, 1 s mid, 5 s far — far-zoom badges are

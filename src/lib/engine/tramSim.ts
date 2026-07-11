@@ -3,7 +3,14 @@
 // non-decreasing except on an explicit >500 m schedule teleport.
 
 import type { RouteGeometry, RouteStop, TramSnapshot } from '@/lib/types';
-import { A_ACC, A_BRK, cruiseCapAt, vAllowedAt, type SpeedProfile } from './speedProfile';
+import {
+  A_ACC,
+  A_BRK,
+  cruiseCapAt,
+  meanCruiseCapOver,
+  vAllowedAt,
+  type SpeedProfile,
+} from './speedProfile';
 
 export type SimPhase = 'cruise' | 'dwell' | 'terminal';
 
@@ -42,6 +49,19 @@ export const MIN_PACE_FACTOR = 0.55;
 export const PACE_GAIN_M = 120;
 /** Max |stop.distM − s| for trusting an at_stop feed state when seeding a dwell, m. */
 const AT_STOP_MATCH_M = 50;
+/**
+ * Pace-bias EWMA half-life, seconds: a fix stream at a new pace dominates the
+ * bias within ~2–3 min — drivers swap mid-route, and central districts without
+ * dedicated tracks run persistently slower than outskirts with them.
+ */
+export const PACE_BIAS_HALF_LIFE_S = 150;
+/** Clamp on one inter-fix real/expected speed ratio sample. */
+export const PACE_BIAS_MIN_RATIO = 0.4;
+export const PACE_BIAS_MAX_RATIO = 1.6;
+/** Inter-fix intervals shorter than this are too noisy to calibrate on, s. */
+export const PACE_BIAS_MIN_DT_S = 8;
+/** Inter-fix advances shorter than this are too noisy to calibrate on, m. */
+export const PACE_BIAS_MIN_DS_M = 15;
 /** Fallback physical tram length when the caller passes none (T3-sized), m. */
 export const DEFAULT_TRAM_LENGTH_M = 14.1;
 
@@ -87,6 +107,15 @@ export interface TramSim {
   minStopDist: number;
   /** ms timestamp of the last hard teleport (renderer may dip opacity), 0 if never. */
   lastTeleportMs: number;
+  /**
+   * Learned per-tram pace multiplier (1 = exactly the profile's cruise pace):
+   * recency-weighted EWMA of real inter-fix average speed ÷ profile-expected
+   * average speed over the same span. Scales the cruise target in tick() so a
+   * tram that consistently runs at 70% of profile speed is simulated at ~70%
+   * between fixes instead of sprint-and-crawl. Reset to 1 on teleport (and
+   * implicitly on trip change — a new sim is created).
+   */
+  paceBias: number;
   /**
    * Hard-brake regime latch: the sim overran the target by more than
    * HARD_BRAKE_ENTER_M and crawls (≤ CRAWL_V_MS) until the error recovers
@@ -305,6 +334,7 @@ export function createSim(
     lengthM,
     minStopDist: 0,
     lastTeleportMs: 0,
+    paceBias: 1,
     crawling: false,
   };
   seedStopState(sim, nowMs);
@@ -322,13 +352,60 @@ export function reanchorSim(sim: TramSim, sM: number, nowMs: number): void {
 }
 
 /**
+ * Per-tram adaptive calibration: on a genuinely NEW fix, compare the real
+ * average speed over the inter-fix interval (Δs_obs/Δt_obs along the shape,
+ * with the scheduled dwell time of stops strictly inside the span deducted)
+ * against the PROFILE-EXPECTED average cruise speed over the same span, and
+ * fold the clamped ratio into sim.paceBias via a time-based EWMA (half-life
+ * PACE_BIAS_HALF_LIFE_S — recent fixes dominate, so a driver change fades in
+ * ~2–3 min). Degenerate samples (Δt < 8 s, Δs < 15 m) are skipped.
+ */
+function updatePaceBias(
+  sim: TramSim,
+  prevObsDistM: number,
+  prevObsAtMs: number,
+  snapshot: TramSnapshot,
+): void {
+  if (prevObsAtMs <= 0 || snapshot.observedAtMs <= prevObsAtMs) return;
+  const dtObsS = (snapshot.observedAtMs - prevObsAtMs) / 1000;
+  const obsDistM = clampS(sim.geometry, snapshot.shapeDistM);
+  const dsObsM = obsDistM - prevObsDistM;
+  if (dtObsS < PACE_BIAS_MIN_DT_S || dsObsM < PACE_BIAS_MIN_DS_M) return;
+
+  // Deduct the (estimated) dwell time of stops strictly inside the span so
+  // the sample measures MOTION pace, matching the dwell-free expected speed.
+  // Never let the deduction eat more than 3/4 of the interval — the estimate
+  // is scheduled, not measured.
+  let dwellS = 0;
+  for (const stop of sim.geometry.stops) {
+    if (stop.distM > prevObsDistM + 1 && stop.distM < obsDistM - 1) {
+      dwellS += dwellDurationMs(stop) / 1000;
+    }
+  }
+  const effDtS = Math.max(dtObsS - dwellS, dtObsS * 0.25);
+
+  const expected = meanCruiseCapOver(sim.profile, sim.geometry, prevObsDistM, obsDistM);
+  if (expected < 0.1) return;
+  const ratio = Math.min(
+    PACE_BIAS_MAX_RATIO,
+    Math.max(PACE_BIAS_MIN_RATIO, dsObsM / effDtS / expected),
+  );
+  // Time-based EWMA: weight decays by half every PACE_BIAS_HALF_LIFE_S of
+  // observed time, regardless of fix cadence.
+  const alpha = 1 - Math.pow(0.5, dtObsS / PACE_BIAS_HALF_LIFE_S);
+  sim.paceBias += alpha * (ratio - sim.paceBias);
+}
+
+/**
  * Ingest a fresh snapshot for the same trip: rebuild the schedule anchor with
  * the new delay and re-anchor the observation (shapeDistM @ observedAtMs) so
  * every poll reconciles the sim with reality. Convergence happens via the pace
  * controller — no position jumps — unless the projected OBSERVATION disagrees
  * with the sim by more than 500 m, which hard-teleports to the observation.
+ * Genuinely new fixes also feed the per-tram pace calibration (paceBias).
  */
 export function applySnapshot(sim: TramSim, snapshot: TramSnapshot, nowMs: number): void {
+  updatePaceBias(sim, sim.obsDistM, sim.obsAtMs, snapshot);
   sim.snapshot = snapshot;
   sim.lastAnchor = buildScheduleAnchor(sim.geometry.stops, snapshot.delaySeconds);
   sim.obsDistM = clampS(sim.geometry, snapshot.shapeDistM);
@@ -344,6 +421,9 @@ export function applySnapshot(sim: TramSim, snapshot: TramSnapshot, nowMs: numbe
     sim.dwelledStopSeqs.clear();
     seedStopState(sim, nowMs);
     sim.lastTeleportMs = nowMs;
+    // A teleport means the observation stream contradicted the sim wholesale —
+    // whatever pace was learned is no longer trustworthy.
+    sim.paceBias = 1;
   }
 }
 
@@ -357,6 +437,7 @@ export function applySnapshot(sim: TramSim, snapshot: TramSnapshot, nowMs: numbe
  *    (hysteresis latch on sim.crawling). The sim NEVER moves backwards.
  *  - e > BOLD_CATCHUP_ERR_M (behind): bold catch-up, pace factor up to 1.5.
  *  - between: gentle proportional control, factor clamp(1 + e/120, 0.55, 1.35).
+ * The cruise target is additionally scaled by the learned per-tram paceBias.
  * All regimes stay clamped by the braking envelope (vTarget ≤ vAllowed) —
  * catch-up can never defeat curve/stop limits. Acceleration is clamped to
  * [−1.2, +1.0] m/s². s never decreases.
@@ -395,7 +476,13 @@ export function tick(sim: TramSim, nowMs: number, dtS: number): void {
     const factor = Math.min(maxFactor, Math.max(MIN_PACE_FACTOR, 1 + e / PACE_GAIN_M));
     // Pace scaling applies to the cruise cap only; the braking envelope is a
     // hard limit — a late tram may hold cruise speed but never overrun a stop.
-    vTarget = Math.min(vAllowed, cruiseCapAt(sim.profile, sim.geometry, sim.sM) * factor);
+    // The learned per-tram paceBias scales the cruise target too, so a tram
+    // that really runs at 70% of profile pace cruises at ~70% between fixes
+    // instead of sprinting to the cap and then crawling.
+    vTarget = Math.min(
+      vAllowed,
+      cruiseCapAt(sim.profile, sim.geometry, sim.sM) * factor * sim.paceBias,
+    );
   }
 
   // Acceleration clamp.
