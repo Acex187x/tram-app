@@ -2,14 +2,20 @@
 //
 // Per-tram adaptive pace calibration (TramSim.paceBias): on each genuinely-new
 // AVL fix the sim compares the real inter-fix average speed against the
-// profile-expected average cruise speed over the same span and folds the
-// clamped ratio into a recency-weighted EWMA (half-life 150 s). The bias then
-// scales the pace controller's cruise target so a consistently-slow tram is
-// simulated at its own pace between fixes instead of sprint-and-crawl.
+// expected average speed over the same span (cruise caps bounded by the
+// V_CRUISE_REF_MS cruise reference) and folds the clamped ratio into a
+// recency-weighted EWMA (half-life 150 s). The bias then scales the pace
+// controller's cruise target so a consistently-slow tram is simulated at its
+// own pace between fixes instead of sprint-and-crawl. Round 1 calibration:
+// new vehicles start at PACE_BIAS_PRIOR (fleet median), and the learned value
+// is INHERITED across hard teleports and (via TramEngine's per-key memory)
+// across trip changes for the same vehicle.
 
+import { TramEngine, PACE_BIAS_MEMORY_TTL_MS } from '@/lib/engine/engine';
 import {
   buildSpeedProfile,
   meanCruiseCapOver,
+  V_CRUISE_REF_MS,
   V_MAX_MS,
 } from '@/lib/engine/speedProfile';
 import {
@@ -19,12 +25,13 @@ import {
   PACE_BIAS_HALF_LIFE_S,
   PACE_BIAS_MAX_RATIO,
   PACE_BIAS_MIN_RATIO,
+  PACE_BIAS_PRIOR,
   targetDistAt,
   tick,
   type TramSim,
 } from '@/lib/engine/tramSim';
 import type { RouteGeometry } from '@/lib/types';
-import { makeGeometry, makeSnapshot } from './helpers';
+import { makeGeometry, makeSnapshot, makeSpec1 } from './helpers';
 
 const T0 = 1_000_000_000_000;
 
@@ -62,12 +69,14 @@ function ewma(from: number, ratio: number, totalS: number): number {
 }
 
 describe('paceBias calibration (applySnapshot)', () => {
-  it('starts at 1 and converges to ~0.7 for a tram consistently at 70% of profile speed', () => {
-    const vReal = 0.7 * V_MAX_MS;
+  it('starts at the fleet prior and converges to ~0.9 for a tram at 90% of reference speed', () => {
+    // 0.9 is ABOVE the 0.62 prior, so convergence is observable as monotone
+    // upward learning (a fresh sim no longer assumes profile pace).
+    const vReal = 0.9 * V_CRUISE_REF_MS;
     const sim = makeSim(straightGeo(6000, vReal), 100);
-    expect(sim.paceBias).toBe(1);
+    expect(sim.paceBias).toBe(PACE_BIAS_PRIOR);
 
-    // 3 fixes, 100 s apart, each advancing at exactly 70% of the 13.9 m/s cap.
+    // 3 fixes, 100 s apart, each advancing at exactly 90% of the reference.
     let t = T0;
     let d = 100;
     let prevBias = sim.paceBias;
@@ -75,17 +84,17 @@ describe('paceBias calibration (applySnapshot)', () => {
       t += 100_000;
       d += vReal * 100;
       applyFixPinned(sim, d, t);
-      expect(sim.paceBias).toBeLessThan(prevBias); // monotone toward 0.7
+      expect(sim.paceBias).toBeGreaterThan(prevBias); // monotone toward 0.9
       prevBias = sim.paceBias;
     }
-    expect(sim.paceBias).toBeGreaterThanOrEqual(0.6);
-    expect(sim.paceBias).toBeLessThanOrEqual(0.8);
-    expect(sim.paceBias).toBeCloseTo(ewma(1, 0.7, 300), 3);
+    expect(sim.paceBias).toBeGreaterThanOrEqual(0.75);
+    expect(sim.paceBias).toBeLessThanOrEqual(0.9);
+    expect(sim.paceBias).toBeCloseTo(ewma(PACE_BIAS_PRIOR, 0.9, 300), 3);
     expect(sim.lastTeleportMs).toBe(0); // calibration, not teleports
   });
 
   it('recency: after a step change to 120% pace, the bias crosses 1.0 within ~3.5 min', () => {
-    const vFast = 1.2 * V_MAX_MS; // ratio sample = 1.2 exactly
+    const vFast = 1.2 * V_CRUISE_REF_MS; // ratio sample = 1.2 exactly
     const sim = makeSim(straightGeo(6000, vFast), 100);
     sim.paceBias = 0.7; // previously-learned slow driver
 
@@ -104,15 +113,21 @@ describe('paceBias calibration (applySnapshot)', () => {
   });
 
   it('clamps each ratio sample to [0.4, 1.6]', () => {
-    // Absurdly fast: 3× the cap → the sample is used as 1.6, not 3.
+    // Absurdly fast: 3× the network cap → the sample is used as 1.6, not ~3.6.
     const fast = makeSim(straightGeo(20_000, V_MAX_MS), 0);
     applyFixPinned(fast, 3 * V_MAX_MS * PACE_BIAS_HALF_LIFE_S, T0 + PACE_BIAS_HALF_LIFE_S * 1000);
-    expect(fast.paceBias).toBeCloseTo(ewma(1, PACE_BIAS_MAX_RATIO, PACE_BIAS_HALF_LIFE_S), 6);
+    expect(fast.paceBias).toBeCloseTo(
+      ewma(PACE_BIAS_PRIOR, PACE_BIAS_MAX_RATIO, PACE_BIAS_HALF_LIFE_S),
+      6,
+    );
 
     // Absurdly slow: 20 m in 150 s → the sample is used as 0.4.
     const slow = makeSim(straightGeo(6000, V_MAX_MS), 0);
     applyFixPinned(slow, 20, T0 + PACE_BIAS_HALF_LIFE_S * 1000);
-    expect(slow.paceBias).toBeCloseTo(ewma(1, PACE_BIAS_MIN_RATIO, PACE_BIAS_HALF_LIFE_S), 6);
+    expect(slow.paceBias).toBeCloseTo(
+      ewma(PACE_BIAS_PRIOR, PACE_BIAS_MIN_RATIO, PACE_BIAS_HALF_LIFE_S),
+      6,
+    );
 
     // Long-run: the bias itself can never leave the clamp interval.
     let t = T0 + PACE_BIAS_HALF_LIFE_S * 1000;
@@ -158,18 +173,40 @@ describe('paceBias calibration (applySnapshot)', () => {
     const sim = makeSim(geo, 100);
     // 400 m in 60 s including the 20 s dwell → motion speed 10 m/s, not 6.67.
     applyFixPinned(sim, 500, T0 + 60_000);
-    const motionRatio = 400 / 40 / V_MAX_MS; // ≈ 0.719
-    expect(sim.paceBias).toBeCloseTo(ewma(1, motionRatio, 60), 3);
+    const motionRatio = 400 / 40 / V_CRUISE_REF_MS; // ≈ 0.855
+    expect(sim.paceBias).toBeCloseTo(ewma(PACE_BIAS_PRIOR, motionRatio, 60), 3);
     // Sanity: clearly above what the raw (dwell-polluted) ratio would give.
-    expect(sim.paceBias).toBeGreaterThan(ewma(1, 400 / 60 / V_MAX_MS, 60) + 0.02);
+    expect(sim.paceBias).toBeGreaterThan(
+      ewma(PACE_BIAS_PRIOR, 400 / 60 / V_CRUISE_REF_MS, 60) + 0.02,
+    );
   });
 
-  it('resets to 1.0 on a hard teleport', () => {
+  it('INHERITS the learned bias across a hard teleport, without a pace sample from the jump', () => {
+    // Round 1 R1: the vehicle and driver don't change at a teleport — the
+    // learned pace was the one thing the old sim got right. The teleporting
+    // fix itself must NOT feed the EWMA (a 1.9 km re-anchor is not motion —
+    // pre-round-1 it fed a clamped 1.6 sample and then reset to 1.0).
     const sim = makeSim(straightGeo(6000, V_MAX_MS), 100);
     sim.paceBias = 0.7;
     applySnapshot(sim, makeSnapshot({ shapeDistM: 2000, observedAtMs: T0 + 30_000 }), T0 + 30_000);
     expect(sim.lastTeleportMs).toBe(T0 + 30_000);
-    expect(sim.paceBias).toBe(1);
+    expect(sim.paceBias).toBe(0.7);
+  });
+
+  it('createSim seeds paceBias from initialPaceBias (clamped) when provided', () => {
+    const geo = straightGeo(6000, V_CRUISE_REF_MS);
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const snap = makeSnapshot({ shapeDistM: 0, observedAtMs: T0 });
+    expect(createSim(geo, profile, snap, T0, undefined, { initialPaceBias: 0.8 }).paceBias).toBe(
+      0.8,
+    );
+    // Out-of-range seeds clamp to the sample bounds.
+    expect(createSim(geo, profile, snap, T0, undefined, { initialPaceBias: 3 }).paceBias).toBe(
+      PACE_BIAS_MAX_RATIO,
+    );
+    expect(createSim(geo, profile, snap, T0, undefined, { initialPaceBias: 0.1 }).paceBias).toBe(
+      PACE_BIAS_MIN_RATIO,
+    );
   });
 });
 
@@ -203,11 +240,46 @@ describe('meanCruiseCapOver', () => {
     // Degenerate span falls back to the point cap.
     expect(meanCruiseCapOver(profile2, geo2, 250, 250)).toBeCloseTo(5, 6);
   });
+
+  it('bounds per-segment caps by refCapMs (the cruise-reference semantics)', () => {
+    const geo = straightGeo(1000, V_MAX_MS);
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    // Straight at the 13.9 network cap → reference-capped mean is the ref.
+    expect(meanCruiseCapOver(profile, geo, 100, 900, V_CRUISE_REF_MS)).toBeCloseTo(
+      V_CRUISE_REF_MS,
+      6,
+    );
+    // Caps BELOW the reference are untouched (curve/zone caps still bind).
+    const geo2 = makeGeometry(
+      [
+        [0, 0],
+        [500, 0],
+        [1000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 },
+        { atM: 1000, arrivalMs: T0 + 100_000 },
+      ],
+    );
+    const profile2 = buildSpeedProfile(geo2, { daytime: false });
+    profile2.vLimit[0] = 5;
+    profile2.vLimit[1] = 5;
+    profile2.vLimit[2] = 13.9;
+    expect(meanCruiseCapOver(profile2, geo2, 0, 1000, V_CRUISE_REF_MS)).toBeCloseTo(
+      (500 * 5 + 500 * V_CRUISE_REF_MS) / 1000,
+      3,
+    );
+    // Degenerate span is reference-capped too.
+    expect(meanCruiseCapOver(profile2, geo2, 750, 750, V_CRUISE_REF_MS)).toBeCloseTo(
+      V_CRUISE_REF_MS,
+      6,
+    );
+  });
 });
 
 describe('paceBias applied to the pace controller (integration)', () => {
   it('a 70%-pace tram stops sprint-and-crawl oscillating once calibrated', () => {
-    const vReal = 0.7 * V_MAX_MS; // ≈ 9.73 m/s, also the schedule pace
+    const vReal = 0.7 * V_MAX_MS; // ≈ 9.73 m/s ≈ 0.83× reference, the schedule pace
     const geo = straightGeo(6000, vReal);
     const profile = buildSpeedProfile(geo, { daytime: false });
     const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 0, observedAtMs: T0 }), T0);
@@ -235,13 +307,146 @@ describe('paceBias applied to the pace controller (integration)', () => {
     }
 
     expect(sim.lastTeleportMs).toBe(0);
-    expect(sim.paceBias).toBeGreaterThan(0.6);
+    // Converging from the 0.62 prior toward vReal / V_CRUISE_REF_MS ≈ 0.83.
+    expect(sim.paceBias).toBeGreaterThan(0.7);
     expect(sim.paceBias).toBeLessThan(0.85);
     // Calibrated: cruises near the tram's real pace instead of sprinting to
-    // the 13.9 m/s cap and then hard-brake crawling.
+    // the cap and then hard-brake crawling.
     expect(crawled).toBe(false);
     expect(minE).toBeGreaterThan(-HARD_BRAKE_ENTER_M);
     expect(vMax).toBeLessThan(12.5);
     expect(vMax).toBeGreaterThan(0.8 * vReal); // still actually moving at pace
+  });
+});
+
+// ── per-key bias memory (TramEngine) ─────────────────────────────────────────
+
+describe('paceBias inheritance across trips and respawns (TramEngine per-key memory)', () => {
+  const KEY = '9201';
+  const vReal = 0.9 * V_CRUISE_REF_MS;
+
+  function makeEngine(): TramEngine {
+    return new TramEngine({
+      resolveModel: () => makeSpec1(),
+      isDaytime: () => false,
+      isCoupled: () => false,
+    });
+  }
+
+  /** Straight 6 km shape with a distinct trip/shape id. */
+  function geoFor(tripId: string): RouteGeometry {
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [6000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 },
+        { atM: 6000, arrivalMs: T0 + Math.round((6000 / vReal) * 1000) },
+      ],
+    );
+    return { ...geo, tripId, shapeId: `shape-${tripId}` };
+  }
+
+  /**
+   * Ingest a learning sequence of fixes at 90% of reference pace, ticking the
+   * engine between polls so the sim tracks the fixes (no teleports — a
+   * teleporting fix would be excluded from calibration by design).
+   */
+  function learn(engine: TramEngine, geo: RouteGeometry, fixes: number): number {
+    let t = T0;
+    let d = 0;
+    engine.ingest(
+      [makeSnapshot({ key: KEY, tripId: geo.tripId, shapeDistM: 0, observedAtMs: t })],
+      () => geo,
+      t,
+    );
+    engine.tick(t);
+    for (let k = 1; k < fixes; k++) {
+      for (let i = 0; i < 600; i++) {
+        t += 100;
+        engine.tick(t);
+      }
+      d += vReal * 60;
+      engine.ingest(
+        [makeSnapshot({ key: KEY, tripId: geo.tripId, shapeDistM: d, observedAtMs: t })],
+        () => geo,
+        t,
+      );
+    }
+    return t;
+  }
+
+  function bias(engine: TramEngine, atMs: number): number {
+    const s = engine.getState(KEY, atMs);
+    if (!s || s.paceBias === undefined) throw new Error('no paceBias in state');
+    return s.paceBias;
+  }
+
+  it('a NEW vehicle starts at the prior; a trip change keeps the learned bias', () => {
+    const engine = makeEngine();
+    const tripA = geoFor('trip-A');
+    engine.ingest(
+      [makeSnapshot({ key: KEY, tripId: 'trip-A', shapeDistM: 0, observedAtMs: T0 })],
+      () => tripA,
+      T0,
+    );
+    expect(bias(engine, T0)).toBe(PACE_BIAS_PRIOR); // genuinely new vehicle
+
+    const tEnd = learn(engine, tripA, 6);
+    const learned = bias(engine, tEnd);
+    expect(learned).toBeGreaterThan(PACE_BIAS_PRIOR + 0.1); // actually learned up
+
+    // Same vehicle switches to a new trip: fresh sim, inherited bias.
+    const tripB = geoFor('trip-B');
+    const t2 = tEnd + 5_000;
+    engine.ingest(
+      [makeSnapshot({ key: KEY, tripId: 'trip-B', shapeDistM: 0, observedAtMs: t2 })],
+      () => tripB,
+      t2,
+    );
+    expect(bias(engine, t2)).toBeCloseTo(learned, 10);
+  });
+
+  it('a vehicle dropped for > STALE_AFTER_MS but within the TTL respawns with its learned bias', () => {
+    const engine = makeEngine();
+    const tripA = geoFor('trip-A');
+    const tEnd = learn(engine, tripA, 6);
+    const learned = bias(engine, tEnd);
+
+    // Feed gap of 2 min (> STALE_AFTER_MS): an ingest without the tram drops it.
+    const tGap = tEnd + 120_000;
+    engine.ingest([], () => tripA, tGap);
+    expect(engine.getState(KEY, tGap)).toBeUndefined();
+
+    // …but the vehicle returns within the memory TTL: bias inherited.
+    const tBack = tEnd + 180_000;
+    engine.ingest(
+      [makeSnapshot({ key: KEY, tripId: 'trip-A', shapeDistM: 3000, observedAtMs: tBack })],
+      () => tripA,
+      tBack,
+    );
+    expect(bias(engine, tBack)).toBeCloseTo(learned, 10);
+  });
+
+  it('memory expires after PACE_BIAS_MEMORY_TTL_MS: a long-gone vehicle restarts at the prior', () => {
+    const engine = makeEngine();
+    const tripA = geoFor('trip-A');
+    const tEnd = learn(engine, tripA, 6);
+    expect(bias(engine, tEnd)).toBeGreaterThan(PACE_BIAS_PRIOR + 0.1);
+
+    // Drop the entry (feed gap > STALE_AFTER_MS)…
+    engine.ingest([], () => tripA, tEnd + 120_000);
+    expect(engine.getState(KEY, tEnd + 120_000)).toBeUndefined();
+
+    // …and return only after the memory TTL: the vehicle is treated as new
+    // (plausible driver/duty change after a long layover).
+    const tLater = tEnd + PACE_BIAS_MEMORY_TTL_MS + 60_000;
+    engine.ingest(
+      [makeSnapshot({ key: KEY, tripId: 'trip-A', shapeDistM: 5000, observedAtMs: tLater })],
+      () => tripA,
+      tLater,
+    );
+    expect(bias(engine, tLater)).toBe(PACE_BIAS_PRIOR);
   });
 });

@@ -12,6 +12,7 @@ import {
   TOD_PACE_TABLE,
   todDwellFactor,
   todPaceFactor,
+  V_CRUISE_REF_MS,
   V_MAX_MS,
   vAllowedAt,
 } from '@/lib/engine/speedProfile';
@@ -113,10 +114,11 @@ describe('boundary blending', () => {
 // ── sim composition ──────────────────────────────────────────────────────────
 
 /**
- * Long straight (night profile, cruise cap V_MAX_MS everywhere), sim chasing a
- * target far ahead so the controller factor saturates at CATCHUP_MAX_FACTOR in
- * every compared run; paceBias is set below 1 so cap*factor*bias stays UNDER
- * the envelope and the time-of-day scaling is directly observable.
+ * Long straight (night profile, cruise reference V_CRUISE_REF_MS everywhere),
+ * sim chasing a target far ahead so the controller factor saturates at
+ * CATCHUP_MAX_FACTOR in every compared run; paceBias is set below 1 so
+ * ref*factor*bias stays UNDER the envelope and the time-of-day scaling is
+ * directly observable.
  */
 function makeCatchupSim(): TramSim {
   const geo = makeGeometry(
@@ -153,8 +155,9 @@ describe('cruise pace composition', () => {
     const base = makeCatchupSim();
     runSeconds(base, T0, 20);
     const vBase = base.vMs;
-    // Steady state = cap * CATCHUP_MAX_FACTOR * paceBias, under the envelope.
-    expect(vBase).toBeCloseTo(V_MAX_MS * CATCHUP_MAX_FACTOR * 0.6, 9);
+    // Steady state = cruise reference * CATCHUP_MAX_FACTOR * paceBias, under
+    // the envelope (the 13.9 m/s network cap bounds only vAllowed).
+    expect(vBase).toBeCloseTo(V_CRUISE_REF_MS * CATCHUP_MAX_FACTOR * 0.6, 9);
 
     TOD_PACE_TABLE.fill(0.5); // uniform so the current hour is irrelevant
     const halved = makeCatchupSim();

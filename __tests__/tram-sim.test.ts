@@ -91,6 +91,10 @@ describe('straight-line acceleration', () => {
       ],
     );
     const sim = makeSim(geo);
+    // A learned-fast tram (fresh sims start at the 0.62 prior and are
+    // deliberately pace-bounded below the cap — see paceBias tests); this
+    // test exercises the accel clamp and the hard V_MAX_MS cap.
+    sim.paceBias = 1.3;
     expect(sim.sM).toBe(0);
     expect(sim.vMs).toBe(0);
 
@@ -243,6 +247,9 @@ describe('pace controller', () => {
       ],
     );
     const sim = makeSim(geo);
+    // Learned-fast tram: catch-up must still reach the braking envelope /
+    // hard cap (the cruise reference only bounds FRESH sims' sprint).
+    sim.paceBias = 1.2;
     const e0 = evalScheduleAnchor(sim.lastAnchor, T0) - sim.sM;
     expect(e0).toBeCloseTo(300, 0);
 
@@ -380,6 +387,9 @@ describe('observation reconciliation (applySnapshot)', () => {
 
   it('converges toward a fresher observed shapeDistM within ~30 s', () => {
     const sim = makeSim(geo);
+    // Neutral learned pace (fresh sims start at the slower 0.62 prior; this
+    // test measures reconciliation speed, not cold-start calibration).
+    sim.paceBias = 1;
     let now = run(sim, T0, 30);
 
     // Fresh AVL fix: the real tram is 200 m AHEAD of the sim (below teleport).
@@ -464,6 +474,90 @@ describe('teleport on large observation error', () => {
     applySnapshot(sim, makeSnapshot({ shapeDistM: 300, observedAtMs: T0 }), T0);
     expect(sim.sM).toBe(0);
     expect(sim.lastTeleportMs).toBe(0);
+  });
+});
+
+describe('terminal un-latch (fresh observation far behind the latched position)', () => {
+  // 1 km straight; terminal at 1000 m. Schedule long finished so the anchor is
+  // flat (projected observation == the raw fix — deterministic conditions).
+  const makeTerminalGeo = () =>
+    makeGeometry(
+      [
+        [0, 0],
+        [1000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 600_000 },
+        { atM: 1000, arrivalMs: T0 - 300_000, isTerminal: true },
+      ],
+    );
+
+  /** A sim latched in 'terminal' at the geometry end. */
+  function makeLatchedSim() {
+    const geo = makeTerminalGeo();
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 1000, observedAtMs: T0 }), T0);
+    run(sim, T0, 10);
+    expect(sim.phase).toBe('terminal');
+    expect(sim.sM).toBeCloseTo(1000, 0);
+    return sim;
+  }
+
+  it('re-anchors BACKWARD to a fresh fix > 150 m behind and resumes simulating', () => {
+    const sim = makeLatchedSim();
+    // Fresh fix: the real tram is still 300 m out. This is the ONE sanctioned
+    // backward jump besides the 500 m teleport — terminal is an absorbing
+    // state (v pinned to 0), so the pace controller can never recover from a
+    // wrong latch; sub-500 m errors never hard-teleport; honesty beats
+    // monotonicity here. It renders as a teleport (lastTeleportMs dips
+    // opacity), not a visible reverse drive.
+    const t1 = T0 + 20_000;
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 700, observedAtMs: t1 }), t1);
+    expect(sim.sM).toBeCloseTo(700, 0); // backward re-anchor to the observation
+    expect(sim.phase).toBe('cruise');
+    expect(sim.vMs).toBe(0);
+    expect(sim.lastTeleportMs).toBe(t1); // renders as a teleport
+
+    // …and normal simulation resumes: monotone forward progress toward the
+    // (now again distant) terminal.
+    let sPrev = sim.sM;
+    run(sim, t1, 120, () => {
+      expect(sim.sM).toBeGreaterThanOrEqual(sPrev); // monotone after re-anchor
+      sPrev = sim.sM;
+    });
+    expect(sim.sM).toBeGreaterThan(700);
+  });
+
+  it('holds the latch when the fresh fix is within the 150 m tolerance', () => {
+    const sim = makeLatchedSim();
+    // End-of-trip fix scatter: the platform fix often sits slightly short of
+    // the geometry end. 100 m behind < TERMINAL_UNLATCH_BEHIND_M → keep hold.
+    const t1 = T0 + 20_000;
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 900, observedAtMs: t1 }), t1);
+    expect(sim.phase).toBe('terminal');
+    expect(sim.sM).toBeCloseTo(1000, 0);
+    expect(sim.lastTeleportMs).toBe(0);
+  });
+
+  it('ignores STALE fixes (a repeated poll of the pre-latch observation)', () => {
+    const geo = makeTerminalGeo();
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    // Latched terminal while the last known fix is 400 m behind — above the
+    // un-latch tolerance but below the 500 m hard-teleport budget (which
+    // fires regardless of freshness and would mask this path).
+    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 600, observedAtMs: T0 }), T0);
+    sim.sM = 1000;
+    sim.phase = 'terminal';
+    sim.vMs = 0;
+    // The next poll repeats the SAME fix (observedAtMs and shapeDistM
+    // unchanged — the vehicle hasn't reported): not evidence, no un-latch.
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 600, observedAtMs: T0 }), T0 + 15_000);
+    expect(sim.phase).toBe('terminal');
+    expect(sim.sM).toBe(1000);
+    // A genuinely fresh fix at the same spot IS evidence → un-latch.
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 600, observedAtMs: T0 + 30_000 }), T0 + 30_000);
+    expect(sim.phase).toBe('cruise');
+    expect(sim.sM).toBeCloseTo(600, 0);
   });
 });
 

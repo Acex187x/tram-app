@@ -89,13 +89,27 @@ def in_center_at(loc, s):
 
 A_BRK, A_ACC = 1.2, 1.0
 DT = 1.0
+FRESH_FIX_COUNT = 2  # first N scored fixes of a segment = "fresh sim" events
 
 
 def replay(cfg):
     """cfg: v_max, v_center, prior, trail, half_life, clamp_lo, clamp_hi,
-    catchup_max, gentle_max, min_factor, gain"""
-    at_fix_err = []   # s - freshObs at fix arrival
-    dev_style = []    # |s - staleObs| every 5 s (comparable to logged devM)
+    catchup_max, gentle_max, min_factor, gain.
+    Round-1 extensions (optional keys):
+      hard_cap      — envelope proxy: vt = min(hard_cap, cap*fac*bias). The
+                      engine always clamps vTarget by vAllowedAt (≤ 13.9);
+                      pass 13.9 to model that. Default None = legacy uncapped
+                      behavior (reproduces the original analysis table).
+      inherit_bias  — True = learned bias survives teleports AND carries into
+                      the tram's next segment (trip change), like the engine's
+                      teleport inheritance + per-key memory. Default False =
+                      reset to prior (legacy/old engine).
+    Fresh-sim events are the first FRESH_FIX_COUNT scored fixes per segment —
+    structural, so the subset is identical across configs."""
+    at_fix_err = []       # (err, fresh) at fix arrival; err = s - freshObs
+    dev_style = []        # |s - staleObs| every 5 s (comparable to logged devM)
+    hard_cap = cfg.get("hard_cap")
+    inherit = cfg.get("inherit_bias", False)
     for key, (fixes, loc) in trams.items():
         # split on trip changes (obs drops > 2 km)
         segs = [[fixes[0]]]
@@ -104,12 +118,13 @@ def replay(cfg):
                 segs.append([f])
             else:
                 segs[-1].append(f)
+        carried = None                 # per-key bias memory across segments
         for seg in segs:
             if len(seg) < 3:
                 continue
             t, s = seg[0][0], float(seg[0][1])
             v = 0.0
-            bias = cfg["prior"]
+            bias = carried if (inherit and carried is not None) else cfg["prior"]
             crawling = False
             fi = 0                      # last applied fix index
             v_proj = 5.9                # global median real speed, m/s
@@ -133,6 +148,8 @@ def replay(cfg):
                         mf = cfg["catchup_max"] if e > 40 else cfg["gentle_max"]
                         fac = min(mf, max(cfg["min_factor"], 1 + e / cfg["gain"]))
                         vt = cap * fac * bias
+                        if hard_cap is not None:
+                            vt = min(hard_cap, vt)
                     a = min(A_ACC, max(-A_BRK, (vt - v) / DT))
                     v = max(0.0, v + a * DT)
                     s += v * DT
@@ -141,7 +158,7 @@ def replay(cfg):
                         dev_style.append(abs(s - seg[fi][1]))
                         last5 = t
                 # fix arrives: score, then learn + re-anchor projection
-                at_fix_err.append(s - of)
+                at_fix_err.append((s - of, i <= FRESH_FIX_COUNT))
                 tprev, oprev = seg[fi]
                 dt_s = (tf - tprev) / 1000
                 ds = of - oprev
@@ -155,7 +172,10 @@ def replay(cfg):
                 fi = i
                 # teleport check (engine: vs projected obs; here vs fresh fix)
                 if abs(of - s) > 500:
-                    s, v, crawling, bias = float(of), 0.0, False, cfg["prior"]
+                    s, v, crawling = float(of), 0.0, False
+                    if not inherit:
+                        bias = cfg["prior"]
+            carried = bias
     return at_fix_err, dev_style
 
 
@@ -163,8 +183,19 @@ BASE = dict(v_max=13.9, v_center=8.6, prior=1.0, trail=10, half_life=150,
             clamp_lo=0.4, clamp_hi=1.6, catchup_max=1.5, gentle_max=1.35,
             min_factor=0.55, gain=120)
 
+# OLD/NEW gate configs (round 1): identical simulator (hard cap = the 13.9
+# envelope proxy, matching the engine's vAllowed clamp), only the shipped
+# constants differ. OLD = pre-round-1 engine (prior 1.0, cruise ref = the
+# 13.9 network cap, bias reset on teleport). NEW = R1+R3 as shipped (prior
+# 0.62, cruise ref 11.7 m/s with the 13.9 envelope untouched, bias inherited
+# across teleports/segments). R2 (terminal un-latch) is not modelable here —
+# the replay has no stop table, so no terminal latch exists to un-latch.
+OLD = {**BASE, "hard_cap": 13.9}
+NEW = {**BASE, "v_max": 11.7, "prior": 0.62, "hard_cap": 13.9,
+       "inherit_bias": True}
+
 CONFIGS = [
-    ("A baseline (current constants)", BASE),
+    ("A baseline (uncapped, legacy table)", BASE),
     ("B prior 0.6", {**BASE, "prior": 0.6}),
     ("C caps 42/29 km/h (11.7/8.0)", {**BASE, "v_max": 11.7, "v_center": 8.0}),
     ("D caps 42/29 + prior 0.75", {**BASE, "v_max": 11.7, "v_center": 8.0, "prior": 0.75}),
@@ -175,16 +206,38 @@ CONFIGS = [
                             "prior": 0.75, "clamp_lo": 0.3}),
     ("I D + TRAIL 20 + hl 60", {**BASE, "v_max": 11.7, "v_center": 8.0,
                                 "prior": 0.75, "trail": 20, "half_life": 60}),
+    ("OLD gate (pre-round-1 constants)", OLD),
+    ("NEW gate (R1+R3 shipped)", NEW),
 ]
 
 print(f"trams replayed: {len(trams)}")
-print(f"{'config':34s} {'|err|p50':>8s} {'|err|p90':>8s} {'signed p50':>10s} "
-      f"{'%ahead':>7s} {'devM p50':>9s} {'devM p90':>9s}")
+print(f"{'config':36s} {'|err|p50':>8s} {'|err|p90':>8s} {'signed p50':>10s} "
+      f"{'%ahead':>7s} {'devM p50':>9s} {'devM p90':>9s} "
+      f"{'frs p50':>8s} {'frs p90':>8s} {'n_frs':>6s}")
+results = {}
 for name, cfg in CONFIGS:
-    errs, devs = replay(cfg)
-    ae = [abs(x) for x in errs]
+    tagged, devs = replay(cfg)
+    errs = [e for e, _ in tagged]
+    ae = [abs(e) for e in errs]
+    fresh = [abs(e) for e, is_fresh in tagged if is_fresh]
     ahead = 100 * sum(1 for x in errs if x > 0) / len(errs)
-    print(f"{name:34s} {pct(ae,50):8.0f} {pct(ae,90):8.0f} {pct(errs,50):10.0f} "
-          f"{ahead:6.1f}% {pct(devs,50):9.0f} {pct(devs,90):9.0f}")
-print("\nlogged reality for comparison: at-fix |err| p50=86 p90=260, signed p50=-38, "
-      "%ahead=27.1, devM p50=130 p90=413")
+    results[name] = dict(p50=pct(ae, 50), p90=pct(ae, 90), sp50=pct(errs, 50),
+                         ahead=ahead, fresh_p50=pct(fresh, 50),
+                         fresh_p90=pct(fresh, 90), n_fresh=len(fresh))
+    print(f"{name:36s} {pct(ae,50):8.0f} {pct(ae,90):8.0f} {pct(errs,50):10.0f} "
+          f"{ahead:6.1f}% {pct(devs,50):9.0f} {pct(devs,90):9.0f} "
+          f"{pct(fresh,50):8.0f} {pct(fresh,90):8.0f} {len(fresh):6d}")
+
+o = results["OLD gate (pre-round-1 constants)"]
+n = results["NEW gate (R1+R3 shipped)"]
+print(f"\nGATE ({PATH}):")
+print(f"  median |fresh-fix err|  OLD {o['p50']:.1f} -> NEW {n['p50']:.1f} m "
+      f"({100 * (n['p50'] - o['p50']) / o['p50']:+.1f}%)")
+print(f"  fresh-sim |err| p90     OLD {o['fresh_p90']:.1f} -> NEW {n['fresh_p90']:.1f} m "
+      f"({100 * (n['fresh_p90'] - o['fresh_p90']) / o['fresh_p90']:+.1f}%)  "
+      f"[n={n['n_fresh']}]")
+print(f"  (context) |err| p90     OLD {o['p90']:.0f} -> NEW {n['p90']:.0f}; "
+      f"signed p50 OLD {o['sp50']:+.0f} -> NEW {n['sp50']:+.0f}; "
+      f"%ahead OLD {o['ahead']:.1f} -> NEW {n['ahead']:.1f}")
+print("\nlogged reality for comparison (device session): at-fix |err| p50=86 p90=260, "
+      "signed p50=-38, %ahead=27.1, devM p50=130 p90=413")

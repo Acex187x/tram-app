@@ -25,6 +25,16 @@ import {
 
 /** Trams unseen for this long are dropped. */
 export const STALE_AFTER_MS = 90_000;
+/**
+ * Per-key learned paceBias is remembered this long after the vehicle was last
+ * seen, so a tram that drops out (feed gap > STALE_AFTER_MS) or changes trip
+ * re-seeds its sims from its own learned pace instead of the fleet prior —
+ * drivers don't change at teleports/trip swaps (calibration round 1 R1).
+ * Bounded so a vehicle returning after a long layover (plausible driver/duty
+ * change) starts from the prior again; the 150 s EWMA half-life re-learns any
+ * residual quickly either way.
+ */
+export const PACE_BIAS_MEMORY_TTL_MS = 15 * 60_000;
 /** Max offset when re-projecting a tram onto a new trip's geometry, meters. */
 const REANCHOR_MAX_OFFSET_M = 100;
 /** Max dt for one engine tick, seconds (larger gaps are clamped). */
@@ -116,6 +126,13 @@ export class TramEngine {
    */
   private queueGroups: TramSim[][] = [];
   private queueDirty = true;
+  /**
+   * key → last learned paceBias (+ when it was last refreshed). Outlives the
+   * entry itself (STALE_AFTER_MS drops entries after 90 s without a fix, but
+   * the vehicle and its driver are still out there) so respawned/trip-swapped
+   * sims inherit the learned pace. Pruned after PACE_BIAS_MEMORY_TTL_MS.
+   */
+  private readonly paceBiasMemory = new Map<string, { bias: number; atMs: number }>();
 
   constructor(opts: TramEngineOptions) {
     this.opts = opts;
@@ -197,6 +214,13 @@ export class TramEngine {
 
       const profile = this.getProfile(geometry, daytime);
       const lengthM = this.tramLengthM(snapshot);
+      // Same physical vehicle → same driver: new sims (trip change, respawn
+      // after a feed gap) inherit the learned pace instead of the fleet prior.
+      const remembered = this.paceBiasMemory.get(key);
+      const inheritedBias =
+        remembered && nowMs - remembered.atMs <= PACE_BIAS_MEMORY_TTL_MS
+          ? remembered.bias
+          : undefined;
 
       if (entry.sim && entry.tripId === snapshot.tripId) {
         applySnapshot(entry.sim, snapshot, nowMs);
@@ -204,10 +228,12 @@ export class TramEngine {
       } else if (entry.sim) {
         // Trip changed: swap geometry, keeping a smooth position when the old
         // world position lies close to the new shape and near the schedule.
+        // The old sim's live bias is the freshest memory of this vehicle.
         const oldSim = entry.sim;
         const oldPos = pointAt(oldSim.geometry.coordinates, oldSim.geometry.cumDistM, oldSim.sM);
         const newSim = createSim(geometry, profile, snapshot, nowMs, lengthM, {
           adaptiveDwell: true,
+          initialPaceBias: oldSim.paceBias,
         });
         const proj = projectPointToPolyline(oldPos, geometry.coordinates, geometry.cumDistM);
         const sTarget = targetDistAt(newSim, nowMs);
@@ -226,9 +252,11 @@ export class TramEngine {
         // dwell); projection sims below never do — they mirror reality.
         entry.sim = createSim(geometry, profile, snapshot, nowMs, lengthM, {
           adaptiveDwell: true,
+          initialPaceBias: inheritedBias,
         });
       }
       entry.tripId = snapshot.tripId;
+      this.paceBiasMemory.set(key, { bias: entry.sim.paceBias, atMs: nowMs });
 
       // Dead-reckoning sim for the projected observation: re-seed ONLY when a
       // genuinely new fix (or trip/geometry) arrives — that's the accepted
@@ -243,13 +271,21 @@ export class TramEngine {
         proj.obsAtMs !== snapshot.observedAtMs ||
         proj.snapshot.shapeDistM !== snapshot.shapeDistM
       ) {
-        entry.projSim = createSim(geometry, profile, snapshot, nowMs, lengthM);
+        // Dead-reckons at the vehicle's LEARNED pace (main sim's live bias) —
+        // the projSim never receives applySnapshot, so it cannot learn itself.
+        entry.projSim = createSim(geometry, profile, snapshot, nowMs, lengthM, {
+          initialPaceBias: entry.sim.paceBias,
+        });
       }
     }
 
-    // Remove trams unseen for 90 s.
+    // Remove trams unseen for 90 s (their learned bias stays remembered);
+    // prune bias memories not refreshed within the TTL.
     for (const [key, entry] of this.entries) {
       if (nowMs - entry.lastSeenMs > STALE_AFTER_MS) this.entries.delete(key);
+    }
+    for (const [key, mem] of this.paceBiasMemory) {
+      if (nowMs - mem.atMs > PACE_BIAS_MEMORY_TTL_MS) this.paceBiasMemory.delete(key);
     }
 
     // Membership may have changed (created/replaced/dropped sims) and

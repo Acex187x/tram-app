@@ -13,6 +13,18 @@ export const A_BRK = 1.2;
 export const A_ACC = 1.0;
 /** Network max (50 km/h), m/s. */
 export const V_MAX_MS = 13.9;
+/**
+ * Pace-controller cruise REFERENCE (42 km/h), m/s — the speed the controller
+ * aims for on an unconstrained straight, before the catch-up factor, the
+ * per-tram paceBias and the time-of-day factor multiply it. Calibration round
+ * 1 (docs/calibration/analysis-2026-07-11.md §3): real outside-p90 speed is
+ * ~42.9 km/h while the 50 km/h network default is ~2× the median real pace —
+ * right as a CAP, far too fast as a cruise TARGET. Caps stay caps: V_MAX_MS
+ * still bounds the braking envelope (vAllowedAt) and the hard speed limit;
+ * catch-up regimes (factor up to 1.5) may exceed this reference up to that
+ * envelope.
+ */
+export const V_CRUISE_REF_MS = 11.7;
 /** Daytime city-center cap (31 km/h), m/s. */
 export const V_CENTER_MS = 8.6;
 /** Lower clamp for curve caps, m/s. */
@@ -242,22 +254,28 @@ export function cruiseCapAt(profile: SpeedProfile, geometry: RouteGeometry, sM: 
 
 /**
  * Length-weighted mean of the cruise cap over the along-shape span [aM, bM]
- * (same per-segment max-of-endpoints semantics as cruiseCapAt). This is the
+ * (same per-segment max-of-endpoints semantics as cruiseCapAt), with each
+ * per-segment value additionally capped at `refCapMs`. This is the
  * PROFILE-EXPECTED average cruise speed over the span — the reference the
- * per-tram pace calibration compares real inter-fix speeds against.
+ * per-tram pace calibration compares real inter-fix speeds against. The
+ * calibration passes V_CRUISE_REF_MS so the bias ratio is measured against
+ * the SAME reference the pace controller cruises at (tramSim tick): if the
+ * two references diverged, the converged product ref × bias would no longer
+ * equal the tram's real pace.
  */
 export function meanCruiseCapOver(
   profile: SpeedProfile,
   geometry: RouteGeometry,
   aM: number,
   bM: number,
+  refCapMs: number = Infinity,
 ): number {
   const cum = geometry.cumDistM;
   const n = cum.length;
   if (n === 0) return 0;
   const a = Math.min(Math.max(Math.min(aM, bM), 0), geometry.totalM);
   const b = Math.min(Math.max(Math.max(aM, bM), 0), geometry.totalM);
-  if (b - a < 1e-6 || n === 1) return cruiseCapAt(profile, geometry, a);
+  if (b - a < 1e-6 || n === 1) return Math.min(refCapMs, cruiseCapAt(profile, geometry, a));
 
   let sum = 0;
   let covered = 0;
@@ -266,12 +284,12 @@ export function meanCruiseCapOver(
     const segEnd = Math.min(cum[i + 1], b);
     const len = segEnd - pos;
     if (len > 0) {
-      sum += len * Math.max(profile.vLimit[i], profile.vLimit[i + 1]);
+      sum += len * Math.min(refCapMs, Math.max(profile.vLimit[i], profile.vLimit[i + 1]));
       covered += len;
     }
     pos = segEnd;
   }
-  return covered > 0 ? sum / covered : cruiseCapAt(profile, geometry, a);
+  return covered > 0 ? sum / covered : Math.min(refCapMs, cruiseCapAt(profile, geometry, a));
 }
 
 /**

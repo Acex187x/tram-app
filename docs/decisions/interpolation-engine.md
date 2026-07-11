@@ -7,7 +7,7 @@ TypeScript — the caller drives `ingest()` per poll and `tick()` per frame.
 - `src/lib/engine/tramSim.ts` — per-tram physics/state machine (`TramSim`)
 - `src/lib/engine/speedProfile.ts` — per-shape speed limits + braking envelope
 - `src/lib/engine/engine.ts` — `TramEngine`: owns all sims, queueing, projection, public state
-- Tests: `__tests__/tram-sim.test.ts`, `engine-queue.test.ts`, `engine-projection.test.ts`, `speed-profile.test.ts`
+- Tests: `__tests__/tram-sim.test.ts`, `engine-queue.test.ts`, `engine-projection.test.ts`, `speed-profile.test.ts`, `pace-bias.test.ts`, `tod-pace.test.ts`
 
 > **Doc-vs-code drift warning.** `docs/architecture.md` (lines ~64–70) still describes the
 > **pre-fix** controller (`vTarget = vAllowed · clamp(1+e/120, 0.55, 1.65)`, teleport to
@@ -87,19 +87,32 @@ sailed in at ~66 km/h and then the stop-reach clamp (`sM = min(sNew, next.distM)
 **snapped it from ~66 km/h to 0 in one frame** — a visible teleport-into-the-platform.
 (`docs/testing/codex-review-1.md` finding #3.)
 
-**Fix.** The pace factor multiplies **only the cruise reference cap**, and the result is then
-clamped by the hard envelope (`tramSim.ts:398`):
+**Fix.** The pace factor multiplies **only the cruise reference**, and the result is then
+clamped by the hard envelope (`tramSim.ts tick()`):
 
 ```ts
-vTarget = Math.min(vAllowed, cruiseCapAt(...) * factor);
+vTarget = Math.min(vAllowed, Math.min(cruiseCapAt(...), V_CRUISE_REF_MS) * factor * paceBias * todPaceFactor(now));
 ```
 
 A late tram may hold the track's cruise speed but can **never** defeat the braking envelope
-toward a stop or curve. `cruiseCapAt`'s doc-comment (`speedProfile.ts:74-82`) states this
+toward a stop or curve. `cruiseCapAt`'s doc-comment states this
 invariant explicitly: *pace scaling may multiply cruiseCap only, never vAllowedAt*.
 Regression: `tram-sim.test.ts` "late tram braking (catch-up never defeats the envelope)"
-(`:485`) forces a 20 m/s schedule (factor pegged at max) and asserts arrival speed ≈ the
+forces a 20 m/s schedule (factor pegged at max) and asserts arrival speed ≈ the
 envelope value at the reach boundary (~2.2 m/s), not a 60 km/h snap.
+
+### Cruise reference vs. hard cap (calibration round 1, R3)
+
+`V_CRUISE_REF_MS = 11.7` (42 km/h) bounds the **pace-controller reference** — the speed the
+controller aims for on an unconstrained straight before the catch-up factor, `paceBias` and
+the TOD factor multiply it. Measured basis (`docs/calibration/analysis-2026-07-11.md` §3):
+real outside-center speeds are p50 23.0 / p90 42.9 km/h; only 4.6% of inter-fix intervals
+exceed 50 km/h. So 50 km/h is right as a **cap** and ~2× too fast as a cruise **target**.
+`V_MAX_MS = 13.9` keeps bounding the braking envelope (`vAllowedAt`) and zone/curve caps —
+caps stay caps — and catch-up regimes (factor ≤ 1.5) can still exceed the reference up to
+that envelope. The pace calibration measures its real/expected ratio against the same
+reference (`meanCruiseCapOver(..., V_CRUISE_REF_MS)`), so converged `ref × bias` equals the
+tram's real motion pace by construction.
 
 ---
 
@@ -148,11 +161,24 @@ fix yanks it back). A sim slightly **behind** reads as natural lag.
 deliberately aims ~10 m *behind* projected reality. "Ride behind reality, not ahead of it."
 Verified by `tram-sim.test.ts` "trail bias" (`:261`), which checks the exact blend − TRAIL_M.
 
-**Note — no adaptive `paceBias`.** The systematic bias is this single fixed constant. There
-is **no per-tram adaptive `paceBias` / EWMA / recency-half-life term in the current code**
-(grep of `src`/`__tests__`/`docs` finds none). If a future task lands a per-driver/per-district
-adaptive bias, it would layer on top of the `targetDistAt` blend here — but as of this writing
-it does not exist. Do not document it as present.
+**Adaptive `paceBias` (landed `bda0255`, recalibrated in round 1).** On each genuinely-new
+AVL fix, `updatePaceBias` folds the clamped ratio (real inter-fix average speed ÷
+reference-expected average speed over the same span, scheduled dwells deducted) into a
+time-based EWMA with half-life `PACE_BIAS_HALF_LIFE_S = 150 s`; per-sample ratio clamp
+`[PACE_BIAS_MIN_RATIO, PACE_BIAS_MAX_RATIO] = [0.4, 1.6]`. The bias multiplies the cruise
+reference in `tick()` (see §3) so a consistently-slow tram is simulated at its own pace
+between fixes instead of sprint-and-crawl. Calibration round 1
+(`docs/calibration/analysis-2026-07-11.md`):
+
+- **Prior**: new sims start at `PACE_BIAS_PRIOR = 0.62` (the fleet's converged median),
+  **not** 1.0 — a 1.0 prior made every fresh sim simulate ~1.7× too fast for its first
+  ~4–5 min (56% rendered ahead of the fresh fix, |err| p90 385 m).
+- **Inheritance**: the learned bias **survives hard teleports** (same vehicle, same driver;
+  the teleporting fix itself is excluded from calibration — a re-anchor jump is not motion)
+  and **survives trip changes / respawns** via `TramEngine`'s per-key memory
+  (`paceBiasMemory`, pruned after `PACE_BIAS_MEMORY_TTL_MS = 15 min`). Reset to the prior
+  happens only for genuinely new (or long-gone) vehicles. `projSim`s are (re)seeded with the
+  main sim's live bias — they never receive `applySnapshot`, so they cannot learn themselves.
 
 ---
 
@@ -218,11 +244,28 @@ across re-renders).
 
 ## 8. Terminal behavior
 
-**Decision.** The last stop (or any `isTerminal`) → `phase = 'terminal'`, `v = 0`, held
-indefinitely (`tick` `:367`, `:414`). A tram that runs off the geometry end with no stops left
-also latches terminal (`:424`). It stays there until fresh trip data swaps geometry
-(`ingest`'s trip-change path re-anchors onto the new shape). At stops, the render layer plays a
-doors-open animation during the dwell (iteration 4).
+**Decision.** The last stop (or any `isTerminal`) → `phase = 'terminal'`, `v = 0`, held until
+fresh trip data swaps geometry (`ingest`'s trip-change path re-anchors onto the new shape). A
+tram that runs off the geometry end with no stops left also latches terminal. At stops, the
+render layer plays a doors-open animation during the dwell (iteration 4).
+
+### Terminal un-latch (calibration round 1, R2)
+
+Terminal used to be an **absorbing** state: `tick()` pins `v = 0`, so a sim that sprinted to
+the last stop *ahead of reality* sat there wrongly until the real tram arrived or the trip
+swapped — sub-500 m errors never teleport. In the 2026-07-11 session this was the worst
+per-mode error: 2.2% of records in `terminal` with signed sim−obs p50 **+324 m** (p90 560).
+
+**Fix** (`applySnapshot`): while `phase === 'terminal'`, a **fresh** fix (new `observedAtMs`
+or changed `shapeDistM`) whose projection lies more than `TERMINAL_UNLATCH_BEHIND_M = 150 m`
+**behind** the latched position re-anchors the sim to the observation and resumes normal
+simulation. This is a deliberate, bounded **backward teleport** — the one sanctioned break of
+`sM` monotonicity besides the 500 m teleport. Why monotonicity is broken here: the pace
+controller can never recover from a wrong terminal latch (v is pinned to 0 and reality is
+*behind*, so no forward motion can reduce the error); un-latching forward is impossible by
+definition. It renders as a teleport (`lastTeleportMs` opacity dip), not a visible reverse
+drive. 150 m tolerance keeps genuine end-of-trip fix scatter (platform fixes slightly short
+of the geometry end) latched. Tests: `tram-sim.test.ts` "terminal un-latch".
 
 ---
 
@@ -258,11 +301,13 @@ at single-car spacing — `engine-queue.test.ts:186`).
 
 ## 10. Teleport rules
 
-**Decision.** `applySnapshot` (`tramSim.ts:338`) hard-teleports only when the **projected
+**Decision.** `applySnapshot` hard-teleports only when the **projected
 observation** disagrees with the sim by more than `TELEPORT_THRESHOLD_M = 500 m`. Then: snap
 `sM` to `sObs`, `v = 0`, reset to cruise, rebuild dwell memory (`seedStopState`), stamp
-`lastTeleportMs` (renderer dips opacity ~300 ms). Errors **under** 500 m are absorbed by the
-pace controller — no jump.
+`lastTeleportMs` (renderer dips opacity ~300 ms). The learned `paceBias` is **kept** (round 1:
+same vehicle, same driver) and the teleporting fix is excluded from pace calibration (the
+jump is a re-anchor artifact, not motion). Errors **under** 500 m are absorbed by the
+pace controller — no jump (except the terminal un-latch, §8).
 
 **Why 500 m / why the observation not the timetable.** Sub-500 m disagreements are normal poll
 lag + prediction error and should converge smoothly. Above 500 m the sim is on the wrong block
@@ -369,21 +414,28 @@ skip-roll-through / proportional shortening / 4 s floor / queue invariant.
 
 ## Tuning constants (single source of truth: the code)
 
-| constant | value | file:line | role |
+| constant | value | file | role |
 |---|---|---|---|
-| `A_LAT` | 0.98 m/s² | speedProfile.ts:9 | curve cap lateral accel |
-| `A_BRK` / `A_ACC` | 1.2 / 1.0 m/s² | speedProfile.ts:11-13 | brake / accel clamps |
-| `V_MAX_MS` / `V_CENTER_MS` | 13.9 / 8.6 m/s | speedProfile.ts:15-17 | zone caps (50 / 31 km/h) |
-| `DEFAULT_LOOKAHEAD_M` | 400 m | speedProfile.ts:21 | braking-envelope horizon |
-| `OBS_BLEND_WEIGHT` | 0.75 | tramSim.ts:21 | observation vs timetable weight |
-| `TRAIL_M` | 10 m | tramSim.ts:26 | ride-behind bias |
-| `HARD_BRAKE_ENTER/EXIT_M` | 40 / 12 m | tramSim.ts:28-30 | crawl hysteresis band |
-| `CRAWL_V_MS` | 1.0 m/s | tramSim.ts:32 | ran-ahead crawl speed |
-| `CATCHUP/GENTLE_MAX_FACTOR` | 1.5 / 1.35 | tramSim.ts:36-38 | pace ceilings |
-| `MIN_PACE_FACTOR` / `PACE_GAIN_M` | 0.55 / 120 | tramSim.ts:40-42 | pace floor / gain |
-| `TELEPORT_THRESHOLD_M` | 500 m | tramSim.ts:11 | hard-teleport trigger |
-| `DEFAULT_DWELL_S` | 18 s ±0–8 | tramSim.ts:15 | fallback dwell |
-| `QUEUE_GAP_M` | 3 m | engine.ts:33 | follower clearance |
-| `COUPLED_TRAILER_OFFSET_M` | 14.5 m | engine.ts:39 | coupled-set extra length |
-| `STALE_AFTER_MS` | 90 s | engine.ts:27 | drop unseen trams |
+| `A_LAT` | 0.98 m/s² | speedProfile.ts | curve cap lateral accel |
+| `A_BRK` / `A_ACC` | 1.2 / 1.0 m/s² | speedProfile.ts | brake / accel clamps |
+| `V_MAX_MS` / `V_CENTER_MS` | 13.9 / 8.6 m/s | speedProfile.ts | zone caps (50 / 31 km/h) — envelope/hard limits |
+| `V_CRUISE_REF_MS` | 11.7 m/s | speedProfile.ts | pace-controller cruise reference (42 km/h, round 1 R3) |
+| `DEFAULT_LOOKAHEAD_M` | 400 m | speedProfile.ts | braking-envelope horizon |
+| `OBS_BLEND_WEIGHT` | 0.75 | tramSim.ts | observation vs timetable weight |
+| `TRAIL_M` | 10 m | tramSim.ts | ride-behind bias |
+| `HARD_BRAKE_ENTER/EXIT_M` | 40 / 12 m | tramSim.ts | crawl hysteresis band |
+| `CRAWL_V_MS` | 1.0 m/s | tramSim.ts | ran-ahead crawl speed |
+| `CATCHUP/GENTLE_MAX_FACTOR` | 1.5 / 1.35 | tramSim.ts | pace ceilings |
+| `MIN_PACE_FACTOR` / `PACE_GAIN_M` | 0.55 / 120 | tramSim.ts | pace floor / gain |
+| `PACE_BIAS_PRIOR` | 0.62 | tramSim.ts | fresh-vehicle paceBias prior (fleet median, round 1 R1) |
+| `PACE_BIAS_HALF_LIFE_S` | 150 s | tramSim.ts | paceBias EWMA half-life |
+| `PACE_BIAS_MIN/MAX_RATIO` | 0.4 / 1.6 | tramSim.ts | per-sample ratio clamp (and seed clamp) |
+| `PACE_BIAS_MIN_DT_S` / `MIN_DS_M` | 8 s / 15 m | tramSim.ts | degenerate-sample floor |
+| `TERMINAL_UNLATCH_BEHIND_M` | 150 m | tramSim.ts | terminal un-latch tolerance (round 1 R2) |
+| `TELEPORT_THRESHOLD_M` | 500 m | tramSim.ts | hard-teleport trigger |
+| `DEFAULT_DWELL_S` | 18 s ±0–8 | tramSim.ts | fallback dwell |
+| `QUEUE_GAP_M` | 3 m | engine.ts | follower clearance |
+| `COUPLED_TRAILER_OFFSET_M` | 14.5 m | engine.ts | coupled-set extra length |
+| `STALE_AFTER_MS` | 90 s | engine.ts | drop unseen trams |
+| `PACE_BIAS_MEMORY_TTL_MS` | 15 min | engine.ts | per-key learned-bias memory lifetime (round 1 R1) |
 </content>

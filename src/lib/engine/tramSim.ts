@@ -10,6 +10,7 @@ import {
   meanCruiseCapOver,
   todDwellFactor,
   todPaceFactor,
+  V_CRUISE_REF_MS,
   vAllowedAt,
   type SpeedProfile,
 } from './speedProfile';
@@ -96,6 +97,27 @@ export const PACE_BIAS_HALF_LIFE_S = 150;
 /** Clamp on one inter-fix real/expected speed ratio sample. */
 export const PACE_BIAS_MIN_RATIO = 0.4;
 export const PACE_BIAS_MAX_RATIO = 1.6;
+/**
+ * paceBias prior for a genuinely NEW vehicle (calibration round 1,
+ * docs/calibration/analysis-2026-07-11.md): the fleet's converged bias median
+ * is ~0.58–0.63, so a fresh sim starting at 1.0 spends its first ~4–5 min
+ * simulating a tram ~1.7× too fast (56% rendered ahead of the fresh fix,
+ * |err| p90 385 m) before the EWMA converges. Starting at the fleet prior
+ * removes that cold-start sprint; a genuinely fast tram still learns upward
+ * within a couple of fixes. Existing vehicles inherit their learned bias
+ * across teleports and trip changes instead (see applySnapshot / TramEngine).
+ */
+export const PACE_BIAS_PRIOR = 0.62;
+/**
+ * Terminal un-latch tolerance, meters: while phase === 'terminal', a FRESH
+ * observation placing the real tram more than this far BEHIND the latched
+ * position re-anchors the sim to the observation (calibration round 1 R2 —
+ * terminal was the worst per-mode error in the 2026-07-11 session: signed
+ * sim−obs p50 +324 m across 2.2% of records, because a fresh sim sprints to
+ * the last stop, latches terminal with v=0, and sub-500 m errors never
+ * teleport). 150 m is comfortably above genuine end-of-trip fix scatter.
+ */
+export const TERMINAL_UNLATCH_BEHIND_M = 150;
 /** Inter-fix intervals shorter than this are too noisy to calibrate on, s. */
 export const PACE_BIAS_MIN_DT_S = 8;
 /** Inter-fix advances shorter than this are too noisy to calibrate on, m. */
@@ -148,10 +170,13 @@ export interface TramSim {
   /**
    * Learned per-tram pace multiplier (1 = exactly the profile's cruise pace):
    * recency-weighted EWMA of real inter-fix average speed ÷ profile-expected
-   * average speed over the same span. Scales the cruise target in tick() so a
-   * tram that consistently runs at 70% of profile speed is simulated at ~70%
-   * between fixes instead of sprint-and-crawl. Reset to 1 on teleport (and
-   * implicitly on trip change — a new sim is created).
+   * average speed over the same span (both measured against the
+   * V_CRUISE_REF_MS cruise reference). Scales the cruise target in tick() so a
+   * tram that consistently runs at 70% of reference pace is simulated at ~70%
+   * between fixes instead of sprint-and-crawl. Starts at PACE_BIAS_PRIOR for a
+   * genuinely new vehicle and is INHERITED across hard teleports (same
+   * vehicle, same driver) and — via TramEngine's per-key memory — across trip
+   * changes for the same vehicle key.
    */
   paceBias: number;
   /**
@@ -370,6 +395,13 @@ export interface CreateSimOptions {
    * Defaults to false.
    */
   adaptiveDwell?: boolean;
+  /**
+   * Seed paceBias from a previously learned value (TramEngine's per-key
+   * memory: same vehicle, new trip/sim — the driver didn't change). Clamped
+   * to [PACE_BIAS_MIN_RATIO, PACE_BIAS_MAX_RATIO]. Defaults to
+   * PACE_BIAS_PRIOR for genuinely new vehicles.
+   */
+  initialPaceBias?: number;
 }
 
 /**
@@ -403,7 +435,10 @@ export function createSim(
     lengthM,
     minStopDist: 0,
     lastTeleportMs: 0,
-    paceBias: 1,
+    paceBias: Math.min(
+      PACE_BIAS_MAX_RATIO,
+      Math.max(PACE_BIAS_MIN_RATIO, opts.initialPaceBias ?? PACE_BIAS_PRIOR),
+    ),
     crawling: false,
     adaptiveDwell: opts.adaptiveDwell === true,
     skipRollUntilM: 0,
@@ -456,7 +491,16 @@ function updatePaceBias(
   }
   const effDtS = Math.max(dtObsS - dwellS, dtObsS * 0.25);
 
-  const expected = meanCruiseCapOver(sim.profile, sim.geometry, prevObsDistM, obsDistM);
+  // Expected speed against the CRUISE REFERENCE (V_CRUISE_REF_MS-capped), the
+  // same reference tick() multiplies by paceBias — so converged ref × bias
+  // equals the tram's real motion pace by construction.
+  const expected = meanCruiseCapOver(
+    sim.profile,
+    sim.geometry,
+    prevObsDistM,
+    obsDistM,
+    V_CRUISE_REF_MS,
+  );
   if (expected < 0.1) return;
   const ratio = Math.min(
     PACE_BIAS_MAX_RATIO,
@@ -468,16 +512,47 @@ function updatePaceBias(
   sim.paceBias += alpha * (ratio - sim.paceBias);
 }
 
+/** Snap the sim to `sM` and rebuild its motion/dwell state (teleport core). */
+function snapTo(sim: TramSim, sM: number, nowMs: number): void {
+  sim.sM = clampS(sim.geometry, sM);
+  sim.vMs = 0;
+  sim.phase = 'cruise';
+  sim.dwellUntilMs = 0;
+  sim.crawling = false;
+  sim.skipRollUntilM = 0;
+  sim.dwelledStopSeqs.clear();
+  seedStopState(sim, nowMs);
+  sim.lastTeleportMs = nowMs;
+}
+
 /**
  * Ingest a fresh snapshot for the same trip: rebuild the schedule anchor with
  * the new delay and re-anchor the observation (shapeDistM @ observedAtMs) so
  * every poll reconciles the sim with reality. Convergence happens via the pace
  * controller — no position jumps — unless the projected OBSERVATION disagrees
  * with the sim by more than 500 m, which hard-teleports to the observation.
- * Genuinely new fixes also feed the per-tram pace calibration (paceBias).
+ * Genuinely new fixes also feed the per-tram pace calibration (paceBias) —
+ * except across a teleport, whose inter-fix "speed" is a re-anchor artifact,
+ * not motion. paceBias itself survives a teleport: it is the same physical
+ * vehicle and driver, and the learned pace was the one thing the old sim got
+ * right (calibration round 1 — resetting it re-triggered the cold-start
+ * sprint on every teleport).
+ *
+ * Terminal un-latch (calibration round 1 R2): 'terminal' is otherwise an
+ * absorbing state (tick() holds v=0 forever), so a sim that sprinted to the
+ * last stop ahead of reality would sit there wrongly for minutes — sub-500 m
+ * errors never teleport. If a FRESH fix places the real tram more than
+ * TERMINAL_UNLATCH_BEHIND_M behind the latched position, re-anchor the sim to
+ * the observation and resume normal simulation. This is a deliberate,
+ * bounded BACKWARD teleport — the one exception to sM monotonicity besides
+ * the 500 m teleport: the pace controller cannot recover from a wrong
+ * terminal latch (v is pinned to 0 and reality is behind), so honesty beats
+ * monotonicity here. It renders as a teleport (lastTeleportMs), not a reverse
+ * drive.
  */
 export function applySnapshot(sim: TramSim, snapshot: TramSnapshot, nowMs: number): void {
-  updatePaceBias(sim, sim.obsDistM, sim.obsAtMs, snapshot);
+  const prevObsDistM = sim.obsDistM;
+  const prevObsAtMs = sim.obsAtMs;
   sim.snapshot = snapshot;
   sim.lastAnchor = buildScheduleAnchor(sim.geometry.stops, snapshot.delaySeconds);
   sim.obsDistM = clampS(sim.geometry, snapshot.shapeDistM);
@@ -485,18 +560,14 @@ export function applySnapshot(sim: TramSim, snapshot: TramSnapshot, nowMs: numbe
   sim.obsSchedDistM = evalScheduleAnchor(sim.lastAnchor, snapshot.observedAtMs);
   const sObs = observedDistAt(sim, nowMs);
   if (Math.abs(sObs - sim.sM) > TELEPORT_THRESHOLD_M) {
-    sim.sM = sObs;
-    sim.vMs = 0;
-    sim.phase = 'cruise';
-    sim.dwellUntilMs = 0;
-    sim.crawling = false;
-    sim.skipRollUntilM = 0;
-    sim.dwelledStopSeqs.clear();
-    seedStopState(sim, nowMs);
-    sim.lastTeleportMs = nowMs;
-    // A teleport means the observation stream contradicted the sim wholesale —
-    // whatever pace was learned is no longer trustworthy.
-    sim.paceBias = 1;
+    // Hard teleport: no pace sample (the jump is not motion), bias inherited.
+    snapTo(sim, sObs, nowMs);
+    return;
+  }
+  updatePaceBias(sim, prevObsDistM, prevObsAtMs, snapshot);
+  const freshFix = snapshot.observedAtMs > prevObsAtMs || sim.obsDistM !== prevObsDistM;
+  if (sim.phase === 'terminal' && freshFix && sim.sM - sObs > TERMINAL_UNLATCH_BEHIND_M) {
+    snapTo(sim, sObs, nowMs);
   }
 }
 
@@ -589,16 +660,20 @@ export function tick(sim: TramSim, nowMs: number, dtS: number): void {
   } else {
     const maxFactor = e > BOLD_CATCHUP_ERR_M ? CATCHUP_MAX_FACTOR : GENTLE_MAX_FACTOR;
     const factor = Math.min(maxFactor, Math.max(MIN_PACE_FACTOR, 1 + e / PACE_GAIN_M));
-    // Pace scaling applies to the cruise cap only; the braking envelope is a
-    // hard limit — a late tram may hold cruise speed but never overrun a stop.
-    // The learned per-tram paceBias scales the cruise target too, so a tram
-    // that really runs at 70% of profile pace cruises at ~70% between fixes
-    // instead of sprinting to the cap and then crawling. The time-of-day pace
-    // factor (hour-blended TOD_PACE_TABLE, neutral until calibrated) composes
-    // on top: paceBias then only learns the per-vehicle RESIDUAL.
+    // Pace scaling applies to the cruise REFERENCE only; the braking envelope
+    // is a hard limit — a late tram may hold cruise speed but never overrun a
+    // stop. The reference is the zone/curve cap bounded by V_CRUISE_REF_MS
+    // (42 km/h — real p90 pace; the 50 km/h V_MAX_MS stays the envelope/hard
+    // cap, calibration round 1 R3), so catch-up regimes (factor ≤ 1.5) can
+    // still exceed the reference up to the envelope. The learned per-tram
+    // paceBias scales the target too, so a tram that really runs at 70% of
+    // reference pace cruises at ~70% between fixes instead of sprinting to
+    // the cap and then crawling. The time-of-day pace factor (hour-blended
+    // TOD_PACE_TABLE, neutral until calibrated) composes on top: paceBias
+    // then only learns the per-vehicle RESIDUAL.
     vTarget = Math.min(
       vAllowed,
-      cruiseCapAt(sim.profile, sim.geometry, sim.sM) *
+      Math.min(cruiseCapAt(sim.profile, sim.geometry, sim.sM), V_CRUISE_REF_MS) *
         factor *
         sim.paceBias *
         todPaceFactor(nowMs),
