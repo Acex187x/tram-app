@@ -68,8 +68,10 @@ for key, rs in by_tram.items():
             fixes.append((r["t"], r["obsDist"]))
             last_obs = r["obsDist"]
     loc = sorted((r["simDist"], r["lng"], r["lat"]) for r in rs
-                 if r.get("simDist") is not None)
-    if len(fixes) >= 3:
+                 if r.get("simDist") is not None and r.get("lng") is not None)
+    # trams that never spawned a sim (no shape match -> simDist/lng null, day
+    # round 6 artifact) have no zone samples; nothing to replay against.
+    if len(fixes) >= 3 and loc:
         trams[key] = (fixes, loc)
 
 
@@ -237,17 +239,17 @@ CONFIGS = [
                                 "prior": 0.75, "trail": 20, "half_life": 60}),
     ("OLD gate (pre-round-1 constants)", OLD),
     ("NEW gate (R1+R3 shipped)", NEW),
-    # Day-round candidates (round 6, first day round): PACE_BIAS_PRIOR
-    # re-measurement on the day fleet. Per-tram median converged bias
-    # (>=3 fixes, sim age >5 min) reads 0.650-0.660 across all disjoint
-    # subsamples (halves x parity), 0.660-0.670 on saturated 90+ min sims —
-    # candidate P17 = 0.66 (P16/P18 bracket), P19 = opposite-direction
-    # control (0.58): if it also "improves", the estimator is insensitive
-    # and the gate is void.
-    ("P16 prior 0.65", {**NEW, "prior": 0.65}),
-    ("P17 prior 0.66 (candidate)", {**NEW, "prior": 0.66}),
-    ("P18 prior 0.67", {**NEW, "prior": 0.67}),
-    ("P19 prior 0.58 (control, wrong way)", {**NEW, "prior": 0.58}),
+    # Day-round candidates (round 7, morning peak 06:36-07:36): TOD h7
+    # measured vs the re-measured 0.66 fleet norm reads x1.030 full-window
+    # but flips sign on one 4-way disjoint cell (x0.985) and the paired
+    # within-tram h6->h7 bias delta is +0.010 (75/58) — weak. D20 = the
+    # measured deviation anyway (gate for the record), D21 = wrong-way
+    # control, D22/D23 = prior candidates re-run on a peak window (R5
+    # evidence accumulation; vs 0.62 the fleet reads x1.081, 140/42).
+    ("D20 tod h7=1.03 (measured)", {**NEW, "tod": {7: 1.03}}),
+    ("D21 tod h7=0.95 (control, wrong way)", {**NEW, "tod": {7: 0.95}}),
+    ("D22 prior 0.66 (R5 candidate)", {**NEW, "prior": 0.66}),
+    ("D23 prior 0.58 (control, wrong way)", {**NEW, "prior": 0.58}),
 ]
 
 print(f"trams replayed: {len(trams)}")
