@@ -323,6 +323,18 @@ CONFIGS = [
     # control.
     ("D38 tod h15=0.99 (measured)", {**NEW, "tod": {15: 0.99}}),
     ("D39 tod h15=1.05 (control, wrong way)", {**NEW, "tod": {15: 1.05}}),
+    # Day-round candidates (round 16, evening peak 15:26-16:37): h16 vs the
+    # 0.66 norm reads x0.970 (110/142) with halves/parity x0.970-x0.985 —
+    # the h12-h15 level, not an h16 deviation; h15 FULL-hour final reads the
+    # same (x0.970, halves x0.985/x0.985). Paired h15->h16 fleet near-null
+    # (Δspeed +0.83, 138/103; Δbias -0.010, 106/122), zonal split intact
+    # (centre-majority -1.81 vs outskirts +1.50). The 16:00-boundary watch
+    # came back NEGATIVE (no 15:00-style transient; the only excursion,
+    # 15:54-15:59, coincides with a logged 66-s poll stall + a real delayS
+    # bump 47->64 — feed NOT flat). D40 = measured-anyway gate record,
+    # D41 = wrong-way control.
+    ("D40 tod h16=0.98 (measured)", {**NEW, "tod": {16: 0.98}}),
+    ("D41 tod h16=1.05 (control, wrong way)", {**NEW, "tod": {16: 1.05}}),
 ]
 
 print(f"trams replayed: {len(trams)}")
