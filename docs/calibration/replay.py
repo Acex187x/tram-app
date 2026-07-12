@@ -353,6 +353,22 @@ CONFIGS = [
     # D44 = measured-anyway gate record, D45 = wrong-way control.
     ("D44 tod h18=0.99 (measured)", {**NEW, "tod": {18: 0.99}}),
     ("D45 tod h18=1.05 (control, wrong way)", {**NEW, "tod": {18: 1.05}}),
+    # Day-round candidates (round 19, h18 tail + h19 18:29-19:30, SUNDAY):
+    # h19-only vs the 0.66 norm reads x0.939 with ALL 8 disjoint subsamples
+    # below (x0.924-x0.955) — the first hour outside the h12-h18 corridor —
+    # BUT the drop is a structural artifact of the 19:00 daytime-cap boundary
+    # (zoneCapAt: centre 8.6 m/s only 07:00-19:00; profiles rebuild at 19:00
+    # and updatePaceBias re-learns centre spans against ~11.7 m/s instead of
+    # 8.6 → centre bias must fall by ~x0.74 at constant real speed; paired
+    # h18->h19 centre-majority Δbias -0.110 (3/59) vs outskirts -0.010, while
+    # the feed-truth leg is null: fleet Δspeed +0.42, true feed speed
+    # 21.7->21.9, centre 18.5->19.0, dwell MID 92->89 — nothing real moved;
+    # h19 bias lands exactly on the night-learned 0.62 prior, vs 0.62 x1.008
+    # mixed). Post-19:00 bias-norm reads are NOT comparable to the daytime
+    # 0.65-0.66 neutral. D46 = norm-implied candidate anyway (gate record),
+    # D47 = wrong-way control.
+    ("D46 tod h19=0.95 (norm-implied, cap-contaminated)", {**NEW, "tod": {19: 0.95}}),
+    ("D47 tod h19=1.05 (control, wrong way)", {**NEW, "tod": {19: 1.05}}),
 ]
 
 print(f"trams replayed: {len(trams)}")
