@@ -59,6 +59,19 @@ export interface CalibrationRecord {
   lng: number | null;
   /** Sim phase at record time. */
   mode: 'cruise' | 'dwell' | 'terminal' | 'unknown';
+  // — R7 additions (schema v2) — raw AVL context so real dwells and true feed
+  // speed become measurable. A repeated obsAt across polls = no fresh fix
+  // (stale), so real feed speed is Δ(obsDist)/Δ(obsAt) between CHANGED obsAt
+  // values, and a growing obsAt with flat obsDist + statePos 'at_stop' is a
+  // real stop dwell (attributable to a stop via nextSeq).
+  /** Unix ms of the last real AVL fix (snapshot.observedAtMs). */
+  obsAt: number | null;
+  /** Raw AVL state_position, e.g. 'on_track' | 'at_stop'. */
+  statePos: string | null;
+  /** Schedule delay in seconds (raw AVL). */
+  delayS: number | null;
+  /** Sequence number of the next stop on the trip. */
+  nextSeq: number | null;
 }
 
 /**

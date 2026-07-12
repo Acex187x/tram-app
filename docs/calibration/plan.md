@@ -42,6 +42,19 @@ The existing daytime center-zone cap (07:00–19:00) folds into this table event
   Record ride) take precedence over sim data when they disagree (sim data inherits AVL
   latency; rides are ground truth).
 
+## Record schema (motionlog daily JSONL)
+
+- **v1** (through 2026-07-12): `{t,key,model,line,obsDist,simDist,projDist,devM,kmh,bias,lat,lng,mode}`.
+- **v2 — R7** (builds from 2026-07-12; new keys APPENDED, old parsers unaffected —
+  detect by presence of `obsAt` on a line, not by file date: a session file can mix
+  v1/v2 lines around the app reload): adds raw AVL context straight from the
+  snapshot — `obsAt` (unix ms of the last real fix, `observedAtMs`), `statePos`
+  (raw `state_position`: `'at_stop'`, `'on_track'`, …), `delayS` (schedule delay s),
+  `nextSeq` (next stop sequence). Unlocks: real dwell detection (flat `obsDist`
+  while `obsAt` advances + `statePos`), true feed speed `Δ(obsDist)/Δ(obsAt)`
+  between FRESH fixes (instead of poll-quantized `Δt`; `kmh` is simSpeedKmh, not
+  feed speed), and dwell↔stop attribution via `nextSeq`.
+
 ## Where things are
 
 - Sessions: `docs/calibration/{session,sim-sessions}/*.jsonl` (schema in analysis doc)

@@ -237,6 +237,10 @@ describe('LocalGolemioFeed geometry + calibration delegation', () => {
         lat: 50.08,
         lng: 14.42,
         mode: 'cruise',
+        obsAt: T0 - 2_000,
+        statePos: 'on_track',
+        delayS: 15,
+        nextSeq: 4,
       },
     ];
     feed.reportCalibration(records);

@@ -173,6 +173,11 @@ describe('TramRuntime driven by an injected TramFeed', () => {
       model: '15t',
       line: '9',
       obsDist: 300,
+      // R7 (schema v2): raw AVL context flows from snapshot into the record.
+      obsAt: T0,
+      statePos: 'on_track',
+      delayS: 0,
+      nextSeq: null,
     });
     expect(batch[0].mode).toBeDefined();
     rt.release();

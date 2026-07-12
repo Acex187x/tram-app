@@ -3,7 +3,8 @@
 //
 //   • Passive daily log (motionlogs/<date>.jsonl): every poll, one compact
 //     record per tram-with-geometry {t,key,model,line,obsDist,simDist,projDist,
-//     devM,lat,lng,mode}. Records are held in a capped in-memory ring buffer and
+//     devM,kmh,bias,lat,lng,mode,obsAt,statePos,delayS,nextSeq} (the feed's
+//     CalibrationRecord). Records are held in a capped in-memory ring buffer and
 //     batch-flushed to disk at most once / FLUSH_MS. A flush failure NEVER
 //     throws into the caller (the map runtime). The whole log directory is
 //     capped (~8 MB) by evicting the oldest files.

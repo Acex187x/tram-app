@@ -103,7 +103,16 @@ class FakeLocation implements LocationWatcher {
 function makeState(key: string, over: Partial<TramPublicState> = {}): TramPublicState {
   return {
     key,
-    snapshot: { line: '9', shapeDistM: 1234, tripId: 't', registrationNumber: 9201 },
+    snapshot: {
+      line: '9',
+      shapeDistM: 1234,
+      tripId: 't',
+      registrationNumber: 9201,
+      observedAtMs: 999_500,
+      statePosition: 'at_stop',
+      delaySeconds: 42,
+      nextStopSequence: 7,
+    },
     model: { id: '15t' },
     simDistM: 1200,
     simSpeedKmh: 25,
@@ -202,6 +211,12 @@ describe('MotionLog daily logging', () => {
     expect(lines).toHaveLength(2);
     const rec = JSON.parse(lines[0]);
     expect(rec).toMatchObject({ key: 'a', model: '15t', line: '9', obsDist: 1234, simDist: 1200 });
+    // R7 (schema v2): raw AVL context for dwell/feed-speed analysis.
+    expect(rec).toMatchObject({ obsAt: 999_500, statePos: 'at_stop', delayS: 42, nextSeq: 7 });
+    // New keys are appended AFTER the historic ones — old lines stay a prefix.
+    const keys = Object.keys(rec);
+    expect(keys.slice(-4)).toEqual(['obsAt', 'statePos', 'delayS', 'nextSeq']);
+    expect(keys.indexOf('mode')).toBe(keys.length - 5);
   });
 
   it('force-flushes once the buffer reaches FLUSH_AT_LINES', () => {
@@ -234,7 +249,9 @@ describe('MotionLog daily logging', () => {
   });
 
   it('evicts the oldest files when the directory exceeds its cap', () => {
-    const h = makeLog({ dirCapBytes: 500 });
+    // Cap = one ~300-byte old file + one flushed record line (~220 B since the
+    // R7 schema-v2 fields) — so eviction must drop exactly the two oldest files.
+    const h = makeLog({ dirCapBytes: 600 });
     // Three ~300-byte log files at increasing timestamps.
     for (let i = 0; i < 3; i++) {
       h.fs.append(`${LOG_DIR}/day${i}.jsonl`, 'x'.repeat(300));

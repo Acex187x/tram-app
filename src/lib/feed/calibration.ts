@@ -36,6 +36,12 @@ export function toCalibrationRecord(s: TramPublicState, t: number): CalibrationR
     lat: r(s.position[1], 6),
     lng: r(s.position[0], 6),
     mode: s.phase,
+    // R7 (schema v2) — appended AFTER the historic fields so old lines remain a
+    // strict prefix; JSONL parsers reading known keys ignore these.
+    obsAt: r(s.snapshot.observedAtMs),
+    statePos: s.snapshot.statePosition ?? null,
+    delayS: r(s.snapshot.delaySeconds),
+    nextSeq: r(s.snapshot.nextStopSequence),
   };
 }
 
