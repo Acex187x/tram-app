@@ -97,3 +97,15 @@ Key insights behind it:
 Related: `docs/decisions/map-rendering.md` (rendering decisions),
 `docs/decisions/interpolation-engine.md` (engine hot path), `docs/decisions/backend-plan.md`
 (moving poll/aggregation off-device is the next big win).
+
+## Open investigation: long-uptime CPU degradation (found 2026-07-12)
+
+After ~9 h of continuous foreground running (simulator, calibration soak) the app's JS
+thread degraded to 99.7% CPU with periodic (~4 min) sim-integration collapses; a restart
+fully restored it (11.6% CPU). Host was idle — this is app-side accumulation (suspects:
+listener/interval leaks, unbounded caches, motionlog buffers, engine maps for departed
+trams). Real users rarely foreground an app for 9 h, but the mechanism should be found:
+profile a long session with Instruments (Allocations + Time Profiler), watch
+`uiListeners`/`frameListeners` sizes, engine entry counts, motionlog ring size.
+Until fixed, calibration soaks restart the app every ~6–8 h (see calibration analysis
+2026-07-12, round 20).
