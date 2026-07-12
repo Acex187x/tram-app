@@ -275,6 +275,16 @@ CONFIGS = [
     # gate record, D29 = wrong-way control.
     ("D28 tod h10=0.99 (measured)", {**NEW, "tod": {10: 0.99}}),
     ("D29 tod h10=1.05 (control, wrong way)", {**NEW, "tod": {10: 1.05}}),
+    # Day-round candidates (round 11, midday 10:37-11:34): the round-10
+    # "+1.0 / 50.2% ahead" regime did NOT persist — the window reads
+    # signed p50 -3.0 / %ahead 38.9 (h10 tail -7.0/38.3, h11 -2.0/39.4),
+    # back inside the 37-40 band; the flip was transient (hole-adjacent
+    # slices had read +17..+22). Paired h10->h11 fleet null (Δspeed -0.19,
+    # Δbias +0.000 123/107); centre-majority still slowing (-1.99, 18/45).
+    # D30 = the pre-registered <1.0 candidate (evaluated anyway for the
+    # record), D31 = wrong-way control.
+    ("D30 tod h11=0.97 (candidate)", {**NEW, "tod": {11: 0.97}}),
+    ("D31 tod h11=1.03 (control, wrong way)", {**NEW, "tod": {11: 1.03}}),
 ]
 
 print(f"trams replayed: {len(trams)}")
