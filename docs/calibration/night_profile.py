@@ -141,13 +141,17 @@ for key, rs in by_tram.items():
                     if r["line"] in NIGHT_LINES:
                         speed_night_h[h].append(kmh)
                     w, s_, e, n = CENTER
-                    if w <= r["lng"] <= e and s_ <= r["lat"] <= n:
+                    if r.get("lng") is None or r.get("lat") is None:
+                        pass  # no rendered position logged (rare) — skip zone split
+                    elif w <= r["lng"] <= e and s_ <= r["lat"] <= n:
                         speed_center_h[h].append(kmh)
                     else:
                         speed_out_h[h].append(kmh)
             # at-fix probe (same rules as analyze.py)
             prev = rs[i - 1]
-            if r["t"] - prev["t"] < 15000 and r["obsDist"] >= prev["obsDist"] - 2000:
+            if (prev.get("simDist") is not None
+                    and r["t"] - prev["t"] < 15000
+                    and r["obsDist"] >= prev["obsDist"] - 2000):
                 simfix_h[h].append(prev["simDist"] - r["obsDist"])
                 if prev.get("projDist") is not None:
                     projfix_h[h].append(prev["projDist"] - r["obsDist"])
@@ -211,7 +215,9 @@ for key, rs in by_tram.items():
     for i, r in enumerate(rs):
         if last_obs is not None and r["obsDist"] != last_obs:
             prev = rs[i - 1]
-            if r["t"] - prev["t"] < 15000 and r["obsDist"] >= prev["obsDist"] - 2000:
+            if (prev.get("simDist") is not None
+                    and r["t"] - prev["t"] < 15000
+                    and r["obsDist"] >= prev["obsDist"] - 2000):
                 b = prev.get("bias")
                 e = prev["simDist"] - r["obsDist"]
                 if b is not None and (abs(b - 1.0) < 1e-9 or abs(b - PACE_BIAS_PRIOR) < 1e-9):

@@ -237,15 +237,17 @@ CONFIGS = [
                                 "prior": 0.75, "trail": 20, "half_life": 60}),
     ("OLD gate (pre-round-1 constants)", OLD),
     ("NEW gate (R1+R3 shipped)", NEW),
-    # Night-round candidates (TOD modeled WITH the updatePaceBias fix).
-    # Round 5 (dawn transition, h4-tail/early-h5 window): N13 = measured
-    # per-tram bias deviations on the NIGHT fleet (h4 1.056, h5 1.081; depot
-    # subsets swing 0.952–1.145 on 13–33 trams — unstable), N14 = global 5%
-    # slow-down control (known to flatter the ahead-biased coarse replay —
-    # see round-1 verdict), N15 = plan's night guess.
-    ("N13 tod h4=1.056 h5=1.081 (meas.)", {**NEW, "tod": {4: 1.056, 5: 1.081}}),
-    ("N14 tod h4=h5=0.95 (control)", {**NEW, "tod": {4: 0.95, 5: 0.95}}),
-    ("N15 tod h4=h5=1.15 (plan's guess)", {**NEW, "tod": {4: 1.15, 5: 1.15}}),
+    # Day-round candidates (round 6, first day round): PACE_BIAS_PRIOR
+    # re-measurement on the day fleet. Per-tram median converged bias
+    # (>=3 fixes, sim age >5 min) reads 0.650-0.660 across all disjoint
+    # subsamples (halves x parity), 0.660-0.670 on saturated 90+ min sims —
+    # candidate P17 = 0.66 (P16/P18 bracket), P19 = opposite-direction
+    # control (0.58): if it also "improves", the estimator is insensitive
+    # and the gate is void.
+    ("P16 prior 0.65", {**NEW, "prior": 0.65}),
+    ("P17 prior 0.66 (candidate)", {**NEW, "prior": 0.66}),
+    ("P18 prior 0.67", {**NEW, "prior": 0.67}),
+    ("P19 prior 0.58 (control, wrong way)", {**NEW, "prior": 0.58}),
 ]
 
 print(f"trams replayed: {len(trams)}")
