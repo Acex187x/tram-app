@@ -259,6 +259,15 @@ CONFIGS = [
     # D25 = wrong-way control.
     ("D24 tod h8=1.03 (measured)", {**NEW, "tod": {8: 1.03}}),
     ("D25 tod h8=0.95 (control, wrong way)", {**NEW, "tod": {8: 0.95}}),
+    # Day-round candidates (round 9, peak decay 08:36-09:36): h9 vs the 0.66
+    # norm reads x1.015 with MIXED subsamples (half A and odd-parity below) —
+    # the round-8 all-above read did not survive past the peak, consistent
+    # with zone-mix. Paired h8->h9 fleet is null (Δspeed -0.25, Δbias +0.000
+    # 97/87); centre-majority still slowing (-2.17, 15/42) but live at-fix h9
+    # is -3.0 m — the engine already tracks it. D26 = measured-anyway gate
+    # record, D27 = wrong-way control.
+    ("D26 tod h9=1.02 (measured)", {**NEW, "tod": {9: 1.02}}),
+    ("D27 tod h9=0.95 (control, wrong way)", {**NEW, "tod": {9: 0.95}}),
 ]
 
 print(f"trams replayed: {len(trams)}")
