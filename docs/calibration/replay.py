@@ -238,12 +238,13 @@ CONFIGS = [
     ("OLD gate (pre-round-1 constants)", OLD),
     ("NEW gate (R1+R3 shipped)", NEW),
     # Night-round candidates (TOD modeled WITH the updatePaceBias fix).
-    # Round 3 (h2/h3 window): N7 = measured per-tram bias deviations,
-    # N8 = global 5% slow-down control (known to flatter the ahead-biased
-    # coarse replay — see round-1 verdict), N9 = plan's night guess.
-    ("N7 tod h2=0.984 h3=1.032 (meas.)", {**NEW, "tod": {2: 0.984, 3: 1.032}}),
-    ("N8 tod h2=h3=0.95 (control)", {**NEW, "tod": {2: 0.95, 3: 0.95}}),
-    ("N9 tod h2=h3=1.15 (plan's guess)", {**NEW, "tod": {2: 1.15, 3: 1.15}}),
+    # Round 4 (h3-tail/h4 window): N10 = measured per-tram bias deviations
+    # (full night fleet; depot-filtered h4 reads 1.016 — same coin flip),
+    # N11 = global 5% slow-down control (known to flatter the ahead-biased
+    # coarse replay — see round-1 verdict), N12 = plan's night guess.
+    ("N10 tod h3=1.032 h4=1.032 (meas.)", {**NEW, "tod": {3: 1.032, 4: 1.032}}),
+    ("N11 tod h3=h4=0.95 (control)", {**NEW, "tod": {3: 0.95, 4: 0.95}}),
+    ("N12 tod h3=h4=1.15 (plan's guess)", {**NEW, "tod": {3: 1.15, 4: 1.15}}),
 ]
 
 print(f"trams replayed: {len(trams)}")
