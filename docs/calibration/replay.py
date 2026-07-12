@@ -389,6 +389,12 @@ CONFIGS = [
     # on the h20 full-hour extract is the h20-final gate record.
     ("D50 tod h21=0.95 (symmetric control)", {**NEW, "tod": {21: 0.95}}),
     ("D51 tod h21=1.05 (symmetric control)", {**NEW, "tod": {21: 1.05}}),
+    # Day-round candidates (round 22, h21 full + h22 first read 22:00-22:33,
+    # SUNDAY night window, app fresh ~2 h): h22 first read — symmetric
+    # control pair around the read (same pattern as D50/D51); D50/D51 rerun
+    # on the h21 full-hour extract is the h21-final gate record.
+    ("D52 tod h22=0.95 (symmetric control)", {**NEW, "tod": {22: 0.95}}),
+    ("D53 tod h22=1.05 (symmetric control)", {**NEW, "tod": {22: 1.05}}),
 ]
 
 print(f"trams replayed: {len(trams)}")
