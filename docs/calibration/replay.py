@@ -250,6 +250,15 @@ CONFIGS = [
     ("D21 tod h7=0.95 (control, wrong way)", {**NEW, "tod": {7: 0.95}}),
     ("D22 prior 0.66 (R5 candidate)", {**NEW, "prior": 0.66}),
     ("D23 prior 0.58 (control, wrong way)", {**NEW, "prior": 0.58}),
+    # Day-round candidates (round 8, deep peak 07:36-08:40): h8 vs the 0.66
+    # norm reads x1.030 with ALL subsamples above for the first time — but the
+    # paired within-tram test is null (h7->h8 Δbias +0.000, 86/91) and the
+    # paired SPEED test says the slowdown is centre-only (-1.4 km/h, outskirts
+    # +0.9) — the bias climb is zone-mix contamination, the same all-day drift
+    # R5 tracks, not an h8 deviation. D24 = measured-anyway gate record,
+    # D25 = wrong-way control.
+    ("D24 tod h8=1.03 (measured)", {**NEW, "tod": {8: 1.03}}),
+    ("D25 tod h8=0.95 (control, wrong way)", {**NEW, "tod": {8: 0.95}}),
 ]
 
 print(f"trams replayed: {len(trams)}")
