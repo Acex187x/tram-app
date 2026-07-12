@@ -311,6 +311,18 @@ CONFIGS = [
     # D37 = wrong-way control.
     ("D36 tod h14=0.99 (measured)", {**NEW, "tod": {14: 0.99}}),
     ("D37 tod h14=1.05 (control, wrong way)", {**NEW, "tod": {14: 1.05}}),
+    # Day-round candidates (round 15, peak onset 14:26-15:26): h15 vs the
+    # 0.66 norm reads x0.985 (114/128) with halves x0.985/x0.985 — norm
+    # level, not an h15 deviation; paired h14->h15 fleet near-null (Δspeed
+    # +0.07, 121/116; Δbias +0.000 109/118) with the zonal split deepening
+    # (centre-majority -3.85 km/h 12/50 vs outskirts +1.49 109/66). Live
+    # at-fix h15 signed -35 BUT dissected as a 15:00-15:20 transient
+    # (slices -38/-48 -> -10.5 after :20) with EVERY feed observable flat
+    # (speed/cadence/jump/delayS/latency/re-anchors) — sim-side excursion,
+    # not a TOD signal. D38 = measured-anyway gate record, D39 = wrong-way
+    # control.
+    ("D38 tod h15=0.99 (measured)", {**NEW, "tod": {15: 0.99}}),
+    ("D39 tod h15=1.05 (control, wrong way)", {**NEW, "tod": {15: 1.05}}),
 ]
 
 print(f"trams replayed: {len(trams)}")

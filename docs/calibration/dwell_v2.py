@@ -280,6 +280,7 @@ tot_stops = 0
 s_low = s_high = 0.0
 tot_time = 0.0
 per_hour = defaultdict(lambda: [0, 0.0, 0.0, 0.0])  # h -> [N, s_low, s_high, T]
+per_zone = defaultdict(lambda: [0, 0.0, 0.0, 0.0])  # in_center? -> same (R8 band)
 for key, segs in segments.items():
     for seg in segs:
         seqs = [r.get("nextSeq") for r in seg if r.get("nextSeq") is not None]
@@ -293,6 +294,7 @@ for key, segs in segments.items():
         steps = list(zip(seg, seg[1:]))
         for si, (a, b) in enumerate(steps):
             h = hour_of(b["obsAt"])
+            z = in_center(b)
             dt = (b["obsAt"] - a["obsAt"]) / 1000
             if dt <= 0 or dt > MAX_DT_S:
                 flat_prev = False
@@ -302,13 +304,17 @@ for key, segs in segments.items():
                 dseq = b["nextSeq"] - a["nextSeq"]
                 if 0 <= dseq <= 5:
                     per_hour[h][0] += dseq
+                    per_zone[z][0] += dseq
             per_hour[h][3] += dt
+            per_zone[z][3] += dt
             flat = abs(b["obsDist"] - a["obsDist"]) <= FLAT_M
             if flat:
                 lo += dt
                 hi += dt
                 per_hour[h][1] += dt
                 per_hour[h][2] += dt
+                per_zone[z][1] += dt
+                per_zone[z][2] += dt
                 if not flat_prev:      # transition INTO the run (prev step)
                     pa, pb = steps[si - 1] if si > 0 else (None, None)
                     if pa is not None:
@@ -316,10 +322,12 @@ for key, segs in segments.items():
                         if 0 < pdt <= MAX_DT_S:
                             hi += pdt / 2
                             per_hour[h][2] += pdt / 2
+                            per_zone[z][2] += pdt / 2
             else:
                 if flat_prev:          # transition OUT of the run
                     hi += dt / 2
                     per_hour[h][2] += dt / 2
+                    per_zone[z][2] += dt / 2
             flat_prev = flat
         T = (seg[-1]["obsAt"] - seg[0]["obsAt"]) / 1000
         tot_stops += n_stops
@@ -337,6 +345,12 @@ for h in sorted(per_hour):
     N, lo, hi, T = per_hour[h]
     if N >= 50:
         print(f"  h{h:02d}: stops {N:5d}  dwell/stop [{lo/N:5.1f}, {hi/N:5.1f}] s  "
+              f"stationary {100*lo/max(1,T):.0f}-{100*hi/max(1,T):.0f}% of time")
+for z in (True, False):
+    N, lo, hi, T = per_zone[z]
+    if N >= 50:
+        print(f"  {'centre' if z else 'outskirts':9s}: stops {N:5d}  "
+              f"dwell/stop [{lo/N:5.1f}, {hi/N:5.1f}] s  "
               f"stationary {100*lo/max(1,T):.0f}-{100*hi/max(1,T):.0f}% of time")
 
 print(f"\nengine reference: DEFAULT_DWELL_S=18 (±8 jitter) × TOD_DWELL (currently 1.0);"
