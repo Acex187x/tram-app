@@ -7,7 +7,15 @@
 //     CalibrationRecord). Records are held in a capped in-memory ring buffer and
 //     batch-flushed to disk at most once / FLUSH_MS. A flush failure NEVER
 //     throws into the caller (the map runtime). The whole log directory is
-//     capped (~8 MB) by evicting the oldest files.
+//     capped (~8 MB) by evicting the oldest files — but NEVER the active
+//     ride file or today's ACTIVE daily-log part (R9: evicting the live log
+//     punched 15–20 min holes into the exported history). Instead the active
+//     part may overflow the shared cap up to its own soft ceiling
+//     (ACTIVE_LOG_ROTATE_BYTES); on reaching it, writing rotates to the next
+//     part file '<date>.N.jsonl' and the previous part becomes an evictable
+//     archive. (The FS seam has no rename, so rotation redirects the writer
+//     to a fresh part instead of renaming the full one away.) Export/listing
+//     sees every part — they all live in LOG_DIR.
 //
 //   • Ride recording (rides/<ts>-<key>.jsonl): while the user is physically on a
 //     tram, GPS fixes (~1 Hz) are correlated with the simulated state and
@@ -78,6 +86,8 @@ export interface MotionLogDeps {
   clearTimeout?: (h: ReturnType<typeof setTimeout>) => void;
   /** Override the on-disk budget (defaults to DIR_CAP_BYTES). */
   dirCapBytes?: number;
+  /** Override the active daily-log rotation ceiling (defaults to ACTIVE_LOG_ROTATE_BYTES). */
+  activeLogRotateBytes?: number;
 }
 
 // ── tuning ───────────────────────────────────────────────────────────────────
@@ -92,6 +102,14 @@ export const FLUSH_MS = 30_000;
 export const FLUSH_AT_LINES = 600;
 /** Total on-disk budget for all motion data; oldest files evicted past this. */
 export const DIR_CAP_BYTES = 8 * 1024 * 1024;
+/**
+ * Soft ceiling for the ACTIVE daily-log part alone. The active part is never
+ * evicted by the disk cap (R9), so the directory may exceed DIR_CAP_BYTES by
+ * up to this much; once the active part itself reaches this size, writing
+ * rotates to the next '<date>.N.jsonl' part and the full part becomes an
+ * evictable archive.
+ */
+export const ACTIVE_LOG_ROTATE_BYTES = 16 * 1024 * 1024;
 /** Auto-stop a ride after this long (battery guard). */
 export const RIDE_MAX_MS = 90 * 60 * 1000;
 
@@ -142,6 +160,11 @@ function sanitizeKey(key: string): string {
   return key.replace(/[^A-Za-z0-9_-]/g, '_');
 }
 
+/** RelPath of a daily-log part: part 0 is the plain '<date>.jsonl'. */
+export function logPartRel(day: string, part: number): string {
+  return `${LOG_DIR}/${day}${part > 0 ? `.${part}` : ''}.jsonl`;
+}
+
 /**
  * Build one compact daily-log record line for a tram (no trailing newline).
  * Field order + rounding now live in feed/calibration.ts — the record IS the
@@ -179,10 +202,16 @@ export class MotionLog {
   private readonly setTimer: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
   private readonly clearTimer: (h: ReturnType<typeof setTimeout>) => void;
   private readonly dirCapBytes: number;
+  private readonly activeLogRotateBytes: number;
 
   /** Unflushed daily-log lines (the in-memory ring buffer). */
   private pending: string[] = [];
   private lastFlushMs = 0;
+
+  /** Rotation part index of the active daily log (0 = plain '<date>.jsonl'). */
+  private logPart = 0;
+  /** dayStamp the part index belongs to ('' forces a rescan on next use). */
+  private logPartDay = '';
 
   private ride: RideInfo | null = null;
   private rideStop: (() => void) | null = null;
@@ -196,6 +225,7 @@ export class MotionLog {
     this.setTimer = deps.setTimeout ?? ((fn, ms) => setTimeout(fn, ms));
     this.clearTimer = deps.clearTimeout ?? ((h) => clearTimeout(h));
     this.dirCapBytes = deps.dirCapBytes ?? DIR_CAP_BYTES;
+    this.activeLogRotateBytes = deps.activeLogRotateBytes ?? ACTIVE_LOG_ROTATE_BYTES;
     // Anchor the flush clock to construction so the first poll doesn't flush a
     // single record immediately (throttle measures elapsed since last flush).
     this.lastFlushMs = deps.now();
@@ -252,32 +282,92 @@ export class MotionLog {
   flush(nowMs: number = this.deps.now()): void {
     this.lastFlushMs = nowMs;
     if (this.pending.length === 0) {
-      this.enforceDirCap();
+      this.enforceDirCap(nowMs);
       return;
     }
     const lines = this.pending;
     this.pending = [];
     try {
-      this.deps.fs.append(`${LOG_DIR}/${dayStamp(nowMs)}.jsonl`, lines.join('\n') + '\n');
+      this.deps.fs.append(this.activeLogRel(nowMs), lines.join('\n') + '\n');
     } catch {
       // Re-buffer for retry, then re-apply the memory bound.
       this.pending = lines.concat(this.pending);
       this.capPending();
       return;
     }
-    this.enforceDirCap();
+    // Order matters: enforce the cap while THIS part is still the protected
+    // active one, then retire it if it crossed the rotation ceiling — so a
+    // freshly-full part is never evicted in the same breath it was written.
+    this.enforceDirCap(nowMs);
+    this.maybeRotate(nowMs);
   }
 
-  /** Evict the oldest files (across both dirs) until under the disk cap. */
-  private enforceDirCap(): void {
+  /** RelPath of the active daily-log part for `nowMs` (rescans on day change). */
+  private activeLogRel(nowMs: number): string {
+    const day = dayStamp(nowMs);
+    if (day !== this.logPartDay) {
+      this.logPartDay = day;
+      this.logPart = this.findCurrentPart(day);
+    }
+    return logPartRel(day, this.logPart);
+  }
+
+  /**
+   * Highest on-disk part index for `day` — so a relaunched app resumes the
+   * part it left off at instead of re-appending to an already-full part.
+   * Returns highest+1 when that part already reached the rotation ceiling.
+   */
+  private findCurrentPart(day: string): number {
+    try {
+      const re = new RegExp(`^${day}(?:\\.(\\d+))?\\.jsonl$`);
+      let part = 0;
+      let size = 0;
+      for (const f of this.deps.fs.list(LOG_DIR)) {
+        const m = re.exec(f.name);
+        if (!m) continue;
+        const p = m[1] ? parseInt(m[1], 10) : 0;
+        if (p >= part) {
+          part = p;
+          size = f.size;
+        }
+      }
+      return size >= this.activeLogRotateBytes ? part + 1 : part;
+    } catch {
+      return 0;
+    }
+  }
+
+  /** Retire the active daily-log part once it reaches the rotation ceiling. */
+  private maybeRotate(nowMs: number): void {
+    try {
+      const rel = this.activeLogRel(nowMs);
+      const f = this.deps.fs.list(LOG_DIR).find((x) => x.relPath === rel);
+      if (f && f.size >= this.activeLogRotateBytes) {
+        // The full part becomes an evictable archive; the next flush appends
+        // to a fresh '<date>.<part>.jsonl'.
+        this.logPart += 1;
+      }
+    } catch {
+      // ignore — rotation is best-effort
+    }
+  }
+
+  /**
+   * Evict the oldest files (across both dirs) until under the disk cap.
+   * Never deletes the active ride file or today's ACTIVE daily-log part (R9:
+   * evicting the live log punched holes into the exported history). If only
+   * protected files remain, the cap may be exceeded — bounded by the active
+   * part's own rotation ceiling (ACTIVE_LOG_ROTATE_BYTES, see maybeRotate).
+   */
+  private enforceDirCap(nowMs: number = this.deps.now()): void {
     try {
       const files = [...this.deps.fs.list(LOG_DIR), ...this.deps.fs.list(RIDE_DIR)];
       let total = files.reduce((n, f) => n + f.size, 0);
       if (total <= this.dirCapBytes) return;
-      // Oldest first, but never delete the file the active ride is writing.
-      const activeRel = this.ride?.relPath;
+      const protectedRels = new Set<string>([this.activeLogRel(nowMs)]);
+      if (this.ride) protectedRels.add(this.ride.relPath);
       const victims = files
-        .filter((f) => f.relPath !== activeRel)
+        .filter((f) => !protectedRels.has(f.relPath))
         .sort((a, b) => a.modifiedMs - b.modifiedMs);
       for (const f of victims) {
         if (total <= this.dirCapBytes) break;
@@ -399,6 +489,8 @@ export class MotionLog {
   clearAll(): void {
     if (this.ride) void this.stopRide();
     this.pending = [];
+    // Everything is gone — restart daily-log rotation from part 0.
+    this.logPartDay = '';
     for (const f of [...this.safeList(LOG_DIR), ...this.safeList(RIDE_DIR)]) {
       try {
         this.deps.fs.remove(f.relPath);

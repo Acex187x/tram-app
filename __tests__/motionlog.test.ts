@@ -11,6 +11,7 @@ import {
   RIDE_DIR,
   RIDE_MAX_MS,
   dayStamp,
+  logPartRel,
   type LocationSample,
   type LocationWatcher,
   type MotionFileInfo,
@@ -248,7 +249,7 @@ describe('MotionLog daily logging', () => {
     expect(h.fs.lines(rel)).toHaveLength(MAX_PENDING);
   });
 
-  it('evicts the oldest files when the directory exceeds its cap', () => {
+  it('evicts the oldest files first when the directory exceeds its cap', () => {
     // Cap = one ~300-byte old file + one flushed record line (~220 B since the
     // R7 schema-v2 fields) — so eviction must drop exactly the two oldest files.
     const h = makeLog({ dirCapBytes: 600 });
@@ -258,11 +259,106 @@ describe('MotionLog daily logging', () => {
       h.advance(1_000);
     }
     expect(h.fs.files.size).toBe(3);
-    // A flush triggers eviction down to <= cap (keeps only the newest file).
+    // A flush triggers eviction down to <= cap (keeps only the newest old file).
     h.log.onPoll([makeState('a')], h.now());
     h.log.flush(h.now());
     const remaining = [...h.fs.files.keys()].filter((k) => k.startsWith(`${LOG_DIR}/day`));
     expect(remaining).toEqual([`${LOG_DIR}/day2.jsonl`]);
+    // R9: today's active daily log is untouched by the eviction.
+    expect(h.fs.files.has(`${LOG_DIR}/${dayStamp(h.now())}.jsonl`)).toBe(true);
+  });
+});
+
+describe('MotionLog R9 — active daily log survives the disk cap', () => {
+  it('never evicts today’s active daily log even when it alone exceeds the cap', () => {
+    // Cap far below a single record line (~220 B): the active daily log is
+    // protected, so it may overflow the shared cap instead of being deleted.
+    const h = makeLog({ dirCapBytes: 100 });
+    const rel = `${LOG_DIR}/${dayStamp(h.now())}.jsonl`;
+
+    h.log.onPoll([makeState('a')], h.now());
+    h.log.flush(h.now());
+    expect(h.fs.files.has(rel)).toBe(true);
+
+    // Repeated over-cap flushes keep appending — no data holes.
+    h.log.onPoll([makeState('a')], h.now());
+    h.log.flush(h.now());
+    expect(h.fs.lines(rel)).toHaveLength(2);
+  });
+
+  it('evicts old files to make room but keeps today’s log when over cap', () => {
+    const h = makeLog({ dirCapBytes: 100 });
+    h.fs.append(`${LOG_DIR}/old.jsonl`, 'x'.repeat(50));
+    h.advance(1_000);
+
+    h.log.onPoll([makeState('a')], h.now());
+    h.log.flush(h.now());
+
+    expect(h.fs.files.has(`${LOG_DIR}/old.jsonl`)).toBe(false);
+    expect(h.fs.files.has(`${LOG_DIR}/${dayStamp(h.now())}.jsonl`)).toBe(true);
+  });
+
+  it('rotates the active log at the soft ceiling and exports every part', async () => {
+    // Ceiling of 10 B: every flushed record (~220 B) fills the active part, so
+    // each flush retires its part and the next one opens '<date>.N.jsonl'.
+    const h = makeLog({ activeLogRotateBytes: 10 });
+    const day = dayStamp(h.now());
+
+    for (let i = 0; i < 3; i++) {
+      h.log.onPoll([makeState(`k${i}`)], h.now());
+      h.log.flush(h.now());
+      h.advance(1_000);
+    }
+
+    const parts = [logPartRel(day, 0), logPartRel(day, 1), logPartRel(day, 2)];
+    expect(parts).toEqual([
+      `${LOG_DIR}/${day}.jsonl`,
+      `${LOG_DIR}/${day}.1.jsonl`,
+      `${LOG_DIR}/${day}.2.jsonl`,
+    ]);
+    for (const rel of parts) expect(h.fs.lines(rel)).toHaveLength(1);
+
+    // listLogFiles + exportAll see the rotated parts, not just the base file.
+    expect(h.log.listLogFiles().map((f) => f.relPath).sort()).toEqual([...parts].sort());
+    const uris = await h.log.exportAll();
+    for (const rel of parts) expect(uris).toContain(`file:///fake/${rel}`);
+  });
+
+  it('rotated archive parts become evictable while the active part is kept', () => {
+    // Cap fits one ~220 B record; ceiling 10 B forces rotation on every flush.
+    const h = makeLog({ dirCapBytes: 300, activeLogRotateBytes: 10 });
+    const day = dayStamp(h.now());
+
+    h.log.onPoll([makeState('a')], h.now());
+    h.log.flush(h.now()); // writes part 0 (under cap), then retires it
+    h.advance(1_000);
+    h.log.onPoll([makeState('b')], h.now());
+    h.log.flush(h.now()); // writes part 1 → over cap → part 0 (archive) evicted
+
+    expect(h.fs.files.has(logPartRel(day, 0))).toBe(false);
+    expect(h.fs.lines(logPartRel(day, 1))).toHaveLength(1);
+  });
+
+  it('resumes at the highest existing part after a restart', () => {
+    const h = makeLog({ activeLogRotateBytes: 10 });
+    const day = dayStamp(h.now());
+    // A previous run left a full base part behind.
+    h.fs.append(logPartRel(day, 0), 'x'.repeat(20));
+
+    h.log.onPoll([makeState('a')], h.now());
+    h.log.flush(h.now());
+
+    // The full part is not appended to — writing resumed on part 1.
+    expect(h.fs.files.get(logPartRel(day, 0))!.content).toBe('x'.repeat(20));
+    expect(h.fs.lines(logPartRel(day, 1))).toHaveLength(1);
+
+    // A part still under the ceiling IS resumed (no gratuitous rotation).
+    const h2 = makeLog({ activeLogRotateBytes: 1_000_000 });
+    h2.fs.append(logPartRel(day, 1), 'y'.repeat(20) + '\n');
+    h2.log.onPoll([makeState('a')], h2.now());
+    h2.log.flush(h2.now());
+    expect(h2.fs.lines(logPartRel(day, 1))).toHaveLength(2);
+    expect(h2.fs.files.has(logPartRel(day, 2))).toBe(false);
   });
 });
 
