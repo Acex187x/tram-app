@@ -292,6 +292,15 @@ CONFIGS = [
     # noon point. D32 = measured-anyway gate record, D33 = wrong-way control.
     ("D32 tod h12=0.99 (measured)", {**NEW, "tod": {12: 0.99}}),
     ("D33 tod h12=1.05 (control, wrong way)", {**NEW, "tod": {12: 1.05}}),
+    # Day-round candidates (round 13, early afternoon 12:35-13:35): h13 vs
+    # the 0.66 norm reads x0.985 with mixed subsamples (x0.970-x1.015);
+    # paired h12->h13 fleet near-null (Δspeed +0.55, 140/113; Δbias +0.010,
+    # 133/106; centre-majority -0.99 vs outskirts +1.70 — same zonal split);
+    # live at-fix h13 signed -5.0 / %ahead 37.9 — inside all bands, the
+    # pre-registered neutral afternoon point. D34 = measured-anyway gate
+    # record, D35 = wrong-way control.
+    ("D34 tod h13=0.99 (measured)", {**NEW, "tod": {13: 0.99}}),
+    ("D35 tod h13=1.05 (control, wrong way)", {**NEW, "tod": {13: 1.05}}),
 ]
 
 print(f"trams replayed: {len(trams)}")
