@@ -369,6 +369,18 @@ CONFIGS = [
     # D47 = wrong-way control.
     ("D46 tod h19=0.95 (norm-implied, cap-contaminated)", {**NEW, "tod": {19: 0.95}}),
     ("D47 tod h19=1.05 (control, wrong way)", {**NEW, "tod": {19: 1.05}}),
+    # Day-round candidates (round 20, h19 full + h20 first read 20:00-20:39,
+    # SUNDAY pre-night; capless frame per the round-19 boundary discovery):
+    # h19 full vs 0.62 x0.968 MIXED subsamples (x0.960-x1.016), h20 vs 0.62
+    # x0.968 MIXED (x0.968-x1.016); paired h19->h20 fleet null (Δbias +0.000
+    # 113/124, Δspeed +0.65); true feed speed 21.7->22.2, centre 18.8->19.0.
+    # NB the whole 19:31-20:39 stretch carries a periodic (~4 min) app-stall
+    # class (integration collapse + at_stop invariant break, NO host load;
+    # app restarted 20:39:51) — replay uses feed fixes only (thinned by poll
+    # gaps, same for all configs; cross-config comparison stays meaningful).
+    # D48 = measured-anyway gate record, D49 = wrong-way control.
+    ("D48 tod h20=0.97 (measured, capless)", {**NEW, "tod": {20: 0.97}}),
+    ("D49 tod h20=1.05 (control, wrong way)", {**NEW, "tod": {20: 1.05}}),
 ]
 
 print(f"trams replayed: {len(trams)}")
