@@ -381,6 +381,14 @@ CONFIGS = [
     # D48 = measured-anyway gate record, D49 = wrong-way control.
     ("D48 tod h20=0.97 (measured, capless)", {**NEW, "tod": {20: 0.97}}),
     ("D49 tod h20=1.05 (control, wrong way)", {**NEW, "tod": {20: 1.05}}),
+    # Day-round candidates (round 21, h20 full + h21 first read 21:00-21:32,
+    # SUNDAY pre-night, FRESH app post-20:39:51 restart): h20 full vs 0.62
+    # x0.968 (subsamples x0.968-x0.984, all at-or-below but <=3.2%), h21 vs
+    # 0.62 x1.000 EXACT (130/130) — no norm-implied candidate for h21, so
+    # D50/D51 are a symmetric control pair around the neutral read; D48 rerun
+    # on the h20 full-hour extract is the h20-final gate record.
+    ("D50 tod h21=0.95 (symmetric control)", {**NEW, "tod": {21: 0.95}}),
+    ("D51 tod h21=1.05 (symmetric control)", {**NEW, "tod": {21: 1.05}}),
 ]
 
 print(f"trams replayed: {len(trams)}")
