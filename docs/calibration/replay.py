@@ -301,6 +301,16 @@ CONFIGS = [
     # record, D35 = wrong-way control.
     ("D34 tod h13=0.99 (measured)", {**NEW, "tod": {13: 0.99}}),
     ("D35 tod h13=1.05 (control, wrong way)", {**NEW, "tod": {13: 1.05}}),
+    # Day-round candidates (round 14, pre-peak 13:35-14:26): h14 vs the 0.66
+    # norm reads x0.985 with ALL subsamples slightly below (x0.970-x0.985);
+    # paired h13->h14 fleet near-null (Δspeed +0.28, 130/112; Δbias -0.010,
+    # 104/125) BUT centre-majority -3.19 km/h (16/48) vs outskirts +1.59
+    # (114/64) — the strongest centre downtick of the day, flagged as a
+    # possible pre-peak precursor; live at-fix h14 signed -8.0 / %ahead 37.2
+    # — at the band edge but inside. D36 = measured-anyway gate record,
+    # D37 = wrong-way control.
+    ("D36 tod h14=0.99 (measured)", {**NEW, "tod": {14: 0.99}}),
+    ("D37 tod h14=1.05 (control, wrong way)", {**NEW, "tod": {14: 1.05}}),
 ]
 
 print(f"trams replayed: {len(trams)}")
