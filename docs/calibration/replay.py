@@ -285,6 +285,13 @@ CONFIGS = [
     # record), D31 = wrong-way control.
     ("D30 tod h11=0.97 (candidate)", {**NEW, "tod": {11: 0.97}}),
     ("D31 tod h11=1.03 (control, wrong way)", {**NEW, "tod": {11: 1.03}}),
+    # Day-round candidates (round 12, midday 11:34-12:35): h12 vs the 0.66
+    # norm reads x0.985 with mixed subsamples (x0.955-x1.015); paired
+    # h11->h12 fleet null (Δspeed +0.12, 128/125; Δbias +0.000); live at-fix
+    # h12 signed -2.0 / %ahead 38.8 — everything neutral, the expected quiet
+    # noon point. D32 = measured-anyway gate record, D33 = wrong-way control.
+    ("D32 tod h12=0.99 (measured)", {**NEW, "tod": {12: 0.99}}),
+    ("D33 tod h12=1.05 (control, wrong way)", {**NEW, "tod": {12: 1.05}}),
 ]
 
 print(f"trams replayed: {len(trams)}")
