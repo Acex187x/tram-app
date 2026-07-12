@@ -335,6 +335,15 @@ CONFIGS = [
     # D41 = wrong-way control.
     ("D40 tod h16=0.98 (measured)", {**NEW, "tod": {16: 0.98}}),
     ("D41 tod h16=1.05 (control, wrong way)", {**NEW, "tod": {16: 1.05}}),
+    # Day-round candidates (round 17, evening peak h16 tail + h17 16:37-17:48):
+    # h17-only vs the 0.66 norm reads x0.985 (114/141) with ALL 8 disjoint
+    # subsamples x0.970-x0.985 — the h12-h16 fleet level, no h17 deviation.
+    # Paired h16->h17 fleet null (Δspeed -0.13, 122/130; Δbias +0.010,
+    # 131/111); the centre-majority decline keeps decelerating
+    # (-3.85 -> -1.81 -> -0.90). D42 = measured-anyway gate record,
+    # D43 = wrong-way control.
+    ("D42 tod h17=0.98 (measured)", {**NEW, "tod": {17: 0.98}}),
+    ("D43 tod h17=1.05 (control, wrong way)", {**NEW, "tod": {17: 1.05}}),
 ]
 
 print(f"trams replayed: {len(trams)}")
