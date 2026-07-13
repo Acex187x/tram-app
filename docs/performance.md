@@ -65,6 +65,8 @@ Key insights behind it:
 3. **Every timer/subscription registers with the runtime lifecycle** (created in `resume()`,
    cleared in `pause()`, guarded by the generation counter). Nothing may tick in background.
    Test: background the app, verify zero log output / network until foregrounded.
+   **One sanctioned exception:** the runtime's `rideBackground` mode while a GPS ride
+   recording is active — see "Sanctioned exception: ride recording in background" below.
 4. **Cadence boundaries stay aligned**: the 60 Hz tick zoom threshold == the fast points
    cadence threshold (one shared constant). If you change one, change both — or you
    reintroduce the aliasing stutter.
@@ -79,6 +81,35 @@ Key insights behind it:
 9. **Heavy work belongs behind the `TramFeed` boundary** — anything that could run
    server-side someday (polling, aggregation) must not leak into render-path modules.
 
+## Sanctioned exception: ride recording in background (2026-07-13)
+
+Ride recordings (Record ride) must survive the app being backgrounded — GPS fixes keep
+arriving via the expo-location background task (`UIBackgroundModes: location`), and a ride
+point correlated against a frozen simulation is useless. So while — and ONLY while — a ride
+is actively recording, backgrounding switches `TramRuntime` to **`rideBackground`** mode
+instead of the full pause:
+
+| work | cadence in `rideBackground` |
+|---|---|
+| Golemio poll (feed) | 10 s (`RIDE_BG_POLL_MS`, vs 5 s foreground) |
+| engine tick | 1 Hz (`RIDE_BG_TICK_MS`) — enough for the 1–2 Hz ride log |
+| render pushes (`frameListeners`) | **off** |
+| UI notifications (`bumpUi`, 1 Hz hooks) | **off** |
+| geometry warm-up | unchanged (needed for the ride's `gpsDist`/`lagM` fields) |
+
+Gates that keep invariant #3 meaningful:
+
+- **Entry** only from `onAppState(background/inactive)` when the injected ride-activity
+  probe (`TramRuntime.setRideActivity`, wired by `src/lib/motionlog`) reports an active
+  recording. An app without a live ride pauses fully, exactly as before.
+- **Exit**: foregrounding → full `resume()`; the ride stopping in background (user stop or
+  the 90 min auto-stop) → `notifyRideActivity()` → immediate full `pause()`. Nothing may
+  keep ticking once `isRiding()` is false.
+- Budget is minimal by construction — no Mapbox work at all (the map isn't rendered), no
+  React re-renders, one 1 Hz tick + one 10 s poll. This is the floor that keeps the ride
+  log's sim-side fields meaningful.
+- The background check in section C still applies to the **no-ride** case verbatim.
+
 ## C. How to verify (before shipping perf-touching changes)
 
 - **Unit guards:** `__tests__/tick-cadence.test.ts` pins the cadence table;
@@ -92,7 +123,9 @@ Key insights behind it:
   CPU should sit in single digits between polls; GPU duty far below 100%; thermal state
   should stay `nominal`/`fair`.
 - **Background check:** background 2 min → metro/log silence, then foreground → resumes
-  within one poll (the P0 regression class).
+  within one poll (the P0 regression class). With a ride recording active, background
+  activity must be exactly the `rideBackground` budget (10 s polls, 1 Hz tick, zero pushes)
+  and must stop entirely the moment the ride stops.
 
 Related: `docs/decisions/map-rendering.md` (rendering decisions),
 `docs/decisions/interpolation-engine.md` (engine hot path), `docs/decisions/backend-plan.md`

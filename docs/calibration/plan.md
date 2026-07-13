@@ -72,6 +72,33 @@ The existing daytime center-zone cap (07:00–19:00) folds into this table event
   `'at_stop'` + flat `obsDist` while the rider's `gpsSpeed`≈0 confirms the stand),
   dwell↔stop attribution via `nextSeq`, and inter-stop pace-factor fitting with `bias`
   recorded so the learned component can be factored out of the residual.
+- **v3** (device builds from 2026-07-13, crash-safe rewrite): two changes, both
+  backward-tolerant for parsers (reference parser: `src/lib/motionlog/rideFile.ts`).
+  1. **Meta lines** — the file now opens with a header and closes with a footer; any
+     line carrying a `type` field is meta, everything else is a point (skip unknown
+     `type`s):
+     - `{type:'ride-start', tramKey, model, line, t, schema:'v3'}` — written the INSTANT
+       recording starts (the file exists on disk before the first GPS fix; model/line
+       null when the tram had no state yet);
+     - `{type:'ride-end', t, points}` — clean stop;
+     - `{type:'ride-orphaned', t}` — appended by startup orphan recovery when the
+       process died mid-ride (crash/jetsam). Every point written before the death is
+       intact (points are appended to disk synchronously, never buffered); treat the
+       file as a valid ride without a clean end. `t` is the RECOVERY time, not the ride
+       end — use the last point's `t` for duration.
+  2. **Appended point fields** (after `posMode`; old lines remain a strict prefix —
+     detect by presence of `gpsDist`): the rider's GPS fix projected onto the tram's
+     shape (`projectPointToPolyline` over the engine geometry):
+     - `gpsDist` — distance along the shape of the projected GPS, m (1 dp);
+     - `gpsOffM` — perpendicular GPS↔shape offset, m — gate on this (e.g. < 30 m)
+       before trusting `gpsDist` (large offset = rider not on the route / GPS noise);
+     - `lagM` — `simDist − gpsDist`, m; **positive = the simulation runs AHEAD of the
+       real tram the rider is sitting in**. The headline ground-truth metric these
+       recordings exist for. All three null without geometry.
+  Also new in v3 device builds: recording continues while the app is backgrounded
+  (expo-location background task); sim-side fields then tick at 1 Hz with 10 s polls
+  (`rideBackground` mode, docs/performance.md) — expect slightly coarser `simDist`
+  steps in backgrounded stretches.
 
 ## Where things are
 

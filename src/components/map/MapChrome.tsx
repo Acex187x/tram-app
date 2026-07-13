@@ -15,6 +15,7 @@ import { LineBadge } from '@/components/ui/LineBadge';
 import { Colors, Fonts, Spacing, Tram } from '@/constants/theme';
 import { getRuntime, useAllTramStates, useTramState } from '@/hooks/tramData';
 import { usePlannerStore } from '@/stores/planner';
+import { useRidePreviewStore } from '@/stores/ridePreview';
 import { useSelectionStore } from '@/stores/selection';
 
 const STALE_AFTER_MS = 30_000;
@@ -189,17 +190,18 @@ export function BottomDock() {
   );
 }
 
-// ── Bottom banners: follow + planner-route clear ─────────────────────────────
+// ── Bottom banners: follow + planner-route clear + ride preview ──────────────
 //
-// Both are stacked glass chips above the dock. The planner chip owns the base
-// slot (where the follow banner used to sit); when a follow is also active the
-// follow banner floats one row above it. Rendered together from a single
+// All are stacked glass chips above the dock. The planner chip owns the base
+// slot, the ride-preview chip stacks above it, and the follow banner floats
+// on top of whichever of those are visible. Rendered together from a single
 // exported node so `app/index.tsx` keeps its one `<FollowBanner />`.
 
 export function FollowBanner() {
   return (
     <>
       <FollowChip />
+      <RideChip />
       <PlannerChip />
     </>
   );
@@ -210,11 +212,16 @@ function FollowChip() {
   const followKey = useSelectionStore((s) => s.followTramKey);
   const state = useTramState(followKey);
   const plannerActive = usePlannerStore((s) => s.itinerary != null);
+  const rideActive = useRidePreviewStore((s) => s.preview != null);
   const colors = useTextColors();
   if (!followKey || !state) return null;
 
-  // Float above the planner chip when both are visible.
-  const bottom = insets.bottom + BANNER_SLOT + (plannerActive ? CHIP_STACK_H : 0);
+  // Float above the planner/ride chips when they are visible.
+  const bottom =
+    insets.bottom +
+    BANNER_SLOT +
+    (plannerActive ? CHIP_STACK_H : 0) +
+    (rideActive ? CHIP_STACK_H : 0);
   const reg = state.snapshot.registrationNumber;
   // Chip body reopens the tram sheet (same pattern as the planner chip —
   // users kept losing the sheet while following); only the ✕ stops the follow.
@@ -253,6 +260,68 @@ function FollowChip() {
           }}
         >
           <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.secondary} />
+        </Pressable>
+      </GlassPanel>
+    </View>
+  );
+}
+
+/**
+ * Shown while a recorded ride is previewed on the map (RideOverlay). Tapping
+ * the chip body reopens the rides sheet (planner-chip pattern); the ✕ clears
+ * the preview. Stacks one slot above the planner chip when both are active.
+ */
+function RideChip() {
+  const insets = useSafeAreaInsets();
+  const preview = useRidePreviewStore((s) => s.preview);
+  const plannerActive = usePlannerStore((s) => s.itinerary != null);
+  const colors = useTextColors();
+  if (!preview) return null;
+
+  const { ride } = preview;
+  const label = [
+    ride.line ? `Line ${ride.line}` : null,
+    ride.tramKey ? `#${ride.tramKey}` : null,
+    ride.startedMs != null
+      ? new Date(ride.startedMs).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  const bottom = insets.bottom + BANNER_SLOT + (plannerActive ? CHIP_STACK_H : 0);
+  return (
+    <View style={[styles.followWrap, { bottom }]}>
+      <GlassPanel variant="regular" interactive style={styles.followBanner}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Reopen recorded rides"
+          style={styles.plannerBody}
+          onPress={() => {
+            tapLight();
+            router.push('/rides' as Href);
+          }}
+        >
+          <SymbolView name="record.circle" size={15} tintColor={Tram.veryLate} />
+          <Text
+            style={[styles.plannerRoute, { color: colors.text }]}
+            numberOfLines={1}
+            allowFontScaling={false}
+          >
+            {label || 'Recorded ride'}
+          </Text>
+          <SymbolView name="chevron.up" size={12} tintColor={colors.secondary} />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Hide ride preview"
+          hitSlop={8}
+          onPress={() => {
+            tapLight();
+            useRidePreviewStore.getState().setPreview(null);
+          }}
+        >
+          <SymbolView name="xmark.circle.fill" size={16} tintColor={colors.secondary} />
         </Pressable>
       </GlassPanel>
     </View>

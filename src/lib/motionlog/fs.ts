@@ -46,6 +46,11 @@ export function createExpoFS(): MotionLogFS {
       return out;
     },
 
+    read(relPath) {
+      const file = new File(baseDir(), relPath);
+      return file.exists ? file.textSync() : '';
+    },
+
     remove(relPath) {
       const file = new File(baseDir(), relPath);
       if (file.exists) file.delete();

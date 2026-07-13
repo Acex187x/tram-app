@@ -14,7 +14,10 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Tram Spotter shows your position on the map so you can find trams near you.",
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": []
+        "UIBackgroundModes": [
+          "location"
+        ],
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Tram Spotter keeps recording your ride (GPS vs simulation) while the app is in the background — only during an active ride recording."
       }
     },
     "android": {
@@ -50,7 +53,12 @@
           "RNMapboxMapsVersion": "11.20.1"
         }
       ],
-      "expo-location"
+      [
+        "expo-location",
+        {
+          "isIosBackgroundLocationEnabled": true
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

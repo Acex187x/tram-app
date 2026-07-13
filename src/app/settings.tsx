@@ -3,6 +3,7 @@
 // grouped-inset lists on Liquid Glass.
 import Constants from 'expo-constants';
 import * as Haptics from 'expo-haptics';
+import { router, type Href } from 'expo-router';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import * as WebBrowser from 'expo-web-browser';
 import { Fragment, type ReactNode } from 'react';
@@ -254,6 +255,21 @@ function MotionDataSection() {
     <View>
       <SectionLabel>Motion data</SectionLabel>
       <InsetGroup>
+        <Row
+          icon="record.circle"
+          iconColor={Tram.veryLate}
+          label="Recorded rides"
+          onPress={() => {
+            void Haptics.selectionAsync();
+            router.push('/rides' as Href);
+          }}
+        >
+          <Text style={[styles.rowValue, { color: palette.textSecondary }]}>
+            {stats.rideCount > 0 ? `${stats.rideCount}` : '—'}
+          </Text>
+          <SymbolView name="chevron.right" size={13} weight="semibold" tintColor={palette.textSecondary} />
+        </Row>
+        <RowSeparator inset={SEPARATOR_INSET} />
         <Row icon="waveform.path.ecg" iconColor={Tram.onTime} label="Export motion logs" onPress={onExportLogs}>
           <Text style={[styles.rowValue, { color: palette.textSecondary }]}>
             {stats.logCount > 0 ? `${stats.logCount}` : '—'}

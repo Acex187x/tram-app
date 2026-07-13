@@ -10,6 +10,7 @@ import {
   MotionLog,
   RIDE_DIR,
   RIDE_MAX_MS,
+  RIDE_SCHEMA,
   dayStamp,
   logPartRel,
   type LocationSample,
@@ -18,7 +19,8 @@ import {
   type MotionLogDeps,
   type MotionLogFS,
 } from '@/lib/motionlog/core';
-import type { TramPublicState } from '@/lib/types';
+import { parseRideFile } from '@/lib/motionlog/rideFile';
+import type { RouteGeometry, TramPublicState } from '@/lib/types';
 
 // ── in-memory fake filesystem ────────────────────────────────────────────────
 
@@ -60,6 +62,10 @@ class FakeFS implements MotionLogFS {
       });
     }
     return out;
+  }
+
+  read(relPath: string): string {
+    return this.files.get(relPath)?.content ?? '';
   }
 
   remove(relPath: string): void {
@@ -145,12 +151,14 @@ function makeLog(over: Partial<MotionLogDeps> = {}) {
   const fs = new FakeFS(() => now);
   const location = new FakeLocation();
   const stateMap = new Map<string, TramPublicState>();
+  const geomMap = new Map<string, RouteGeometry>();
 
   const deps: MotionLogDeps = {
     fs,
     location,
     now: () => now,
     stateProvider: (key) => stateMap.get(key),
+    geometry: (key) => geomMap.get(key),
     setTimeout: ((fn: () => void, ms: number) => {
       const t: Timer = { fn, at: now + ms };
       timers.push(t);
@@ -169,6 +177,7 @@ function makeLog(over: Partial<MotionLogDeps> = {}) {
     fs,
     location,
     stateMap,
+    geomMap,
     advance(ms: number) {
       now += ms;
       for (const t of [...timers]) {
@@ -364,7 +373,7 @@ describe('MotionLog R9 — active daily log survives the disk cap', () => {
 });
 
 describe('MotionLog ride recording', () => {
-  it('records GPS+sim samples to a ride file and returns its uri on stop', async () => {
+  it('records GPS+sim samples to a ride file and returns the saved file on stop', async () => {
     const h = makeLog({ positionMode: () => 'live' });
     h.stateMap.set('9201', makeState('9201'));
 
@@ -378,16 +387,29 @@ describe('MotionLog ride recording', () => {
 
     const info = h.log.rideInfo();
     expect(info?.points).toBe(2);
+    expect(info?.lastPointMs).toBe(h.now());
 
-    const uri = await h.log.stopRide();
-    expect(uri).toMatch(/^file:\/\/\/fake\/rides\/.*-9201\.jsonl$/);
+    const saved = await h.log.stopRide();
+    expect(saved?.uri).toMatch(/^file:\/\/\/fake\/rides\/.*-9201\.jsonl$/);
+    expect(saved?.points).toBe(2);
+    expect(saved?.bytes).toBeGreaterThan(0);
     expect(h.log.isRiding()).toBe(false);
     expect(h.location.stopped).toBe(1);
 
     const rel = info!.relPath;
     const lines = h.fs.lines(rel);
-    expect(lines).toHaveLength(2);
-    const rec = JSON.parse(lines[0]);
+    // v3: header + 2 points + footer.
+    expect(lines).toHaveLength(4);
+    expect(JSON.parse(lines[0])).toEqual({
+      type: 'ride-start',
+      tramKey: '9201',
+      model: '15t',
+      line: '9',
+      t: info!.startedMs,
+      schema: RIDE_SCHEMA,
+    });
+    expect(JSON.parse(lines[3])).toMatchObject({ type: 'ride-end', points: 2 });
+    const rec = JSON.parse(lines[1]);
     expect(rec).toMatchObject({ gpsLat: 50.081, gpsSpeed: 6.2, model: '15t', line: '9', simDist: 1200 });
     // Ride schema v2: raw AVL context + learned bias + active position mode.
     expect(rec).toMatchObject({
@@ -398,10 +420,17 @@ describe('MotionLog ride recording', () => {
       bias: 1.07,
       posMode: 'live',
     });
+    // v3 fields are null without geometry.
+    expect(rec.gpsDist).toBeNull();
+    expect(rec.gpsOffM).toBeNull();
+    expect(rec.lagM).toBeNull();
     // New keys are appended AFTER the historic ones — old lines stay a prefix.
     const keys = Object.keys(rec);
-    expect(keys.slice(-6)).toEqual(['obsAt', 'statePos', 'delayS', 'nextSeq', 'bias', 'posMode']);
-    expect(keys.indexOf('phase')).toBe(keys.length - 7);
+    expect(keys.slice(-9)).toEqual([
+      'obsAt', 'statePos', 'delayS', 'nextSeq', 'bias', 'posMode',
+      'gpsDist', 'gpsOffM', 'lagM',
+    ]);
+    expect(keys.indexOf('phase')).toBe(keys.length - 10);
   });
 
   it('records nulls for sim fields when no state is available', async () => {
@@ -410,7 +439,7 @@ describe('MotionLog ride recording', () => {
     h.location.push({ lat: 50.09, lng: 14.4 });
     const rel = h.log.rideInfo()!.relPath;
     await h.log.stopRide();
-    const rec = JSON.parse(h.fs.lines(rel)[0]);
+    const rec = JSON.parse(h.fs.lines(rel)[1]); // line 0 is the header
     expect(rec.simDist).toBeNull();
     expect(rec.model).toBeNull();
     expect(rec.gpsLat).toBe(50.09);
@@ -431,11 +460,13 @@ describe('MotionLog ride recording', () => {
     expect(h.location.started).toBe(1);
   });
 
-  it('returns false and stays idle when permission is denied', async () => {
+  it('returns false, stays idle and leaves no phantom file when permission is denied', async () => {
     const h = makeLog();
     h.location.denied = true;
     expect(await h.log.startRide('a')).toBe(false);
     expect(h.log.isRiding()).toBe(false);
+    // The eagerly-created header-only file is cleaned up — nothing was recorded.
+    expect(h.fs.list(RIDE_DIR)).toHaveLength(0);
   });
 
   it('auto-stops the ride after RIDE_MAX_MS', async () => {
@@ -455,6 +486,179 @@ describe('MotionLog ride recording', () => {
     for (let i = 0; i < 30; i++) h.location.push();
     expect(h.fs.files.has(rel)).toBe(true);
     await h.log.stopRide();
+  });
+});
+
+describe('MotionLog ride crash-safety (v3)', () => {
+  it('creates the ride file with a ride-start header IMMEDIATELY on startRide', async () => {
+    const h = makeLog();
+    h.stateMap.set('9201', makeState('9201'));
+    await h.log.startRide('9201');
+    // No GPS fix yet — the file must already exist and be valid JSONL.
+    const rel = h.log.rideInfo()!.relPath;
+    const lines = h.fs.lines(rel);
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0])).toMatchObject({ type: 'ride-start', tramKey: '9201', schema: RIDE_SCHEMA });
+    await h.log.stopRide();
+  });
+
+  it('appends every GPS point to disk synchronously (no buffering window)', async () => {
+    const h = makeLog();
+    await h.log.startRide('a');
+    const rel = h.log.rideInfo()!.relPath;
+    for (let i = 1; i <= 5; i++) {
+      h.location.push();
+      // Header + i points, on disk after EVERY sample — a crash loses nothing.
+      expect(h.fs.lines(rel)).toHaveLength(1 + i);
+    }
+    await h.log.stopRide();
+  });
+
+  it('THE LOSS BUG: a completed (stopped) ride survives disk-cap eviction even when the active daily log alone exceeds the cap', async () => {
+    // Regression for the real-world loss: the active daily-log part may legally
+    // exceed the shared cap (R9 rotation ceiling > cap). enforceDirCap then
+    // could never get under the cap and deleted EVERY unprotected file — and
+    // stopRide un-protected the ride before flushing, so the file the user had
+    // just saved was evicted milliseconds later.
+    const h = makeLog({ dirCapBytes: 300 });
+    await h.log.startRide('a');
+    h.location.push();
+    const rel = h.log.rideInfo()!.relPath;
+    const saved = await h.log.stopRide(); // flush + cap enforcement run inside
+    expect(saved).not.toBeNull();
+
+    // Grow the protected active daily log far past the cap, flushing repeatedly.
+    for (let i = 0; i < 5; i++) {
+      h.advance(1_000);
+      h.log.onPoll([makeState('x')], h.now());
+      h.log.flush(h.now());
+    }
+    const logRel = `${LOG_DIR}/${dayStamp(h.now())}.jsonl`;
+    expect(h.fs.files.get(logRel)!.content.length).toBeGreaterThan(300);
+
+    // The completed ride is still there, byte-for-byte.
+    expect(h.fs.files.has(rel)).toBe(true);
+    expect(h.log.listRideFiles().map((f) => f.relPath)).toContain(rel);
+  });
+
+  it('writes a ride-end footer on stop and recoverOrphanRides leaves closed files alone', async () => {
+    const h = makeLog();
+    await h.log.startRide('a');
+    h.location.push();
+    const rel = h.log.rideInfo()!.relPath;
+    await h.log.stopRide();
+    const before = h.fs.files.get(rel)!.content;
+    expect(JSON.parse(h.fs.lines(rel).at(-1)!)).toMatchObject({ type: 'ride-end', points: 1 });
+
+    expect(h.log.recoverOrphanRides()).toBe(0);
+    expect(h.fs.files.get(rel)!.content).toBe(before); // untouched
+  });
+
+  it('closes unfooted ride files with a ride-orphaned footer at startup', () => {
+    const h = makeLog();
+    // A previous process died mid-ride: header + one point, no footer.
+    const rel = `${RIDE_DIR}/20260713-101500-9251.jsonl`;
+    h.fs.append(rel, '{"type":"ride-start","tramKey":"9251","model":null,"line":null,"t":1,"schema":"v3"}\n');
+    h.fs.append(rel, '{"t":2,"gpsLat":50.08,"gpsLng":14.42}\n');
+    // Another died so hard the tail line is half-written.
+    const relTorn = `${RIDE_DIR}/20260713-090000-8123.jsonl`;
+    h.fs.append(relTorn, '{"t":2,"gpsLat":50.08,"gpsLng":14.42}\n{"t":3,"gps');
+
+    expect(h.log.recoverOrphanRides()).toBe(2);
+    expect(JSON.parse(h.fs.lines(rel).at(-1)!)).toMatchObject({ type: 'ride-orphaned' });
+    // The orphaned file still parses as a valid ride with its data intact.
+    const parsed = parseRideFile(h.fs.read(rel));
+    expect(parsed.orphaned).toBe(true);
+    expect(parsed.points).toBe(1);
+    expect(parsed.gpsTrack).toEqual([[14.42, 50.08]]);
+
+    // Recovery is idempotent.
+    expect(h.log.recoverOrphanRides()).toBe(0);
+  });
+
+  it('does not orphan-close the ACTIVE ride file', async () => {
+    const h = makeLog();
+    await h.log.startRide('a');
+    h.location.push();
+    expect(h.log.recoverOrphanRides()).toBe(0);
+    expect(h.log.isRiding()).toBe(true);
+    await h.log.stopRide();
+  });
+});
+
+describe('MotionLog ride ground truth (v3 gpsDist/lagM)', () => {
+  /** Straight ~1.43 km west→east shape at lat 50 with exact cumDistM. */
+  function straightGeometry(): RouteGeometry {
+    const coords: [number, number][] = [
+      [14.4, 50.0],
+      [14.41, 50.0],
+      [14.42, 50.0],
+    ];
+    // Matching cumulative distances (values only need to be consistent —
+    // projectPointToPolyline interpolates between them).
+    return {
+      shapeId: 's',
+      tripId: 't',
+      routeId: 'r',
+      line: '9',
+      headsign: 'h',
+      coordinates: coords,
+      cumDistM: [0, 715, 1430],
+      totalM: 1430,
+      stops: [],
+    } as unknown as RouteGeometry;
+  }
+
+  it('projects the GPS fix onto the shape and derives lagM = simDist − gpsDist', async () => {
+    const h = makeLog();
+    h.stateMap.set('9201', makeState('9201', { simDistM: 1200 } as Partial<TramPublicState>));
+    h.geomMap.set('9201', straightGeometry());
+    await h.log.startRide('9201');
+
+    // Rider exactly at the middle vertex → gpsDist = 715, offset 0.
+    h.location.push({ lat: 50.0, lng: 14.41 });
+    // Rider abeam the first vertex, ~111 m north of the line → gpsDist 0.
+    h.location.push({ lat: 50.001, lng: 14.4 });
+
+    const rel = h.log.rideInfo()!.relPath;
+    await h.log.stopRide();
+    const lines = h.fs.lines(rel);
+
+    const mid = JSON.parse(lines[1]);
+    expect(mid.gpsDist).toBeCloseTo(715, 0);
+    expect(mid.gpsOffM).toBeCloseTo(0, 0);
+    // Sim at 1200 m, real tram (rider) at 715 m → sim runs 485 m AHEAD.
+    expect(mid.lagM).toBeCloseTo(1200 - 715, 0);
+
+    const off = JSON.parse(lines[2]);
+    expect(off.gpsDist).toBeCloseTo(0, 0);
+    expect(off.gpsOffM).toBeCloseTo(111.3, 0);
+    expect(off.lagM).toBeCloseTo(1200, 0);
+  });
+
+  it('leaves the v3 fields null without geometry and parses meanLagM per file', async () => {
+    const h = makeLog();
+    h.stateMap.set('9201', makeState('9201'));
+    h.geomMap.set('9201', straightGeometry());
+    await h.log.startRide('9201');
+    h.location.push({ lat: 50.0, lng: 14.41 });
+    h.geomMap.delete('9201'); // geometry lost mid-ride (trip change etc.)
+    h.location.push({ lat: 50.0, lng: 14.41 });
+    const rel = h.log.rideInfo()!.relPath;
+    await h.log.stopRide();
+
+    const withGeom = JSON.parse(h.fs.lines(rel)[1]);
+    const withoutGeom = JSON.parse(h.fs.lines(rel)[2]);
+    expect(withGeom.lagM).toBeCloseTo(1200 - 715, 0);
+    expect(withoutGeom.gpsDist).toBeNull();
+    expect(withoutGeom.lagM).toBeNull();
+
+    const parsed = parseRideFile(h.fs.read(rel));
+    expect(parsed.points).toBe(2);
+    expect(parsed.meanLagM).toBeCloseTo(1200 - 715, 0); // only non-null lags averaged
+    expect(parsed.closed).toBe(true);
+    expect(parsed.orphaned).toBe(false);
+    expect(parsed.line).toBe('9');
   });
 });
 

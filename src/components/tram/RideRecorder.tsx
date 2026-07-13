@@ -1,9 +1,14 @@
 // Record-ride control for the tram detail sheet. Starts/stops a GPS ride
 // recording (real-vs-sim telemetry) via the MotionLog singleton, so recording
-// survives the sheet closing. Shows a pulsing red dot, elapsed time and the
-// number of captured points while active. Only one ride runs at a time; if a
-// different tram is recording, this surfaces a chip pointing at it.
+// survives the sheet closing. While active it shows a live reliability
+// readout — points on disk, seconds since the last fix, file size, and whether
+// background GPS is active (with an explicit warning when it is not) — because
+// a recording the user cannot verify is a recording they cannot trust
+// (two early recordings were lost silently). Stopping confirms the saved file
+// with its path and size. Only one ride runs at a time; if a different tram is
+// recording, this surfaces a chip pointing at it.
 import * as Haptics from 'expo-haptics';
+import { router, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
@@ -11,6 +16,12 @@ import { Alert, Animated, Pressable, StyleSheet, Text, useColorScheme, View } fr
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { Colors, Tram } from '@/constants/theme';
 import { useMotionLog } from '@/lib/motionlog';
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function fmtElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -79,7 +90,19 @@ export function RideRecorder({ tramKey, line }: { tramKey: string; line: string 
     setBusy(true);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Rigid);
     try {
-      await log.stopRide();
+      const saved = await log.stopRide();
+      if (saved) {
+        // Explicit save confirmation — the user must be able to verify the
+        // recording exists (two early rides vanished silently).
+        Alert.alert(
+          'Ride saved',
+          `${saved.relPath}\n${saved.points} point${saved.points === 1 ? '' : 's'} · ${fmtBytes(saved.bytes)}`,
+          [
+            { text: 'View rides', onPress: () => router.push('/rides' as Href) },
+            { text: 'OK', style: 'default' },
+          ],
+        );
+      }
     } finally {
       setBusy(false);
     }
@@ -110,6 +133,14 @@ export function RideRecorder({ tramKey, line }: { tramKey: string; line: string 
   }
 
   if (recordingThis && ride) {
+    const bytes = log.rideFileBytes();
+    const mode = log.rideLocationMode();
+    const lastAgoS =
+      ride.lastPointMs != null ? Math.max(0, Math.round((Date.now() - ride.lastPointMs) / 1000)) : null;
+    const lastLabel =
+      lastAgoS == null ? 'no fix yet' : lastAgoS <= 1 ? 'fix just now' : `last fix ${lastAgoS} s ago`;
+    // A fix gap > 15 s while recording means GPS delivery has stalled.
+    const stalled = lastAgoS != null && lastAgoS > 15;
     return (
       <GlassPanel variant="clear" style={styles.card}>
         <View style={styles.row}>
@@ -119,8 +150,24 @@ export function RideRecorder({ tramKey, line }: { tramKey: string; line: string 
               Recording · {fmtElapsed(Date.now() - ride.startedMs)}
             </Text>
             <Text style={[styles.subtitle, { color: c.textSecondary }]}>
-              {ride.points} point{ride.points === 1 ? '' : 's'} captured
+              {ride.points} pt{ride.points === 1 ? '' : 's'} · {lastLabel} · {fmtBytes(bytes)} on disk
             </Text>
+            {mode === 'background' ? (
+              <Text style={[styles.statusLine, { color: Tram.onTime }]}>
+                Background GPS active — recording continues if you leave the app
+              </Text>
+            ) : mode === 'foreground' ? (
+              <Text style={[styles.statusLine, { color: Tram.late }]}>
+                Foreground only — keep the app open or the recording pauses
+              </Text>
+            ) : (
+              <Text style={[styles.statusLine, { color: c.textSecondary }]}>Starting GPS…</Text>
+            )}
+            {stalled && (
+              <Text style={[styles.statusLine, { color: Tram.veryLate }]}>
+                GPS stalled — check the location permission in Settings
+              </Text>
+            )}
           </View>
           <Pressable
             accessibilityRole="button"
@@ -174,6 +221,7 @@ const styles = StyleSheet.create({
   rowText: { flex: 1, gap: 2 },
   title: { fontSize: 15, fontWeight: '600' },
   subtitle: { fontSize: 12, lineHeight: 16 },
+  statusLine: { fontSize: 11, fontWeight: '600', lineHeight: 15 },
   recDot: {
     backgroundColor: Tram.veryLate,
     borderRadius: 7,

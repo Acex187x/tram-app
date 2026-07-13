@@ -19,9 +19,20 @@
 //
 //   • Ride recording (rides/<ts>-<key>.jsonl): while the user is physically on a
 //     tram, GPS fixes (~1 Hz) are correlated with the simulated state and
-//     appended live (ride schema v2 appends raw-AVL context — obsAt/statePos/
-//     delayS/nextSeq/bias/posMode — see rideRecord). Auto-stops after
-//     RIDE_MAX_MS to spare the battery.
+//     appended live (ride schema v3 — see rideRecord and
+//     docs/calibration/plan.md). Auto-stops after RIDE_MAX_MS to spare the
+//     battery. CRASH-SAFETY CONTRACT (two device recordings were lost to the
+//     pre-v3 design — see the fix notes below):
+//       – startRide writes a {type:'ride-start'} header line IMMEDIATELY, so
+//         the file exists on disk from second zero;
+//       – every GPS point is appended to disk synchronously (no buffering);
+//       – stopRide writes a {type:'ride-end'} footer;
+//       – a file whose last line is not a footer was interrupted by process
+//         death — recoverOrphanRides() (called at app start) closes it with a
+//         {type:'ride-orphaned'} footer; it stays listed/exported like any ride;
+//       – ride files are NEVER victims of the disk-cap eviction (this was loss
+//         vector #1: completed rides aged out of the 8 MB cap within ~20 min of
+//         passive logging). Only clearAll() deletes rides.
 //
 // All I/O, time, location and timers are injected (see MotionLogDeps) so the
 // buffering/flush/eviction logic is unit-testable with in-memory fakes.
@@ -33,7 +44,8 @@
 // wrapper (it builds the records itself via feed/calibration).
 import { toCalibrationRecord, toCalibrationRecords } from '@/lib/feed/calibration';
 import type { CalibrationRecord } from '@/lib/feed/types';
-import type { TramPublicState } from '@/lib/types';
+import { projectPointToPolyline, type PolylineProjection } from '@/lib/geo/polyline';
+import type { RouteGeometry, TramPublicState } from '@/lib/types';
 
 // ── injected boundaries ──────────────────────────────────────────────────────
 
@@ -56,6 +68,8 @@ export interface MotionLogFS {
   append(relPath: string, text: string): void;
   /** List files directly under a relative dir (non-recursive). */
   list(relDir: string): MotionFileInfo[];
+  /** Full text content of a file; '' when absent (orphan-recovery scan). */
+  read(relPath: string): string;
   /** Delete a file by relPath; no-op when absent. */
   remove(relPath: string): void;
   /** Absolute file:// uri for a relPath. */
@@ -72,9 +86,19 @@ export interface LocationSample {
   accuracy: number | null;
 }
 
+/** How ride GPS fixes are being delivered (honest UI status). */
+export type LocationWatchMode = 'background' | 'foreground';
+
 /** Location seam. `start` resolves once watching begins; rejects if denied. */
 export interface LocationWatcher {
   start(onSample: (s: LocationSample) => void): Promise<() => void>;
+  /**
+   * How the active watch delivers fixes: 'background' (survives the app being
+   * backgrounded — expo-location task updates) or 'foreground' (dies on
+   * suspend — the watchPositionAsync fallback). null when not watching or the
+   * implementation can't tell (fakes).
+   */
+  mode?(): LocationWatchMode | null;
 }
 
 export interface MotionLogDeps {
@@ -84,6 +108,12 @@ export interface MotionLogDeps {
   now: () => number;
   /** Latest public state for a tram key (from the engine), or undefined. */
   stateProvider: (key: string) => TramPublicState | undefined;
+  /**
+   * Geometry currently driving a tram's sim (engine.getGeometry), for
+   * projecting the rider's GPS onto the tram's shape (gpsDist/lagM ride
+   * fields). Optional seam; ride fields are null without it.
+   */
+  geometry?: (key: string) => RouteGeometry | undefined;
   /**
    * Current position-mode setting ('smooth' | 'live'), for ride records —
    * which rendering the user was visually comparing the tram against.
@@ -120,6 +150,8 @@ export const DIR_CAP_BYTES = 8 * 1024 * 1024;
 export const ACTIVE_LOG_ROTATE_BYTES = 16 * 1024 * 1024;
 /** Auto-stop a ride after this long (battery guard). */
 export const RIDE_MAX_MS = 90 * 60 * 1000;
+/** Ride on-disk schema version, written into the ride-start header. */
+export const RIDE_SCHEMA = 'v3';
 
 // ── record shapes (kept compact on disk) ─────────────────────────────────────
 
@@ -128,6 +160,17 @@ export interface RideInfo {
   startedMs: number;
   points: number;
   relPath: string;
+  /** Wall-clock ms of the last appended GPS point; null before the first. */
+  lastPointMs: number | null;
+}
+
+/** What stopRide hands back for the "ride saved" confirmation UI. */
+export interface RideStopResult {
+  uri: string;
+  relPath: string;
+  points: number;
+  /** On-disk size after the ride-end footer, bytes (0 if unlistable). */
+  bytes: number;
 }
 
 export interface MotionStats {
@@ -186,11 +229,14 @@ export function pollRecord(s: TramPublicState, t: number): string {
  * Build one ride record line correlating a GPS fix with the sim (no newline).
  * Field order is the on-disk format — new fields are APPENDED so old lines
  * remain a strict prefix (same rule as feed/calibration CalibrationRecord).
+ * `gpsProj` is the rider's GPS fix projected onto the tram's shape (null
+ * without geometry) — it yields the ground-truth lag metric lagM.
  */
 export function rideRecord(
   sample: LocationSample,
   s: TramPublicState | undefined,
   posMode?: string | null,
+  gpsProj?: PolylineProjection | null,
 ): string {
   return JSON.stringify({
     t: sample.t,
@@ -218,7 +264,40 @@ export function rideRecord(
     nextSeq: s ? r(s.snapshot.nextStopSequence) : null,
     bias: s ? r(s.paceBias, 2) : null,
     posMode: posMode ?? null,
+    // Ride schema v3 — appended AFTER the v2 fields (old parsers see a strict
+    // prefix; detect by presence of `gpsDist`). The rider's GPS projected onto
+    // the tram's shape — the ground-truth lag of the real tram (which the
+    // rider is sitting in) vs the simulation:
+    //   gpsDist  distance along the shape of the rider's projected GPS (m)
+    //   gpsOffM  perpendicular offset GPS↔shape (m) — projection quality gate
+    //   lagM     simDist − gpsDist; POSITIVE = the simulation runs AHEAD of
+    //            the real tram. The headline calibration metric.
+    gpsDist: gpsProj ? r(gpsProj.distM, 1) : null,
+    gpsOffM: gpsProj ? r(gpsProj.offsetM, 1) : null,
+    lagM: gpsProj && s && Number.isFinite(s.simDistM) ? r(s.simDistM - gpsProj.distM, 1) : null,
   });
+}
+
+/** Ride file header line (no newline) — written the instant a ride starts. */
+export function rideStartRecord(
+  tramKey: string,
+  s: TramPublicState | undefined,
+  t: number,
+): string {
+  return JSON.stringify({
+    type: 'ride-start',
+    tramKey,
+    model: s ? s.model.id : null,
+    line: s ? s.snapshot.line : null,
+    t,
+    schema: RIDE_SCHEMA,
+  });
+}
+
+/** True when a parsed ride-file line is a closing footer. */
+function isRideFooter(rec: unknown): boolean {
+  const type = (rec as { type?: unknown } | null)?.type;
+  return type === 'ride-end' || type === 'ride-orphaned';
 }
 
 // ── the engine ───────────────────────────────────────────────────────────────
@@ -379,21 +458,25 @@ export class MotionLog {
   }
 
   /**
-   * Evict the oldest files (across both dirs) until under the disk cap.
-   * Never deletes the active ride file or today's ACTIVE daily-log part (R9:
-   * evicting the live log punched holes into the exported history). If only
-   * protected files remain, the cap may be exceeded — bounded by the active
-   * part's own rotation ceiling (ACTIVE_LOG_ROTATE_BYTES, see maybeRotate).
+   * Evict the oldest DAILY-LOG files until under the disk cap. Ride files are
+   * NEVER victims — completed rides used to age out of the shared cap within
+   * ~20 min of passive logging (~400 KB/min of calibration records), which is
+   * how the first two device recordings were lost. Rides are tiny (~1 Hz,
+   * ≤90 min) and only clearAll() deletes them; they still count toward the
+   * total, so log archives are evicted more eagerly while rides exist. Today's
+   * ACTIVE daily-log part is also protected (R9: evicting the live log punched
+   * holes into the exported history) — if only protected files remain the cap
+   * may be exceeded, bounded by the active part's own rotation ceiling
+   * (ACTIVE_LOG_ROTATE_BYTES, see maybeRotate).
    */
   private enforceDirCap(nowMs: number = this.deps.now()): void {
     try {
       const files = [...this.deps.fs.list(LOG_DIR), ...this.deps.fs.list(RIDE_DIR)];
       let total = files.reduce((n, f) => n + f.size, 0);
       if (total <= this.dirCapBytes) return;
-      const protectedRels = new Set<string>([this.activeLogRel(nowMs)]);
-      if (this.ride) protectedRels.add(this.ride.relPath);
+      const activeLog = this.activeLogRel(nowMs);
       const victims = files
-        .filter((f) => !protectedRels.has(f.relPath))
+        .filter((f) => f.relPath.startsWith(`${LOG_DIR}/`) && f.relPath !== activeLog)
         .sort((a, b) => a.modifiedMs - b.modifiedMs);
       for (const f of victims) {
         if (total <= this.dirCapBytes) break;
@@ -416,21 +499,56 @@ export class MotionLog {
   }
 
   /**
+   * On-disk size of the active ride file, bytes (0 when idle/unlistable) —
+   * the RideRecorder's "on disk" live readout.
+   */
+  rideFileBytes(): number {
+    const ride = this.ride;
+    if (!ride) return 0;
+    return this.safeList(RIDE_DIR).find((f) => f.relPath === ride.relPath)?.size ?? 0;
+  }
+
+  /**
+   * How the active ride's GPS fixes are delivered: 'background' (recording
+   * survives backgrounding), 'foreground' (fallback — dies on suspend), or
+   * null while idle / still acquiring the watch (honest UI status).
+   */
+  rideLocationMode(): LocationWatchMode | null {
+    if (!this.ride || !this.rideStop) return null;
+    return this.deps.location.mode?.() ?? null;
+  }
+
+  /**
    * Begin a GPS ride recording for `tramKey`. One at a time. Resolves true when
    * watching started, false if a ride is already active or permission failed.
+   * Crash-safety: the ride file + its {type:'ride-start'} header hit the disk
+   * BEFORE the (possibly slow) permission/watch acquisition — a process death
+   * at any later moment leaves a valid JSONL that orphan recovery closes.
    */
   async startRide(tramKey: string): Promise<boolean> {
     if (this.ride) return false;
     const startedMs = this.deps.now();
     const relPath = `${RIDE_DIR}/${fileStamp(startedMs)}-${sanitizeKey(tramKey)}.jsonl`;
     // Claim the slot before awaiting so concurrent calls can't double-start.
-    this.ride = { key: tramKey, startedMs, points: 0, relPath };
+    this.ride = { key: tramKey, startedMs, points: 0, relPath, lastPointMs: null };
+    try {
+      this.deps.fs.append(relPath, rideStartRecord(tramKey, this.deps.stateProvider(tramKey), startedMs) + '\n');
+    } catch {
+      // Header is best-effort — point appends may still succeed later.
+    }
     this.notify();
     try {
       this.rideStop = await this.deps.location.start((sample) => this.onRideSample(sample));
     } catch {
       this.ride = null;
       this.rideStop = null;
+      try {
+        // Nothing was recorded — drop the header-only file instead of leaving
+        // a phantom "ride" in the export list.
+        this.deps.fs.remove(relPath);
+      } catch {
+        // ignore
+      }
       this.notify();
       return false;
     }
@@ -441,6 +559,7 @@ export class MotionLog {
       return false;
     }
     this.autoStopTimer = this.setTimer(() => void this.stopRide(), RIDE_MAX_MS);
+    this.notify(); // rideLocationMode is known now
     return true;
   }
 
@@ -450,9 +569,19 @@ export class MotionLog {
     try {
       const state = this.deps.stateProvider(ride.key);
       const posMode = this.deps.positionMode?.() ?? null;
-      this.deps.fs.append(ride.relPath, rideRecord(sample, state, posMode) + '\n');
+      // Ground truth (v3): the rider's GPS projected onto the tram's shape.
+      const geom = this.deps.geometry?.(ride.key);
+      const gpsProj =
+        geom && geom.coordinates.length > 1
+          ? projectPointToPolyline([sample.lng, sample.lat], geom.coordinates, geom.cumDistM)
+          : null;
+      // Appended to disk IMMEDIATELY (never buffered) — a crash/jetsam loses
+      // at most the point being written, not the recording.
+      this.deps.fs.append(ride.relPath, rideRecord(sample, state, posMode, gpsProj) + '\n');
       ride.points += 1;
-      // Rides are low-volume; still keep total disk usage bounded.
+      ride.lastPointMs = this.deps.now();
+      // Rides are low-volume; still keep total disk usage bounded (rides are
+      // never victims — this evicts log archives to compensate).
       if (ride.points % 30 === 0) this.enforceDirCap();
       this.notify();
     } catch {
@@ -460,8 +589,8 @@ export class MotionLog {
     }
   }
 
-  /** Stop the active ride; returns its file uri (or null if not riding). */
-  async stopRide(): Promise<string | null> {
+  /** Stop the active ride; returns the saved file info (null if not riding). */
+  async stopRide(): Promise<RideStopResult | null> {
     const ride = this.ride;
     if (!ride) return null;
     this.ride = null;
@@ -475,9 +604,67 @@ export class MotionLog {
       // ignore
     }
     this.rideStop = null;
+    try {
+      this.deps.fs.append(
+        ride.relPath,
+        JSON.stringify({ type: 'ride-end', t: this.deps.now(), points: ride.points }) + '\n',
+      );
+    } catch {
+      // best-effort — an unclosed file is orphan-recovered on next launch
+    }
     this.flush(this.deps.now());
     this.notify();
-    return this.deps.fs.uri(ride.relPath);
+    return {
+      uri: this.deps.fs.uri(ride.relPath),
+      relPath: ride.relPath,
+      points: ride.points,
+      bytes: this.safeList(RIDE_DIR).find((f) => f.relPath === ride.relPath)?.size ?? 0,
+    };
+  }
+
+  /**
+   * Close ride files left open by a previous process death: any file in
+   * rides/ whose last line is not a {type:'ride-end'|'ride-orphaned'} footer
+   * gets a {type:'ride-orphaned', t} footer appended. The data recorded up to
+   * the death is intact (points are written synchronously) and the file stays
+   * listed/exported like any completed ride. Call once at app start (the
+   * singleton factory does). Returns the number of files closed; never throws.
+   */
+  recoverOrphanRides(): number {
+    let recovered = 0;
+    try {
+      for (const f of this.safeList(RIDE_DIR)) {
+        if (this.ride && f.relPath === this.ride.relPath) continue; // live ride
+        try {
+          const text = this.deps.fs.read(f.relPath);
+          const lines = text.trimEnd().split('\n');
+          const last = lines[lines.length - 1] ?? '';
+          let closed = false;
+          try {
+            closed = isRideFooter(JSON.parse(last));
+          } catch {
+            // corrupt/half-written tail line — definitely interrupted
+          }
+          if (!closed) {
+            // A file killed mid-append may lack its trailing newline — the
+            // footer must start a FRESH line, or it would concatenate onto the
+            // torn tail and recovery would re-orphan the file forever.
+            const sep = text.length > 0 && !text.endsWith('\n') ? '\n' : '';
+            this.deps.fs.append(
+              f.relPath,
+              sep + JSON.stringify({ type: 'ride-orphaned', t: this.deps.now() }) + '\n',
+            );
+            recovered += 1;
+          }
+        } catch {
+          // per-file best-effort
+        }
+      }
+    } catch {
+      // recovery must never break startup
+    }
+    if (recovered > 0) this.notify();
+    return recovered;
   }
 
   // — export / stats —
@@ -488,6 +675,15 @@ export class MotionLog {
 
   listRideFiles(): MotionFileInfo[] {
     return this.sorted(this.safeList(RIDE_DIR));
+  }
+
+  /** Full JSONL text of a ride file ('' when unreadable) — list/preview UI. */
+  readRideFile(relPath: string): string {
+    try {
+      return this.deps.fs.read(relPath);
+    } catch {
+      return '';
+    }
   }
 
   /** All motion-data file uris (logs + rides), newest first. Flushes first. */

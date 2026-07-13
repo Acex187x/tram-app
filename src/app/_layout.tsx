@@ -2,6 +2,12 @@ import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useColorScheme } from 'react-native';
 
+// Side-effect import: registers the ride background-location task
+// (TaskManager.defineTask) in the GLOBAL scope of the bundle — required by the
+// Expo v57 TaskManager contract so iOS can deliver locations after relaunching
+// the app headless in the background. Must stay a top-level module import.
+import '@/lib/motionlog/location';
+
 SplashScreen.preventAutoHideAsync();
 // The map screen hides the splash once the base map has rendered.
 
@@ -31,6 +37,7 @@ export default function RootLayout() {
         <Stack.Screen name="planner" options={sheet([0.6, 0.95])} />
         <Stack.Screen name="search" options={sheet([0.5, 0.95])} />
         <Stack.Screen name="settings" options={sheet([0.55, 0.95])} />
+        <Stack.Screen name="rides" options={sheet([0.5, 0.95])} />
         <Stack.Screen
           name="model/[id]"
           options={{ presentation: 'fullScreenModal', headerShown: false, animation: 'fade' }}

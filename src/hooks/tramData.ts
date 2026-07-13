@@ -30,6 +30,16 @@ export const TICK_MS = 16; // ~60 fps simulation while trams visibly glide (zoom
  */
 export const TICK_IDLE_MS = 100;
 const UI_NOTIFY_MS = 1_000;
+/**
+ * rideBackground mode (SANCTIONED exception to perf invariant #3 — see
+ * docs/performance.md): while a GPS ride recording is active, backgrounding
+ * must NOT fully pause the runtime, or every ride point correlates against a
+ * frozen simulation. Budget is minimal: feed polls at 10 s, engine ticks at
+ * 1 Hz, and ALL render pushes / UI notifications stay off. Gate: only while
+ * the injected rideActivity reports an active ride; ride stop → full pause.
+ */
+export const RIDE_BG_POLL_MS = 10_000;
+export const RIDE_BG_TICK_MS = 1_000;
 /** Re-ingest shortly after a prefetch so early geometries apply without waiting a poll. */
 const GEOMETRY_NUDGE_MS = 2_500;
 
@@ -87,6 +97,18 @@ export class TramRuntime {
   private lastSnapshots: TramSnapshot[] = [];
   /** True while the map is in the glide band (see detailModeForZoom) → 60 Hz tick. */
   private detailMode = false;
+  /**
+   * Runtime activity mode: 'active' (foreground, full cadence), 'rideBackground'
+   * (backgrounded WITH a live ride recording — minimal keep-alive cadence, no
+   * rendering), 'paused' (backgrounded/released — nothing ticks; invariant #3).
+   */
+  private runMode: 'paused' | 'active' | 'rideBackground' = 'paused';
+  /**
+   * Injected by src/lib/motionlog (never imported from here — that would be a
+   * module cycle): reports whether a GPS ride recording is active. null until
+   * the motionlog singleton exists, i.e. no ride can be active.
+   */
+  private rideActivity: (() => boolean) | null = null;
   /** Unsubscribe from the settings store (projection cadence follows positionMode). */
   private settingsUnsub: (() => void) | null = null;
 
@@ -158,20 +180,42 @@ export class TramRuntime {
 
   /** Start the timer loops + the feed (which polls immediately). Idempotent. */
   private resume(): void {
-    if (this.tickTimer) return;
+    if (this.runMode === 'active') return;
+    // Leaving rideBackground: clear its slow timers/feed first. From 'paused'
+    // everything is already stopped — halting again would double feed.stop().
+    if (this.runMode === 'rideBackground') this.halt();
+    this.runMode = 'active';
     this.startTickTimer();
     this.uiNotifyTimer = setInterval(() => this.bumpUi(), UI_NOTIFY_MS);
     this.feed.start();
   }
 
+  /**
+   * Backgrounded while a ride is recording: keep the minimum alive for the
+   * ride log to stay meaningful (see RIDE_BG_* constants — sanctioned
+   * exception to invariant #3, docs/performance.md). The tick loop runs at
+   * 1 Hz and NEVER notifies frame listeners; bumpUi() is gated off. Idempotent.
+   */
+  private enterRideBackground(): void {
+    if (this.runMode === 'rideBackground') return;
+    // From 'paused' nothing runs — halting again would double feed.stop().
+    if (this.runMode === 'active') this.halt();
+    this.runMode = 'rideBackground';
+    this.startTickTimer();
+    this.feed.start(RIDE_BG_POLL_MS);
+  }
+
   private startTickTimer(): void {
+    const rideBg = this.runMode === 'rideBackground';
     this.tickTimer = setInterval(
       () => {
         const now = Date.now();
         this.engine.tick(now);
-        this.frameListeners.forEach((l) => l(now));
+        // No render pushes in rideBackground — the map isn't visible and the
+        // whole point of the mode is a minimal keep-alive budget.
+        if (!rideBg) this.frameListeners.forEach((l) => l(now));
       },
-      this.detailMode ? TICK_MS : TICK_IDLE_MS,
+      rideBg ? RIDE_BG_TICK_MS : this.detailMode ? TICK_MS : TICK_IDLE_MS,
     );
   }
 
@@ -188,18 +232,27 @@ export class TramRuntime {
     if (this.detailMode === on) return;
     this.detailMode = on;
     if (__DEV__) console.log(`[tram-runtime] tick rate → ${on ? '60 Hz (glide band)' : '10 Hz (idle)'}`);
-    if (!this.tickTimer) return; // paused — resume() picks up the new rate
+    if (this.runMode !== 'active' || !this.tickTimer) return; // resume() picks up the new rate
     clearInterval(this.tickTimer);
     this.startTickTimer();
   }
 
   /**
-   * Halt timers, the feed, and all outstanding async work WITHOUT removing the
-   * AppState/feed subscriptions (used on background). feed.stop() aborts the
-   * in-flight poll; the pending nudge is cancelled and the generation bumped so
-   * any late completions no-op.
+   * Full pause: nothing may tick afterwards (perf invariant #3). Halts timers,
+   * the feed, and all outstanding async work WITHOUT removing the AppState/feed
+   * subscriptions (used on background/release).
    */
   private pause(): void {
+    this.halt();
+    this.runMode = 'paused';
+  }
+
+  /**
+   * Shared teardown of the mode-owned machinery: timers, the pending nudge,
+   * and the feed. feed.stop() aborts the in-flight poll; the generation bump
+   * makes any late completions no-op. Mode transitions call this first.
+   */
+  private halt(): void {
     this.generation += 1;
     for (const t of [this.tickTimer, this.uiNotifyTimer]) {
       if (t) clearInterval(t);
@@ -215,11 +268,37 @@ export class TramRuntime {
   private readonly onAppState = (status: AppStateStatus): void => {
     if (this.refCount === 0) return;
     if (status === 'active') {
-      if (!this.tickTimer) this.resume();
-    } else if (this.tickTimer) {
+      this.resume();
+    } else if (this.rideActivity?.() === true) {
+      // Backgrounded mid-recording: keep the ride log alive on the minimal
+      // budget instead of freezing it (see enterRideBackground). Note this
+      // also covers 'inactive' — the location-permission dialog during
+      // startRide must not fully pause the runtime under the recording.
+      this.enterRideBackground();
+    } else if (this.runMode !== 'paused') {
       this.pause();
     }
   };
+
+  /**
+   * Wire the ride-recording probe (called by src/lib/motionlog when the
+   * singleton is created; direction chosen to avoid a module cycle).
+   */
+  setRideActivity(isRiding: (() => boolean) | null): void {
+    this.rideActivity = isRiding;
+  }
+
+  /**
+   * Called by motionlog on every ride state change: a ride that stops while
+   * we are in rideBackground (user stop via the sheet, or the 90 min
+   * auto-stop firing in background) must complete the full pause — the
+   * exception to invariant #3 is gated strictly on an ACTIVE recording.
+   */
+  notifyRideActivity(): void {
+    if (this.runMode === 'rideBackground' && this.rideActivity?.() !== true) {
+      this.pause();
+    }
+  }
 
   /**
    * One fresh snapshot batch from the feed → engine ingest + calibration
@@ -262,6 +341,9 @@ export class TramRuntime {
   // — React (1 Hz) subscriptions —
 
   private bumpUi(): void {
+    // rideBackground: ALL UI notifications are off by contract (the app is
+    // backgrounded; subscribers would re-render an invisible tree).
+    if (this.runMode === 'rideBackground') return;
     // No UI subscriber → skip entirely; bumping the version would only
     // invalidate the states cache and force a full getStates() allocation
     // for nobody (1 Hz background churn, thermal).

@@ -70,9 +70,9 @@ export class LocalGolemioFeed implements TramFeed {
   }
 
   /** Start the poll loop + an immediate poll. Idempotent. */
-  start(): void {
+  start(pollMs: number = POLL_MS): void {
     if (this.pollTimer) return;
-    this.pollTimer = setInterval(() => void this.poll(), POLL_MS);
+    this.pollTimer = setInterval(() => void this.poll(), pollMs);
     void this.poll();
   }
 

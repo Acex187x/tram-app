@@ -96,6 +96,11 @@ export interface TramFeed {
   reportCalibration(records: CalibrationRecord[]): void;
   /** Feed health for the status chip. */
   status(): FeedStatus;
-  start(): void;
+  /**
+   * Begin emitting batches. `pollMs` optionally overrides the poll cadence
+   * (implementation default otherwise) — the runtime's rideBackground mode
+   * polls slower while a ride records with the app backgrounded.
+   */
+  start(pollMs?: number): void;
   stop(): void;
 }

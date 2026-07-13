@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { resolveLightPreset, STANDARD_CONFIG } from '@/components/map/mapStyle';
 import { BottomDock, ControlStack, FollowBanner, StatusChip } from '@/components/map/MapChrome';
 import { PlannerOverlay } from '@/components/map/PlannerOverlay';
+import { RideOverlay } from '@/components/map/RideOverlay';
 import { RouteNetwork, STOP_TOTEM_MODEL_KEY } from '@/components/map/RouteNetwork';
 import { TramLayers, type FollowGestureState } from '@/components/map/TramLayers';
 import { useTramModels } from '@/components/map/useTramModels';
@@ -243,6 +244,7 @@ export default function MapScreen() {
           stopTotemReady={modelUris != null && STOP_TOTEM_MODEL_KEY in modelUris}
         />
         <PlannerOverlay cameraRef={cameraRef} />
+        <RideOverlay cameraRef={cameraRef} />
         <TramLayers
           cameraRef={cameraRef}
           viewportRef={viewportRef}
