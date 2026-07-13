@@ -22,6 +22,8 @@ subsamples; per-tram above/below split must not be a coin flip.
 Night lines 91-99 are excluded by default (day-fleet prior); use
 --fleet night for the 91-99 segment or --fleet all (Monday round 26+;
 Sunday h0-h4 whole-fleet norms were night-line-dominated windows).
+--zone centre|out|all (round 28): record-level CENTER-bbox filter for the
+07:00/19:00 cap-boundary mirror checks (default all = historical).
 """
 
 import json
@@ -31,6 +33,7 @@ from collections import defaultdict
 from datetime import datetime
 
 NIGHT_LINES = {str(x) for x in range(91, 100)}
+CENTER = (14.395, 50.068, 14.46, 50.096)  # lng0, lat0, lng1, lat1 (plan.md bbox)
 MIN_FIXES = 3
 MIN_AGE_MS = 5 * 60 * 1000
 
@@ -46,7 +49,7 @@ def pct(xs, p):
 
 
 def parse_args(argv):
-    paths, since, until, prior, fleet = [], None, None, 0.62, "day"
+    paths, since, until, prior, fleet, zone = [], None, None, 0.62, "day", "all"
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -63,13 +66,20 @@ def parse_args(argv):
             fleet = argv[i + 1]  # day (default, historical) | night (91-99 only) | all
             assert fleet in ("day", "night", "all"), "--fleet day|night|all"
             i += 2
+        elif a == "--zone":
+            # centre = records inside the CENTER bbox only; out = outside only;
+            # all (default, historical) = no positional filter. Record-level
+            # filter (round 28, for the 07:00 cap-boundary mirror check).
+            zone = argv[i + 1]
+            assert zone in ("centre", "out", "all"), "--zone centre|out|all"
+            i += 2
         else:
             paths.append(a)
             i += 1
-    return paths, since, until, prior, fleet
+    return paths, since, until, prior, fleet, zone
 
 
-paths, SINCE, UNTIL, PRIOR, FLEET = parse_args(sys.argv[1:])
+paths, SINCE, UNTIL, PRIOR, FLEET, ZONE = parse_args(sys.argv[1:])
 if not paths:
     paths = ["docs/calibration/sim-sessions/sim-2026-07-12.jsonl"]
 
@@ -94,6 +104,13 @@ for p in paths:
             is_night = r["line"] in NIGHT_LINES
             if (FLEET == "day" and is_night) or (FLEET == "night" and not is_night):
                 continue
+            if ZONE != "all":
+                lng, lat = r.get("lng"), r.get("lat")
+                in_centre = (lng is not None and lat is not None
+                             and CENTER[0] <= lng <= CENTER[2]
+                             and CENTER[1] <= lat <= CENTER[3])
+                if (ZONE == "centre") != in_centre:
+                    continue
             records.append(r)
 
 records.sort(key=lambda r: (r["key"], r["t"]))
