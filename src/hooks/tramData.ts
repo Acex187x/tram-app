@@ -268,6 +268,10 @@ export class TramRuntime {
       this.nudgeTimer = null;
     }
     this.feed.stop();
+    // Every mode transition is a tick-clock boundary: the first tick of the
+    // next mode must anchor, never integrate (or budget-drop) the gap the
+    // stopped timers left behind — minutes of suspension are NOT replayed.
+    this.engine.resetClock();
   }
 
   private readonly onAppState = (status: AppStateStatus): void => {

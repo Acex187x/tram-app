@@ -51,8 +51,23 @@ export const STALE_AFTER_MS = 90_000;
 export const PACE_BIAS_MEMORY_TTL_MS = 15 * 60_000;
 /** Max offset when re-projecting a tram onto a new trip's geometry, meters. */
 const REANCHOR_MAX_OFFSET_M = 100;
-/** Max dt for one engine tick, seconds (larger gaps are clamped). */
+/** Max dt for one physics substep, seconds. A tick() spanning more wall time
+ *  integrates it in several substeps of at most this — never by clamping. */
 const MAX_ENGINE_DT_S = 0.25;
+/**
+ * Catch-up budget for one tick(), ms: at most this much elapsed wall time is
+ * integrated synchronously (in ≤ MAX_ENGINE_DT_S substeps). It exists to keep
+ * a COARSE BUT LIVE cadence honest — the rideBackground 1 Hz keep-alive tick
+ * must integrate its full 1000 ms (clamping it to one 0.25 s step ran the
+ * background simulation 4× slower than reality and poisoned every ride
+ * recording's simDist/lagM — audit 2026-07-13 P0). Time beyond the budget is
+ * DROPPED, not replayed: a genuine suspension gap (paused runtime, JS thread
+ * stall) is cheaper and more honest to re-anchor from — the pace controller /
+ * next fresh fix pulls every sim back to reality — than to burn a long
+ * synchronous loop simulating minutes nobody observed. True pause/resume
+ * should additionally call resetClock() so the gap never reaches tick() at all.
+ */
+export const MAX_TICK_CATCHUP_MS = 2_000;
 /** In 'coarse' projection cadence the projSims advance at most this often. */
 export const PROJ_COARSE_INTERVAL_MS = 500;
 /** Max wall-clock gap integrated in one coarse projection advance, seconds. */
@@ -399,52 +414,76 @@ export class TramEngine {
     this.projectionCadence = cadence;
   }
 
-  /** Advance all sims to nowMs. dt derives from the previous tick (clamped). */
+  /**
+   * Forget the tick clock. Call on a TRUE pause/resume boundary (app
+   * suspension, runtime mode change): the next tick() re-anchors at its
+   * timestamp instead of integrating — or budget-dropping — the gap. Sims and
+   * their state are untouched; only the notion of "time since last tick" is.
+   */
+  resetClock(): void {
+    this.lastTickMs = null;
+    this.lastProjTickMs = null;
+  }
+
+  /**
+   * Advance all sims to nowMs. The elapsed interval since the previous tick is
+   * integrated in substeps of ≤ MAX_ENGINE_DT_S — a coarse tick cadence (the
+   * rideBackground 1 Hz keep-alive) advances the simulation at TRUE wall-clock
+   * rate instead of the old clamp's quarter speed. Every substep advances the
+   * WHOLE fleet and then applies queue constraints, so car-following on a
+   * coarse cadence stays equivalent to fine cadences (one tram must never be
+   * integrated several steps ahead of its queue neighbours). Elapsed time
+   * beyond MAX_TICK_CATCHUP_MS is dropped (resume-gap guard — see the
+   * constant; true pause/resume should call resetClock()).
+   */
   tick(nowMs: number): void {
     this.refreshDaytime(nowMs);
-    const dtS =
-      this.lastTickMs === null
-        ? 0
-        : Math.min(Math.max((nowMs - this.lastTickMs) / 1000, 0), MAX_ENGINE_DT_S);
+    const prevMs = this.lastTickMs;
     this.lastTickMs = nowMs;
-    if (dtS <= 0) return;
+    if (prevMs === null || nowMs <= prevMs) return; // anchor tick / clock skew
 
-    // Projection sims advance with the same physics but are NOT queue-
-    // constrained: they dead-reckon the raw fix, not the rendered fleet.
-    // In 'full' cadence they move with the main tick; in 'coarse' they are
-    // batch-advanced (in ≤ MAX_ENGINE_DT_S substeps, so physics integration
-    // stays identical) at most every PROJ_COARSE_INTERVAL_MS.
+    const fromMs = Math.max(prevMs, nowMs - MAX_TICK_CATCHUP_MS);
     const full = this.projectionCadence === 'full';
-    const prevProjMs = this.lastProjTickMs;
-    let projSteps: { fromMs: number; toMs: number } | null = null;
-    if (prevProjMs === null) {
-      // First projection bookkeeping point; integrate this tick's dt in full
-      // mode, just anchor the clock in coarse mode.
-      if (full) projSteps = { fromMs: nowMs - dtS * 1000, toMs: nowMs };
-      this.lastProjTickMs = nowMs;
-    } else if (full || nowMs - prevProjMs >= PROJ_COARSE_INTERVAL_MS) {
-      // Integrate the whole elapsed span (bounded), so no time is dropped on a
-      // coarse→full cadence switch or across coarse intervals.
-      const fromMs = Math.max(prevProjMs, nowMs - PROJ_COARSE_MAX_GAP_S * 1000);
-      if (nowMs > fromMs) projSteps = { fromMs, toMs: nowMs };
-      this.lastProjTickMs = nowMs;
-    }
+    // First projection bookkeeping point: anchor at the integration start. A
+    // clock stranded behind a dropped gap needs no special-casing — the proj
+    // batch below is bounded by PROJ_COARSE_MAX_GAP_S regardless.
+    if (this.lastProjTickMs === null) this.lastProjTickMs = fromMs;
 
-    for (const entry of this.entries.values()) {
-      if (entry.sim) tickSim(entry.sim, nowMs, dtS);
-      if (entry.projSim && projSteps) {
-        // Substep the accumulated gap so the per-step dt clamp never drops time.
-        let t = projSteps.fromMs;
-        while (t < projSteps.toMs) {
-          const step = Math.min(MAX_ENGINE_DT_S * 1000, projSteps.toMs - t);
-          t += step;
-          tickSim(entry.projSim, t, step / 1000);
+    let t = fromMs;
+    while (t < nowMs) {
+      const stepMs = Math.min(MAX_ENGINE_DT_S * 1000, nowMs - t);
+      t += stepMs;
+      const dtS = stepMs / 1000;
+
+      // Projection sims advance with the same physics but are NOT queue-
+      // constrained against the main fleet: they dead-reckon the raw fix. In
+      // 'full' cadence they move with every substep; in 'coarse' they are
+      // batch-advanced at most every PROJ_COARSE_INTERVAL_MS. The batch spans
+      // [projFromMs, t] in ≤ MAX_ENGINE_DT_S sub-substeps, so no time is
+      // dropped across coarse intervals or on a coarse→full cadence switch
+      // (bounded by PROJ_COARSE_MAX_GAP_S).
+      const projDue = full || t - this.lastProjTickMs >= PROJ_COARSE_INTERVAL_MS;
+      let projFromMs = 0;
+      if (projDue) {
+        projFromMs = Math.max(this.lastProjTickMs, t - PROJ_COARSE_MAX_GAP_S * 1000);
+        this.lastProjTickMs = t;
+      }
+
+      for (const entry of this.entries.values()) {
+        if (entry.sim) tickSim(entry.sim, t, dtS);
+        if (entry.projSim && projDue) {
+          let pt = projFromMs;
+          while (pt < t) {
+            const pStepMs = Math.min(MAX_ENGINE_DT_S * 1000, t - pt);
+            pt += pStepMs;
+            tickSim(entry.projSim, pt, pStepMs / 1000);
+          }
         }
       }
+      // Car-following runs AFTER each substep's position updates so queues
+      // compress correctly regardless of iteration order and tick cadence.
+      this.applyQueueConstraints();
     }
-    // Car-following runs AFTER all position updates so queues compress
-    // correctly regardless of iteration order.
-    this.applyQueueConstraints();
   }
 
   /** Rebuild shapeId → sims queue groups (only groups of ≥ 2 members). */

@@ -24,6 +24,8 @@ import {
   DEPART_BURST_FACTOR,
   PACE_BIAS_PRIOR,
   STOP_HOLD_MAX_FIX_AGE_S,
+  STUCK_BACK_EPS_M,
+  STUCK_BACK_FADE_M,
   STUCK_FIX_EPS_M,
   tick,
   type TramSim,
@@ -186,6 +188,93 @@ describe('stuck-hold on repeated same-position fixes (#3)', () => {
     });
     expect(vMax).toBeGreaterThan(3); // actually driving again
     expect(sim.sM).toBeGreaterThan(sHeld + 80);
+  });
+
+  it('pulls the sim BACK to the fix when it already drove well past it (audit P2)', () => {
+    const geo = straightGeo(5);
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 1000, observedAtMs: T0 }), T0);
+    const now = run(sim, T0, 15); // sim cruised/braked well ahead of the fix
+    const overshootM = sim.sM - 1000;
+    expect(overshootM).toBeGreaterThan(STUCK_BACK_FADE_M); // fixture sanity: a LARGE overshoot
+
+    // Second confirming fix at the same point: the tram never left it — the
+    // sim is corrected back to the anchor, rendered as a teleport fade.
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 1000, observedAtMs: now }), now);
+    expect(sim.stuckAtM).toBe(1000);
+    expect(Math.abs(sim.sM - 1000)).toBeLessThanOrEqual(STUCK_BACK_EPS_M);
+    expect(sim.vMs).toBe(0);
+    expect(sim.lastTeleportMs).toBe(now);
+
+    // The hold keeps it AT the anchor afterwards.
+    run(sim, now, 20);
+    expect(sim.sM).toBe(1000);
+  });
+
+  it('a small overshoot (≤ STUCK_BACK_EPS_M) stays put — no backward twitch', () => {
+    const geo = straightGeo(5);
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 1000, observedAtMs: T0 }), T0);
+    const now = run(sim, T0, 1); // barely moved past the fix
+    const sBefore = sim.sM;
+    expect(sBefore - 1000).toBeGreaterThan(0);
+    expect(sBefore - 1000).toBeLessThanOrEqual(STUCK_BACK_EPS_M);
+
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 1000, observedAtMs: now }), now);
+    expect(sim.stuckAtM).toBe(1000);
+    expect(sim.sM).toBe(sBefore); // held where it is — scatter-scale error
+    expect(sim.lastTeleportMs).toBe(0);
+  });
+
+  it('a mid-size pull-back snaps quietly, WITHOUT the teleport fade', () => {
+    const geo = straightGeo(5);
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 1000, observedAtMs: T0 }), T0);
+    const now = run(sim, T0, 2.5);
+    const overshootM = sim.sM - 1000;
+    expect(overshootM).toBeGreaterThan(STUCK_BACK_EPS_M);
+    expect(overshootM).toBeLessThanOrEqual(STUCK_BACK_FADE_M);
+
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 1000, observedAtMs: now }), now);
+    expect(sim.sM).toBe(1000);
+    expect(sim.lastTeleportMs).toBe(0); // small correction — no fade event
+  });
+
+  it('the pull-back re-opens a stop the overshoot had already served', () => {
+    // Stop 45 m past the jam point (outside STUCK_NEAR_STOP_M, so the stuck
+    // hold still arms): the sim reaches and starts serving it before the
+    // confirming fix reveals the tram never left the jam behind it.
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [3000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 100_000 },
+        { atM: 1045, arrivalMs: T0 + 9_000, departureMs: T0 + 24_000, dwellSeconds: 15 },
+        { atM: 3000, arrivalMs: T0 + 300_000 },
+      ],
+    );
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 1000, observedAtMs: T0 }), T0);
+    let now = run(sim, T0, 20);
+    expect(sim.phase).toBe('dwell'); // serving the 1045 m stop
+    expect(sim.sM).toBeGreaterThan(1040);
+
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 1000, observedAtMs: now }), now);
+    expect(sim.sM).toBe(1000);
+    expect(sim.phase).toBe('cruise'); // standing via the stuck hold, not a dwell
+    expect(sim.vMs).toBe(0);
+    expect(sim.minStopDist).toBeLessThan(1045); // the stop is a 0-limit again
+
+    // Jam clears (fresh moving fix): the sim drives on and serves the
+    // re-opened stop for real instead of rolling through it.
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 1100, observedAtMs: now }), now);
+    let dwelledAtStop = false;
+    now = run(sim, now, 30, () => {
+      if (sim.phase === 'dwell' && Math.abs(sim.sM - 1045) < 3) dwelledAtStop = true;
+    });
+    expect(dwelledAtStop).toBe(true);
   });
 
   it('repeated fixes NEAR A STOP are a dwell, not a jam (no stuck-hold)', () => {

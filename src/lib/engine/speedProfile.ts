@@ -3,6 +3,7 @@
 // stop points. Precomputed once per geometry; recompute only when daytime flips.
 
 import type { RouteGeometry } from '@/lib/types';
+import { pragueOffsetSeconds } from '@/lib/time/prague';
 import { curvatureProfile, segmentIndexAt } from '../geo/polyline';
 
 /** Lateral comfort acceleration used for curve caps, m/s². */
@@ -86,9 +87,19 @@ function pragueHourMinuteAt(ms: number): number {
     }
     if (!Number.isNaN(h) && !Number.isNaN(m)) return (h % 24) + m / 60;
   }
-  // Fallback: CET/CEST approximation.
-  const d = new Date(ms);
-  return ((d.getUTCHours() + 2) % 24) + d.getUTCMinutes() / 60;
+  return pragueHourMinuteFallback(ms);
+}
+
+/**
+ * Intl-free Prague hour: shift by the shared deterministic CET/CEST offset
+ * (lib/time/prague — the same EU DST rule GTFS service days resolve with) and
+ * read the UTC clock of the shifted instant. The previous fallback hardcoded
+ * UTC+2, which is an hour off through the entire CET winter (audit 2026-07-13).
+ * Exported for direct testing (the Intl path shadows it wherever ICU exists).
+ */
+export function pragueHourMinuteFallback(ms: number): number {
+  const local = new Date(ms + pragueOffsetSeconds(ms) * 1000);
+  return local.getUTCHours() + local.getUTCMinutes() / 60;
 }
 
 /** Per-minute cache so the Intl lookup runs once per wall-clock minute, not per tick. */
@@ -380,10 +391,12 @@ export function vAllowedAt(
   }
 
   // Upcoming stops = 0-limit points (skipping already-dwelled/passed ones).
+  // stops are ordered by distM (RouteGeometry invariant, enforced by the GTFS
+  // builder's monotonic clamp) — past the horizon nothing closer can follow.
   for (const stop of geometry.stops) {
     const d = stop.distM;
+    if (d > horizon) break;
     if (d < minStopDist || d < s) continue;
-    if (d > horizon) continue;
     const cand = Math.sqrt(2 * aBrk * (d - s));
     if (cand < v) v = cand;
   }

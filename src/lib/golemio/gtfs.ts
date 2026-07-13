@@ -5,6 +5,7 @@
 // fetchAllTramRoutes lists the 38 tram lines for pickers.
 
 import type { RouteGeometry, RouteStop } from '@/lib/types';
+import { pragueOffsetSeconds } from '@/lib/time/prague';
 import type {
   GtfsRoute,
   GtfsShapePoint,
@@ -16,6 +17,11 @@ import {
   type GolemioPriority,
   type GolemioRequestOptions,
 } from './client';
+
+// The deterministic CET/CEST resolver moved to the shared Prague-time module
+// (the engine's TOD fallback needs the same rule and must not import golemio);
+// re-exported so existing callers/tests keep working.
+export { pragueOffsetSeconds };
 
 export interface FetchOptions {
   priority?: GolemioPriority;
@@ -46,24 +52,6 @@ export function parseGtfsTimeSeconds(value: string | null | undefined): number |
   const s = Number(m[3]);
   if (min > 59 || s > 59) return null;
   return h * 3600 + min * 60 + s;
-}
-
-/**
- * UTC offset (seconds) for Europe/Prague at a given instant, computed from the
- * EU DST rule (CEST +2h from the last Sunday of March 01:00 UTC to the last
- * Sunday of October 01:00 UTC; CET +1h otherwise). Avoids relying on Intl
- * timezone support, which is unreliable on Hermes.
- */
-export function pragueOffsetSeconds(utcMs: number): number {
-  const year = new Date(utcMs).getUTCFullYear();
-  const lastSundayUtc1am = (monthZeroBased: number): number => {
-    const lastDay = new Date(Date.UTC(year, monthZeroBased + 1, 0));
-    const date = lastDay.getUTCDate() - lastDay.getUTCDay();
-    return Date.UTC(year, monthZeroBased, date, 1, 0, 0);
-  };
-  const dstStart = lastSundayUtc1am(2); // March
-  const dstEnd = lastSundayUtc1am(9); // October
-  return utcMs >= dstStart && utcMs < dstEnd ? 7200 : 3600;
 }
 
 /** Epoch ms of Prague-local midnight for the calendar day containing `instantMs`. */

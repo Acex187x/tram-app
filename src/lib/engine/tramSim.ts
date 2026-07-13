@@ -93,6 +93,20 @@ export const STUCK_FIX_EPS_M = 8;
  * standing at a platform is a dwell (fix-hold owns it), not a jam, meters.
  */
 export const STUCK_NEAR_STOP_M = 40;
+/**
+ * When a stuck fix is confirmed and the sim has already driven MORE than this
+ * far past the pinned point, it is pulled back to the fix — reality says the
+ * tram never left it (audit 2026-07-13: the old hold merely stopped the sim
+ * wherever it happened to be, stranding it up to ~80 m ahead of the jam for
+ * the whole hold). Smaller overshoots stay put: braking-distance leftover and
+ * AVL scatter, not worth a visible backward correction, meters.
+ */
+export const STUCK_BACK_EPS_M = 10;
+/**
+ * Stuck pull-backs larger than this render as a teleport (lastTeleportMs →
+ * feature-builder opacity fade) instead of an instant small nudge, meters.
+ */
+export const STUCK_BACK_FADE_M = 25;
 
 // ── motion-profile redistribution (field feedback, 2026-07-13) ──────────────
 // Real trams leave stops briskly and cruise the first stretch clearly faster
@@ -277,6 +291,15 @@ export interface TramSim {
    * evidence that releases the dwell fix-hold.
    */
   dwellObsDistM: number;
+  /**
+   * Monotonic scan hint for nextUndwelledStop(): stops[0..nextStopIdx) are
+   * known served/skippable (dwelled or below minStopDist — both monotone
+   * facts), so the per-tick scan starts here instead of at 0 (stop hot-path
+   * audit 2026-07-13). Reset to 0 whenever those facts are invalidated:
+   * teleport (snapTo), reanchor, and the stuck pull-back (which re-opens
+   * stops). Purely an optimization — behavior is identical to a full scan.
+   */
+  nextStopIdx: number;
 }
 
 // ── schedule anchor ──────────────────────────────────────────────────────────
@@ -524,12 +547,23 @@ function seedCruiseSpeed(sim: TramSim, nowMs: number): void {
   );
 }
 
-/** First stop not yet dwelled at (stops are ordered by distance along shape). */
+/**
+ * First stop not yet dwelled at (stops are ordered by distance along shape).
+ * Advances the sim's monotonic nextStopIdx hint as it skips: a stop rejected
+ * for being dwelled or below minStopDist stays rejected forever (both facts
+ * only grow, except at the resets that also clear the hint), so the scan
+ * never re-visits the prefix — O(1) amortized per tick instead of O(stops).
+ */
 export function nextUndwelledStop(sim: TramSim): RouteStop | null {
-  for (const stop of sim.geometry.stops) {
-    if (stop.distM < sim.minStopDist) continue;
-    if (!sim.dwelledStopSeqs.has(stop.sequence)) return stop;
+  const stops = sim.geometry.stops;
+  let i = sim.nextStopIdx;
+  for (; i < stops.length; i++) {
+    const stop = stops[i];
+    if (stop.distM < sim.minStopDist || sim.dwelledStopSeqs.has(stop.sequence)) continue;
+    sim.nextStopIdx = i;
+    return stop;
   }
+  sim.nextStopIdx = i;
   return null;
 }
 
@@ -609,6 +643,7 @@ export function createSim(
     stuckAtM,
     burstUntilM: 0,
     dwellObsDistM: obsDistM,
+    nextStopIdx: 0,
   };
   seedStopState(sim, nowMs);
   seedCruiseSpeed(sim, nowMs);
@@ -625,6 +660,7 @@ export function reanchorSim(sim: TramSim, sM: number, nowMs: number): void {
   sim.burstUntilM = 0;
   sim.stuckAtM = null; // new shape — old along-shape anchor is meaningless
   sim.dwelledStopSeqs.clear();
+  sim.nextStopIdx = 0;
   seedStopState(sim, nowMs);
   seedCruiseSpeed(sim, nowMs);
 }
@@ -697,6 +733,7 @@ function snapTo(sim: TramSim, sM: number, nowMs: number): void {
   sim.burstUntilM = 0;
   sim.stuckAtM = null; // a >500 m re-anchor is movement evidence in itself
   sim.dwelledStopSeqs.clear();
+  sim.nextStopIdx = 0;
   seedStopState(sim, nowMs);
   seedCruiseSpeed(sim, nowMs); // a tram teleported mid-segment is moving
   sim.lastTeleportMs = nowMs;
@@ -743,7 +780,7 @@ export function applySnapshot(sim: TramSim, snapshot: TramSnapshot, nowMs: numbe
   }
   updatePaceBias(sim, prevObsDistM, prevObsAtMs, snapshot);
   const freshFix = snapshot.observedAtMs > prevObsAtMs || sim.obsDistM !== prevObsDistM;
-  if (freshFix) updateStuckHold(sim, prevObsDistM, prevObsAtMs, snapshot);
+  if (freshFix) updateStuckHold(sim, prevObsDistM, prevObsAtMs, snapshot, nowMs);
   if (sim.phase === 'terminal' && freshFix && sim.sM - sObs > TERMINAL_UNLATCH_BEHIND_M) {
     snapTo(sim, sObs, nowMs);
   }
@@ -757,12 +794,19 @@ export function applySnapshot(sim: TramSim, snapshot: TramSnapshot, nowMs: numbe
  * the hold (the pace controller's catch-up then closes the gap softly).
  * Standing at/near a stop is a dwell, not a jam — the dwell fix-hold owns it.
  * Stuck fixes never pollute paceBias (Δs < PACE_BIAS_MIN_DS_M skips them).
+ *
+ * When the confirming fix arrives AFTER the sim already drove past the pinned
+ * point (the fix cadence is slow; the sim was cruising at learned pace in the
+ * meantime), the sim is pulled BACK to the fix — bounded, and rendered as a
+ * teleport fade when large (see rewindToStuckFix). The hold releases only on
+ * a fresh fix that actually moved (> STUCK_FIX_EPS_M).
  */
 function updateStuckHold(
   sim: TramSim,
   prevObsDistM: number,
   prevObsAtMs: number,
   snapshot: TramSnapshot,
+  nowMs: number,
 ): void {
   if (Math.abs(sim.obsDistM - prevObsDistM) > STUCK_FIX_EPS_M) {
     sim.stuckAtM = null; // moving fix — release, soft catch-up takes over
@@ -776,6 +820,45 @@ function updateStuckHold(
     if (Math.abs(stop.distM - sim.obsDistM) <= STUCK_NEAR_STOP_M) return;
   }
   sim.stuckAtM = sim.obsDistM;
+  rewindToStuckFix(sim, nowMs);
+}
+
+/**
+ * Bounded backward correction to a just-confirmed stuck fix: the tram is
+ * physically standing AT sim.stuckAtM while the sim already drove ahead of it.
+ * Overshoots ≤ STUCK_BACK_EPS_M stay put (scatter / braking leftover); larger
+ * ones snap back to the anchor — quietly when small, marked as a teleport
+ * (renderer fade) beyond STUCK_BACK_FADE_M. This is a deliberate exception to
+ * sM monotonicity, same class as the terminal un-latch: the hold pins v to 0
+ * with reality behind, so the pace controller could never recover the error.
+ * Stops the overshoot had already "served" are re-opened — the real tram is
+ * still behind them and must dwell there after the jam clears.
+ */
+function rewindToStuckFix(sim: TramSim, nowMs: number): void {
+  const anchorM = sim.stuckAtM;
+  if (anchorM === null) return;
+  const backM = sim.sM - anchorM;
+  if (backM <= STUCK_BACK_EPS_M) return;
+  sim.sM = anchorM;
+  sim.vMs = 0;
+  sim.phase = 'cruise'; // stuckAtM keeps it standing; no dwell/terminal latch
+  sim.dwellUntilMs = 0;
+  sim.crawling = false;
+  sim.skipRollUntilM = 0;
+  sim.burstUntilM = 0;
+  // Re-open stops now ahead of the corrected position and rebuild minStopDist
+  // from the marks that remain (stuck arming guarantees no stop within
+  // STUCK_NEAR_STOP_M of the anchor, so nothing re-opens right on top of it).
+  let min = 0;
+  for (const stop of sim.geometry.stops) {
+    if (stop.distM > sim.sM + STOP_REACH_M) sim.dwelledStopSeqs.delete(stop.sequence);
+    else if (sim.dwelledStopSeqs.has(stop.sequence) && stop.distM + 0.01 > min) {
+      min = stop.distM + 0.01;
+    }
+  }
+  sim.minStopDist = min;
+  sim.nextStopIdx = 0; // re-opened stops invalidate the monotonic scan hint
+  if (backM > STUCK_BACK_FADE_M) sim.lastTeleportMs = nowMs;
 }
 
 // ── physics tick ─────────────────────────────────────────────────────────────

@@ -157,3 +157,42 @@ describe('TramRuntime rideBackground transitions', () => {
     expect(feed.running).toBe(true);
   });
 });
+
+describe('engine tick clock across mode transitions (audit P0)', () => {
+  it('every transition resets the engine clock — a suspension gap is never integrated', () => {
+    jest.useFakeTimers();
+    let riding = true;
+    const { rt, p } = makeRuntime(() => riding);
+    const resets = jest.spyOn(rt.engine, 'resetClock');
+
+    p.resume();
+    expect(resets).toHaveBeenCalledTimes(0); // cold start: nothing to reset yet
+
+    p.onAppState('background'); // active → rideBackground (halt + slow timers)
+    expect(resets).toHaveBeenCalledTimes(1);
+
+    p.onAppState('active'); // rideBackground → active
+    expect(resets).toHaveBeenCalledTimes(2);
+
+    p.onAppState('background'); // → rideBackground again…
+    riding = false;
+    rt.notifyRideActivity(); // …ride stops in background → full pause
+    expect(resets).toHaveBeenCalledTimes(4);
+    // After the pause the first tick of the NEXT mode anchors instead of
+    // integrating the suspension gap (engine-substep.test.ts covers the
+    // engine-side semantics of resetClock).
+  });
+
+  it('rideBackground ticks the engine at 1 Hz with real timestamps (substep integration input)', () => {
+    jest.useFakeTimers();
+    const { rt, p } = makeRuntime(() => true);
+    p.resume();
+    p.onAppState('background');
+    const ticks = jest.spyOn(rt.engine, 'tick');
+    jest.advanceTimersByTime(5_000);
+    // One engine tick per RIDE_BG_TICK_MS: the engine now substeps each 1 s
+    // interval internally (4 × 250 ms), so this cadence advances the sim at
+    // true wall-clock rate — the old dt clamp made it 4× slow (the P0 bug).
+    expect(ticks).toHaveBeenCalledTimes(5);
+  });
+});
