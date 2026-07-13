@@ -11,7 +11,7 @@ import {
   geometryServiceMidnight,
   serviceDayShiftMs,
 } from './gtfs';
-import type { GolemioPriority } from './client';
+import { GolemioAbortError, type GolemioPriority } from './client';
 
 const CACHE_DIR_NAME = 'tripgeo';
 const TTL_MS = 24 * 60 * 60 * 1000; // 24h
@@ -127,24 +127,48 @@ function writeDisk(tripId: string, geometry: RouteGeometry): void {
 /**
  * Resolve a trip's geometry, using the in-memory cache, then disk, then the
  * network. Concurrent calls for the same tripId share one in-flight promise.
+ *
+ * `signal` is the caller's lifecycle signal (the feed session's abort). Abort
+ * cancels the network fetch AND acts as a generation guard: a completion that
+ * lands after the signal aborted must not mutate the memory cache or the disk
+ * — a stale session's late result never pollutes a fresh session's cache.
+ * A joiner whose own signal is still live retries once when the shared
+ * in-flight task turns out to belong to an aborted session.
  */
 export async function getTripGeometry(
   tripId: string,
   priority: GolemioPriority = 1,
+  signal?: AbortSignal,
 ): Promise<RouteGeometry> {
   const mem = memCache.get(tripId);
   if (mem) return mem;
+  if (signal?.aborted) throw new GolemioAbortError();
 
   const existing = inFlight.get(tripId);
-  if (existing) return existing;
+  if (existing) {
+    try {
+      return await existing;
+    } catch (err) {
+      // The shared task was aborted by ANOTHER session's lifecycle signal.
+      // If our caller is still alive, issue a fresh request instead of
+      // failing an unrelated consumer (planner/route network).
+      if (!(err instanceof GolemioAbortError) || signal?.aborted) throw err;
+      if (inFlight.get(tripId) === existing) inFlight.delete(tripId);
+      return getTripGeometry(tripId, priority, signal);
+    }
+  }
 
   const task = (async (): Promise<RouteGeometry> => {
     const disk = await readDisk(tripId);
+    if (signal?.aborted) throw new GolemioAbortError(); // no cache writes after abort
     if (disk) {
       memCache.set(tripId, disk);
       return disk;
     }
-    const geometry = await fetchTripGeometry(tripId, { priority });
+    const geometry = await fetchTripGeometry(tripId, { priority, signal });
+    // Late-completion guard: even if the underlying fetch ignored the signal,
+    // an aborted session must not write cache/disk.
+    if (signal?.aborted) throw new GolemioAbortError();
     memCache.set(tripId, geometry);
     writeDisk(tripId, geometry);
     return geometry;
@@ -160,15 +184,18 @@ export async function getTripGeometry(
 
 /**
  * Warm the cache for a batch of trips at (by default) background priority.
- * Errors are swallowed — prefetch is best-effort.
+ * Errors are swallowed — prefetch is best-effort. `signal` (the feed session's
+ * abort) cancels queued/in-flight fetches immediately on feed.stop().
  */
 export function requestPrefetch(
   tripIds: Iterable<string>,
   priority: GolemioPriority = 2,
+  signal?: AbortSignal,
 ): void {
+  if (signal?.aborted) return;
   for (const tripId of tripIds) {
     if (memCache.has(tripId) || inFlight.has(tripId)) continue;
-    void getTripGeometry(tripId, priority).catch(() => {
+    void getTripGeometry(tripId, priority, signal).catch(() => {
       // ignore: prefetch failures are non-fatal
     });
   }

@@ -29,6 +29,18 @@ export interface FeedStatus {
   inFlight: boolean;
   /** Active poll cadence in ms (0 = feed stopped). */
   pollIntervalMs: number;
+  // — Optional health extensions (2026-07 review; additive so simple/fake
+  //   feeds keep compiling). —
+  /** True while the feed is halted on an auth failure (401/403) and probing
+   * at a slow cadence instead of hammering the normal poll. */
+  authFailed?: boolean;
+  /** Consecutive failed polls (0 after a success) — drives failure backoff. */
+  consecutiveFailures?: number;
+  /** Cumulative count of records dropped by input validation since the feed
+   * was created (see SnapshotRejectReason in golemio/vehicles). */
+  rejectedTotal?: number;
+  /** Cumulative dropped-record counts keyed by rejection reason. */
+  rejectedByReason?: Record<string, number>;
 }
 
 /**

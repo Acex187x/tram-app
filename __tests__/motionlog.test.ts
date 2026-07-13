@@ -478,6 +478,39 @@ describe('MotionLog ride recording', () => {
     expect(h.location.stopped).toBe(1);
   });
 
+  it('enforces the deadline in the location callback even when the JS timer never fires (suspension)', async () => {
+    const h = makeLog();
+    await h.log.startRide('a');
+    const rel = h.log.rideInfo()!.relPath;
+    h.location.push();
+    expect(h.log.rideInfo()!.points).toBe(1);
+
+    // Simulate iOS suspension: the wall clock jumps past the deadline but the
+    // fake timer queue is never run (setNow moves time WITHOUT firing timers).
+    h.setNow(h.now() + RIDE_MAX_MS + 1);
+    h.location.push(); // first delivery after resume
+
+    // The overdue sample is dropped and the ride stops cleanly with a footer.
+    expect(h.log.isRiding()).toBe(false);
+    expect(h.location.stopped).toBe(1);
+    const lines = h.fs.lines(rel);
+    expect(JSON.parse(lines[lines.length - 1])).toMatchObject({ type: 'ride-end', points: 1 });
+  });
+
+  it('a ride started after a deadline-stop gets a fresh deadline', async () => {
+    const h = makeLog();
+    await h.log.startRide('a');
+    h.setNow(h.now() + RIDE_MAX_MS + 1);
+    h.location.push(); // deadline-stops ride #1
+    expect(h.log.isRiding()).toBe(false);
+
+    expect(await h.log.startRide('b')).toBe(true);
+    h.location.push(); // well within ride #2's own deadline
+    expect(h.log.isRiding()).toBe(true);
+    expect(h.log.rideInfo()!.points).toBe(1);
+    await h.log.stopRide();
+  });
+
   it('never evicts the active ride file even over the cap', async () => {
     const h = makeLog({ dirCapBytes: 10 });
     await h.log.startRide('a');

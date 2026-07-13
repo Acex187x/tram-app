@@ -65,6 +65,15 @@ export function createExpoLocationWatcher(): LocationWatcher {
       if (perm.status !== Location.PermissionStatus.GRANTED) {
         throw new Error('Location permission denied');
       }
+      // Verify the ACTUAL granted scope, not just the coarse status: iOS
+      // reports status 'granted' for "Allow Once" and "While Using" alike
+      // (both arrive as scope 'whenInUse' — usable; Allow Once simply expires
+      // when the app quits, which orphan recovery + the ride deadline already
+      // handle). A scope of 'none' means no usable authorization despite the
+      // status and must not start a recording that would silently be empty.
+      if (perm.ios?.scope === 'none') {
+        throw new Error('Location permission not usable (scope: none)');
+      }
       activeHandler = onSample;
       try {
         // A stale registration from a crashed session would double-deliver.
@@ -90,6 +99,12 @@ export function createExpoLocationWatcher(): LocationWatcher {
             notificationBody: 'Logging GPS vs. simulation telemetry.',
           },
         });
+        // Report 'background' only after the native task has REALLY started —
+        // trusting the resolved promise alone could claim background delivery
+        // the OS never armed (the UI would then lie about surviving a lock).
+        if (!(await Location.hasStartedLocationUpdatesAsync(RIDE_LOCATION_TASK))) {
+          throw new Error('Background location task did not start');
+        }
         mode = 'background';
         return () => {
           if (activeHandler === onSample) activeHandler = null;
@@ -98,7 +113,9 @@ export function createExpoLocationWatcher(): LocationWatcher {
         };
       } catch {
         // Background route unavailable — record in the foreground only rather
-        // than not at all, and let mode() tell the UI the truth.
+        // than not at all, and let mode() tell the UI the truth. Best-effort
+        // cleanup in case the native task half-started before verification.
+        await Location.stopLocationUpdatesAsync(RIDE_LOCATION_TASK).catch(() => {});
         const sub = await Location.watchPositionAsync(
           {
             accuracy: Location.Accuracy.BestForNavigation,

@@ -224,6 +224,8 @@ function MotionDataSection() {
   const palette = Colors[scheme];
   const log = useMotionLog();
   const stats = log.stats();
+  const passiveFleetLogging = useSettingsStore((s) => s.passiveFleetLogging);
+  const setPassiveFleetLogging = useSettingsStore((s) => s.setPassiveFleetLogging);
 
   const onExportLogs = () => {
     void Haptics.selectionAsync();
@@ -255,6 +257,17 @@ function MotionDataSection() {
     <View>
       <SectionLabel>Motion data</SectionLabel>
       <InsetGroup>
+        <Row icon="waveform.path.ecg" iconColor={Tram.onTime} label="Passive fleet logging">
+          <Switch
+            value={passiveFleetLogging}
+            onValueChange={(value) => {
+              void Haptics.selectionAsync();
+              setPassiveFleetLogging(value);
+            }}
+            trackColor={{ true: Tram.pidRed }}
+          />
+        </Row>
+        <RowSeparator inset={SEPARATOR_INSET} />
         <Row
           icon="record.circle"
           iconColor={Tram.veryLate}
@@ -309,8 +322,11 @@ function MotionDataSection() {
         )}
       </InsetGroup>
       <Text style={[styles.footnote, { color: palette.textSecondary }]}>
-        Recordings capture GPS against the simulated position to recalibrate the
-        physics. Nothing leaves the device until you export it.
+        Passive fleet logging collects full-fleet deviation logs for physics
+        calibration, ~25 MB/h (on by default during the single-user calibration
+        phase). Ride recordings capture GPS against the simulated position and
+        work independently of the toggle. Nothing leaves the device until you
+        export it.
       </Text>
     </View>
   );

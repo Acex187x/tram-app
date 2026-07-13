@@ -321,6 +321,13 @@ export class MotionLog {
   private ride: RideInfo | null = null;
   private rideStop: (() => void) | null = null;
   private autoStopTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Wall-clock ms past which the active ride must stop (battery guard),
+   * checked in EVERY location callback: the autoStopTimer alone is unreliable
+   * — iOS suspends JS timers while backgrounded, and location deliveries can
+   * long outlive the timer's intended firing moment.
+   */
+  private rideDeadlineMs: number | null = null;
 
   private listeners = new Set<() => void>();
   private version = 0;
@@ -531,6 +538,9 @@ export class MotionLog {
     const relPath = `${RIDE_DIR}/${fileStamp(startedMs)}-${sanitizeKey(tramKey)}.jsonl`;
     // Claim the slot before awaiting so concurrent calls can't double-start.
     this.ride = { key: tramKey, startedMs, points: 0, relPath, lastPointMs: null };
+    // Deadline is an absolute timestamp (not just a timer): survives JS-timer
+    // suspension and is enforced in every location callback.
+    this.rideDeadlineMs = startedMs + RIDE_MAX_MS;
     try {
       this.deps.fs.append(relPath, rideStartRecord(tramKey, this.deps.stateProvider(tramKey), startedMs) + '\n');
     } catch {
@@ -541,6 +551,7 @@ export class MotionLog {
       this.rideStop = await this.deps.location.start((sample) => this.onRideSample(sample));
     } catch {
       this.ride = null;
+      this.rideDeadlineMs = null;
       this.rideStop = null;
       try {
         // Nothing was recorded — drop the header-only file instead of leaving
@@ -566,6 +577,14 @@ export class MotionLog {
   private onRideSample(sample: LocationSample): void {
     const ride = this.ride;
     if (!ride) return;
+    // Deadline check on EVERY sample: if the JS auto-stop timer never fired
+    // (app suspension), the first delivery past the deadline closes the ride
+    // properly (footer + watcher teardown) instead of recording forever.
+    const deadline = this.rideDeadlineMs;
+    if (deadline != null && this.deps.now() >= deadline) {
+      void this.stopRide();
+      return;
+    }
     try {
       const state = this.deps.stateProvider(ride.key);
       const posMode = this.deps.positionMode?.() ?? null;
@@ -594,6 +613,7 @@ export class MotionLog {
     const ride = this.ride;
     if (!ride) return null;
     this.ride = null;
+    this.rideDeadlineMs = null;
     if (this.autoStopTimer != null) {
       this.clearTimer(this.autoStopTimer);
       this.autoStopTimer = null;
