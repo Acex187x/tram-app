@@ -62,7 +62,14 @@ class FakeFeed implements TramFeed {
   }
 
   status(): FeedStatus {
-    return { lastBatchAtMs: this.lastBatchAtMs, lastError: this.lastError };
+    return {
+      lastBatchAtMs: this.lastBatchAtMs,
+      lastError: this.lastError,
+      lastFetchAtMs: this.lastBatchAtMs,
+      nextFetchAtMs: 0,
+      inFlight: false,
+      pollIntervalMs: 0,
+    };
   }
 
   start(): void {

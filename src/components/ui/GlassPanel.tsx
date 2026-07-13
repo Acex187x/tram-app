@@ -29,10 +29,25 @@ export interface GlassPanelProps {
   /** Glass reacts to touches (buttons). */
   interactive?: boolean;
   tintColor?: string;
+  /**
+   * Force the panel's light/dark appearance instead of following the system
+   * scheme. The MAP chrome passes the map's resolved light preset here — the
+   * panels float over the basemap, so a dark-mode phone over a daytime map
+   * must still get LIGHT glass with dark content (and vice versa at night).
+   */
+  appearance?: 'light' | 'dark';
 }
 
-export function GlassPanel({ children, style, variant = 'regular', interactive, tintColor }: GlassPanelProps) {
-  const scheme = useColorScheme();
+export function GlassPanel({
+  children,
+  style,
+  variant = 'regular',
+  interactive,
+  tintColor,
+  appearance,
+}: GlassPanelProps) {
+  const systemScheme = useColorScheme();
+  const scheme = appearance ?? (systemScheme === 'dark' ? 'dark' : 'light');
   const [reduceTransparency, setReduceTransparency] = useState(reduceTransparencyCache);
 
   useEffect(() => {
@@ -62,6 +77,7 @@ export function GlassPanel({ children, style, variant = 'regular', interactive, 
         glassEffectStyle={variant}
         isInteractive={interactive}
         tintColor={tintColor}
+        colorScheme={appearance ?? 'auto'}
         style={[styles.rounded, style]}
       >
         {children}

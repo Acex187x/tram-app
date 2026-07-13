@@ -15,7 +15,7 @@ import { getModelSpec, isLikelyCoupledPair, regNumberToModelId } from '@/lib/fle
 import { TramEngine, type ProjectionCadence } from '@/lib/engine/engine';
 import { toCalibrationRecords } from '@/lib/feed/calibration';
 import { LocalGolemioFeed } from '@/lib/feed/localGolemioFeed';
-import type { TramFeed } from '@/lib/feed/types';
+import type { FeedStatus, TramFeed } from '@/lib/feed/types';
 import * as shapeCache from '@/lib/golemio/shapeCache';
 import type { RouteGeometry, TramPublicState, TramSnapshot } from '@/lib/types';
 import { useSettingsStore, type PositionMode } from '@/stores/settings';
@@ -129,6 +129,11 @@ export class TramRuntime {
   /** Wall-clock ms of the last delivered snapshot batch, 0 = never (status chip). */
   get lastPollAtMs(): number {
     return this.feed.status().lastBatchAtMs;
+  }
+
+  /** Full feed health (poll-cycle indicator) — a fresh view over feed.status(). */
+  get feedStatus(): FeedStatus {
+    return this.feed.status();
   }
 
   /** Coupled-pair predicate for featureBuilder opts. */
@@ -397,6 +402,17 @@ export function useTramState(key: string | null | undefined): TramPublicState | 
   const rt = getRuntime();
   useSyncExternalStore(rt.subscribeUi, rt.getUiVersion);
   return key ? rt.engine.getState(key, Date.now()) : undefined;
+}
+
+/**
+ * Feed poll-cycle health, refreshed ~1 Hz (fetch indicator + status chip).
+ * Rides the existing subscribeUi notification — no extra timers, and the
+ * status object is only re-read on the 1 Hz version bump (perf invariant #1).
+ */
+export function useFeedStatus(): FeedStatus {
+  const rt = getRuntime();
+  useSyncExternalStore(rt.subscribeUi, rt.getUiVersion);
+  return rt.feedStatus;
 }
 
 /**

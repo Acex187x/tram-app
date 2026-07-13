@@ -15,12 +15,20 @@ import type { RouteGeometry, TramSnapshot } from '@/lib/types';
 /** Geometry fetch priority: 0 = urgent (tapped tram), 1 = normal, 2 = background. */
 export type FeedPriority = 0 | 1 | 2;
 
-/** Feed health for the status chip ("stale data" banner). */
+/** Feed health for the status chip ("stale data" banner) + the poll indicator. */
 export interface FeedStatus {
   /** Wall-clock ms of the last successfully delivered snapshot batch (0 = never). */
   lastBatchAtMs: number;
   /** Message of the most recent delivery failure, or null after a success. */
   lastError: string | null;
+  /** Wall-clock ms when the most recent fetch attempt STARTED (0 = never). */
+  lastFetchAtMs: number;
+  /** Projected wall-clock ms of the next fetch start (0 = feed stopped). */
+  nextFetchAtMs: number;
+  /** True while a fetch is currently in flight. */
+  inFlight: boolean;
+  /** Active poll cadence in ms (0 = feed stopped). */
+  pollIntervalMs: number;
 }
 
 /**

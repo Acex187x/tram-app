@@ -1,90 +1,161 @@
-// Liquid Glass chrome floating over the map: status chip (live count + stale
-// warning), right-side control stack, bottom dock (search + favorites +
-// planner), and the follow banner. All surfaces are GlassPanel over the map.
+// Liquid Glass chrome floating over the map: status chip (poll ring + live
+// count + sync detail), top-right control stack (2D/3D · settings), the
+// bottom-right locate button, bottom dock (search + favorites + planner), and
+// the follow/planner/ride chips. All surfaces are GlassPanel over the map.
+//
+// APPEARANCE: the chrome floats over the BASEMAP, not over app UI — so its
+// light/dark styling follows the map's resolved light preset (day/dawn →
+// light glass + dark labels, dusk/night → dark glass + light labels) via
+// MapChromeSchemeContext, NOT the system color scheme. A dark-mode phone over
+// a daytime map previously rendered white icons on white glass.
 
 import * as Haptics from 'expo-haptics';
 import { router, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useSyncExternalStore } from 'react';
-import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { createContext, useContext, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { PollRing, usePollModel } from '@/components/map/PollIndicator';
 import { DelayPill } from '@/components/ui/DelayPill';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
 import { Colors, Fonts, Spacing, Tram } from '@/constants/theme';
-import { getRuntime, useAllTramStates, useTramState } from '@/hooks/tramData';
+import { useAllTramStates, useTramState } from '@/hooks/tramData';
 import { usePlannerStore } from '@/stores/planner';
 import { useRidePreviewStore } from '@/stores/ridePreview';
 import { useSelectionStore } from '@/stores/selection';
 
-const STALE_AFTER_MS = 30_000;
+// ── Chrome appearance (follows the MAP light preset, not the system scheme) ──
 
-/** Vertical footprint of one stacked bottom chip (banner height + gap). */
-const CHIP_STACK_H = 56;
-/** Bottom offset of the follow-banner slot, above the dock. */
-const BANNER_SLOT = Spacing.three + 68;
+export type ChromeScheme = 'light' | 'dark';
+
+/** Provided by the map screen from the resolved basemap light preset. */
+export const MapChromeSchemeContext = createContext<ChromeScheme>('light');
+
+function useChromeScheme(): ChromeScheme {
+  return useContext(MapChromeSchemeContext);
+}
 
 function useTextColors() {
-  const scheme = useColorScheme();
-  const palette = Colors[scheme === 'dark' ? 'dark' : 'light'];
-  return { text: palette.text, secondary: palette.textSecondary };
+  const scheme = useChromeScheme();
+  const palette = Colors[scheme];
+  return { scheme, text: palette.text, secondary: palette.textSecondary };
 }
 
 function tapLight() {
   void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 }
 
-// ── Status chip (top-left): live tram count + stale-data warning ─────────────
+// ── Layout constants (shared with the map screen's compass ornament) ─────────
 
-/** Stale when the last poll errored or is older than 30 s (re-checked ~1 Hz). */
-function useDataStale(): boolean {
-  const rt = getRuntime();
-  return useSyncExternalStore(
-    rt.subscribeUi,
-    () =>
-      rt.lastError != null ||
-      rt.lastPollAtMs === 0 ||
-      Date.now() - rt.lastPollAtMs > STALE_AFTER_MS,
-  );
-}
+const CONTROL_BUTTON_SIZE = 46;
+const CONTROL_GAP = Spacing.two + 2;
+/** Right inset of the control column — one shared vertical axis for all round buttons. */
+const CONTROL_RIGHT = Spacing.two + 4;
+const TOP_STACK_BUTTONS = 2; // 2D/3D · settings
+/**
+ * Mapbox compass ornament slot: directly below the top-right control stack,
+ * on the same right axis. NOTE: rnmapbox ornament offsets are already
+ * safe-area-relative on iOS — do NOT add insets.top here (adding it double
+ * counted the inset and stranded the compass mid-screen).
+ */
+export const COMPASS_TOP =
+  Spacing.two + TOP_STACK_BUTTONS * CONTROL_BUTTON_SIZE + (TOP_STACK_BUTTONS - 1) * CONTROL_GAP + 12;
+/** The native compass is ~44 pt wide; +1 centers it on the 46 pt button axis. */
+export const COMPASS_RIGHT = CONTROL_RIGHT + 1;
 
+/** Bottom dock footprint (38 pt search field + vertical padding). */
+const DOCK_H = 54;
+/** Locate button slot: bottom-right, floating just above the dock. */
+const LOCATE_BOTTOM = Spacing.three + DOCK_H + 12;
+/** Vertical footprint of one stacked bottom chip (banner height + gap). */
+const CHIP_STACK_H = 56;
+/**
+ * Bottom offset of the follow/planner/ride chip base slot — above the locate
+ * button so a wide centered chip can never collide with it (the chips stack
+ * above the button like snackbars above a FAB).
+ */
+const BANNER_SLOT = LOCATE_BOTTOM + CONTROL_BUTTON_SIZE + 12;
+
+// ── Status chip (top-left): poll ring + live tram count + sync detail ────────
+
+/**
+ * The poll indicator and the status chip are ONE element: the 5-segment ring
+ * counts down the 5 s positions poll (fills once per second at the shared
+ * 1 Hz UI cadence — no timers or animations of its own, see PollIndicator),
+ * recolors on stale/error, and tapping the chip toggles an inline "updated
+ * N s ago" / offline detail so the information lives in a single surface.
+ */
 export function StatusChip() {
   const insets = useSafeAreaInsets();
   const states = useAllTramStates(); // ~1 Hz
   const colors = useTextColors();
-  const stale = useDataStale();
+  const poll = usePollModel(); // ~1 Hz, same subscription
+  const [expanded, setExpanded] = useState(false);
+
+  const trouble = poll.state === 'error' || poll.state === 'stale';
+  const dimColor = colors.scheme === 'dark' ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.15)';
 
   return (
-    <View style={[styles.statusChipWrap, { top: insets.top + Spacing.two }]} pointerEvents="none">
-      <GlassPanel variant="regular" style={styles.statusChip}>
-        <SymbolView name="tram.fill" size={14} tintColor={Tram.pidRed} />
-        <Text
-          style={[styles.statusText, { color: colors.text }]}
-          allowFontScaling={false}
+    <View style={[styles.statusChipWrap, { top: insets.top + Spacing.two }]}>
+      <GlassPanel
+        variant="regular"
+        interactive
+        appearance={colors.scheme}
+        style={styles.statusChip}
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Live data: ${states.length} trams, ${poll.detail}`}
+          accessibilityHint="Shows when tram positions were last updated"
+          hitSlop={6}
+          style={styles.statusBody}
+          onPress={() => {
+            tapLight();
+            setExpanded((e) => !e);
+          }}
         >
-          {states.length}
-        </Text>
-        {stale && (
-          <>
-            <SymbolView name="wifi.exclamationmark" size={14} tintColor={Tram.late} />
-            <Text style={[styles.statusStale, { color: Tram.late }]} allowFontScaling={false}>
-              stale
+          <PollRing model={poll} color={colors.text} dimColor={dimColor} />
+          <SymbolView
+            name="tram.fill"
+            size={14}
+            tintColor={colors.scheme === 'dark' ? Tram.liveryRed : Tram.pidRed}
+          />
+          <Text style={[styles.statusText, { color: colors.text }]} allowFontScaling={false}>
+            {states.length}
+          </Text>
+          {trouble && (
+            <SymbolView
+              name="wifi.exclamationmark"
+              size={14}
+              tintColor={poll.state === 'error' ? Tram.veryLate : Tram.late}
+            />
+          )}
+          {(expanded || trouble) && (
+            <Text
+              style={[
+                styles.statusDetail,
+                {
+                  color: trouble
+                    ? poll.state === 'error'
+                      ? Tram.veryLate
+                      : Tram.late
+                    : colors.secondary,
+                },
+              ]}
+              allowFontScaling={false}
+            >
+              {poll.detail}
             </Text>
-          </>
-        )}
+          )}
+        </Pressable>
       </GlassPanel>
     </View>
   );
 }
 
-// ── Control stack (top-right): locate · 2D/3D · settings ─────────────────────
-
-export interface ControlStackProps {
-  is3D: boolean;
-  onLocate: () => void;
-  onTogglePitch: () => void;
-}
+// ── Round glass control button (shared by the stacks + locate) ───────────────
 
 function ControlButton({
   symbol,
@@ -97,7 +168,12 @@ function ControlButton({
 }) {
   const colors = useTextColors();
   return (
-    <GlassPanel variant="regular" interactive style={styles.controlButton}>
+    <GlassPanel
+      variant="regular"
+      interactive
+      appearance={colors.scheme}
+      style={styles.controlButton}
+    >
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={label}
@@ -114,11 +190,17 @@ function ControlButton({
   );
 }
 
-export function ControlStack({ is3D, onLocate, onTogglePitch }: ControlStackProps) {
+// ── Control stack (top-right): 2D/3D · settings ──────────────────────────────
+
+export interface ControlStackProps {
+  is3D: boolean;
+  onTogglePitch: () => void;
+}
+
+export function ControlStack({ is3D, onTogglePitch }: ControlStackProps) {
   const insets = useSafeAreaInsets();
   return (
     <View style={[styles.controlStack, { top: insets.top + Spacing.two }]}>
-      <ControlButton symbol="location" label="Show my location" onPress={onLocate} />
       <ControlButton
         symbol={is3D ? 'view.2d' : 'view.3d'}
         label={is3D ? 'Switch to 2D map' : 'Switch to 3D map'}
@@ -133,17 +215,28 @@ export function ControlStack({ is3D, onLocate, onTogglePitch }: ControlStackProp
   );
 }
 
+// ── Locate button (bottom-right, above the dock — standard nav-app slot) ─────
+
+export function LocateButton({ onLocate }: { onLocate: () => void }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={[styles.locateWrap, { bottom: insets.bottom + LOCATE_BOTTOM }]}>
+      <ControlButton symbol="location" label="Show my location" onPress={onLocate} />
+    </View>
+  );
+}
+
 // ── Bottom dock: search pill + favorites + planner ───────────────────────────
 
 export function BottomDock() {
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
   const colors = useTextColors();
-  const fieldBg = scheme === 'dark' ? 'rgba(120,120,128,0.22)' : 'rgba(120,120,128,0.16)';
+  const fieldBg =
+    colors.scheme === 'dark' ? 'rgba(120,120,128,0.22)' : 'rgba(120,120,128,0.16)';
 
   return (
     <View style={[styles.dockWrap, { bottom: insets.bottom + Spacing.three }]}>
-      <GlassPanel variant="regular" style={styles.dock}>
+      <GlassPanel variant="regular" appearance={colors.scheme} style={styles.dock}>
         <Pressable
           accessibilityRole="search"
           style={[styles.searchField, { backgroundColor: fieldBg }]}
@@ -192,10 +285,12 @@ export function BottomDock() {
 
 // ── Bottom banners: follow + planner-route clear + ride preview ──────────────
 //
-// All are stacked glass chips above the dock. The planner chip owns the base
-// slot, the ride-preview chip stacks above it, and the follow banner floats
-// on top of whichever of those are visible. Rendered together from a single
-// exported node so `app/index.tsx` keeps its one `<FollowBanner />`.
+// All are stacked glass chips above the locate button (snackbar-above-FAB
+// pattern — a wide centered chip must never collide with the bottom-right
+// button). The planner chip owns the base slot, the ride-preview chip stacks
+// above it, and the follow banner floats on top of whichever are visible.
+// Rendered together from a single exported node so `app/index.tsx` keeps its
+// one `<FollowBanner />`.
 
 export function FollowBanner() {
   return (
@@ -227,7 +322,7 @@ function FollowChip() {
   // users kept losing the sheet while following); only the ✕ stops the follow.
   return (
     <View style={[styles.followWrap, { bottom }]}>
-      <GlassPanel variant="regular" interactive style={styles.followBanner}>
+      <GlassPanel variant="regular" interactive appearance={colors.scheme} style={styles.followBanner}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Open tram ${reg ?? followKey} details`}
@@ -292,7 +387,7 @@ function RideChip() {
   const bottom = insets.bottom + BANNER_SLOT + (plannerActive ? CHIP_STACK_H : 0);
   return (
     <View style={[styles.followWrap, { bottom }]}>
-      <GlassPanel variant="regular" interactive style={styles.followBanner}>
+      <GlassPanel variant="regular" interactive appearance={colors.scheme} style={styles.followBanner}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Reopen recorded rides"
@@ -347,7 +442,7 @@ function PlannerChip() {
 
   return (
     <View style={[styles.followWrap, { bottom: insets.bottom + BANNER_SLOT }]}>
-      <GlassPanel variant="regular" interactive style={styles.followBanner}>
+      <GlassPanel variant="regular" interactive appearance={colors.scheme} style={styles.followBanner}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Reopen trip planner"
@@ -386,29 +481,29 @@ function PlannerChip() {
 const styles = StyleSheet.create({
   statusChipWrap: { position: 'absolute', left: Spacing.three },
   statusChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 999,
   },
+  statusBody: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusText: {
     fontSize: 14,
     fontWeight: '600',
     fontVariant: ['tabular-nums'],
     fontFamily: Fonts?.rounded,
   },
-  statusStale: { fontSize: 12, fontWeight: '600' },
+  statusDetail: { fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'] },
 
-  controlStack: { position: 'absolute', right: Spacing.two + 4, gap: Spacing.two + 2 },
-  controlButton: { borderRadius: 23 },
+  controlStack: { position: 'absolute', right: CONTROL_RIGHT, gap: CONTROL_GAP },
+  controlButton: { borderRadius: CONTROL_BUTTON_SIZE / 2 },
   controlPressable: {
-    width: 46,
-    height: 46,
+    width: CONTROL_BUTTON_SIZE,
+    height: CONTROL_BUTTON_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
   },
+
+  locateWrap: { position: 'absolute', right: CONTROL_RIGHT },
 
   // Wide layouts (iPad): the dock caps at 560 pt and centers instead of
   // stretching edge-to-edge; on phones maxWidth never binds.

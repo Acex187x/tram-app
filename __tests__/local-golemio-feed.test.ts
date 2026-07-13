@@ -73,7 +73,14 @@ describe('LocalGolemioFeed poll loop', () => {
     await flush();
 
     expect(batches).toEqual([{ snapshots, atMs: T0 }]);
-    expect(feed.status()).toEqual({ lastBatchAtMs: T0, lastError: null });
+    expect(feed.status()).toEqual({
+      lastBatchAtMs: T0,
+      lastError: null,
+      lastFetchAtMs: T0,
+      nextFetchAtMs: T0 + POLL_MS,
+      inFlight: false,
+      pollIntervalMs: POLL_MS,
+    });
     feed.stop();
   });
 
@@ -118,7 +125,7 @@ describe('LocalGolemioFeed poll loop', () => {
     expect(feed.status().lastBatchAtMs).toBe(0);
 
     await jest.advanceTimersByTimeAsync(POLL_MS);
-    expect(feed.status()).toEqual({ lastBatchAtMs: T0 + POLL_MS, lastError: null });
+    expect(feed.status()).toMatchObject({ lastBatchAtMs: T0 + POLL_MS, lastError: null });
     feed.stop();
   });
 
@@ -154,7 +161,14 @@ describe('LocalGolemioFeed poll loop', () => {
     d.resolve([makeSnapshot()]);
     await flush();
     expect(batches).toHaveLength(0);
-    expect(feed.status()).toEqual({ lastBatchAtMs: 0, lastError: null });
+    expect(feed.status()).toMatchObject({
+      lastBatchAtMs: 0,
+      lastError: null,
+      // Stopped: no next fetch is projected and no poll is in flight.
+      nextFetchAtMs: 0,
+      inFlight: false,
+      pollIntervalMs: 0,
+    });
   });
 
   it('a late REJECTION after stop() is swallowed too (no stale lastError)', async () => {
@@ -166,6 +180,41 @@ describe('LocalGolemioFeed poll loop', () => {
     d.reject(new Error('aborted'));
     await flush();
     expect(feed.status().lastError).toBeNull();
+  });
+
+  it('status() exposes the poll cycle: inFlight during a fetch, next-fetch projection, cadence override', async () => {
+    const d = deferred<TramSnapshot[]>();
+    fetchMock.mockImplementationOnce(() => d.promise);
+    fetchMock.mockResolvedValue([]);
+    const feed = new LocalGolemioFeed();
+
+    // Before start(): everything zero/off.
+    expect(feed.status()).toMatchObject({
+      lastFetchAtMs: 0,
+      nextFetchAtMs: 0,
+      inFlight: false,
+      pollIntervalMs: 0,
+    });
+
+    feed.start(10_000); // cadence override (rideBackground path)
+    expect(feed.status()).toMatchObject({
+      lastFetchAtMs: T0,
+      nextFetchAtMs: T0 + 10_000,
+      inFlight: true,
+      pollIntervalMs: 10_000,
+    });
+
+    d.resolve([]);
+    await flush();
+    expect(feed.status().inFlight).toBe(false);
+
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(feed.status()).toMatchObject({
+      lastFetchAtMs: T0 + 10_000,
+      nextFetchAtMs: T0 + 20_000,
+    });
+    feed.stop();
+    expect(feed.status()).toMatchObject({ nextFetchAtMs: 0, pollIntervalMs: 0 });
   });
 
   it('unsubscribe stops delivery', async () => {

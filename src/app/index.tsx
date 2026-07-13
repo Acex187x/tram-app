@@ -15,10 +15,18 @@ import * as Location from 'expo-location';
 import * as SplashScreen from 'expo-splash-screen';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { resolveLightPreset, STANDARD_CONFIG } from '@/components/map/mapStyle';
-import { BottomDock, ControlStack, FollowBanner, StatusChip } from '@/components/map/MapChrome';
+import {
+  BottomDock,
+  COMPASS_RIGHT,
+  COMPASS_TOP,
+  ControlStack,
+  FollowBanner,
+  LocateButton,
+  MapChromeSchemeContext,
+  StatusChip,
+} from '@/components/map/MapChrome';
 import { PlannerOverlay } from '@/components/map/PlannerOverlay';
 import { RideOverlay } from '@/components/map/RideOverlay';
 import { RouteNetwork, STOP_TOTEM_MODEL_KEY } from '@/components/map/RouteNetwork';
@@ -46,7 +54,6 @@ const SPLASH_FAILSAFE_MS = 8_000;
 export default function MapScreen() {
   useTramRuntime(); // keeps polling + simulation alive while the map lives
 
-  const insets = useSafeAreaInsets();
   const cameraRef = useRef<Camera>(null);
   const viewportRef = useRef<Viewport>({ ...INITIAL_VIEWPORT });
   const splashHiddenRef = useRef(false);
@@ -63,6 +70,10 @@ export default function MapScreen() {
     return () => clearInterval(iv);
   }, []);
   const lightPreset = resolveLightPreset(lightPresetSetting, lightClock);
+  // The chrome floats over the BASEMAP, so its light/dark appearance follows
+  // the map's light preset — NOT the system scheme (a dark-mode phone over a
+  // daytime map used to render white icons on white glass).
+  const chromeScheme = lightPreset === 'dusk' || lightPreset === 'night' ? 'dark' : 'light';
 
   // ── Splash: hide when the base map is in, failsafe either way ──────────────
   const hideSplash = useCallback(() => {
@@ -215,7 +226,10 @@ export default function MapScreen() {
         styleURL="mapbox://styles/mapbox/standard"
         scaleBarEnabled={false}
         compassEnabled
-        compassPosition={{ top: insets.top + 178, right: 21 }}
+        // Ornament offsets are safe-area-relative on iOS (adding insets.top
+        // here double-counted it and stranded the compass mid-screen). The
+        // slot sits right below the top-right control stack, same right axis.
+        compassPosition={{ top: COMPASS_TOP, right: COMPASS_RIGHT }}
         pitchEnabled
         onDidFinishLoadingMap={hideSplash}
         onDidFinishLoadingStyle={() => setStyleLoaded(true)}
@@ -254,10 +268,13 @@ export default function MapScreen() {
         {locationGranted && <LocationPuck puckBearingEnabled puckBearing="heading" />}
       </MapView>
 
-      <StatusChip />
-      <ControlStack is3D={is3D} onLocate={() => void onLocate()} onTogglePitch={onTogglePitch} />
-      <FollowBanner />
-      <BottomDock />
+      <MapChromeSchemeContext.Provider value={chromeScheme}>
+        <StatusChip />
+        <ControlStack is3D={is3D} onTogglePitch={onTogglePitch} />
+        <LocateButton onLocate={() => void onLocate()} />
+        <FollowBanner />
+        <BottomDock />
+      </MapChromeSchemeContext.Provider>
     </View>
   );
 }

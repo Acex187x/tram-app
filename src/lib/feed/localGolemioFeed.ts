@@ -63,6 +63,10 @@ export class LocalGolemioFeed implements TramFeed {
   private listeners = new Set<SnapshotListener>();
   private lastBatchAtMs = 0;
   private lastError: string | null = null;
+  /** Poll-cycle bookkeeping for status(): the chrome's fetch indicator. */
+  private pollMs = POLL_MS;
+  private lastFetchAtMs = 0;
+  private nextFetchAtMs = 0;
   private readonly calibrationSink: (records: CalibrationRecord[]) => void;
 
   constructor(options?: LocalGolemioFeedOptions) {
@@ -72,6 +76,7 @@ export class LocalGolemioFeed implements TramFeed {
   /** Start the poll loop + an immediate poll. Idempotent. */
   start(pollMs: number = POLL_MS): void {
     if (this.pollTimer) return;
+    this.pollMs = pollMs;
     this.pollTimer = setInterval(() => void this.poll(), pollMs);
     void this.poll();
   }
@@ -119,12 +124,25 @@ export class LocalGolemioFeed implements TramFeed {
   }
 
   status(): FeedStatus {
-    return { lastBatchAtMs: this.lastBatchAtMs, lastError: this.lastError };
+    const running = this.pollTimer != null;
+    return {
+      lastBatchAtMs: this.lastBatchAtMs,
+      lastError: this.lastError,
+      lastFetchAtMs: this.lastFetchAtMs,
+      nextFetchAtMs: running ? this.nextFetchAtMs : 0,
+      inFlight: this.pollInFlight,
+      pollIntervalMs: running ? this.pollMs : 0,
+    };
   }
 
   private async poll(): Promise<void> {
     if (this.pollInFlight) return;
     this.pollInFlight = true;
+    // Cycle bookkeeping for the chrome's fetch indicator (status()). The
+    // interval is anchored at start(), so "now + pollMs" tracks the real next
+    // tick to within timer jitter — plenty for a 1 Hz UI ring.
+    this.lastFetchAtMs = Date.now();
+    this.nextFetchAtMs = this.lastFetchAtMs + this.pollMs;
     const gen = this.generation;
     const abort = new AbortController();
     this.pollAbort = abort;
