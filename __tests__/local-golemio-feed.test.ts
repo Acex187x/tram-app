@@ -51,6 +51,16 @@ const prefetchMock = shapeCache.requestPrefetch as jest.MockedFunction<
 
 const T0 = 1_000_000_000_000;
 
+// The failure backoff jitters by ×(0.85 + random·0.3). Pin random to 0.5 so
+// the multiplier is exactly 1.0 and backoff windows land exactly on poll
+// ticks — otherwise every exact-tick assertion below is a coin flip.
+beforeEach(() => {
+  jest.spyOn(Math, 'random').mockReturnValue(0.5);
+});
+afterEach(() => {
+  (Math.random as unknown as jest.Mock).mockRestore();
+});
+
 /** Build a TramSnapshotBatch the way the hardened vehicles module does. */
 function batch(
   snapshots: TramSnapshot[] = [],

@@ -4,6 +4,7 @@
 // feed MapView a tiny style JSON that imports Standard under the id 'basemap' —
 // then <StyleImport id="basemap" existing config> works for live re-lighting.
 
+import { pragueOffsetSeconds } from '@/lib/time/prague';
 import type { LightPreset } from '@/stores/settings';
 
 /** Standard basemap config shared by the initial style JSON and StyleImport. */
@@ -38,8 +39,8 @@ function pragueHour(nowMs: number): number {
     const h = parseInt(pragueHourFormatter.format(new Date(nowMs)), 10);
     if (!Number.isNaN(h)) return h % 24;
   }
-  // Fallback: CET/CEST approximation.
-  return (new Date(nowMs).getUTCHours() + 2) % 24;
+  // Fallback: deterministic CET/CEST resolver (a flat +2 was wrong in winter).
+  return Math.floor(((nowMs / 1000 + pragueOffsetSeconds(nowMs)) / 3600) % 24);
 }
 
 /** 'auto' → time-of-day in Prague; explicit presets pass through. */
