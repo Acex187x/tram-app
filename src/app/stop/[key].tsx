@@ -33,6 +33,7 @@ import {
 } from '@/lib/arrivals';
 import { usePlannerStore } from '@/stores/planner';
 import { useSelectionStore } from '@/stores/selection';
+import { useSpotterStore } from '@/stores/spotter';
 
 /** 'Tatra T3R.P' → 'T3R.P', 'Škoda 15T ForCity Alfa' → '15T ForCity Alfa'. */
 function shortModelName(name: string): string {
@@ -75,6 +76,31 @@ export default function StopSheet() {
   const onOpenTram = (arrival: StopArrival): void => {
     void Haptics.selectionAsync();
     router.push(('/tram/' + encodeURIComponent(arrival.tramKey)) as Href);
+  };
+
+  // Spotter mode: sit at a window overlooking this stop and watch how well
+  // the simulation matches reality — the camera flies to the stop, follows
+  // the tram arriving FIRST, and hops to the next one as each departs
+  // (SpotterController owns the loop; this button only starts/stops it).
+  const spotterStation = useSpotterStore((s) => s.station);
+  const isSpottingHere = spotterStation?.key === stationKey;
+  const onSpot = (): void => {
+    if (!station) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (isSpottingHere) {
+      useSpotterStore.getState().stop();
+      useSelectionStore.getState().setFollowTramKey(null);
+      return;
+    }
+    // Fly-in first (also clears any existing follow when the map consumes
+    // it); the controller waits for the glide before grabbing a target.
+    requestFlyTo({ coordinates: station.coordinates, zoom: 16.5 });
+    useSpotterStore.getState().start({
+      key: stationKey,
+      name: station.name,
+      coordinates: station.coordinates,
+    });
+    router.back();
   };
 
   // "Route here": nearest stop to the user → this stop, handed to the planner
@@ -196,6 +222,28 @@ export default function StopSheet() {
                   </Text>
                 </>
               )}
+            </Pressable>
+          )}
+
+          {station && (
+            <Pressable
+              onPress={onSpot}
+              accessibilityRole="button"
+              accessibilityLabel={isSpottingHere ? 'Stop spotting this stop' : 'Spot this stop'}
+              accessibilityHint="Follows each tram arriving at this stop, switching as they depart"
+              style={({ pressed }) => [
+                styles.spotButton,
+                { backgroundColor: c.backgroundElement, opacity: pressed ? 0.75 : 1 },
+              ]}
+            >
+              <SymbolView
+                name="binoculars.fill"
+                size={16}
+                tintColor={isSpottingHere ? Tram.veryLate : Tram.pidRed}
+              />
+              <Text style={[styles.spotButtonText, { color: c.text }]} allowFontScaling={false}>
+                {isSpottingHere ? 'Stop spotting' : 'Spot this stop'}
+              </Text>
             </Pressable>
           )}
 
@@ -353,6 +401,19 @@ const styles = StyleSheet.create({
   },
   routeButtonText: {
     color: Tram.cream,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  spotButton: {
+    alignItems: 'center',
+    borderCurve: 'continuous',
+    borderRadius: 14,
+    flexDirection: 'row',
+    gap: Spacing.two,
+    justifyContent: 'center',
+    minHeight: 50,
+  },
+  spotButtonText: {
     fontSize: 16,
     fontWeight: '600',
   },

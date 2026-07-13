@@ -242,8 +242,12 @@ function geometriesByTrip(geometries: RouteGeometry[]): Map<string, RouteGeometr
   return m;
 }
 
-/** First stop of station `key` still ahead of a tram at `simDistM`. */
-function nextStationStop(geo: RouteGeometry, key: string, simDistM: number) {
+/**
+ * First stop of station `key` still ahead of a tram at `simDistM`. Exported
+ * for the spotter (src/lib/spotter.ts), which anchors its departed-detector
+ * on the matched platform's shape distance.
+ */
+export function nextStationStop(geo: RouteGeometry, key: string, simDistM: number) {
   for (const stop of geo.stops) {
     if (stop.distM < simDistM - STOP_SLACK_M) continue;
     if (normalizeName(stop.name) === key) return stop;

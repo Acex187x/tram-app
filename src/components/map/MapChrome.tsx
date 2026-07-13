@@ -22,9 +22,11 @@ import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
 import { Colors, Fonts, Spacing, Tram } from '@/constants/theme';
 import { useAllTramStates, useTramState } from '@/hooks/tramData';
+import { formatEtaMinutes } from '@/lib/arrivals';
 import { usePlannerStore } from '@/stores/planner';
 import { useRidePreviewStore } from '@/stores/ridePreview';
 import { useSelectionStore } from '@/stores/selection';
+import { useSpotterStore } from '@/stores/spotter';
 
 // ── Chrome appearance (follows the MAP light preset, not the system scheme) ──
 
@@ -283,19 +285,20 @@ export function BottomDock() {
   );
 }
 
-// ── Bottom banners: follow + planner-route clear + ride preview ──────────────
+// ── Bottom banners: follow + spotter + planner-route clear + ride preview ────
 //
 // All are stacked glass chips above the locate button (snackbar-above-FAB
 // pattern — a wide centered chip must never collide with the bottom-right
 // button). The planner chip owns the base slot, the ride-preview chip stacks
-// above it, and the follow banner floats on top of whichever are visible.
-// Rendered together from a single exported node so `app/index.tsx` keeps its
-// one `<FollowBanner />`.
+// above it, the spotter chip above that, and the follow banner floats on top
+// of whichever are visible. Rendered together from a single exported node so
+// `app/index.tsx` keeps its one `<FollowBanner />`.
 
 export function FollowBanner() {
   return (
     <>
       <FollowChip />
+      <SpotterChip />
       <RideChip />
       <PlannerChip />
     </>
@@ -308,15 +311,17 @@ function FollowChip() {
   const state = useTramState(followKey);
   const plannerActive = usePlannerStore((s) => s.itinerary != null);
   const rideActive = useRidePreviewStore((s) => s.preview != null);
+  const spotterActive = useSpotterStore((s) => s.station != null);
   const colors = useTextColors();
   if (!followKey || !state) return null;
 
-  // Float above the planner/ride chips when they are visible.
+  // Float above the planner/ride/spotter chips when they are visible.
   const bottom =
     insets.bottom +
     BANNER_SLOT +
     (plannerActive ? CHIP_STACK_H : 0) +
-    (rideActive ? CHIP_STACK_H : 0);
+    (rideActive ? CHIP_STACK_H : 0) +
+    (spotterActive ? CHIP_STACK_H : 0);
   const reg = state.snapshot.registrationNumber;
   // Chip body reopens the tram sheet (same pattern as the planner chip —
   // users kept losing the sheet while following); only the ✕ stops the follow.
@@ -355,6 +360,83 @@ function FollowChip() {
           }}
         >
           <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.secondary} />
+        </Pressable>
+      </GlassPanel>
+    </View>
+  );
+}
+
+/**
+ * Shown while stop-spotting is active (SpotterController drives the follow
+ * camera through the trams arriving at the spotted stop). Body reopens the
+ * stop sheet (planner-chip pattern); the ✕ ends spotting AND the follow it
+ * drives. While nobody is inbound the chip stays up with a waiting hint.
+ * Note the follow-banner ✕ also ends spotting — the controller reconciles
+ * any follow change it didn't make (no orphaned spotter sessions).
+ */
+function SpotterChip() {
+  const insets = useSafeAreaInsets();
+  const station = useSpotterStore((s) => s.station);
+  const target = useSpotterStore((s) => s.target); // ~1 Hz while ETA changes
+  const plannerActive = usePlannerStore((s) => s.itinerary != null);
+  const rideActive = useRidePreviewStore((s) => s.preview != null);
+  const colors = useTextColors();
+  if (!station) return null;
+
+  const detail = target
+    ? `line ${target.line} · ${formatEtaMinutes(target.etaS)}`
+    : 'waiting for next tram';
+  const bottom =
+    insets.bottom +
+    BANNER_SLOT +
+    (plannerActive ? CHIP_STACK_H : 0) +
+    (rideActive ? CHIP_STACK_H : 0);
+  return (
+    <View style={[styles.followWrap, { bottom }]}>
+      <GlassPanel variant="regular" interactive appearance={colors.scheme} style={styles.followBanner}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Spotting ${station.name}, ${detail}. Reopen stop details`}
+          style={styles.plannerBody}
+          onPress={() => {
+            tapLight();
+            router.push(('/stop/' + encodeURIComponent(station.key)) as Href);
+          }}
+        >
+          <SymbolView
+            name="binoculars.fill"
+            size={15}
+            tintColor={colors.scheme === 'dark' ? Tram.liveryRed : Tram.pidRed}
+          />
+          <Text
+            style={[styles.plannerRoute, { color: colors.text }]}
+            numberOfLines={1}
+            allowFontScaling={false}
+          >
+            Spotting {station.name}
+          </Text>
+          <Text
+            style={[styles.spotterDetail, { color: colors.secondary }]}
+            numberOfLines={1}
+            allowFontScaling={false}
+          >
+            {detail}
+          </Text>
+          <SymbolView name="chevron.up" size={12} tintColor={colors.secondary} />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Stop spotting"
+          hitSlop={8}
+          onPress={() => {
+            tapLight();
+            // Order matters: stop() unmounts the controller first, then the
+            // follow it was driving is released.
+            useSpotterStore.getState().stop();
+            useSelectionStore.getState().setFollowTramKey(null);
+          }}
+        >
+          <SymbolView name="xmark.circle.fill" size={16} tintColor={colors.secondary} />
         </Pressable>
       </GlassPanel>
     </View>
@@ -554,4 +636,5 @@ const styles = StyleSheet.create({
   followHint: { fontSize: 12, fontWeight: '500' },
   plannerRoute: { fontSize: 13, fontWeight: '600', maxWidth: 200, flexShrink: 1 },
   plannerBody: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  spotterDetail: { fontSize: 12, fontWeight: '500', fontVariant: ['tabular-nums'] },
 });

@@ -29,6 +29,7 @@ import {
 } from '@/components/map/MapChrome';
 import { PlannerOverlay } from '@/components/map/PlannerOverlay';
 import { RideOverlay } from '@/components/map/RideOverlay';
+import { SpotterController } from '@/components/map/SpotterController';
 import { RouteNetwork, STOP_TOTEM_MODEL_KEY } from '@/components/map/RouteNetwork';
 import { TramLayers, type FollowGestureState } from '@/components/map/TramLayers';
 import { useTramModels } from '@/components/map/useTramModels';
@@ -275,6 +276,11 @@ export default function MapScreen() {
         <FollowBanner />
         <BottomDock />
       </MapChromeSchemeContext.Provider>
+
+      {/* Invisible: while stop-spotting is active, drives the follow camera
+          through the trams arriving at the spotted stop (1 Hz; renders null
+          and costs nothing when inactive). */}
+      <SpotterController />
     </View>
   );
 }
