@@ -21,9 +21,11 @@
 // (whole fleet, badges/dots) is pushed at a zoom-dependent cadence
 // (pointsPushIntervalMs: 15 Hz close, 1 s mid, 5 s far — far-zoom badges are
 // near-static and re-pushing burns GPU). The follow camera is retargeted at
-// ~12.5 Hz (CAMERA_RETARGET_MS) with overlapping linear glides — see the
-// comment at CAMERA_RETARGET_MS. Stringify is skipped entirely while a FC
-// stays empty, and frames that push nothing skip buildFrame altogether.
+// ~12.5 Hz (CAMERA_RETARGET_MS) with overlapping linear glides, and a
+// stationary-target deadband keeps a dwelling tram from restarting native
+// camera animations at all — see ./followCamera.ts. Stringify is skipped
+// entirely while a FC stays empty, and frames that push nothing skip
+// buildFrame altogether.
 
 import {
   Camera,
@@ -57,6 +59,15 @@ import { useFavoritesStore } from '@/stores/favorites';
 import { usePlannerStore } from '@/stores/planner';
 import { useSelectionStore } from '@/stores/selection';
 import { useSettingsStore } from '@/stores/settings';
+import {
+  CAMERA_DWELL_EVAL_MS,
+  CAMERA_DWELL_SPEED_KMH,
+  CAMERA_GLIDE_MS,
+  CAMERA_RETARGET_MS,
+  leadTarget,
+  withinDeadband,
+  type FollowCameraTarget,
+} from './followCamera';
 import {
   BAND_BADGES_TO_MODELS,
   BAND_DOTS_TO_BADGES,
@@ -96,38 +107,8 @@ export interface FollowGestureState {
   overrides: { zoom: number; pitch: number; headingOffset: number } | null;
 }
 
-/**
- * Follow-camera cadence. Retargeting `setCamera` on EVERY 16 ms tick restarts
- * the native Mapbox camera animator 60×/s, which chokes it into ~1 Hz visible
- * stutter (user-reported regression). Instead we retarget every ~80 ms with a
- * 170 ms linear glide: each new glide starts before the previous one ends, so
- * consecutive animations overlap into continuous motion, while the animator is
- * only restarted 12.5×/s. Deliberately NOT tied to the 1 Hz UI cadence.
- */
-const CAMERA_RETARGET_MS = 80;
-const CAMERA_GLIDE_MS = 170;
-
-/** Meters per degree of latitude (target-leading math, small offsets only). */
-const M_PER_DEG_LAT = 111_320;
-
-/**
- * Lead a coordinate along `bearing` by the distance the tram covers in
- * CAMERA_RETARGET_MS at `speedKmh` — the camera glides toward where the tram
- * is about to be instead of trailing where it was at retarget time.
- */
-function leadTarget(
-  [lng, lat]: [number, number],
-  bearing: number,
-  speedKmh: number,
-): [number, number] {
-  const distM = (speedKmh / 3.6) * (CAMERA_RETARGET_MS / 1000);
-  if (distM <= 0) return [lng, lat];
-  const rad = (bearing * Math.PI) / 180;
-  return [
-    lng + (distM * Math.sin(rad)) / (M_PER_DEG_LAT * Math.cos((lat * Math.PI) / 180)),
-    lat + (distM * Math.cos(rad)) / M_PER_DEG_LAT,
-  ];
-}
+// Cadence constants, target leading and the stationary-target deadband live
+// in ./followCamera (pure module — see the doc comments there).
 
 /** Night lines 90–99 use the navy sprite variants instead of PID red. */
 const NIGHT_LINE = ['>=', ['to-number', ['get', 'line']], 90];
@@ -234,7 +215,14 @@ export function TramLayers({
   const sectionsEmptyRef = useRef(true);
   const fixEmptyRef = useRef(true);
   const lastPointsPushMsRef = useRef(0);
-  const lastCameraPushMsRef = useRef(0);
+  /** Next follow-camera evaluation is skipped until this timestamp. */
+  const cameraEvalDueMsRef = useRef(0);
+  /**
+   * The last camera target actually SENT (deadband reference). Null whenever
+   * the camera is not authoritatively ours — not following, or the user's
+   * fingers are on the map — so the next retarget always fires.
+   */
+  const lastSentCameraRef = useRef<(FollowCameraTarget & { key: string }) | null>(null);
   const favSetRef = useRef<{ source: string[]; set: Set<string> } | null>(null);
   const lineFilterRef = useRef<{
     source: PlannerItinerary | null;
@@ -332,52 +320,87 @@ export function TramLayers({
       }
 
       // Follow camera: runs ONLY while following. Retarget every
-      // CAMERA_RETARGET_MS (NOT every tick — see the cadence comment above)
-      // with a longer overlapping glide. Engine state is read fresh at each
-      // retarget. While the user's fingers are on the map the loop yields
-      // (gestures adjust the view WITHOUT cancelling follow); their captured
-      // zoom/pitch/heading-offset then override the defaults.
+      // CAMERA_RETARGET_MS (NOT every tick — see followCamera.ts) with a
+      // longer overlapping glide; targets inside the stationary deadband are
+      // not re-sent at all, so a tram dwelling at a stop lets the native map
+      // go fully idle. Engine state is read fresh at each retarget. While the
+      // user's fingers are on the map the loop yields (gestures adjust the
+      // view WITHOUT cancelling follow); their captured zoom/pitch/heading-
+      // offset then override the defaults.
       const followKey = selection.followTramKey;
-      if (followKey && nowMs - lastCameraPushMsRef.current >= CAMERA_RETARGET_MS) {
-        const gesture = followGestureRef.current;
-        if (gesture?.gestureActive) return;
-        const state = rt.engine.getState(followKey, nowMs);
-        if (!state) {
-          // The followed tram disappeared (left service / pruned) — end follow.
-          selection.setFollowTramKey(null);
-          return;
-        }
-        lastCameraPushMsRef.current = nowMs;
-        // Track where the tram is RENDERED. In live mode that is the PROJECTED
-        // observation (the fix dead-reckoned to now) — anchoring to the raw fix
-        // left the camera parked while the tram drove away.
-        const isLive = positionMode === 'live';
-        let anchor = state.position;
-        let bearing = state.bearing;
-        if (isLive) {
-          const geometry = rt.engine.getGeometry(followKey);
-          const projDist = state.projectedObservedDistM;
-          if (geometry && projDist != null) {
-            anchor = pointAt(geometry.coordinates, geometry.cumDistM, projDist);
-            bearing = bearingAt(geometry.coordinates, geometry.cumDistM, projDist);
-          } else {
-            anchor = state.observedPosition;
-            bearing = state.observedBearing;
-          }
-        }
-        const overrides = gesture?.overrides ?? null;
-        cameraRef.current?.setCamera({
-          // Lead slightly toward where the tram will be at the next retarget.
-          centerCoordinate: leadTarget(anchor, bearing, state.simSpeedKmh),
-          zoomLevel: overrides?.zoom ?? FOLLOW_ZOOM,
-          pitch: overrides?.pitch ?? FOLLOW_PITCH,
-          // Camera behind the tram, looking forward over the roof; the user's
-          // rotation gesture persists as an offset from the tram bearing.
-          heading: (((bearing + (overrides?.headingOffset ?? 0)) % 360) + 360) % 360,
-          animationMode: 'linearTo',
-          animationDuration: CAMERA_GLIDE_MS,
-        });
+      if (!followKey) {
+        lastSentCameraRef.current = null;
+        return;
       }
+      const gesture = followGestureRef.current;
+      if (gesture?.gestureActive) {
+        // The user owns the camera while touching. Forget the last-sent
+        // target and re-arm the eval clock so the first retarget after
+        // release fires immediately — the deadband must never leave the
+        // camera wherever a pan ended just because the tram itself is parked.
+        lastSentCameraRef.current = null;
+        cameraEvalDueMsRef.current = 0;
+        return;
+      }
+      const lastSent = lastSentCameraRef.current;
+      // A target switch (follow started / spotter hop to another tram)
+      // retargets immediately; otherwise hold the eval cadence.
+      if (lastSent?.key === followKey && nowMs < cameraEvalDueMsRef.current) return;
+      const state = rt.engine.getState(followKey, nowMs);
+      if (!state) {
+        // The followed tram disappeared (left service / pruned) — end follow.
+        selection.setFollowTramKey(null);
+        lastSentCameraRef.current = null;
+        return;
+      }
+      // Track where the tram is RENDERED. In live mode that is the PROJECTED
+      // observation (the fix dead-reckoned to now) — anchoring to the raw fix
+      // left the camera parked while the tram drove away.
+      const isLive = positionMode === 'live';
+      let anchor = state.position;
+      let bearing = state.bearing;
+      if (isLive) {
+        const geometry = rt.engine.getGeometry(followKey);
+        const projDist = state.projectedObservedDistM;
+        if (geometry && projDist != null) {
+          anchor = pointAt(geometry.coordinates, geometry.cumDistM, projDist);
+          bearing = bearingAt(geometry.coordinates, geometry.cumDistM, projDist);
+        } else {
+          anchor = state.observedPosition;
+          bearing = state.observedBearing;
+        }
+      }
+      const overrides = gesture?.overrides ?? null;
+      const target: FollowCameraTarget = {
+        // Lead slightly toward where the tram will be at the next retarget.
+        center: leadTarget(anchor, bearing, state.simSpeedKmh),
+        zoom: overrides?.zoom ?? FOLLOW_ZOOM,
+        pitch: overrides?.pitch ?? FOLLOW_PITCH,
+        // Camera behind the tram, looking forward over the roof; the user's
+        // rotation gesture persists as an offset from the tram bearing.
+        heading: (((bearing + (overrides?.headingOffset ?? 0)) % 360) + 360) % 360,
+      };
+      // Deadband: visually identical to what the map is already showing —
+      // skip the send (each one restarts a native animation). Movement, a
+      // teleport, a gesture override change or the dwell ending all exceed
+      // the deadband and send on the next eval; while parked, evals relax to
+      // the dwell cadence.
+      if (lastSent?.key === followKey && withinDeadband(lastSent, target)) {
+        cameraEvalDueMsRef.current =
+          nowMs +
+          (state.simSpeedKmh < CAMERA_DWELL_SPEED_KMH ? CAMERA_DWELL_EVAL_MS : CAMERA_RETARGET_MS);
+        return;
+      }
+      cameraEvalDueMsRef.current = nowMs + CAMERA_RETARGET_MS;
+      lastSentCameraRef.current = { key: followKey, ...target };
+      cameraRef.current?.setCamera({
+        centerCoordinate: target.center,
+        zoomLevel: target.zoom,
+        pitch: target.pitch,
+        heading: target.heading,
+        animationMode: 'linearTo',
+        animationDuration: CAMERA_GLIDE_MS,
+      });
     });
   }, [cameraRef, viewportRef, followGestureRef]);
 
