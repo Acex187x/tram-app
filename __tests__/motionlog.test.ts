@@ -127,6 +127,7 @@ function makeState(key: string, over: Partial<TramPublicState> = {}): TramPublic
     nextStopName: 'Anděl',
     nextStopEtaS: 40,
     hasGeometry: true,
+    paceBias: 1.072,
     ...over,
   } as unknown as TramPublicState;
 }
@@ -364,7 +365,7 @@ describe('MotionLog R9 — active daily log survives the disk cap', () => {
 
 describe('MotionLog ride recording', () => {
   it('records GPS+sim samples to a ride file and returns its uri on stop', async () => {
-    const h = makeLog();
+    const h = makeLog({ positionMode: () => 'live' });
     h.stateMap.set('9201', makeState('9201'));
 
     const ok = await h.log.startRide('9201');
@@ -388,6 +389,19 @@ describe('MotionLog ride recording', () => {
     expect(lines).toHaveLength(2);
     const rec = JSON.parse(lines[0]);
     expect(rec).toMatchObject({ gpsLat: 50.081, gpsSpeed: 6.2, model: '15t', line: '9', simDist: 1200 });
+    // Ride schema v2: raw AVL context + learned bias + active position mode.
+    expect(rec).toMatchObject({
+      obsAt: 999_500,
+      statePos: 'at_stop',
+      delayS: 42,
+      nextSeq: 7,
+      bias: 1.07,
+      posMode: 'live',
+    });
+    // New keys are appended AFTER the historic ones — old lines stay a prefix.
+    const keys = Object.keys(rec);
+    expect(keys.slice(-6)).toEqual(['obsAt', 'statePos', 'delayS', 'nextSeq', 'bias', 'posMode']);
+    expect(keys.indexOf('phase')).toBe(keys.length - 7);
   });
 
   it('records nulls for sim fields when no state is available', async () => {
@@ -400,6 +414,13 @@ describe('MotionLog ride recording', () => {
     expect(rec.simDist).toBeNull();
     expect(rec.model).toBeNull();
     expect(rec.gpsLat).toBe(50.09);
+    // v2 fields are null without a state; posMode is null without the seam.
+    expect(rec.obsAt).toBeNull();
+    expect(rec.statePos).toBeNull();
+    expect(rec.delayS).toBeNull();
+    expect(rec.nextSeq).toBeNull();
+    expect(rec.bias).toBeNull();
+    expect(rec.posMode).toBeNull();
   });
 
   it('allows only one ride at a time', async () => {

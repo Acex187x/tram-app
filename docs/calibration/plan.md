@@ -55,6 +55,24 @@ The existing daytime center-zone cap (07:00–19:00) folds into this table event
   between FRESH fixes (instead of poll-quantized `Δt`; `kmh` is simSpeedKmh, not
   feed speed), and dwell↔stop attribution via `nextSeq`.
 
+## Ride schema (rides/<ts>-<key>.jsonl, Record ride)
+
+- **v1** (through 2026-07-13):
+  `{t,gpsLat,gpsLng,gpsSpeed,gpsAcc,simDist,simLat,simLng,simKmh,obsDist,projDist,devM,model,line,phase}`
+  — one line per GPS fix (~1 Hz), correlated with the sim state at write time.
+- **v2** (device builds from 2026-07-13; new keys APPENDED, old parsers unaffected —
+  detect by presence of `obsAt` on a line): appends the same raw-AVL context as the
+  daily-log v2 plus ride-specific extras — `obsAt` (unix ms of the last real fix),
+  `statePos` (raw `state_position`), `delayS` (schedule delay s), `nextSeq` (next stop
+  sequence), `bias` (learned `paceBias`, 2 dp), `posMode` (active settings positionMode,
+  `'smooth'`/`'live'` — which rendering the rider was visually judging). All sim-derived
+  fields (incl. the new ones except `posMode`) are `null` when the tram has no state.
+  Unlocks ground-truth calibration per ride: the rider's GPS vs `simDist` vs raw AVL
+  (`obsDist`+`obsAt`) vs projection (`projDist`), real dwell windows (`statePos`
+  `'at_stop'` + flat `obsDist` while the rider's `gpsSpeed`≈0 confirms the stand),
+  dwell↔stop attribution via `nextSeq`, and inter-stop pace-factor fitting with `bias`
+  recorded so the learned component can be factored out of the residual.
+
 ## Where things are
 
 - Sessions: `docs/calibration/{session,sim-sessions}/*.jsonl` (schema in analysis doc)

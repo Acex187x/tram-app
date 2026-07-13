@@ -10,6 +10,7 @@
 import { useSyncExternalStore } from 'react';
 
 import { getRuntime } from '@/hooks/tramData';
+import { useSettingsStore } from '@/stores/settings';
 
 import { MotionLog } from './core';
 import { createExpoFS } from './fs';
@@ -39,6 +40,7 @@ export function getMotionLog(): MotionLog {
       location: createExpoLocationWatcher(),
       now: () => Date.now(),
       stateProvider: (key) => getRuntime().engine.getState(key, Date.now()),
+      positionMode: () => useSettingsStore.getState().positionMode,
     });
   }
   return instance;

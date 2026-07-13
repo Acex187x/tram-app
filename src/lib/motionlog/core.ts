@@ -19,7 +19,9 @@
 //
 //   • Ride recording (rides/<ts>-<key>.jsonl): while the user is physically on a
 //     tram, GPS fixes (~1 Hz) are correlated with the simulated state and
-//     appended live. Auto-stops after RIDE_MAX_MS to spare the battery.
+//     appended live (ride schema v2 appends raw-AVL context — obsAt/statePos/
+//     delayS/nextSeq/bias/posMode — see rideRecord). Auto-stops after
+//     RIDE_MAX_MS to spare the battery.
 //
 // All I/O, time, location and timers are injected (see MotionLogDeps) so the
 // buffering/flush/eviction logic is unit-testable with in-memory fakes.
@@ -82,6 +84,12 @@ export interface MotionLogDeps {
   now: () => number;
   /** Latest public state for a tram key (from the engine), or undefined. */
   stateProvider: (key: string) => TramPublicState | undefined;
+  /**
+   * Current position-mode setting ('smooth' | 'live'), for ride records —
+   * which rendering the user was visually comparing the tram against.
+   * Optional seam so the pure core stays store-free; null when absent.
+   */
+  positionMode?: () => string;
   setTimeout?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
   clearTimeout?: (h: ReturnType<typeof setTimeout>) => void;
   /** Override the on-disk budget (defaults to DIR_CAP_BYTES). */
@@ -174,8 +182,16 @@ export function pollRecord(s: TramPublicState, t: number): string {
   return JSON.stringify(toCalibrationRecord(s, t));
 }
 
-/** Build one ride record line correlating a GPS fix with the sim (no newline). */
-export function rideRecord(sample: LocationSample, s: TramPublicState | undefined): string {
+/**
+ * Build one ride record line correlating a GPS fix with the sim (no newline).
+ * Field order is the on-disk format — new fields are APPENDED so old lines
+ * remain a strict prefix (same rule as feed/calibration CalibrationRecord).
+ */
+export function rideRecord(
+  sample: LocationSample,
+  s: TramPublicState | undefined,
+  posMode?: string | null,
+): string {
   return JSON.stringify({
     t: sample.t,
     gpsLat: r(sample.lat, 6),
@@ -192,6 +208,16 @@ export function rideRecord(sample: LocationSample, s: TramPublicState | undefine
     model: s ? s.model.id : null,
     line: s ? s.snapshot.line : null,
     phase: s ? s.phase : null,
+    // Ride schema v2 — appended AFTER the historic fields (old parsers see a
+    // strict prefix; detect by presence of `obsAt`). Raw AVL context + learned
+    // bias, keyed like the daily-log v2 fields, for ground-truth matching:
+    // GPS vs sim vs raw AVL vs projection with real dwells + stop anchoring.
+    obsAt: s ? r(s.snapshot.observedAtMs) : null,
+    statePos: s ? (s.snapshot.statePosition ?? null) : null,
+    delayS: s ? r(s.snapshot.delaySeconds) : null,
+    nextSeq: s ? r(s.snapshot.nextStopSequence) : null,
+    bias: s ? r(s.paceBias, 2) : null,
+    posMode: posMode ?? null,
   });
 }
 
@@ -423,7 +449,8 @@ export class MotionLog {
     if (!ride) return;
     try {
       const state = this.deps.stateProvider(ride.key);
-      this.deps.fs.append(ride.relPath, rideRecord(sample, state) + '\n');
+      const posMode = this.deps.positionMode?.() ?? null;
+      this.deps.fs.append(ride.relPath, rideRecord(sample, state, posMode) + '\n');
       ride.points += 1;
       // Rides are low-volume; still keep total disk usage bounded.
       if (ride.points % 30 === 0) this.enforceDirCap();
