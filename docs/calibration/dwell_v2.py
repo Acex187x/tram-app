@@ -60,7 +60,7 @@ def pct(xs, p):
 
 
 def parse_args(argv):
-    paths, since, until = [], None, None
+    paths, since, until, fleet = [], None, None, "day"
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -70,13 +70,17 @@ def parse_args(argv):
         elif a == "--until":
             until = datetime.strptime(argv[i + 1], "%Y-%m-%d %H:%M").timestamp() * 1000
             i += 2
+        elif a == "--fleet":
+            fleet = argv[i + 1]  # day (default, historical) | night (91-99 only) | all
+            assert fleet in ("day", "night", "all"), "--fleet day|night|all"
+            i += 2
         else:
             paths.append(a)
             i += 1
-    return paths, since, until
+    return paths, since, until, fleet
 
 
-paths, SINCE, UNTIL = parse_args(sys.argv[1:])
+paths, SINCE, UNTIL, FLEET = parse_args(sys.argv[1:])
 if not paths:
     paths = ["docs/calibration/sim-sessions/sim-2026-07-12.jsonl"]
 
@@ -101,7 +105,8 @@ for p in paths:
                 continue
             if UNTIL and r["t"] >= UNTIL:
                 continue
-            if r["line"] in NIGHT_LINES:
+            is_night = r["line"] in NIGHT_LINES
+            if (FLEET == "day" and is_night) or (FLEET == "night" and not is_night):
                 continue
             fixes = by_tram[r["key"]]
             if r["obsAt"] not in fixes:

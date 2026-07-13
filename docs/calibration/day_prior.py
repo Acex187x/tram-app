@@ -19,7 +19,9 @@ Robustness subsamples (all disjoint):
     - even vs odd fleet number (int(key) % 2).
 A real prior miscalibration must read on the same side of the prior in ALL
 subsamples; per-tram above/below split must not be a coin flip.
-Night lines 91-99 are excluded (day-fleet prior only).
+Night lines 91-99 are excluded by default (day-fleet prior); use
+--fleet night for the 91-99 segment or --fleet all (Monday round 26+;
+Sunday h0-h4 whole-fleet norms were night-line-dominated windows).
 """
 
 import json
@@ -44,7 +46,7 @@ def pct(xs, p):
 
 
 def parse_args(argv):
-    paths, since, until, prior = [], None, None, 0.62
+    paths, since, until, prior, fleet = [], None, None, 0.62, "day"
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -57,13 +59,17 @@ def parse_args(argv):
         elif a == "--prior":
             prior = float(argv[i + 1])
             i += 2
+        elif a == "--fleet":
+            fleet = argv[i + 1]  # day (default, historical) | night (91-99 only) | all
+            assert fleet in ("day", "night", "all"), "--fleet day|night|all"
+            i += 2
         else:
             paths.append(a)
             i += 1
-    return paths, since, until, prior
+    return paths, since, until, prior, fleet
 
 
-paths, SINCE, UNTIL, PRIOR = parse_args(sys.argv[1:])
+paths, SINCE, UNTIL, PRIOR, FLEET = parse_args(sys.argv[1:])
 if not paths:
     paths = ["docs/calibration/sim-sessions/sim-2026-07-12.jsonl"]
 
@@ -85,7 +91,8 @@ for p in paths:
                 continue
             if UNTIL and r["t"] >= UNTIL:
                 continue
-            if r["line"] in NIGHT_LINES:
+            is_night = r["line"] in NIGHT_LINES
+            if (FLEET == "day" and is_night) or (FLEET == "night" and not is_night):
                 continue
             records.append(r)
 

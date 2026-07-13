@@ -43,7 +43,7 @@ def ts(s):
 
 
 args = sys.argv[1:]
-paths, wa, wb = [], None, None
+paths, wa, wb, FLEET = [], None, None, "day"
 i = 0
 while i < len(args):
     if args[i] == "--a":
@@ -52,6 +52,10 @@ while i < len(args):
     elif args[i] == "--b":
         wb = (ts(args[i + 1]), ts(args[i + 2]))
         i += 3
+    elif args[i] == "--fleet":
+        FLEET = args[i + 1]  # day (default, historical) | night (91-99 only) | all
+        assert FLEET in ("day", "night", "all"), "--fleet day|night|all"
+        i += 2
     else:
         paths.append(args[i])
         i += 1
@@ -71,7 +75,8 @@ for p in paths:
             k = r["key"]
             if k not in first_seen or r["t"] < first_seen[k]:
                 first_seen[k] = r["t"]
-            if r["line"] in NIGHT_LINES:
+            is_night = r["line"] in NIGHT_LINES
+            if (FLEET == "day" and is_night) or (FLEET == "night" and not is_night):
                 continue
             if wa[0] <= r["t"] < wa[1]:
                 buck["A"][k].append(r)
