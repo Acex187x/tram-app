@@ -1,0 +1,6 @@
+# EAS build context: exclude heavy non-app content
+docs/
+build/
+*.ipa
+scripts/calibration/
+.claude/

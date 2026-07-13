@@ -45,3 +45,10 @@ example
 .env
 
 /*.jsonl
+
+# raw calibration telemetry (object storage, not git)
+docs/calibration/sim-sessions/
+
+# local build artifacts
+/build/
+*.ipa

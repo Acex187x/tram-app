@@ -226,6 +226,11 @@ export default function MapScreen() {
         style={styles.map}
         styleURL="mapbox://styles/mapbox/standard"
         scaleBarEnabled={false}
+        // Keep required Mapbox ornaments clear of the BottomDock (centre) and
+        // the LocateButton (bottom-right): pin both to the bottom-left corner.
+        // iOS ornament offsets are already safe-area-relative.
+        logoPosition={{ bottom: 10, left: 12 }}
+        attributionPosition={{ bottom: 10, left: 106 }}
         compassEnabled
         // Ornament offsets are safe-area-relative on iOS (adding insets.top
         // here double-counted it and stranded the compass mid-screen). The

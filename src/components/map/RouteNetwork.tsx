@@ -369,6 +369,10 @@ export function RouteNetwork({ stopTotemReady = false }: RouteNetworkProps) {
                 modelEmissiveStrength: 1,
                 modelElevationReference: 'ground',
                 modelType: 'common-3d',
+                // Style-spec default is true — hundreds of totems would re-enable
+                // the shadow passes the tram layers deliberately turned off.
+                modelCastShadows: false,
+                modelReceiveShadows: false,
               }}
             />,
           ]}
