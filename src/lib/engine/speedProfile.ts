@@ -7,10 +7,21 @@ import { curvatureProfile, segmentIndexAt } from '../geo/polyline';
 
 /** Lateral comfort acceleration used for curve caps, m/s². */
 export const A_LAT = 0.98;
-/** Service braking deceleration, m/s². */
-export const A_BRK = 1.2;
-/** Service acceleration, m/s². */
-export const A_ACC = 1.0;
+/**
+ * Service braking deceleration, m/s². Raised 1.2 → 1.4 (field feedback
+ * 2026-07-13, ride observations): real trams brake into stops later and
+ * harder than the old envelope allowed — 1.4 is still comfortably inside
+ * Tatra/Škoda service-braking capability (~1.5+). The braking envelope
+ * (vAllowedAt) derives from this, so the braking onset moves closer to the
+ * stop automatically.
+ */
+export const A_BRK = 1.4;
+/**
+ * Service acceleration, m/s². Raised 1.0 → 1.3 (field feedback 2026-07-13):
+ * real departures are visibly bolder than a 1.0 m/s² ramp; ~1.3–1.4 matches
+ * observed stop exits and stays under vehicle capability.
+ */
+export const A_ACC = 1.3;
 /** Network max (50 km/h), m/s. */
 export const V_MAX_MS = 13.9;
 /**

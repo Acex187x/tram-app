@@ -9,7 +9,13 @@ import type {
   TramPublicState,
   TramSnapshot,
 } from '@/lib/types';
-import { bearingAt, pointAt, projectPointToPolyline } from '../geo/polyline';
+import {
+  bearingAt,
+  bearingBetween,
+  haversineM,
+  pointAt,
+  projectPointToPolyline,
+} from '../geo/polyline';
 import {
   A_BRK,
   buildSpeedProfile,
@@ -69,6 +75,40 @@ export const QUEUE_GAP_M = 3;
  */
 export const COUPLED_TRAILER_OFFSET_M = 14.5;
 
+// ── cross-shape car-following (field feedback #6, 2026-07-13) ────────────────
+// The per-shapeId queue can't see trams of OTHER lines sharing the same
+// street/rails (different shapeIds — common in the centre), so they drove
+// through each other. Candidate PAIRS are discovered on ingest (grid-bucketed,
+// so the tick stays allocation-light — performance invariant #8): two sims on
+// different shapes, spatially close, bearing-aligned, whose positions project
+// onto each other's shape within a shared-track lateral tolerance. Each pair
+// carries a precomputed along-shape offset mapping the leader's s onto the
+// follower's shape; per tick the pair costs O(1) — the exact same clamp /
+// braking-envelope speed cap as the same-shape queue.
+
+/** Max world distance between two sims to be considered a cross-shape pair, m. */
+export const CROSS_CANDIDATE_RADIUS_M = 120;
+/** Max lateral offset between position and the other shape = same track, m. */
+export const CROSS_LATERAL_MAX_M = 4;
+/** Max bearing difference for "travelling the same way on the same track", deg. */
+export const CROSS_BEARING_MAX_DEG = 25;
+/** Grid cell size for candidate discovery, m (≥ CROSS_CANDIDATE_RADIUS_M). */
+const CROSS_GRID_CELL_M = 150;
+/** Ignore instantaneous AVL bearings; adopt a raw-position bearing only after this much movement, m. */
+const RAW_BEARING_MIN_MOVE_M = 10;
+
+/** A cross-shape follower/leader pair: leader.sM + offsetM ≈ leader's position
+ *  in the FOLLOWER's shape coordinates (locally parallel tracks). */
+interface CrossPair {
+  leader: TramSim;
+  follower: TramSim;
+  offsetM: number;
+}
+
+/** Forward neighbor-cell key deltas (key = ix·2²⁰ + iy) so each unordered
+ *  cell pair is visited exactly once during cross-pair discovery. */
+const CROSS_NEIGHBOR_OFFSETS = [1, 1_048_576 - 1, 1_048_576, 1_048_576 + 1] as const;
+
 export interface TramEngineOptions {
   /** Maps a snapshot to its fleet model spec (injected — keeps engine pure). */
   resolveModel: (snapshot: TramSnapshot) => TramModelSpec;
@@ -104,11 +144,20 @@ interface Entry {
   /**
    * Live-mode dead-reckoning sim: re-seeded AT the raw fix whenever a NEW
    * observation arrives (jumping to it — accepted live-mode UX), then advanced
-   * between polls by the same physics as the main sim (speed profile, dwells,
-   * pace capped by the schedule-projected observation). Its sM feeds
+   * between polls by the same physics as the main sim (speed profile, dwells)
+   * at the vehicle's LEARNED pace (projection sims never chase the pace-
+   * controller target — no trail bias / schedule-pace drag). Its sM feeds
    * TramPublicState.projectedObservedDistM.
    */
   projSim: TramSim | null;
+  /**
+   * Bearing for trams WITHOUT geometry (field feedback #7): derived from raw
+   * position movement (≥ RAW_BEARING_MIN_MOVE_M) and held while standing —
+   * never the feed's instantaneous bearing at v≈0, which is what rendered
+   * spawning trams perpendicular to the road. Seeded from the feed bearing
+   * once at entry creation (nothing better exists yet).
+   */
+  fallbackBearing: number;
 }
 
 /** Default daytime rule: 07:00–19:00 Prague time (shared helper in speedProfile). */
@@ -136,7 +185,17 @@ export class TramEngine {
    * there). Persisted so tick() allocates nothing on the hot path.
    */
   private queueGroups: TramSim[][] = [];
+  /** Same-shape queue groups for the live-projection sims (live-mode fleet). */
+  private projQueueGroups: TramSim[][] = [];
   private queueDirty = true;
+  /**
+   * Cross-shape follower/leader pairs (different shapeIds sharing the same
+   * physical track — see CrossPair). Rebuilt on every ingest; applying them is
+   * O(pairs) per tick with zero allocation.
+   */
+  private readonly crossPairs: CrossPair[] = [];
+  /** Cross-shape pairs among the projection sims (live-mode rendering). */
+  private readonly projCrossPairs: CrossPair[] = [];
   /**
    * key → last learned paceBias (+ when it was last refreshed). Outlives the
    * entry itself (STALE_AFTER_MS drops entries after 90 s without a fix, but
@@ -217,8 +276,14 @@ export class TramEngine {
           lastSeenMs: nowMs,
           sim: null,
           projSim: null,
+          fallbackBearing: snapshot.bearing ?? 0,
         };
         this.entries.set(key, entry);
+      } else if (haversineM(entry.snapshot.coordinates, snapshot.coordinates) >= RAW_BEARING_MIN_MOVE_M) {
+        // Raw-position bearing (geometry-less rendering): adopt a direction
+        // only from actual movement; while standing, hold the last one — the
+        // feed's instantaneous bearing at v≈0 is noise (perpendicular spawns).
+        entry.fallbackBearing = bearingBetween(entry.snapshot.coordinates, snapshot.coordinates);
       }
       entry.snapshot = snapshot;
       entry.lastSeenMs = nowMs;
@@ -295,8 +360,13 @@ export class TramEngine {
       ) {
         // Dead-reckons at the vehicle's LEARNED pace (main sim's live bias) —
         // the projSim never receives applySnapshot, so it cannot learn itself.
+        // The main sim's stuck-hold (repeated same-position fixes) carries
+        // over: a stuck tram's projection stands AT the fix instead of
+        // driving off at cruise pace and jumping back on the next repeat.
         entry.projSim = createSim(geometry, profile, snapshot, nowMs, lengthM, {
+          projection: true,
           initialPaceBias: entry.sim.paceBias,
+          stuckAtM: entry.sim.stuckAtM,
         });
       }
     }
@@ -312,8 +382,11 @@ export class TramEngine {
 
     // Membership may have changed (created/replaced/dropped sims) and
     // applySnapshot may have hard-teleported a sim into another tram — resolve
-    // overlaps right away rather than waiting for the next tick.
+    // overlaps right away rather than waiting for the next tick (incl. a
+    // teleport/reseed landing a tram on another line's tail: cross pairs are
+    // rebuilt from post-snapshot positions and applied immediately below).
     this.queueDirty = true;
+    this.rebuildCrossPairs();
     this.applyQueueConstraints();
   }
 
@@ -377,18 +450,143 @@ export class TramEngine {
   /** Rebuild shapeId → sims queue groups (only groups of ≥ 2 members). */
   private rebuildQueueGroups(): void {
     this.queueDirty = false;
+    this.collectQueueGroups('sim', this.queueGroups);
+    // The live projections form their own queues: what live mode RENDERS must
+    // not drive through the tram ahead either (field feedback #6б).
+    this.collectQueueGroups('projSim', this.projQueueGroups);
+  }
+
+  private collectQueueGroups(kind: 'sim' | 'projSim', out: TramSim[][]): void {
     const byShape = new Map<string, TramSim[]>();
     for (const entry of this.entries.values()) {
-      const sim = entry.sim;
+      const sim = entry[kind];
       if (!sim) continue;
       const shapeId = sim.geometry.shapeId;
       const group = byShape.get(shapeId);
       if (group) group.push(sim);
       else byShape.set(shapeId, [sim]);
     }
-    this.queueGroups.length = 0;
+    out.length = 0;
     for (const group of byShape.values()) {
-      if (group.length > 1) this.queueGroups.push(group);
+      if (group.length > 1) out.push(group);
+    }
+  }
+
+  /**
+   * Discover cross-shape follower/leader pairs (ingest-time only — the tick
+   * path stays allocation-light). Grid-bucketed by world position, so dense
+   * fleets don't degenerate into O(n²): pairs are only examined within a
+   * bucket and its forward neighbor buckets. A pair qualifies when the two
+   * sims sit on different shapes, within CROSS_CANDIDATE_RADIUS_M, travel the
+   * same way (Δbearing ≤ CROSS_BEARING_MAX_DEG) and one projects onto the
+   * other's shape within CROSS_LATERAL_MAX_M (same physical track). The
+   * projected offset maps the leader's s into the follower's shape coords for
+   * the O(1) per-tick constraint.
+   */
+  private rebuildCrossPairs(): void {
+    this.crossPairs.length = 0;
+    this.projCrossPairs.length = 0;
+    const sims: TramSim[] = [];
+    const projs: (TramSim | null)[] = [];
+    for (const entry of this.entries.values()) {
+      if (entry.sim) {
+        sims.push(entry.sim);
+        projs.push(entry.projSim);
+      }
+    }
+    const n = sims.length;
+    if (n < 2) return;
+
+    // Local-meter positions + grid buckets.
+    const M_PER_DEG = 111_320;
+    const cosLat = Math.cos((sims[0].geometry.coordinates[0]?.[1] ?? 50) * (Math.PI / 180));
+    const xs = new Float64Array(n);
+    const ys = new Float64Array(n);
+    const cells = new Map<number, number[]>();
+    for (let i = 0; i < n; i++) {
+      const g = sims[i].geometry;
+      const p = pointAt(g.coordinates, g.cumDistM, sims[i].sM);
+      xs[i] = p[0] * cosLat * M_PER_DEG;
+      ys[i] = p[1] * M_PER_DEG;
+      const key =
+        Math.round(xs[i] / CROSS_GRID_CELL_M) * 1_048_576 + Math.round(ys[i] / CROSS_GRID_CELL_M);
+      const cell = cells.get(key);
+      if (cell) cell.push(i);
+      else cells.set(key, [i]);
+    }
+
+    const r2 = CROSS_CANDIDATE_RADIUS_M * CROSS_CANDIDATE_RADIUS_M;
+    for (const [key, cell] of cells) {
+      // Same cell (i<j) + forward neighbor cells (each unordered cell pair
+      // visited exactly once).
+      for (let a = 0; a < cell.length; a++) {
+        for (let b = a + 1; b < cell.length; b++) this.tryCrossPair(sims, projs, xs, ys, r2, cell[a], cell[b]);
+        for (const dKey of CROSS_NEIGHBOR_OFFSETS) {
+          const other = cells.get(key + dKey);
+          if (!other) continue;
+          for (const j of other) this.tryCrossPair(sims, projs, xs, ys, r2, cell[a], j);
+        }
+      }
+    }
+  }
+
+  /** Examine one candidate pair; push CrossPair(s) when it qualifies. */
+  private tryCrossPair(
+    sims: TramSim[],
+    projs: (TramSim | null)[],
+    xs: Float64Array,
+    ys: Float64Array,
+    r2: number,
+    i: number,
+    j: number,
+  ): void {
+    const a = sims[i];
+    const b = sims[j];
+    if (a.geometry.shapeId === b.geometry.shapeId) return; // same-shape queue owns it
+    const dx = xs[i] - xs[j];
+    const dy = ys[i] - ys[j];
+    if (dx * dx + dy * dy > r2) return;
+    // Same direction of travel? (opposite tracks/directions must never couple)
+    const bearA = bearingAt(a.geometry.coordinates, a.geometry.cumDistM, a.sM);
+    const bearB = bearingAt(b.geometry.coordinates, b.geometry.cumDistM, b.sM);
+    let dBear = Math.abs(bearA - bearB) % 360;
+    if (dBear > 180) dBear = 360 - dBear;
+    if (dBear > CROSS_BEARING_MAX_DEG) return;
+
+    // Shared physical track? Project A onto B's shape (and vice versa when A
+    // is the follower) — the along-shape offset then maps s between shapes.
+    const posA = pointAt(a.geometry.coordinates, a.geometry.cumDistM, a.sM);
+    const projAonB = projectPointToPolyline(posA, b.geometry.coordinates, b.geometry.cumDistM);
+    if (projAonB.offsetM <= CROSS_LATERAL_MAX_M && projAonB.distM > b.sM) {
+      this.pushCrossPair(a, b, projAonB.distM - a.sM, projs, sims, i, j);
+      return;
+    }
+    const posB = pointAt(b.geometry.coordinates, b.geometry.cumDistM, b.sM);
+    const projBonA = projectPointToPolyline(posB, a.geometry.coordinates, a.geometry.cumDistM);
+    if (projBonA.offsetM <= CROSS_LATERAL_MAX_M && projBonA.distM > a.sM) {
+      this.pushCrossPair(b, a, projBonA.distM - b.sM, projs, sims, j, i);
+    }
+  }
+
+  /** Register leader→follower for the main sims and (when both exist) projSims. */
+  private pushCrossPair(
+    leader: TramSim,
+    follower: TramSim,
+    offsetM: number,
+    projs: (TramSim | null)[],
+    sims: TramSim[],
+    leaderIdx: number,
+    followerIdx: number,
+  ): void {
+    this.crossPairs.push({ leader, follower, offsetM });
+    const pl = projs[leaderIdx];
+    const pf = projs[followerIdx];
+    // The shape-to-shape offset is a local track-alignment constant — it holds
+    // for the projections too. Orientation may differ (projections sit at the
+    // raw fixes): assign leader/follower by projected order.
+    if (pl && pf && pl.geometry.shapeId === sims[leaderIdx].geometry.shapeId) {
+      if (pl.sM + offsetM > pf.sM) this.projCrossPairs.push({ leader: pl, follower: pf, offsetM });
+      else this.projCrossPairs.push({ leader: pf, follower: pl, offsetM: -offsetM });
     }
   }
 
@@ -406,7 +604,14 @@ export class TramEngine {
    */
   private applyQueueConstraints(): void {
     if (this.queueDirty) this.rebuildQueueGroups();
-    for (const group of this.queueGroups) {
+    this.applyGroupConstraints(this.queueGroups);
+    this.applyGroupConstraints(this.projQueueGroups);
+    this.applyCrossPairs(this.crossPairs);
+    this.applyCrossPairs(this.projCrossPairs);
+  }
+
+  private applyGroupConstraints(groups: TramSim[][]): void {
+    for (const group of groups) {
       group.sort(compareBySimDist);
       for (let i = group.length - 2; i >= 0; i--) {
         const leader = group[i + 1];
@@ -420,6 +625,26 @@ export class TramEngine {
           const vCap = leader.vMs + Math.sqrt(2 * A_BRK * gap);
           if (follower.vMs > vCap) follower.vMs = vCap;
         }
+      }
+    }
+  }
+
+  /**
+   * Cross-shape car-following: same clamp/brake semantics as the same-shape
+   * queue, with the leader's position translated into the follower's shape
+   * coordinates via the pair's precomputed along-shape offset. O(1) per pair,
+   * zero allocation (performance invariant #8).
+   */
+  private applyCrossPairs(pairs: CrossPair[]): void {
+    for (const p of pairs) {
+      const limit = p.leader.sM + p.offsetM - p.leader.lengthM - QUEUE_GAP_M;
+      const gap = limit - p.follower.sM;
+      if (gap <= 0) {
+        p.follower.sM = Math.max(0, limit);
+        if (p.follower.vMs > p.leader.vMs) p.follower.vMs = p.leader.vMs;
+      } else {
+        const vCap = p.leader.vMs + Math.sqrt(2 * A_BRK * gap);
+        if (p.follower.vMs > vCap) p.follower.vMs = vCap;
       }
     }
   }
@@ -454,6 +679,8 @@ export class TramEngine {
     if (!sim) {
       // No geometry: hold the raw API position (featureBuilder renders as-is).
       // The observation IS the position — the sim can't deviate from it.
+      // Bearing comes from the movement-derived fallback, NEVER the feed's
+      // instantaneous bearing (garbage at v≈0 → perpendicular spawns, #7).
       return {
         key: entry.key,
         snapshot,
@@ -461,10 +688,10 @@ export class TramEngine {
         simDistM: snapshot.shapeDistM,
         simSpeedKmh: 0,
         position: [snapshot.coordinates[0], snapshot.coordinates[1]],
-        bearing: snapshot.bearing ?? 0,
+        bearing: entry.fallbackBearing,
         phase: 'unknown',
         observedPosition: [snapshot.coordinates[0], snapshot.coordinates[1]],
-        observedBearing: snapshot.bearing ?? 0,
+        observedBearing: entry.fallbackBearing,
         deviationM: null,
         projectedObservedDistM: null,
         nextStopName: null,

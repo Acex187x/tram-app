@@ -59,12 +59,25 @@ for r in records:
     by_tram[r["key"]].append(r)
 
 # Per tram: fix sequence + simDist->(lng,lat) location samples for zone lookup.
+# Fresh-fix detection prefers the v2 `obsAt` timestamp (present from 2026-07-12
+# builds): a NEW obsAt with an UNCHANGED obsDist is a genuine repeated-position
+# fix (stuck tram) and must stay in the sequence — the obsDist-change heuristic
+# (v1 fallback) drops exactly those, hiding the stuck regime from the replay.
 trams = {}
 for key, rs in by_tram.items():
     fixes = []
     last_obs = None
+    last_at = None
     for r in rs:
-        if last_obs is None or r["obsDist"] != last_obs:
+        if r.get("obsDist") is None:
+            continue
+        obs_at = r.get("obsAt")
+        if obs_at is not None:
+            if last_at is None or obs_at > last_at:
+                fixes.append((r["t"], r["obsDist"]))
+                last_at = obs_at
+                last_obs = r["obsDist"]
+        elif last_obs is None or r["obsDist"] != last_obs:
             fixes.append((r["t"], r["obsDist"]))
             last_obs = r["obsDist"]
     loc = sorted((r["simDist"], r["lng"], r["lat"]) for r in rs
@@ -130,6 +143,26 @@ def replay(cfg):
                       todPaceFactor), the only correct way to ship a non-1.0
                       entry (otherwise bias double-counts the TOD factor).
                       Default None = neutral.
+    Realism-wave extensions (2026-07-13, field feedback):
+      a_acc/a_brk   — accel/brake clamps (defaults 1.0/1.2 = legacy; the
+                      shipped profile change is 1.3/1.4).
+      seed_speed    — True = a fresh segment sim starts at its cruise pace
+                      (min(cap, hard_cap) × bias) instead of 0 — models the
+                      mid-segment cruise seeding (fix #2; teleports reseed
+                      the same way).
+      stuck_hold    — True = a repeated-position fresh fix (|Δs| ≤ 8 m with
+                      time advancing — only extractable via v2 obsAt) freezes
+                      the target AT the fix and brakes the sim to a stand
+                      there until a moving fix arrives OR the pinning fix is
+                      60 s old (fix #3 + the #1 staleness compromise: the
+                      replay has no stop table, so its "stuck" stretches mix
+                      real jams with platform dwells — the engine handles the
+                      latter via dwell + fix-hold with exactly this 60 s age
+                      release). Off = the target keeps advancing at vProj
+                      through the jam (the old creep-forward behavior).
+    NOT modelable here (no stop table): stop-hold (#1), departure burst +
+    adaptive-dwell debt repayment (#4b), the projection redesign (R11 — the
+    replay models the MAIN sim only).
     Fresh-sim events are the first FRESH_FIX_COUNT scored fixes per segment —
     structural, so the subset is identical across configs."""
     at_fix_err = []       # (err, fresh) at fix arrival; err = s - freshObs
@@ -137,7 +170,19 @@ def replay(cfg):
     hard_cap = cfg.get("hard_cap")
     inherit = cfg.get("inherit_bias", False)
     tod = cfg.get("tod")
+    a_acc = cfg.get("a_acc", A_ACC)
+    a_brk = cfg.get("a_brk", A_BRK)
+    seed_speed = cfg.get("seed_speed", False)
+    stuck_hold = cfg.get("stuck_hold", False)
+
+    def cruise_at(s, bias, t):
+        cap = cfg["v_center"] if in_center_at_loc[0](s) else cfg["v_max"]
+        vt = cap * bias * tod_factor(tod, t)
+        return min(hard_cap, vt) if hard_cap is not None else vt
+
+    in_center_at_loc = [None]
     for key, (fixes, loc) in trams.items():
+        in_center_at_loc[0] = lambda s, loc=loc: in_center_at(loc, s)
         # split on trip changes (obs drops > 2 km)
         segs = [[fixes[0]]]
         for f in fixes[1:]:
@@ -150,9 +195,10 @@ def replay(cfg):
             if len(seg) < 3:
                 continue
             t, s = seg[0][0], float(seg[0][1])
-            v = 0.0
             bias = carried if (inherit and carried is not None) else cfg["prior"]
+            v = cruise_at(s, bias, t) if seed_speed else 0.0
             crawling = False
+            stuck = False
             fi = 0                      # last applied fix index
             v_proj = 5.9                # global median real speed, m/s
             last5 = t
@@ -161,23 +207,31 @@ def replay(cfg):
                 # integrate up to this fix
                 while t < tf:
                     tprev, oprev = seg[fi]
-                    target = oprev + v_proj * (t - tprev) / 1000 - cfg["trail"]
-                    e = target - s
                     cap = cfg["v_center"] if in_center_at(loc, s) else cfg["v_max"]
-                    if crawling:
-                        if e > -12:
-                            crawling = False
-                    elif e < -40:
-                        crawling = True
-                    if crawling:
-                        vt = min(cap, 1.0)
+                    if stuck and t - tprev <= 60_000:
+                        # Stuck-hold: target frozen AT the fix; brake to a
+                        # stand there (envelope approach when still short).
+                        # Releases when the pinning fix turns 60 s old (the
+                        # engine's staleness compromise at stops).
+                        d_hold = oprev - s
+                        vt = min(cap, math.sqrt(2 * a_brk * d_hold)) if d_hold > 0 else 0.0
                     else:
-                        mf = cfg["catchup_max"] if e > 40 else cfg["gentle_max"]
-                        fac = min(mf, max(cfg["min_factor"], 1 + e / cfg["gain"]))
-                        vt = cap * fac * bias * tod_factor(tod, t)
-                        if hard_cap is not None:
-                            vt = min(hard_cap, vt)
-                    a = min(A_ACC, max(-A_BRK, (vt - v) / DT))
+                        target = oprev + v_proj * (t - tprev) / 1000 - cfg["trail"]
+                        e = target - s
+                        if crawling:
+                            if e > -12:
+                                crawling = False
+                        elif e < -40:
+                            crawling = True
+                        if crawling:
+                            vt = min(cap, 1.0)
+                        else:
+                            mf = cfg["catchup_max"] if e > 40 else cfg["gentle_max"]
+                            fac = min(mf, max(cfg["min_factor"], 1 + e / cfg["gain"]))
+                            vt = cap * fac * bias * tod_factor(tod, t)
+                            if hard_cap is not None:
+                                vt = min(hard_cap, vt)
+                    a = min(a_acc, max(-a_brk, (vt - v) / DT))
                     v = max(0.0, v + a * DT)
                     s += v * DT
                     t += 1000
@@ -189,6 +243,9 @@ def replay(cfg):
                 tprev, oprev = seg[fi]
                 dt_s = (tf - tprev) / 1000
                 ds = of - oprev
+                if stuck_hold and dt_s > 0:
+                    # Repeated-position fresh fix = stuck; a moving fix clears.
+                    stuck = abs(ds) <= 8
                 if dt_s >= 8 and ds >= 15:
                     v_real = ds / dt_s
                     v_proj += 0.5 * (v_real - v_proj)   # projection-pace EWMA
@@ -203,7 +260,9 @@ def replay(cfg):
                 fi = i
                 # teleport check (engine: vs projected obs; here vs fresh fix)
                 if abs(of - s) > 500:
-                    s, v, crawling = float(of), 0.0, False
+                    s = float(of)
+                    v = cruise_at(s, bias, tf) if seed_speed else 0.0
+                    crawling = False
                     if not inherit:
                         bias = cfg["prior"]
             carried = bias
@@ -398,6 +457,19 @@ CONFIGS = [
     # 121) => TOD h22 = 1.0 FINAL alongside norm x1.016 + paired +0.010 legs.
     ("D52 tod h22=0.95 (symmetric control)", {**NEW, "tod": {22: 0.95}}),
     ("D53 tod h22=1.05 (symmetric control)", {**NEW, "tod": {22: 1.05}}),
+    # Realism wave (2026-07-13, field-feedback rides): structural fixes #2
+    # (mid-segment cruise-speed seeding), #3 (stuck-hold on repeated-position
+    # fixes — requires the v2 obsAt fresh-fix extraction above) and the #4
+    # profile constants (A_ACC 1.0→1.3, A_BRK 1.2→1.4). R60/R61 isolate the
+    # components, R62 is the shipped combination. GATE: R62 vs NEW on the
+    # newest sim session — median |at-fix err| must not grow. (Stop-hold #1,
+    # the departure burst #4b and the projection redesign R11 have no replay
+    # counterpart — no stop table / main-sim-only model; they are gated by the
+    # jest invariants instead.)
+    ("R60 seed+profile (#2+#4a)", {**NEW, "seed_speed": True, "a_acc": 1.3, "a_brk": 1.4}),
+    ("R61 stuck-hold (#3)", {**NEW, "stuck_hold": True}),
+    ("R62 REALISM shipped (#2+#3+#4a)",
+     {**NEW, "seed_speed": True, "stuck_hold": True, "a_acc": 1.3, "a_brk": 1.4}),
 ]
 
 print(f"trams replayed: {len(trams)}")
@@ -429,5 +501,15 @@ print(f"  fresh-sim |err| p90     OLD {o['fresh_p90']:.1f} -> NEW {n['fresh_p90'
 print(f"  (context) |err| p90     OLD {o['p90']:.0f} -> NEW {n['p90']:.0f}; "
       f"signed p50 OLD {o['sp50']:+.0f} -> NEW {n['sp50']:+.0f}; "
       f"%ahead OLD {o['ahead']:.1f} -> NEW {n['ahead']:.1f}")
+r = results.get("R62 REALISM shipped (#2+#3+#4a)")
+if r is not None:
+    print(f"\nREALISM GATE (R62 vs NEW, {PATH}):")
+    print(f"  median |fix err|   NEW {n['p50']:.1f} -> R62 {r['p50']:.1f} m "
+          f"({100 * (r['p50'] - n['p50']) / n['p50']:+.1f}%)")
+    print(f"  signed p50         NEW {n['sp50']:+.1f} -> R62 {r['sp50']:+.1f}; "
+          f"%ahead NEW {n['ahead']:.1f} -> R62 {r['ahead']:.1f}")
+    print(f"  fresh-sim |err|    p50 NEW {n['fresh_p50']:.1f} -> R62 {r['fresh_p50']:.1f}; "
+          f"p90 NEW {n['fresh_p90']:.1f} -> R62 {r['fresh_p90']:.1f}  [n={r['n_fresh']}]")
+
 print("\nlogged reality for comparison (device session): at-fix |err| p50=86 p90=260, "
       "signed p50=-38, %ahead=27.1, devM p50=130 p90=413")

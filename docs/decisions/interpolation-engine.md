@@ -291,11 +291,39 @@ leader onto a follower), so a dwelling leader compresses the whole queue in one 
 of iteration order (`:277`, `:257`).
 
 **Why grouped by `shapeId`, not by line/route.** Opposite directions and route variants have
-**different** shapeIds and share no rail — constraining them would freeze a tram behind a tram on
-the *other* track. They are intentionally **unconstrained** (`engine-queue.test.ts:193` "does NOT
-constrain trams on different shapeIds"). Coupled-set length uses the `defaultIsCoupled` heuristic
-(`engine.ts:55`): `runsCoupled` models on numeric day lines 1–26 excluding 23 (night lines queue
-at single-car spacing — `engine-queue.test.ts:186`).
+**different** shapeIds and (usually) share no rail — blanket-constraining them would freeze a
+tram behind a tram on the *other* track. Cross-shape sharing is handled by the targeted
+mechanism below instead. Coupled-set length uses the `defaultIsCoupled` heuristic
+(`engine.ts`): `runsCoupled` models on numeric day lines 1–26 excluding 23 (night lines queue
+at single-car spacing — `engine-queue.test.ts`).
+
+### Cross-shape car-following (field feedback #6, 2026-07-13)
+
+**Problem.** In the centre several LINES share one street and one physical track with
+**different** shapeIds — the per-shape queue could not see them, and trams of different lines
+drove through each other.
+
+**Decision** (`engine.ts rebuildCrossPairs/applyCrossPairs`). Candidate **pairs** are
+discovered on **ingest only** (performance invariant #8 — the tick allocates nothing):
+sims are grid-bucketed by world position (`CROSS_GRID_CELL_M = 150`), and a pair within a
+bucket (or forward-neighbor bucket) qualifies when it is on **different shapes**, within
+`CROSS_CANDIDATE_RADIUS_M = 120` (covers the worst closing speed over a 5 s poll), travelling
+the **same way** (`Δbearing ≤ CROSS_BEARING_MAX_DEG = 25°` — opposite directions on the same
+street never couple), and one sim's position projects onto the other's shape within
+`CROSS_LATERAL_MAX_M = 4` (same physical track; adjacent parallel tracks are further apart).
+The projection also yields a per-pair **along-shape offset** mapping the leader's `s` into
+the follower's shape coordinates; per tick each pair costs O(1) — exactly the same
+clamp/braking-envelope speed cap as the same-shape queue. Pairs are applied inside `ingest`
+too, so a teleport/reseed landing on another line's tail is resolved immediately.
+
+**Live projections queue too.** `projSim`s get their own same-shape groups and cross-pairs:
+what live mode renders must not drive through the tram ahead either. (This supersedes the
+earlier "projections are not queue-constrained" rule — the projection redesign in §11 makes
+them physically plausible dead-reckoners, and physical plausibility includes not overlapping.)
+Known bound: pairs refresh on the 5 s poll, so a tram closing more than the candidate radius
+between two polls could briefly miss its pair — impossible at tram speeds (≤ ~70 m per poll).
+Tests: `engine-queue.test.ts` "cross-shape car-following" (same-direction clamp, teleport
+resolution at ingest, projection queueing, opposite-direction exclusion).
 
 ---
 
@@ -329,19 +357,36 @@ others want smooth motion. Both must be available without re-deriving physics tw
 - **main `sim`** — the smoothed, trail-biased, **queue-constrained** position. Feeds
   `simDistM`/`position`/`bearing`. This is "Smooth" mode.
 - **`projSim`** — a dead-reckoning sim **re-seeded at the raw fix** whenever a *genuinely new*
-  observation arrives (new `observedAtMs` **or** new `shapeDistM`, or trip/shape change —
-  `:236-245`), then advanced between polls by the **same** physics (speed profile, dwells). It is
-  **not** trail-biased and **not** queue-constrained — it dead-reckons the raw AVL fix, not the
-  rendered fleet. Feeds `projectedObservedDistM`. This is "Live" mode.
+  observation arrives (new `observedAtMs` **or** new `shapeDistM`, or trip/shape change), then
+  advanced between polls by the **same** physics (speed profile, stops, dwells) at the
+  vehicle's **learned pace**. Feeds `projectedObservedDistM`. This is "Live" mode.
+
+### Projection pace redesign (R11 fix, field feedback 2026-07-13)
+
+**What was wrong.** The projSim used the same `tick()` controller as the main sim — i.e. it
+*chased* `targetDistAt` (the schedule-projected observation blend **minus `TRAIL_M`**) with
+the pace factor and crawl regime. Despite the old note here claiming "not trail-biased", the
+live rendering therefore carried the 10 m trail bias and a systematic **schedule-pace drag**
+between fixes — calibration R11 measured it as `prev=on_track` at-fix signed ≈ −41…−46 m
+with slope +4.1…+4.8 m per ΔdelayS-second (10+ reproductions, "designed drag"). This is the
+mode the user rides with, and the drag is visible from inside the real tram.
+
+**Decision.** Projection sims (`TramSim.projection = true`, set by `TramEngine` for projSims
+only) do **not** chase any target: no `targetDistAt`, no `TRAIL_M`, no pace factor, no crawl
+latch. Each tick they cruise at `min(vAllowed, min(cruiseCap, V_CRUISE_REF_MS) · paceBias ·
+todPaceFactor)` — honest dead-reckoning of the last fix at the pace this vehicle has actually
+been driving, under the same braking envelope, stops and (fixed) dwells. The observation-
+pinned holds (§14) apply to projections too. Tests: `engine-realism.test.ts` "live projection
+pace" (advances at learned pace when the schedule sprints at 20 m/s; never crawls when the
+schedule lags).
 
 **Why re-seed only on a new fix.** Between identical polls `projSim` integrates smoothly (no
 snapping to a re-projection); when a fresh fix lands it **jumps** to it — forward or backward.
 That jump is the *accepted* live-mode UX: it shows the true correction the AVL feed just
-reported. Tests `engine-projection.test.ts`: seeds at the fix and advances smoothly (`:67`),
-jumps back (`:101`) / forward (`:117`), does **not** re-seed on a repeated stale fix (`:133`),
-dwells at stops with the same physics (`:148`). `projectedObservedDistM` falls back to the
-schedule-pace `observedDistAt` only if `projSim` is somehow absent (`engine.ts:400`, normally
-unused).
+reported. Tests `engine-projection.test.ts`: seeds at the fix and advances smoothly,
+jumps back / forward, does **not** re-seed on a repeated stale fix,
+dwells at stops with the same physics. `projectedObservedDistM` falls back to the
+schedule-pace `observedDistAt` only if `projSim` is somehow absent (normally unused).
 
 ---
 
@@ -412,12 +457,113 @@ skip-roll-through / proportional shortening / 4 s floor / queue invariant.
 
 ---
 
+## 14. Observation-pinned holds — stop-hold & stuck-hold (field feedback, 2026-07-13)
+
+Real-tram ride sessions surfaced two classes of phantom motion, both caused by trusting a
+*projection* over a *contradicting fix*:
+
+### Stop-hold (`fixPinsDwell`, tramSim.ts) — never depart ahead of an at-stop fix
+
+**Problem.** A fresh fix showed the tram standing at a stop, but the schedule/projected
+target had moved on — the sim departed while the real tram (with the rider inside) was still
+boarding.
+
+**Decision.** When a dwell's base duration expires, the dwell **keeps holding** while the
+latest fix still pins the tram at the stop: fix within `[−STOP_HOLD_AHEAD_EPS_M,
++STOP_HOLD_NEAR_BEHIND_M]` of the dwell position (or explicit `at_stop` within
+`AT_STOP_MATCH_M`), **and** the fix has not advanced more than `STOP_HOLD_MOVE_EPS_M` past
+the fix seen at dwell entry (`dwellObsDistM`), **and** the fix is younger than
+`STOP_HOLD_MAX_FIX_AGE_S = 60 s`. Release triggers: a fresh fix that **moved** (departure
+evidence — released within a tick), or fix **staleness** (the feed's cadence is ~45 s p50; a
+tram that left right after its last fix shows a moving fix within ~one cadence, so past 60 s
+an unseen departure is likelier than a record dwell — the bounded compromise, never an
+eternal wait). Applies to **all** sims — main and projections (both render modes had the
+early-departure bug). Fresh at-stop fixes re-arm the hold indefinitely: that is reality.
+
+### Stuck-hold (`updateStuckHold`, tramSim.ts) — jams are not schedule progress
+
+**Problem.** Two+ genuinely new fixes at the same mid-segment point mean the tram is
+physically stuck (light/jam/incident). The sim kept creeping forward at target pace.
+
+**Decision.** On a fresh fix whose position matches the previous fix within
+`STUCK_FIX_EPS_M = 8 m` (with `observedAtMs` advanced — a repeated *poll* is not evidence),
+set `stuckAtM` to the fix: `tick()` clamps `vTarget` to the braking envelope toward that
+point (0 past it) — the sim brakes to a stand **at the fix** and holds. Suppressed within
+`STUCK_NEAR_STOP_M = 40 m` of a stop or on `at_stop` state (dwell + stop-hold own platform
+stands). Released **only by a moving fix** (> 8 m — per the field requirement), after which
+the normal pace controller performs the soft catch-up; projections jump at their reseed.
+Stuck fixes never pollute `paceBias` (`Δs < PACE_BIAS_MIN_DS_M` skips them). The main sim's
+`stuckAtM` carries into projSim reseeds so live mode stands still too instead of driving off
+and snapping back every poll.
+
+---
+
+## 15. Mid-segment cruise seeding & motion-profile redistribution (field feedback #2/#4)
+
+### Seed speed (`seedCruiseSpeed`, tramSim.ts)
+
+A sim (re)created **between stops** — new vehicle, trip change, hard teleport, projSim
+reseed — used to start at `v = 0` and visibly "accelerate out of nowhere". A tram observed
+mid-segment is *already moving*: seed `vMs = min(vAllowedAt, min(cruiseCap, V_CRUISE_REF_MS)
+· paceBias · todPaceFactor)` — its own cruise pace, bounded by the braking envelope (a seed
+10 m short of a stop starts at the envelope value, not cruise). Sims seeded into a
+dwell/terminal or pinned by a stuck fix stay at 0.
+
+### Motion profile (speedProfile.ts / tramSim.ts)
+
+Real trams move *bolder* than the calibrated average suggests: brisk stop exits, later and
+harder braking — the average is dragged down by dwells and traffic lights, not by gentle
+driving. Redistribution, without touching the calibrated average pace (`paceBias` learning
+and its `V_CRUISE_REF_MS` expectation basis are unchanged):
+
+- **`A_ACC` 1.0 → 1.3 m/s², `A_BRK` 1.2 → 1.4 m/s²** — bolder acceleration; braking onset
+  moves closer to the stop automatically (the envelope derives from `A_BRK`). Both remain
+  inside vehicle service capability. `DWELL_SKIP_ZONE_M` shrinks accordingly (derived).
+- **Departure burst** (`DEPART_BURST_FACTOR = 1.25` over `DEPART_BURST_DIST_M = 150 m`):
+  on dwell release the cruise product is boosted ×1.25 until 150 m past the stop. The debt
+  this builds against the pace target (~−20 m) is repaid where it is least visible — at the
+  next stop, via the adaptive-dwell extension ("boarding takes longer") — so stop-to-stop
+  timing stays target-locked. **Main smooth-mode sims only** (`adaptiveDwell` gates it):
+  projections must mirror the real average pace and have no dwell-extension compensator.
+
+Replay gate (2026-07-13 session, 64 MB extract, 362 trams): seed+profile alone is **neutral**
+(R60 ≡ NEW on every metric); adding stuck-hold (R62 = shipped set) trades median |at-fix err|
+137 → 142 m (+3.6%) for **halving the signed ahead-bias** (+60 → +31, toward the logged
+device-session reality of −38) and improving devM p50 224 → 203 (−9%) — the accepted cost of
+holding honest during a jam with a ~45 s fix cadence (the at-fix metric penalizes the hold at
+the first post-jam fix by construction). See `analysis-2026-07-13.md` realism-wave note.
+
+---
+
+## 16. Bearing robustness (field feedback #7)
+
+- **Folded-window guard** (`bearingAt`, geo/polyline.ts): the ±2 m averaging window at a
+  terminal-loop / switchback apex spans both legs — its chord points ACROSS the fold
+  (perpendicular trams, typically where trams cluster). If the chord is shorter than
+  `0.9 ×` the along-shape window, fall back to the nearest non-degenerate **segment**
+  direction (always along the rails; even a 5 m-radius curve keeps chord/arc ≥ 0.97, so
+  legitimate bends never trip the guard).
+- **Movement-derived fallback bearing** (`Entry.fallbackBearing`, engine.ts): trams without
+  geometry used the feed's instantaneous bearing — garbage at v≈0 (perpendicular spawns).
+  The engine now adopts a bearing only from raw-position movement ≥ 10 m and holds the last
+  good value while standing; the feed bearing is used once, at entry creation, when nothing
+  better exists.
+
+---
+
 ## Tuning constants (single source of truth: the code)
 
 | constant | value | file | role |
 |---|---|---|---|
 | `A_LAT` | 0.98 m/s² | speedProfile.ts | curve cap lateral accel |
-| `A_BRK` / `A_ACC` | 1.2 / 1.0 m/s² | speedProfile.ts | brake / accel clamps |
+| `A_BRK` / `A_ACC` | 1.4 / 1.3 m/s² | speedProfile.ts | brake / accel clamps (realism wave 2026-07-13; were 1.2 / 1.0) |
+| `STOP_HOLD_MAX_FIX_AGE_S` | 60 s | tramSim.ts | fix-hold staleness release (§14) |
+| `STOP_HOLD_MOVE_EPS_M` | 8 m | tramSim.ts | fix advance past dwell-entry fix = departure evidence |
+| `STOP_HOLD_NEAR_BEHIND_M` / `STOP_HOLD_AHEAD_EPS_M` | 30 / 8 m | tramSim.ts | "fix pins this stop" window |
+| `STUCK_FIX_EPS_M` / `STUCK_NEAR_STOP_M` | 8 / 40 m | tramSim.ts | stuck detection / near-stop suppression (§14) |
+| `DEPART_BURST_FACTOR` / `DEPART_BURST_DIST_M` | 1.25 / 150 m | tramSim.ts | departure burst (§15, main sims only) |
+| `CROSS_CANDIDATE_RADIUS_M` | 120 m | engine.ts | cross-shape pair discovery radius (§9) |
+| `CROSS_LATERAL_MAX_M` / `CROSS_BEARING_MAX_DEG` | 4 m / 25° | engine.ts | same-track / same-direction gates (§9) |
 | `V_MAX_MS` / `V_CENTER_MS` | 13.9 / 8.6 m/s | speedProfile.ts | zone caps (50 / 31 km/h) — envelope/hard limits |
 | `V_CRUISE_REF_MS` | 11.7 m/s | speedProfile.ts | pace-controller cruise reference (42 km/h, round 1 R3) |
 | `DEFAULT_LOOKAHEAD_M` | 400 m | speedProfile.ts | braking-envelope horizon |

@@ -96,11 +96,14 @@ describe('straight-line acceleration', () => {
     // test exercises the accel clamp and the hard V_MAX_MS cap.
     sim.paceBias = 1.3;
     expect(sim.sM).toBe(0);
-    expect(sim.vMs).toBe(0);
+    // Mid-segment spawns seed cruise speed (field feedback #2); force a
+    // standstill here to exercise the acceleration clamp from v = 0.
+    expect(sim.vMs).toBeGreaterThan(0);
+    sim.vMs = 0;
 
-    // Acceleration is clamped: after 1 s, v ≤ 1.0 m/s (+ eps).
+    // Acceleration is clamped: after 1 s, v ≤ A_ACC (+ eps).
     run(sim, T0, 1);
-    expect(sim.vMs).toBeLessThanOrEqual(1.0 + 1e-6);
+    expect(sim.vMs).toBeLessThanOrEqual(A_ACC + 1e-6);
 
     let vMax = 0;
     let sPrev = sim.sM;
@@ -325,11 +328,12 @@ describe('hard-brake crawl when the sim ran ahead of reality', () => {
     // e ≈ −(100 + TRAIL_M) → hard-brake regime.
     expect(targetDistAt(sim, T0) - sim.sM).toBeLessThan(-HARD_BRAKE_ENTER_M);
 
-    // Crawl phase: after the brake settles, speed stays below 1.5 m/s while
+    // Crawl phase: after the brake settles (the sim spawns cruise-seeded, so
+    // it needs a few seconds to brake down), speed stays below 1.5 m/s while
     // the projected observation slowly closes the gap. s NEVER decreases.
     let sPrev = sim.sM;
     let now = T0;
-    now = run(sim, now, 3, () => {
+    now = run(sim, now, 7, () => {
       expect(sim.sM).toBeGreaterThanOrEqual(sPrev);
       sPrev = sim.sM;
     });
@@ -450,7 +454,8 @@ describe('teleport on large observation error', () => {
 
     applySnapshot(sim, makeSnapshot({ shapeDistM: 1000, observedAtMs: T0 }), T0);
     expect(sim.sM).toBeCloseTo(1000, 0);
-    expect(sim.vMs).toBe(0);
+    // A tram teleported mid-segment is MOVING — cruise speed is seeded (#2).
+    expect(sim.vMs).toBeGreaterThan(0);
     expect(sim.phase).toBe('cruise');
     expect(sim.lastTeleportMs).toBe(T0);
     // Dwell memory rebuilt for the new position: the origin stop is behind.
@@ -515,7 +520,7 @@ describe('terminal un-latch (fresh observation far behind the latched position)'
     applySnapshot(sim, makeSnapshot({ shapeDistM: 700, observedAtMs: t1 }), t1);
     expect(sim.sM).toBeCloseTo(700, 0); // backward re-anchor to the observation
     expect(sim.phase).toBe('cruise');
-    expect(sim.vMs).toBe(0);
+    expect(sim.vMs).toBeGreaterThan(0); // re-anchored mid-segment = moving (#2)
     expect(sim.lastTeleportMs).toBe(t1); // renders as a teleport
 
     // …and normal simulation resumes: monotone forward progress toward the
@@ -653,7 +658,7 @@ describe('spawning near a stop (dwell seeding)', () => {
       ],
     );
 
-  it('spawning 1 m before a stop dwells there exactly once, until the scheduled departure', () => {
+  it('spawning 1 m before a stop dwells there exactly once, held by the pinning fix until it moves', () => {
     const geo = makeStopGeo();
     const sim = makeSim(geo, 499);
     // The stop 1 m AHEAD is not silently marked as served — it dwells now.
@@ -664,7 +669,16 @@ describe('spawning near a stop (dwell seeding)', () => {
 
     let dwellReEntries = 0;
     let prevPhase: string = sim.phase;
-    run(sim, T0, 60, () => {
+    let now = run(sim, T0, 15, () => {
+      if (sim.phase === 'dwell' && prevPhase !== 'dwell') dwellReEntries++;
+      prevPhase = sim.phase;
+    });
+    // Past the scheduled departure the last fix STILL pins the tram at the
+    // stop (fix-hold, field feedback #1) — no early departure.
+    expect(sim.phase).toBe('dwell');
+    // A fresh fix that moved past the stop releases the hold immediately.
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 520, observedAtMs: now }), now);
+    run(sim, now, 20, () => {
       if (sim.phase === 'dwell' && prevPhase !== 'dwell') dwellReEntries++;
       prevPhase = sim.phase;
     });
@@ -796,7 +810,10 @@ describe('adaptive dwell', () => {
   it('non-adaptive sims (the projSim default) depart at the base dwell even when ahead', () => {
     const geo = makeAheadGeo();
     const profile = buildSpeedProfile(geo, { daytime: false });
-    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 470, observedAtMs: T0 }), T0);
+    // Fix at 460: far enough behind the 500 m stop that the fix-hold does NOT
+    // pin the dwell (beyond STOP_HOLD_NEAR_BEHIND_M, statePosition on_track) —
+    // this isolates the pure base-dwell behavior of non-adaptive sims.
+    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 460, observedAtMs: T0 }), T0);
     expect(sim.adaptiveDwell).toBe(false); // opt-in only — projSims stay fixed
     const enterMs = runToDwell(sim, T0, 30);
     const exitMs = runToDepart(sim, enterMs, 30);

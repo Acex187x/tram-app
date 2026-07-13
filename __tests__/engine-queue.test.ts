@@ -190,25 +190,198 @@ describe('faster tram behind a slower one (different trips, same shape)', () => 
     expect(endGap).toBeGreaterThanOrEqual(LEN + QUEUE_GAP_M - EPS);
   });
 
-  it('does NOT constrain trams on different shapeIds (opposite direction/variant)', () => {
+  it('does NOT constrain trams on different shapeIds in OPPOSITE directions', () => {
+    // Same street, opposite direction of travel: shape-B runs the same line
+    // REVERSED. Cross-shape car-following must never couple them (they pass).
     const engine = makeEngine();
-    const { slow, fast } = makeSlowFast();
-    const fastOtherShape: RouteGeometry = { ...fast, shapeId: 'shape-B' };
-    const resolve = (tripId: string) => (tripId === 'trip-fast' ? fastOtherShape : slow);
+    const { slow } = makeSlowFast();
+    const reversed: RouteGeometry = {
+      ...makeGeometry(
+        [
+          [3000, 0],
+          [0, 0],
+        ],
+        [
+          { atM: 0, arrivalMs: T0 - 60_000 },
+          { atM: 3000, arrivalMs: T0 + 165_000, isTerminal: true }, // ~13.3 m/s pace
+        ],
+      ),
+      tripId: 'trip-fast',
+      shapeId: 'shape-B',
+    };
+    const resolve = (tripId: string) => (tripId === 'trip-fast' ? reversed : slow);
+    // World-space start: slow at x=400 heading east, fast at x=600 (sM 2400 on
+    // the reversed shape) heading west — 200 m apart, closing head-on.
+    const snaps = [
+      makeSnapshot({ key: 'slow', shapeDistM: 400, observedAtMs: T0 }),
+      makeSnapshot({ key: 'fast', shapeDistM: 2400, observedAtMs: T0, tripId: 'trip-fast' }),
+    ];
+    engine.ingest(snaps, resolve, T0);
+    engine.tick(T0);
+    // Re-ingest every 5 s (like the real poll) so cross-pair discovery keeps
+    // running while the two trams meet and pass in world space: identical
+    // rails mean zero lateral offset — only the opposite-bearing gate keeps
+    // them uncoupled.
+    let now = T0;
+    for (let k = 0; k < 12; k++) {
+      now = run(engine, now, 5);
+      engine.ingest(snaps, resolve, now);
+    }
+    // The fast tram drove straight THROUGH the encounter — no cross coupling
+    // (its world x is now far west of the oncoming slow tram).
+    expect(state(engine, 'fast', now).simDistM).toBeGreaterThan(
+      3000 - state(engine, 'slow', now).simDistM + 100,
+    );
+  });
+});
+
+describe('cross-shape car-following (different lines sharing the same track)', () => {
+  const line: [number, number][] = [
+    [0, 0],
+    [3000, 0],
+  ];
+  /** Identical rails, different line/trip/shape ids (the shared-street case). */
+  function makeShared(): { slow: RouteGeometry; fast: RouteGeometry } {
+    const slow = makeGeometry(line, [
+      { atM: 0, arrivalMs: T0 - 60_000 },
+      { atM: 3000, arrivalMs: T0 + 940_000, isTerminal: true }, // ~3 m/s pace
+    ]);
+    const fast: RouteGeometry = {
+      ...makeGeometry(line, [
+        { atM: 0, arrivalMs: T0 - 60_000 },
+        // ~6 m/s pace: faster than the leader but modest enough that the
+        // schedule-projected (stale) fix never drifts > 500 m ahead of the
+        // queued sim inside the test window (which would hard-teleport).
+        { atM: 3000, arrivalMs: T0 + 440_000, isTerminal: true },
+      ]),
+      tripId: 'trip-fast',
+      shapeId: 'shape-B',
+      line: '22',
+    };
+    return { slow, fast };
+  }
+
+  it('a faster tram of ANOTHER line never drives through the slow one ahead', () => {
+    const engine = makeEngine();
+    const { slow, fast } = makeShared();
+    const resolve = (tripId: string) => (tripId === 'trip-fast' ? fast : slow);
+    const snaps = [
+      makeSnapshot({ key: 'slow', shapeDistM: 400, observedAtMs: T0 }),
+      makeSnapshot({ key: 'fast', shapeDistM: 250, observedAtMs: T0, tripId: 'trip-fast', line: '22' }),
+    ];
+    engine.ingest(snaps, resolve, T0);
+    engine.tick(T0);
+
+    const clearance = LEN + QUEUE_GAP_M;
+    let minGap = Infinity;
+    let now = T0;
+    for (let k = 0; k < 24; k++) {
+      // 5 s poll cadence: cross pairs refresh from current positions.
+      now = run(engine, now, 5, (atMs) => {
+        const gap =
+          state(engine, 'slow', atMs).simDistM - state(engine, 'fast', atMs).simDistM;
+        minGap = Math.min(minGap, gap);
+      });
+      engine.ingest(snaps, resolve, now);
+    }
+    // Identical rails → identical parameterization: the cross clamp holds the
+    // same clearance as the same-shape queue (tiny float tolerance for the
+    // projected offset between the two coordinate arrays).
+    expect(minGap).toBeGreaterThanOrEqual(clearance - 0.05);
+    // …and the constraint was binding (the fast tram actually caught up).
+    const endGap = state(engine, 'slow', now).simDistM - state(engine, 'fast', now).simDistM;
+    expect(endGap).toBeLessThan(clearance + 20);
+  });
+
+  it('a teleport landing on another line\'s tail is clamped clear at ingest', () => {
+    const engine = makeEngine();
+    const { slow, fast } = makeShared();
+    const resolve = (tripId: string) => (tripId === 'trip-fast' ? fast : slow);
     engine.ingest(
       [
-        makeSnapshot({ key: 'slow', shapeDistM: 400, observedAtMs: T0 }),
-        makeSnapshot({ key: 'fast', shapeDistM: 0, observedAtMs: T0, tripId: 'trip-fast' }),
+        makeSnapshot({ key: 'B', shapeDistM: 300, observedAtMs: T0 }),
+        makeSnapshot({ key: 'A', shapeDistM: 900, observedAtMs: T0, tripId: 'trip-fast', line: '22' }),
       ],
       resolve,
       T0,
     );
     engine.tick(T0);
-    const end = run(engine, T0, 150);
-    // The fast tram sailed straight past — no queue across shapes.
-    expect(state(engine, 'fast', end).simDistM).toBeGreaterThan(
-      state(engine, 'slow', end).simDistM + 100,
+    let now = run(engine, T0, 2);
+
+    // Fresh fix drops A (other line, other shape) right onto B's tail.
+    const bAt = state(engine, 'B', now).simDistM;
+    engine.ingest(
+      [
+        makeSnapshot({ key: 'B', shapeDistM: 300, observedAtMs: T0 }),
+        makeSnapshot({ key: 'A', shapeDistM: bAt - 5, observedAtMs: now, tripId: 'trip-fast', line: '22' }),
+      ],
+      resolve,
+      now,
     );
+    const clearance = LEN + QUEUE_GAP_M;
+    const check = (atMs: number) => {
+      const a = state(engine, 'A', atMs);
+      const b = state(engine, 'B', atMs);
+      expect(a.simDistM).toBeLessThanOrEqual(b.simDistM - clearance + 0.05);
+    };
+    check(now); // resolved inside ingest, not a tick later
+    run(engine, now, 5, check);
+  });
+
+  it('live projections queue across shapes too (live mode must not overlap either)', () => {
+    // The leader stands at a stop (pinned by an at_stop fix); the follower is
+    // another line on the same rails approaching from behind. Its PROJECTION
+    // must brake and hold clear of the leader's projection.
+    const stopGeo = makeGeometry(line, [
+      { atM: 0, arrivalMs: T0 - 300_000 },
+      { atM: 500, arrivalMs: T0 - 10_000, departureMs: T0 + 10_000, dwellSeconds: 12 },
+      { atM: 3000, arrivalMs: T0 + 900_000, isTerminal: true },
+    ]);
+    const other: RouteGeometry = {
+      ...makeGeometry(line, [
+        { atM: 0, arrivalMs: T0 - 60_000 },
+        { atM: 3000, arrivalMs: T0 + 240_000, isTerminal: true }, // 10 m/s pace
+      ]),
+      tripId: 'trip-other',
+      shapeId: 'shape-B',
+      line: '22',
+    };
+    const resolve = (tripId: string) => (tripId === 'trip-other' ? other : stopGeo);
+    const leadSnap = (atMs: number) =>
+      makeSnapshot({
+        key: 'lead',
+        shapeDistM: 500,
+        observedAtMs: atMs,
+        statePosition: 'at_stop',
+        lastStopSequence: stopGeo.stops[1].sequence,
+      });
+    const followSnap = makeSnapshot({
+      key: 'follow',
+      shapeDistM: 400,
+      observedAtMs: T0,
+      tripId: 'trip-other',
+      line: '22',
+    });
+    const engine = makeEngine();
+    engine.ingest([leadSnap(T0), followSnap], resolve, T0);
+    engine.tick(T0);
+
+    const clearance = LEN + QUEUE_GAP_M;
+    let minProjGap = Infinity;
+    let followProjMax = -Infinity;
+    let now = T0;
+    for (let k = 0; k < 8; k++) {
+      now = run(engine, now, 5, (atMs) => {
+        const lead = state(engine, 'lead', atMs).projectedObservedDistM!;
+        const follow = state(engine, 'follow', atMs).projectedObservedDistM!;
+        minProjGap = Math.min(minProjGap, lead - follow);
+        followProjMax = Math.max(followProjMax, follow);
+      });
+      // Fresh at-stop fixes keep the leader pinned at the platform.
+      engine.ingest([leadSnap(now), followSnap], resolve, now);
+    }
+    expect(minProjGap).toBeGreaterThanOrEqual(clearance - 0.05);
+    expect(followProjMax).toBeGreaterThan(500 - clearance - 15); // actually converged on it
   });
 });
 

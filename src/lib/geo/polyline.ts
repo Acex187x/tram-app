@@ -78,9 +78,22 @@ export function bearingBetween(a: LngLat, b: LngLat): number {
 }
 
 /**
+ * Ratio of window chord to along-shape arc below which the ±2 m bearing window
+ * is treated as FOLDED (a switchback / terminal-loop apex where d−2 and d+2
+ * land on nearly opposite legs): the chord then points ACROSS the fold —
+ * sideways to the track — instead of along it. Legitimate curves stay far
+ * above this: even a 5 m-radius bend keeps chord/arc ≥ 0.97 over a 4 m
+ * window, while a fold onto a parallel leg 0–4 m away drops it to ≤ ~0.75.
+ */
+const BEARING_FOLD_CHORD_RATIO = 0.9;
+
+/**
  * Bearing (deg 0..360) of the track at distM. For stability, averages the local
  * direction over the segment [distM-2, distM+2] (clamped to the polyline ends).
- * Falls back to the nearest non-degenerate segment for degenerate windows.
+ * Falls back to the nearest non-degenerate SEGMENT direction when the window is
+ * degenerate (duplicate vertices) or folded (switchback apex) — the chord of a
+ * folded window points sideways to the rails and rendered trams perpendicular
+ * to the road (field feedback #7, clustered trams at terminal loops).
  */
 export function bearingAt(coords: LngLat[], cumDistM: number[], distM: number): number {
   const n = coords.length;
@@ -91,9 +104,13 @@ export function bearingAt(coords: LngLat[], cumDistM: number[], distM: number): 
   const d1 = Math.min(total, d + 2);
   const p0 = pointAt(coords, cumDistM, d0);
   const p1 = pointAt(coords, cumDistM, d1);
-  if (haversineM(p0, p1) > 1e-3) return bearingBetween(p0, p1);
-  // Degenerate window (duplicate vertices / zero-length shape region):
-  // scan outward for the nearest non-degenerate segment.
+  const chord = haversineM(p0, p1);
+  if (chord > 1e-3 && chord >= BEARING_FOLD_CHORD_RATIO * (d1 - d0)) {
+    return bearingBetween(p0, p1);
+  }
+  // Degenerate window (duplicate vertices / zero-length shape region) or a
+  // folded one: use the direction of the nearest non-degenerate segment —
+  // always along the rails at d, never across a fold.
   const i = segmentIndexAt(cumDistM, d);
   for (let step = 0; step < n; step++) {
     const fwd = i + step;
