@@ -10,7 +10,15 @@ import type {
   TramSnapshot,
 } from '@/lib/types';
 import { bearingAt, pointAt, projectPointToPolyline } from '../geo/polyline';
-import { A_BRK, buildSpeedProfile, pragueHour, type SpeedProfile } from './speedProfile';
+import {
+  A_BRK,
+  buildSpeedProfile,
+  pragueHour,
+  ZONAL_DWELL_AB,
+  ZONAL_DWELL_CENTRE,
+  ZONAL_DWELL_OUT,
+  type SpeedProfile,
+} from './speedProfile';
 import {
   applySnapshot,
   createSim,
@@ -109,6 +117,9 @@ export function defaultIsDaytime(nowMs: number): boolean {
   return h >= 7 && h < 19;
 }
 
+/** One console line per app run, even if several engines are constructed. */
+let zonalAbLoggedOnce = false;
+
 export class TramEngine {
   private readonly entries = new Map<string, Entry>();
   /** shapeId → profile built for the current daytime flag. */
@@ -136,6 +147,17 @@ export class TramEngine {
 
   constructor(opts: TramEngineOptions) {
     this.opts = opts;
+    // R8 gate-2 observability: announce the A/B state once at engine start so
+    // an enabled experiment is verifiable from the Metro/device console. No
+    // motionlog schema change — parity is derivable from `key` downstream.
+    if (ZONAL_DWELL_AB && !zonalAbLoggedOnce) {
+      zonalAbLoggedOnce = true;
+      console.log(
+        `[engine] R8 gate-2 zonal-dwell A/B ACTIVE (dev flag): treatment = even ` +
+          `registration numbers, centre x${ZONAL_DWELL_CENTRE} / outskirts x${ZONAL_DWELL_OUT} ` +
+          `(DEFAULT dwells only; odd/non-numeric keys = control)`,
+      );
+    }
   }
 
   private isDaytime(nowMs: number): boolean {

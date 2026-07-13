@@ -166,6 +166,40 @@ export const TOD_DWELL_TABLE: number[] = [
   1.0, // 23 — night: expect ~0.8
 ];
 
+// ── R8 gate-2: zonal default-dwell A/B (live experiment, dev flag only) ─────
+// 24 consecutive zonal reproductions (docs/calibration/analysis-2026-07-13.md,
+// rounds ≤ 30) put centre-stop dwell cost at ~x1.3 of the 18 s default and
+// outskirts at ~x0.9, while fleet-level TOD stays honestly neutral
+// (0.30×1.30 + 0.70×0.90 ≈ 1.02 at the measured 30.3–30.7% centre stop
+// share). The A/B applies the factor to DEFAULT dwells only (scheduled
+// computed_dwell is never scaled) and only to the treatment parity group
+// (even registration numbers — gating lives in tramSim's
+// zonalDwellTreatmentFactor). This flag exists solely to collect the live
+// evidence leg: shipping zonal dwell permanently still requires the standard
+// double gate + replay + full suite.
+
+/** Treatment DEFAULT-dwell factor for stops inside CENTER_BBOX (x1.30). */
+export const ZONAL_DWELL_CENTRE = 1.3;
+/** Treatment DEFAULT-dwell factor for stops outside CENTER_BBOX (x0.90). */
+export const ZONAL_DWELL_OUT = 0.9;
+
+/**
+ * R8 gate-2 experiment flag: dev builds only (`__DEV__` makes release/device
+ * builds structurally OFF) and only when Metro runs with
+ * EXPO_PUBLIC_ZONAL_DWELL_AB=1. Default OFF — with the flag off the engine is
+ * bit-identical to the pre-experiment behavior (the treatment factor is
+ * exactly 1). Disable = unset the env var + reload; no code revert.
+ */
+export const ZONAL_DWELL_AB: boolean =
+  __DEV__ && process.env.EXPO_PUBLIC_ZONAL_DWELL_AB === '1';
+
+/** Zonal DEFAULT-dwell factor at a stop coordinate (same bbox test as zoneCapAt). */
+export function zonalDwellFactor(coord: [number, number]): number {
+  const [w, s, e, n] = CENTER_BBOX;
+  const inside = coord[0] >= w && coord[0] <= e && coord[1] >= s && coord[1] <= n;
+  return inside ? ZONAL_DWELL_CENTRE : ZONAL_DWELL_OUT;
+}
+
 /**
  * Blended table lookup at the Prague-local fractional hour: linear
  * interpolation between entry floor(h) and the next entry (wrapping 23→0).

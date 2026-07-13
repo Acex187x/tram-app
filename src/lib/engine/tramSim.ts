@@ -12,6 +12,8 @@ import {
   todPaceFactor,
   V_CRUISE_REF_MS,
   vAllowedAt,
+  ZONAL_DWELL_AB,
+  zonalDwellFactor,
   type SpeedProfile,
 } from './speedProfile';
 
@@ -284,16 +286,46 @@ function hashString(str: string): number {
 
 /**
  * Dwell duration for a stop: feed value (scheduled computed dwell — NEVER
- * time-of-day scaled), else the 18 s ± deterministic 0–8 s jitter default,
- * multiplied by todDwellFactor(nowMs) when a wall clock is provided (peak
- * boarding takes longer). Callers without a time context omit nowMs and get
- * the unscaled default.
+ * time-of-day or zonally scaled), else the 18 s ± deterministic 0–8 s jitter
+ * default, multiplied by todDwellFactor(nowMs) when a wall clock is provided
+ * (peak boarding takes longer) and by the caller-supplied zonal A/B factor
+ * (R8 gate-2 treatment trams only — see zonalDwellTreatmentFactor; omitted or
+ * 1 keeps the product bit-identical to the pre-experiment value). Callers
+ * without a time context omit nowMs and get the unscaled default.
  */
-export function dwellDurationMs(stop: RouteStop, nowMs?: number): number {
+export function dwellDurationMs(
+  stop: RouteStop,
+  nowMs?: number,
+  zonalFactor?: number,
+): number {
   if (stop.dwellSeconds > 0) return stop.dwellSeconds * 1000;
   const jitter = (hashString(stop.stopId) % 17) - 8; // deterministic, in [-8, 8]
   const baseMs = (DEFAULT_DWELL_S + jitter) * 1000;
-  return nowMs === undefined ? baseMs : baseMs * todDwellFactor(nowMs);
+  if (nowMs === undefined) return baseMs;
+  return baseMs * todDwellFactor(nowMs) * (zonalFactor ?? 1);
+}
+
+/**
+ * R8 gate-2 zonal-dwell A/B treatment factor for a sim at a stop
+ * (docs/calibration/analysis-2026-07-13.md, round-30 spec). Flag OFF (the
+ * default) → exactly 1 for every tram, so multiplying it into
+ * dwellDurationMs is a bit-identical no-op. Flag ON (dev only): trams whose
+ * key is an EVEN registration number form the treatment group — the parity
+ * split matches the analysis scripts' `int(key) % 2`, so the key must be a
+ * pure integer string; ODD and non-numeric (trip-id fallback, possibly
+ * digit-prefixed) keys are the control group and stay at 1. Treated trams get
+ * zonalDwellFactor(stop) — centre x1.30 / outskirts x0.90 — on DEFAULT dwells
+ * only via dwellDurationMs.
+ */
+export function zonalDwellTreatmentFactor(sim: TramSim, stop: RouteStop): number {
+  if (!ZONAL_DWELL_AB) return 1;
+  const key = sim.snapshot.key;
+  const reg = parseInt(key, 10);
+  // Strict-integer keys only (String(reg) round-trips) — a digit-prefixed
+  // trip-id fallback key must land in control, exactly like the analysis
+  // scripts' int(key) which rejects it.
+  if (!Number.isFinite(reg) || String(reg) !== key || reg % 2 !== 0) return 1;
+  return zonalDwellFactor(stop.coordinates);
 }
 
 function isTerminalStop(geometry: RouteGeometry, stop: RouteStop): boolean {
@@ -370,7 +402,8 @@ function seedStopState(sim: TramSim, nowMs: number): void {
     sim.dwellUntilMs = departMs;
   } else if (atStop) {
     sim.phase = 'dwell';
-    sim.dwellUntilMs = nowMs + dwellDurationMs(current, nowMs);
+    sim.dwellUntilMs =
+      nowMs + dwellDurationMs(current, nowMs, zonalDwellTreatmentFactor(sim, current));
   }
   // else: scheduled departure already passed and the feed doesn't report
   // at_stop — the dwell is considered served; cruise on.
@@ -486,7 +519,8 @@ function updatePaceBias(
   let dwellS = 0;
   for (const stop of sim.geometry.stops) {
     if (stop.distM > prevObsDistM + 1 && stop.distM < obsDistM - 1) {
-      dwellS += dwellDurationMs(stop, snapshot.observedAtMs) / 1000;
+      dwellS +=
+        dwellDurationMs(stop, snapshot.observedAtMs, zonalDwellTreatmentFactor(sim, stop)) / 1000;
     }
   }
   const effDtS = Math.max(dtObsS - dwellS, dtObsS * 0.25);
@@ -704,7 +738,7 @@ export function tick(sim: TramSim, nowMs: number, dtS: number): void {
       sim.phase = 'terminal';
     } else {
       sim.phase = 'dwell';
-      let dwellMs = dwellDurationMs(next, nowMs);
+      let dwellMs = dwellDurationMs(next, nowMs, zonalDwellTreatmentFactor(sim, next));
       if (sim.adaptiveDwell && e > 0) {
         // Behind reality: the real tram has already spent part of its dwell
         // here — trim proportionally, but never blink (≥ DWELL_MIN_S when
