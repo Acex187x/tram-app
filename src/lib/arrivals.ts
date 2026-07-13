@@ -8,6 +8,7 @@
 
 import { normalizeName } from '@/lib/planner/network';
 import type {
+  PlannerItinerary,
   PlannerLeg,
   RouteGeometry,
   TramModelSpec,
@@ -107,7 +108,7 @@ export function nearestStation(
 }
 
 /** Great-circle distance in meters between two [lng, lat] points. */
-function haversineM(a: [number, number], b: [number, number]): number {
+export function haversineM(a: [number, number], b: [number, number]): number {
   const R = 6371008.8; // mean Earth radius (matches polyline.ts)
   const toRad = Math.PI / 180;
   const dLat = (b[1] - a[1]) * toRad;
@@ -118,6 +119,67 @@ function haversineM(a: [number, number], b: [number, number]): number {
     Math.sin(dLat / 2) ** 2 +
     Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+// ── Walking (planner access / egress) ────────────────────────────────────────
+//
+// Straight-line distances are optimistic: streets zig-zag, crossings wait.
+// A detour factor over the great-circle distance at a steady pedestrian pace
+// is the standard planner approximation.
+
+/** Average pedestrian speed, meters per second. */
+export const WALK_SPEED_MPS = 1.35;
+/** Street-network detour factor over the great-circle distance. */
+export const WALK_DETOUR_FACTOR = 1.3;
+/** Safety buffer subtracted on top of the walk when computing leave-by. */
+export const LEAVE_BUFFER_MS = 60_000;
+
+/** Estimated walking seconds to cover `distM` great-circle meters. */
+export function walkSecondsForMeters(distM: number): number {
+  if (!Number.isFinite(distM) || distM <= 0) return 0;
+  return (distM * WALK_DETOUR_FACTOR) / WALK_SPEED_MPS;
+}
+
+/** Estimated walking seconds between two [lng, lat] points. */
+export function walkSecondsBetween(a: [number, number], b: [number, number]): number {
+  return walkSecondsForMeters(haversineM(a, b));
+}
+
+/**
+ * When to leave for a departure: departure minus the walk minus a 1-minute
+ * buffer. May be in the past (render as "leave now").
+ */
+export function computeLeaveByMs(departureMs: number, walkS: number): number {
+  return departureMs - Math.round(walkS * 1000) - LEAVE_BUFFER_MS;
+}
+
+/**
+ * Walking seconds from the user's location to an itinerary's boarding point
+ * (the first leg's first shape coordinate — the actual platform, not the
+ * station's representative coordinate). Null when the leg has no shape yet.
+ */
+export function itineraryAccessWalkS(
+  userCoords: [number, number],
+  itinerary: PlannerItinerary,
+): number | null {
+  const boarding = itinerary.legs[0]?.coordinates[0];
+  if (!boarding) return null;
+  return walkSecondsBetween(userCoords, boarding);
+}
+
+/**
+ * Walking seconds from an itinerary's alighting point (last leg's last shape
+ * coordinate) to a final destination that is NOT the stop itself. Null when
+ * the leg has no shape yet.
+ */
+export function itineraryEgressWalkS(
+  destCoords: [number, number],
+  itinerary: PlannerItinerary,
+): number | null {
+  const coords = itinerary.legs[itinerary.legs.length - 1]?.coordinates;
+  const alighting = coords && coords.length > 0 ? coords[coords.length - 1] : undefined;
+  if (!alighting) return null;
+  return walkSecondsBetween(alighting, destCoords);
 }
 
 // ── Arrivals board ───────────────────────────────────────────────────────────
@@ -216,6 +278,15 @@ export interface ItineraryTiming {
   arrivalMs: number | null;
 }
 
+export interface ItineraryTimingOpts {
+  /**
+   * Realistic catchability floor for the FIRST leg's departure — typically
+   * `nowMs + access-walk seconds × 1000`. Trams leaving the boarding stop
+   * before the user can physically reach it are skipped.
+   */
+  earliestDepartureMs?: number;
+}
+
 /**
  * Live wall-clock timing for a planned itinerary. For each leg, find the next
  * real tram on the leg's line that will still call at the from-stop (after the
@@ -230,10 +301,11 @@ export function computeItineraryTiming(
   states: TramPublicState[],
   geometries: RouteGeometry[],
   nowMs: number,
+  opts?: ItineraryTimingOpts,
 ): ItineraryTiming {
   const byTrip = geometriesByTrip(geometries);
   const out: LegTiming[] = [];
-  let earliestMs: number | null = nowMs;
+  let earliestMs: number | null = Math.max(nowMs, opts?.earliestDepartureMs ?? nowMs);
 
   for (const leg of legs) {
     const fromKey = normalizeName(leg.fromStopName);

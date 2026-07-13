@@ -1,10 +1,12 @@
 // Planner result shared between the planner sheet and the map (route highlight),
-// plus persisted recent from→to searches and a one-shot prefill handoff used by
-// the stop sheet's "Route here" action to open the planner pre-filled + auto-plan.
+// plus persisted recent from→to searches, a one-shot prefill handoff used by
+// the stop sheet's "Route here" action to open the planner pre-filled +
+// auto-plan, and the live journey-guidance session (Start on an itinerary).
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import type { PlannerItinerary } from '@/lib/types';
+import { initialProgress, type GuidanceProgress } from '@/lib/planner/guidance';
 import { normalizeName } from '@/lib/planner/network';
 import { fileSystemStorage } from './favorites';
 
@@ -23,6 +25,15 @@ export interface RecentRoute {
 export interface PlannerPrefill {
   from: string;
   to: string;
+}
+
+/** An active journey-guidance run over one itinerary. Ephemeral session state. */
+export interface GuidanceSession {
+  itinerary: PlannerItinerary;
+  /** Walking seconds from the user's location to the boarding stop (0 = none/unknown). */
+  accessWalkS: number;
+  /** Unix ms when guidance started (anchors the walk phase's duration). */
+  startedAtMs: number;
 }
 
 interface PlannerState {
@@ -45,6 +56,18 @@ interface PlannerState {
   prefill: PlannerPrefill | null;
   requestPrefill: (from: string, to: string) => void;
   clearPrefill: () => void;
+
+  /**
+   * Live journey guidance. `startGuidance` also makes the itinerary the active
+   * map route; changing/clearing the itinerary ends guidance. `guidanceProgress`
+   * is advanced by the map-side driver (GuidanceBanner) at ≤ 1 Hz, only on
+   * actual step transitions.
+   */
+  guidance: GuidanceSession | null;
+  guidanceProgress: GuidanceProgress | null;
+  startGuidance: (itinerary: PlannerItinerary, accessWalkS: number) => void;
+  stopGuidance: () => void;
+  setGuidanceProgress: (progress: GuidanceProgress) => void;
 }
 
 function samePair(a: RecentRoute, from: string, to: string): boolean {
@@ -58,7 +81,14 @@ export const usePlannerStore = create<PlannerState>()(
   persist(
     (set) => ({
       itinerary: null,
-      setItinerary: (itinerary) => set({ itinerary }),
+      // Swapping or clearing the map route ends any guidance that was running
+      // over a different itinerary (the PlannerChip ✕ path goes through here).
+      setItinerary: (itinerary) =>
+        set((state) =>
+          state.guidance && state.guidance.itinerary !== itinerary
+            ? { itinerary, guidance: null, guidanceProgress: null }
+            : { itinerary },
+        ),
 
       recents: [],
       addRecent: (from, to) =>
@@ -79,12 +109,23 @@ export const usePlannerStore = create<PlannerState>()(
       prefill: null,
       requestPrefill: (from, to) => set({ prefill: { from, to } }),
       clearPrefill: () => set({ prefill: null }),
+
+      guidance: null,
+      guidanceProgress: null,
+      startGuidance: (itinerary, accessWalkS) =>
+        set({
+          itinerary,
+          guidance: { itinerary, accessWalkS, startedAtMs: Date.now() },
+          guidanceProgress: initialProgress(accessWalkS),
+        }),
+      stopGuidance: () => set({ guidance: null, guidanceProgress: null }),
+      setGuidanceProgress: (progress) => set({ guidanceProgress: progress }),
     }),
     {
       name: 'planner',
       storage: createJSONStorage(() => fileSystemStorage),
-      // Only the recent searches persist; the drawn itinerary and the one-shot
-      // prefill handoff are ephemeral session state.
+      // Only the recent searches persist; the drawn itinerary, the one-shot
+      // prefill handoff and the guidance session are ephemeral session state.
       partialize: (state) => ({ recents: state.recents }),
     },
   ),

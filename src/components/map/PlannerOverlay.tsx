@@ -10,6 +10,7 @@
 import { Camera, LineLayer, ShapeSource } from '@rnmapbox/maps';
 import { useEffect, useRef, type RefObject } from 'react';
 
+import { GuidanceBanner } from '@/components/planner/GuidanceBanner';
 import { Tram } from '@/constants/theme';
 import { usePlannerStore } from '@/stores/planner';
 
@@ -68,34 +69,40 @@ export function PlannerOverlay({ cameraRef }: PlannerOverlayProps) {
   }, [itinerary, cameraRef]);
 
   return (
-    <ShapeSource ref={sourceRef} id="planner-legs" shape={EMPTY_FC}>
-      <LineLayer
-        id="planner-leg-casing"
-        slot="top"
-        style={{
-          lineColor: Tram.gold,
-          lineWidth: 9,
-          lineOpacity: 0.9,
-          lineCap: 'round',
-          lineJoin: 'round',
-        }}
-      />
-      <LineLayer
-        id="planner-leg-inner"
-        slot="top"
-        style={{
-          lineColor: [
-            'case',
-            ['>=', ['to-number', ['get', 'line']], 90],
-            Tram.night,
-            Tram.pidRed,
-          ],
-          lineWidth: 4,
-          lineOpacity: 1,
-          lineCap: 'round',
-          lineJoin: 'round',
-        }}
-      />
-    </ShapeSource>
+    <>
+      <ShapeSource ref={sourceRef} id="planner-legs" shape={EMPTY_FC}>
+        <LineLayer
+          id="planner-leg-casing"
+          slot="top"
+          style={{
+            lineColor: Tram.gold,
+            lineWidth: 9,
+            lineOpacity: 0.9,
+            lineCap: 'round',
+            lineJoin: 'round',
+          }}
+        />
+        <LineLayer
+          id="planner-leg-inner"
+          slot="top"
+          style={{
+            lineColor: [
+              'case',
+              ['>=', ['to-number', ['get', 'line']], 90],
+              Tram.night,
+              Tram.pidRed,
+            ],
+            lineWidth: 4,
+            lineOpacity: 1,
+            lineCap: 'round',
+            lineJoin: 'round',
+          }}
+        />
+      </ShapeSource>
+      {/* Journey-guidance card floating over the map (plain RN view — MapView
+          renders non-map children as regular subviews on top of the map).
+          Renders null unless a guidance session is active. */}
+      <GuidanceBanner />
+    </>
   );
 }

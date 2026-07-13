@@ -7,7 +7,7 @@ import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +20,7 @@ import {
   View,
 } from 'react-native';
 
+import { GuidanceStepper } from '@/components/planner/GuidanceStepper';
 import { ItineraryCard } from '@/components/planner/ItineraryCard';
 import { RecentRoutes } from '@/components/planner/RecentRoutes';
 import { StopSearchCard } from '@/components/planner/StopSearchCard';
@@ -29,7 +30,9 @@ import { Colors, Spacing, Tram } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
 import {
   computeItineraryTiming,
+  computeLeaveByMs,
   formatCountdown,
+  itineraryAccessWalkS,
   nearestStation,
   type ItineraryTiming,
 } from '@/lib/arrivals';
@@ -46,6 +49,10 @@ type PlanError =
 interface RankedResult {
   itinerary: PlannerItinerary;
   timing: ItineraryTiming;
+  /** Walking seconds from the user's location to the boarding stop (null unknown). */
+  walkS: number | null;
+  /** Leave-by wall clock (departure − walk − buffer), when live + walk known. */
+  leaveByMs: number | null;
 }
 
 export default function PlannerScreen() {
@@ -62,15 +69,28 @@ export default function PlannerScreen() {
   const removeRecent = usePlannerStore((s) => s.removeRecent);
   const prefill = usePlannerStore((s) => s.prefill);
   const clearPrefill = usePlannerStore((s) => s.clearPrefill);
+  const guidance = usePlannerStore((s) => s.guidance);
+  const guidanceProgress = usePlannerStore((s) => s.guidanceProgress);
+  const startGuidance = usePlannerStore((s) => s.startGuidance);
+  const stopGuidance = usePlannerStore((s) => s.stopGuidance);
 
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [results, setResults] = useState<PlannerItinerary[] | null>(null);
   const [error, setError] = useState<PlanError | null>(null);
   const [locating, setLocating] = useState(false);
+  // Device location, when available — drives the nearest-stop From autofill
+  // and the walk-time math on results. Null = permission denied / unknown.
+  const [userCoords, setUserCoords] = useState<[number, number] | null>(null);
   // Wall-clock second tick — refreshes the 'in N min' countdowns while the sheet
   // is open (independent of the ~1 Hz states cadence).
   const [nowMs, setNowMs] = useState(() => Date.now());
+  // Focus To (keyboard up) on a plain open — not when a prefill handoff is
+  // about to auto-plan, and not when reopened over an active route/guidance.
+  const [autoFocusTo] = useState(() => {
+    const s = usePlannerStore.getState();
+    return s.prefill == null && s.itinerary == null;
+  });
 
   const loading = geometries.length === 0;
 
@@ -78,6 +98,47 @@ export default function PlannerScreen() {
     const id = setInterval(() => setNowMs(Date.now()), 1_000);
     return () => clearInterval(id);
   }, []);
+
+  // On open: silently read the device location. Graceful throughout — denied
+  // permission or a location error just leaves From empty and walk math off
+  // (no alerts on this path; the manual locate button keeps its alerts).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') return;
+        const pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        if (!cancelled) setUserCoords([pos.coords.longitude, pos.coords.latitude]);
+      } catch {
+        // graceful: no location → no autofill, no walk times
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Autofill From with the nearest stop once location + geometry are both in —
+  // one-shot, and only when the user hasn't typed/prefilled anything yet.
+  // The fill itself is deferred a tick (no synchronous setState in an effect).
+  const autoFilledRef = useRef(false);
+  useEffect(() => {
+    if (autoFilledRef.current || !userCoords || loading) return;
+    if (usePlannerStore.getState().prefill) return; // "Route here" handoff wins
+    const station = nearestStation(userCoords, geometries);
+    if (!station) {
+      autoFilledRef.current = true;
+      return;
+    }
+    const t = setTimeout(() => {
+      autoFilledRef.current = true;
+      setFrom((prev) => (prev.trim().length > 0 ? prev : station.name));
+    }, 0);
+    return () => clearTimeout(t);
+  }, [userCoords, loading, geometries]);
 
   // Station index for suggestion badges + input validation. Rebuilt only when
   // the geometry set changes (~1 Hz re-render at most while shapes stream in).
@@ -198,6 +259,7 @@ export default function PlannerScreen() {
       const pos = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
+      setUserCoords([pos.coords.longitude, pos.coords.latitude]);
       const station = nearestStation([pos.coords.longitude, pos.coords.latitude], geometries);
       if (!station) {
         Alert.alert('No nearby stop', 'No tram stop is loaded near you yet — try again shortly.');
@@ -252,15 +314,51 @@ export default function PlannerScreen() {
     setItinerary(null);
   }, [setItinerary]);
 
+  // Start journey guidance: make the itinerary the active route, record the
+  // access-walk time and hand over to the map (guidance banner + stepper).
+  const handleStart = useCallback(
+    (it: PlannerItinerary, walkS: number | null) => {
+      Keyboard.dismiss();
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      startGuidance(it, walkS ?? 0);
+      router.back(); // the guidance banner over the map takes over
+    },
+    [startGuidance],
+  );
+
+  const handleEndGuidance = useCallback(() => {
+    stopGuidance();
+  }, [stopGuidance]);
+
+  /** Access-walk seconds for the ACTIVE itinerary (banner Start button). */
+  const activeWalkS = useMemo(
+    () => (itinerary && userCoords ? itineraryAccessWalkS(userCoords, itinerary) : null),
+    [itinerary, userCoords],
+  );
+
   // Live wall-clock timing per result, then sort by EARLIEST ARRIVAL (live
   // arrival first; schedule-only itineraries fall back to fewest transfers /
   // stops). Recomputed each 1 Hz tick so times + countdowns stay current.
+  // With a known user location the timing also accounts for the WALK to the
+  // boarding stop: trams leaving before the user can reach the stop are
+  // skipped, and each result carries a leave-by wall time.
   const ranked = useMemo<RankedResult[]>(() => {
     if (!results) return [];
-    const withTiming = results.map((it) => ({
-      itinerary: it,
-      timing: computeItineraryTiming(it.legs, states, geometries, nowMs),
-    }));
+    const withTiming = results.map((it) => {
+      const walkS = userCoords ? itineraryAccessWalkS(userCoords, it) : null;
+      const timing = computeItineraryTiming(
+        it.legs,
+        states,
+        geometries,
+        nowMs,
+        walkS != null ? { earliestDepartureMs: nowMs + walkS * 1_000 } : undefined,
+      );
+      const leaveByMs =
+        walkS != null && timing.departureMs != null
+          ? computeLeaveByMs(timing.departureMs, walkS)
+          : null;
+      return { itinerary: it, timing, walkS, leaveByMs };
+    });
     withTiming.sort((a, b) => {
       const aa = a.timing.arrivalMs;
       const bb = b.timing.arrivalMs;
@@ -273,7 +371,7 @@ export default function PlannerScreen() {
       );
     });
     return withTiming;
-  }, [results, states, geometries, nowMs]);
+  }, [results, states, geometries, nowMs, userCoords]);
 
   const activeTiming = useMemo(
     () =>
@@ -340,6 +438,17 @@ export default function PlannerScreen() {
                 {bannerTimes ?? 'Awaiting a live tram for departure times'}
               </Text>
             </View>
+            {!guidance && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Start journey guidance"
+                onPress={() => handleStart(itinerary, activeWalkS)}
+                style={({ pressed }) => [styles.bannerStart, { opacity: pressed ? 0.7 : 1 }]}
+              >
+                <SymbolView name="play.fill" size={11} tintColor={Tram.cream} />
+                <Text style={styles.bannerStartText}>Start</Text>
+              </Pressable>
+            )}
             <Pressable
               onPress={handleClearItinerary}
               style={({ pressed }) => [styles.bannerClear, { opacity: pressed ? 0.7 : 1 }]}
@@ -349,6 +458,19 @@ export default function PlannerScreen() {
           </View>
         )}
 
+        {/* Active guidance: the sheet becomes the full stepper; planning UI
+            stays out of the way until guidance ends. */}
+        {guidance && guidanceProgress ? (
+          <GuidanceStepper
+            session={guidance}
+            progress={guidanceProgress}
+            states={states}
+            geometries={geometries}
+            nowMs={nowMs}
+            onEnd={handleEndGuidance}
+          />
+        ) : (
+          <>
         <StopSearchCard
           from={from}
           to={to}
@@ -360,6 +482,7 @@ export default function PlannerScreen() {
           onSubmit={handlePlan}
           onLocate={() => void handleLocate()}
           locating={locating}
+          autoFocusTo={autoFocusTo}
         />
 
         <Pressable
@@ -430,16 +553,21 @@ export default function PlannerScreen() {
             <Text style={[styles.sectionLabel, { color: palette.textSecondary }]}>
               Routes · earliest arrival first
             </Text>
-            {ranked.map(({ itinerary: it, timing }, i) => (
+            {ranked.map(({ itinerary: it, timing, walkS, leaveByMs }, i) => (
               <ItineraryCard
                 key={`${i}-${it.legs.map((l) => l.line).join('-')}-${it.legs[0]?.fromStopId}`}
                 itinerary={it}
                 timing={timing}
                 nowMs={nowMs}
+                walkS={walkS}
+                leaveByMs={leaveByMs}
                 onPress={() => handlePick(it)}
+                onStart={() => handleStart(it, walkS)}
               />
             ))}
           </View>
+        )}
+          </>
         )}
         </SheetContent>
       </ScrollView>
@@ -497,6 +625,21 @@ const styles = StyleSheet.create({
   bannerTimes: {
     fontSize: 12,
     fontVariant: ['tabular-nums'],
+  },
+  bannerStart: {
+    alignItems: 'center',
+    backgroundColor: Tram.onTime,
+    borderCurve: 'continuous',
+    borderRadius: 12,
+    flexDirection: 'row',
+    gap: 5,
+    paddingHorizontal: Spacing.two + 2,
+    paddingVertical: 5,
+  },
+  bannerStartText: {
+    color: Tram.cream,
+    fontSize: 13,
+    fontWeight: '600',
   },
   bannerClear: {
     backgroundColor: Tram.pidRed,

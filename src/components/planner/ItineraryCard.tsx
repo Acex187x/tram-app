@@ -29,10 +29,24 @@ export interface ItineraryCardProps {
   timing?: ItineraryTiming;
   /** Current time (ms) for the 'in N min' departure countdown; defaults to now. */
   nowMs?: number;
+  /** Walking seconds from the user's location to the boarding stop, when known. */
+  walkS?: number | null;
+  /** Wall-clock ms to leave by (departure − walk − buffer), when known. */
+  leaveByMs?: number | null;
   onPress: () => void;
+  /** Start journey guidance on this itinerary (shows a Start button when set). */
+  onStart?: () => void;
 }
 
-export function ItineraryCard({ itinerary, timing, nowMs, onPress }: ItineraryCardProps) {
+export function ItineraryCard({
+  itinerary,
+  timing,
+  nowMs,
+  walkS,
+  leaveByMs,
+  onPress,
+  onStart,
+}: ItineraryCardProps) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = Colors[scheme];
   const separatorColor = scheme === 'dark' ? 'rgba(84,84,88,0.5)' : 'rgba(60,60,67,0.24)';
@@ -90,6 +104,19 @@ export function ItineraryCard({ itinerary, timing, nowMs, onPress }: ItineraryCa
         </View>
       )}
 
+      {/* Walk-aware leave-by line: departure − walk − 1 min buffer. */}
+      {walkS != null && leaveByMs != null && departureMs != null && (
+        <View style={styles.leaveRow}>
+          <SymbolView name="figure.walk" size={12} tintColor={accent} />
+          <Text style={[styles.leaveText, { color: palette.text }]} allowFontScaling={false}>
+            {leaveByMs <= now ? 'Leave now' : `Leave by ${formatPragueClock(leaveByMs)}`}
+          </Text>
+          <Text style={[styles.leaveWalk, { color: palette.textSecondary }]} allowFontScaling={false}>
+            {Math.max(1, Math.round(walkS / 60))} min walk to the stop
+          </Text>
+        </View>
+      )}
+
       {legs.map((leg, i) => {
         const legTiming: LegTiming | undefined = timing?.legs[i];
         // Transfer wait = this leg's departure − previous leg's arrival, when
@@ -136,6 +163,20 @@ export function ItineraryCard({ itinerary, timing, nowMs, onPress }: ItineraryCa
           {totalStops} {totalStops === 1 ? 'stop' : 'stops'} ·{' '}
           {transferCount === 0 ? 'Direct' : `${transferCount} ${transferCount === 1 ? 'transfer' : 'transfers'}`}
         </Text>
+        {onStart && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Start journey guidance on this route"
+            hitSlop={6}
+            onPress={onStart}
+            style={({ pressed }) => [styles.startButton, { opacity: pressed ? 0.7 : 1 }]}
+          >
+            <SymbolView name="play.fill" size={10} tintColor={Tram.cream} />
+            <Text style={styles.startButtonText} allowFontScaling={false}>
+              Start
+            </Text>
+          </Pressable>
+        )}
         <View style={styles.footerAction}>
           <Text style={[styles.footerActionText, { color: accent }]}>Show on map</Text>
           <SymbolView name="chevron.right" size={11} weight="semibold" tintColor={accent} />
@@ -281,17 +322,49 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.two + 2,
   },
   footerTotals: {
+    flex: 1,
     fontSize: 13,
     fontVariant: ['tabular-nums'],
+  },
+  startButton: {
+    alignItems: 'center',
+    backgroundColor: Tram.pidRed,
+    borderCurve: 'continuous',
+    borderRadius: 11,
+    flexDirection: 'row',
+    gap: 5,
+    marginRight: Spacing.three,
+    paddingHorizontal: Spacing.two + 2,
+    paddingVertical: 4,
+  },
+  startButtonText: {
+    color: Tram.cream,
+    fontSize: 13,
+    fontWeight: '600',
   },
   footerAction: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 3,
-    marginLeft: 'auto',
   },
   footerActionText: {
     fontSize: 13,
     fontWeight: '600',
+  },
+  leaveRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: Spacing.one,
+  },
+  leaveText: {
+    fontSize: 13,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '600',
+  },
+  leaveWalk: {
+    fontSize: 12,
+    fontVariant: ['tabular-nums'],
+    marginLeft: 'auto',
   },
 });

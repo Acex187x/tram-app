@@ -38,6 +38,8 @@ export interface StopSearchCardProps {
   onLocate?: () => void;
   /** Whether a location lookup is in flight (shows a spinner in the From field). */
   locating?: boolean;
+  /** Focus the To field (keyboard up) as soon as the card mounts. */
+  autoFocusTo?: boolean;
 }
 
 export function StopSearchCard({
@@ -51,6 +53,7 @@ export function StopSearchCard({
   onSubmit,
   onLocate,
   locating = false,
+  autoFocusTo = false,
 }: StopSearchCardProps) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = Colors[scheme];
@@ -106,6 +109,7 @@ export function StopSearchCard({
           placeholder={isFrom ? 'From stop' : 'To stop'}
           placeholderTextColor={palette.textSecondary}
           style={[styles.input, { color: palette.text }]}
+          autoFocus={!isFrom && autoFocusTo}
           autoCorrect={false}
           autoCapitalize="none"
           clearButtonMode="while-editing"
