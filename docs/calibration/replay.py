@@ -393,6 +393,9 @@ CONFIGS = [
     # SUNDAY night window, app fresh ~2 h): h22 first read — symmetric
     # control pair around the read (same pattern as D50/D51); D50/D51 rerun
     # on the h21 full-hour extract is the h21-final gate record.
+    # Round 24: D52/D53 rerun on the h22 FULL-hour extract (22:00-23:00, clean)
+    # is the h22-final gate record — both flat-to-worse (frs p50 122/122 vs NEW
+    # 121) => TOD h22 = 1.0 FINAL alongside norm x1.016 + paired +0.010 legs.
     ("D52 tod h22=0.95 (symmetric control)", {**NEW, "tod": {22: 0.95}}),
     ("D53 tod h22=1.05 (symmetric control)", {**NEW, "tod": {22: 1.05}}),
 ]
