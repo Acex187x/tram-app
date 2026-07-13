@@ -58,7 +58,9 @@ beforeEach(() => {
   jest.spyOn(Math, 'random').mockReturnValue(0.5);
 });
 afterEach(() => {
-  (Math.random as unknown as jest.Mock).mockRestore();
+  // Optional call: the backoff describe pins/restores its own spy, so by the
+  // time this runs Math.random may already be the native function again.
+  (Math.random as unknown as jest.Mock).mockRestore?.();
 });
 
 /** Build a TramSnapshotBatch the way the hardened vehicles module does. */
