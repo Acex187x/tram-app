@@ -72,13 +72,15 @@ const DOCK_H = 54;
 /** Locate button slot: bottom-right, floating just above the dock. */
 const LOCATE_BOTTOM = Spacing.three + DOCK_H + 12;
 /** Vertical footprint of one stacked bottom chip (banner height + gap). */
-const CHIP_STACK_H = 56;
+const CHIP_STACK_H = CONTROL_BUTTON_SIZE + 10;
 /**
- * Bottom offset of the follow/planner/ride chip base slot — above the locate
- * button so a wide centered chip can never collide with it (the chips stack
- * above the button like snackbars above a FAB).
+ * Bottom offset of the follow/planner/ride chip base slot — the base chip sits
+ * on the SAME row as the locate button (same bottom, same height). The chip is
+ * left-aligned to the dock and its right edge is fenced short of the locate
+ * button (see `followWrap`), so they share the row as `[ chip … ] [locate]`.
+ * Multiple active chips stack UPWARD from this row (each +CHIP_STACK_H).
  */
-const BANNER_SLOT = LOCATE_BOTTOM + CONTROL_BUTTON_SIZE + 12;
+const BANNER_SLOT = LOCATE_BOTTOM;
 
 // ── Status chip (top-left): poll ring + live tram count + sync detail ────────
 
@@ -287,12 +289,12 @@ export function BottomDock() {
 
 // ── Bottom banners: follow + spotter + planner-route clear + ride preview ────
 //
-// All are stacked glass chips above the locate button (snackbar-above-FAB
-// pattern — a wide centered chip must never collide with the bottom-right
-// button). The planner chip owns the base slot, the ride-preview chip stacks
-// above it, the spotter chip above that, and the follow banner floats on top
-// of whichever are visible. Rendered together from a single exported node so
-// `app/index.tsx` keeps its one `<FollowBanner />`.
+// All are left-aligned glass chips (same height as the locate button), fenced
+// short of the bottom-right button so the base chip shares its row:
+// `[ chip … ] [locate]` just above the dock. The planner chip owns the base
+// row, the ride-preview chip stacks above it, the spotter chip above that, and
+// the follow banner floats on top of whichever are visible. Rendered together
+// from a single exported node so `app/index.tsx` keeps its one `<FollowBanner />`.
 
 export function FollowBanner() {
   return (
@@ -644,13 +646,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  followWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
+  // Left-aligned to the dock; right edge fenced short of the locate button so
+  // the base chip shares that row without overlapping it. The chip sizes to its
+  // content (flex-start), never the full width.
+  followWrap: {
+    position: 'absolute',
+    left: Spacing.three,
+    right: CONTROL_RIGHT + CONTROL_BUTTON_SIZE + 12,
+    alignItems: 'flex-start',
+  },
   followBanner: {
     flexDirection: 'row',
     alignItems: 'center',
+    // Match the locate button's height and center content vertically (pill).
+    height: CONTROL_BUTTON_SIZE,
+    justifyContent: 'center',
     gap: Spacing.two,
     paddingHorizontal: 12,
-    paddingVertical: 8,
     borderRadius: 999,
   },
   followBody: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
