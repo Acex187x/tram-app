@@ -90,6 +90,7 @@ export function GuidanceStepper({
               status={status}
               timing={timing}
               live={live}
+              progress={progress}
               session={session}
               nowMs={nowMs}
               scheme={scheme}
@@ -121,6 +122,7 @@ function StepRow({
   status,
   timing,
   live,
+  progress,
   session,
   nowMs,
   scheme,
@@ -129,6 +131,7 @@ function StepRow({
   status: StepStatus;
   timing: ItineraryTiming;
   live: ReturnType<typeof tickGuidance>;
+  progress: GuidanceProgress;
   session: GuidanceSession;
   nowMs: number;
   scheme: 'light' | 'dark';
@@ -137,6 +140,14 @@ function StepRow({
   const accent = scheme === 'dark' ? Tram.gold : Tram.pidRed;
   const dim = status === 'done';
   const textColor = dim ? palette.textSecondary : palette.text;
+
+  // Pinned exit arrival for the leg currently being ridden (frozen at boarding).
+  // Non-null only for the ride/arrive step of the active ridden leg; used in
+  // place of the nearest-tram timing so the ETA never jumps to the tram behind.
+  const pinnedArrivalMs =
+    progress.phase === 'ride' && 'legIndex' in step && progress.legIndex === step.legIndex
+      ? live.arrivalMs
+      : null;
 
   let symbol: Parameters<typeof SymbolView>[0]['name'];
   let title: string;
@@ -171,7 +182,10 @@ function StepRow({
     symbol = 'tram.fill';
     title = `Ride ${step.stopCount} ${step.stopCount === 1 ? 'stop' : 'stops'} — exit at ${step.exitName}`;
     const legTiming = timing.legs[step.legIndex];
-    if (legTiming?.arrivalMs != null) detail = `arrive ${formatPragueClock(legTiming.arrivalMs)}`;
+    // While riding THIS leg, arrival is the pinned tram's frozen exit arrival —
+    // never the nearest-tram re-search (which would jump to the tram behind).
+    const arrivalMs = pinnedArrivalMs ?? legTiming?.arrivalMs ?? null;
+    if (arrivalMs != null) detail = `arrive ${formatPragueClock(arrivalMs)}`;
     if (status === 'active') {
       liveNote = live.pos
         ? live.pos.nextIsExit
@@ -182,7 +196,10 @@ function StepRow({
   } else {
     symbol = 'mappin.circle.fill';
     title = `Arrive at ${step.stopName}`;
-    if (timing.arrivalMs != null) detail = formatPragueClock(timing.arrivalMs);
+    // On the final ride leg the pinned tram's frozen arrival is the destination
+    // ETA — stable, not the nearest-tram re-search.
+    const arrivalMs = pinnedArrivalMs ?? timing.arrivalMs;
+    if (arrivalMs != null) detail = formatPragueClock(arrivalMs);
   }
 
   return (

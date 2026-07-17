@@ -21,7 +21,7 @@ import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
 import { Colors, Spacing, Tram } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
-import { formatCountdown } from '@/lib/arrivals';
+import { formatCountdown, formatEtaMinutes } from '@/lib/arrivals';
 import { formatPragueClock } from '@/lib/format/pragueTime';
 import {
   activeStepIndex,
@@ -127,20 +127,31 @@ function ActiveBanner({
     }
   } else if (progress.phase === 'ride') {
     symbol = 'tram.fill';
+    // ETA to YOUR exit stop, pinned to the boarded tram (tick.arrivalMs is
+    // frozen at boarding) — a stable, decreasing countdown that never jumps to
+    // the tram behind.
+    const eta =
+      tick.arrivalMs != null
+        ? `${formatEtaMinutes(Math.max(0, Math.floor((tick.arrivalMs - nowMs) / 1000)))} · arr ${formatPragueClock(
+            tick.arrivalMs,
+          )}`
+        : null;
     if (tick.pos) {
       if (tick.pos.nextIsExit) {
         title = `Get off at ${leg.toStopName}`;
-        subtitle = 'The next stop is yours';
+        subtitle = eta ? `Next stop is yours · ${eta}` : 'The next stop is yours';
         highlight = true;
       } else {
-        title = `Ride to ${leg.toStopName}`;
-        subtitle = `${tick.pos.stopsRemaining} ${
+        const stops = `${tick.pos.stopsRemaining} ${
           tick.pos.stopsRemaining === 1 ? 'stop' : 'stops'
-        } to go${boundState ? ` · tram #${boundState}` : ''}`;
+        } to go`;
+        title = `Ride to ${leg.toStopName}`;
+        subtitle = eta ? `${stops} · ${eta}` : `${stops}${boundState ? ` · tram #${boundState}` : ''}`;
       }
     } else {
+      // Pinned tram left the feed: hold the frozen ETA rather than switch trams.
       title = `Ride to ${leg.toStopName}`;
-      subtitle = 'Tracking lost — watch for your stop';
+      subtitle = eta ? `${eta} · signal lost` : 'Tracking lost — watch for your stop';
     }
   } else {
     symbol = 'checkmark.circle.fill';

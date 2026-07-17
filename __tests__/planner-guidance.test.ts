@@ -302,6 +302,70 @@ describe('tickGuidance', () => {
     expect(tick.progress.phase).toBe('ride');
     expect(tick.progress.tramKey).toBe('9201');
     expect(tick.pos?.departedFrom).toBe(true);
+    // Boarding freezes the pinned tram's exit arrival (Gamma @ BASE+240s, delay 0).
+    expect(tick.progress.rideArrivalMs).toBe(BASE + 240 * S);
+    expect(tick.arrivalMs).toBe(BASE + 240 * S);
+  });
+
+  it('keeps the bound tram through the departure dead-zone (no jump to the tram behind)', () => {
+    // '9201' is 10 m past Alpha: excluded from the fresh candidate search (>2 m
+    // past the stop) yet not "departed" (<30 m). The buggy code rebound to the
+    // follower here; the fix keeps the binding so departedFrom can still fire.
+    const geos = [geoA('trip-a'), geoA('trip-a2', 600)];
+    const states = [
+      makeState({ key: '9201', tripId: 'trip-a', line: '22', simDistM: 10 }),
+      makeState({ key: '9202', tripId: 'trip-a2', line: '22', simDistM: 0 }),
+    ];
+    const progress: GuidanceProgress = { legIndex: 0, phase: 'wait', tramKey: '9201' };
+    const tick = tickGuidance(direct, progress, states, geos, BASE + 5 * S, 0);
+    expect(tick.progress.phase).toBe('wait');
+    expect(tick.progress.tramKey).toBe('9201'); // NOT the follower '9202'
+  });
+
+  it('holds the pinned tram ETA in ride even as an earlier tram behind approaches', () => {
+    const frozen = BASE + 240 * S;
+    // '9202' is earlier AND closer to Gamma — it would win a nearest-tram search,
+    // but ride must ignore it and hold the pinned tram's frozen arrival.
+    const geos = [geoA('trip-a'), geoA('trip-a2', -30)];
+    const states = [
+      makeState({ key: '9201', tripId: 'trip-a', line: '22', simDistM: 300 }),
+      makeState({ key: '9202', tripId: 'trip-a2', line: '22', simDistM: 400, delaySeconds: 120 }),
+    ];
+    const progress: GuidanceProgress = {
+      legIndex: 0,
+      phase: 'ride',
+      tramKey: '9201',
+      rideArrivalMs: frozen,
+    };
+    const tick = tickGuidance(direct, progress, states, geos, BASE + 150 * S, 0);
+    expect(tick.progress).toBe(progress); // pinned, unchanged reference
+    expect(tick.progress.tramKey).toBe('9201');
+    expect(tick.arrivalMs).toBe(frozen); // not '9202'’s arrival
+    expect(tick.pos?.simDistM).toBe(300); // position tracked from the pinned tram
+  });
+
+  it('holds the schedule (no re-bind) when the pinned tram leaves the feed mid-ride', () => {
+    const frozen = BASE + 240 * S;
+    // Only a DIFFERENT live tram remains; ride must not adopt it.
+    const states = [makeState({ key: '9202', tripId: 'trip-a2', line: '22', simDistM: 100 })];
+    const progress: GuidanceProgress = {
+      legIndex: 0,
+      phase: 'ride',
+      tramKey: '9201',
+      rideArrivalMs: frozen,
+    };
+    const tick = tickGuidance(
+      direct,
+      progress,
+      states,
+      [geoA('trip-a'), geoA('trip-a2', 600)],
+      BASE + 150 * S,
+      0,
+    );
+    expect(tick.progress).toBe(progress);
+    expect(tick.progress.tramKey).toBe('9201'); // still pinned to the vanished tram
+    expect(tick.pos).toBeNull();
+    expect(tick.arrivalMs).toBe(frozen); // scheduled ETA held
   });
 
   it('does NOT board from the walk phase', () => {

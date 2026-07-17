@@ -26,6 +26,13 @@ export interface GuidanceProgress {
   phase: GuidancePhase;
   /** Live tram bound to the current leg (rebound while waiting, pinned while riding). */
   tramKey: string | null;
+  /**
+   * Wall-clock arrival (ms epoch) of the PINNED tram at the exit stop, frozen at
+   * the moment of boarding. Present only in the `ride` phase; it is the stable,
+   * counting-down ETA that survives the pinned tram dropping off the feed and
+   * never jumps to a tram behind. Absent in walk/wait/arrived.
+   */
+  rideArrivalMs?: number | null;
 }
 
 /** Tram counted as DEPARTED its boarding stop beyond this along-shape slack (m). */
@@ -47,6 +54,8 @@ export interface LegTramPosition {
   simDistM: number;
   fromDistM: number;
   toDistM: number;
+  /** Scheduled arrival at the exit stop (ms epoch, pre-delay) on this geometry. */
+  toArrivalMs: number;
   /** Leg stops still ahead of the tram, exit stop included. */
   stopsRemaining: number;
   /** The next stop the tram reaches is the exit stop — "get off at the next stop". */
@@ -89,6 +98,7 @@ export function legTramPosition(
     simDistM,
     fromDistM,
     toDistM,
+    toArrivalMs: geo.stops[toIdx].arrivalMs,
     stopsRemaining,
     nextIsExit: stopsRemaining === 1,
     departedFrom: simDistM > fromDistM + BOARD_DEPART_SLACK_M,
@@ -105,6 +115,13 @@ export interface GuidanceTick {
   pos: LegTramPosition | null;
   /** Next catchable tram's timing while walking/waiting (what to board & when). */
   wait: LegTiming | null;
+  /**
+   * Wall-clock arrival (ms epoch) of the PINNED tram at the current leg's exit
+   * stop while `ride`-ing — the stable, decreasing ETA to show. Held from
+   * `progress.rideArrivalMs` (frozen at boarding), so it does not jump to a tram
+   * behind and survives the pinned tram dropping off the feed. Null off `ride`.
+   */
+  arrivalMs: number | null;
 }
 
 /**
@@ -122,53 +139,72 @@ export function tickGuidance(
 ): GuidanceTick {
   const legs = itinerary.legs;
   const leg = legs[progress.legIndex];
-  if (!leg || progress.phase === 'arrived') return { progress, pos: null, wait: null };
+  if (!leg || progress.phase === 'arrived') return { progress, pos: null, wait: null, arrivalMs: null };
 
   const fromKey = normalizeName(leg.fromStopName);
   const toKey = normalizeName(leg.toStopName);
 
-  const posFor = (key: string | null): LegTramPosition | null => {
+  // Resolve a bound tram to its position on the leg AND its live wall-clock exit
+  // arrival (its scheduled arrival at the exit stop shifted by its live delay).
+  const bind = (key: string | null): { pos: LegTramPosition; arrivalMs: number } | null => {
     if (!key) return null;
     const state = states.find((s) => s.key === key);
     if (!state || state.snapshot.line !== leg.line || state.snapshot.isCanceled) return null;
     const geo = geometries.find((g) => g.tripId === state.snapshot.tripId);
     if (!geo) return null;
-    return legTramPosition(geo, state.simDistM, fromKey, toKey);
+    const pos = legTramPosition(geo, state.simDistM, fromKey, toKey);
+    if (!pos) return null;
+    return { pos, arrivalMs: pos.toArrivalMs + state.snapshot.delaySeconds * 1000 };
   };
 
   if (progress.phase === 'ride') {
-    const pos = posFor(progress.tramKey);
-    if (pos?.arrivedAtExit) {
+    // Pinned tram only — NO candidate re-search while riding, so the ETA can
+    // never jump to the tram behind (item 1/4). Re-binding happens only in wait.
+    const b = bind(progress.tramKey);
+    if (b?.pos.arrivedAtExit) {
       const next: GuidanceProgress =
         progress.legIndex + 1 < legs.length
           ? { legIndex: progress.legIndex + 1, phase: 'wait', tramKey: null }
           : { legIndex: progress.legIndex, phase: 'arrived', tramKey: null };
-      return { progress: next, pos: null, wait: null };
+      return { progress: next, pos: null, wait: null, arrivalMs: null };
     }
-    // Tram lost from the feed → keep riding on schedule knowledge (pos null).
-    return { progress, pos, wait: null };
+    // ETA held from the arrival frozen at boarding (stable, decreasing) — so it
+    // survives the pinned tram dropping off the feed (b null ⇒ pos null) without
+    // switching to another vehicle. Fall back to live only if never frozen.
+    const arrivalMs = progress.rideArrivalMs ?? b?.arrivalMs ?? null;
+    return { progress, pos: b?.pos ?? null, wait: null, arrivalMs };
   }
 
-  // walk / wait. The boarding transition watches the PREVIOUSLY bound tram —
-  // the fresh candidate search excludes trams already past the boarding stop,
-  // so the departure signal only exists on the old binding.
-  const boundPos = posFor(progress.tramKey);
-  if (progress.phase === 'wait' && boundPos?.departedFrom) {
-    return { progress: { ...progress, phase: 'ride' }, pos: boundPos, wait: null };
+  // walk / wait. The boarding transition watches the bound tram pulling away —
+  // that signal (departedFrom) lives only on the binding, so we must KEEP the
+  // binding across the window where the candidate search has already dropped it
+  // (it is >2 m past the stop) yet it has not cleared BOARD_DEPART_SLACK_M.
+  const bound = bind(progress.tramKey);
+  if (progress.phase === 'wait' && bound?.pos.departedFrom) {
+    // Boarded: pin THIS tram and freeze its exit arrival for the whole ride.
+    const rode: GuidanceProgress = {
+      legIndex: progress.legIndex,
+      phase: 'ride',
+      tramKey: progress.tramKey,
+      rideArrivalMs: bound.arrivalMs,
+    };
+    return { progress: rode, pos: bound.pos, wait: null, arrivalMs: bound.arrivalMs };
   }
 
   const wait = computeItineraryTiming([leg], states, geometries, nowMs).legs[0] ?? null;
   const candidateKey = wait?.tram?.key ?? null;
   const phase: GuidancePhase =
     progress.phase === 'walk' && nowMs >= walkUntilMs ? 'wait' : progress.phase;
-  // Bind the fresh candidate; keep the old binding only while still trackable.
-  const tramKey = candidateKey ?? (boundPos ? progress.tramKey : null);
+  // Keep the bound tram bound while it is still trackable on the leg (so its
+  // pull-away is what flips us to ride); only (re)bind a fresh candidate when we
+  // have no trackable binding. Never swap onto the catchable tram behind ours.
+  const tramKey = bound ? progress.tramKey : candidateKey;
 
   const next =
     phase !== progress.phase || tramKey !== progress.tramKey
       ? { legIndex: progress.legIndex, phase, tramKey }
       : progress;
-  return { progress: next, pos: posFor(tramKey), wait };
+  return { progress: next, pos: bind(tramKey)?.pos ?? null, wait, arrivalMs: null };
 }
 
 // ── Step list (stepper + banner counter) ─────────────────────────────────────
