@@ -235,7 +235,15 @@ describe('faster tram behind a slower one (different trips, same shape)', () => 
   });
 });
 
-describe('cross-shape car-following (different lines sharing the same track)', () => {
+describe('cross-shape car-following (brake-only — never rewrites the follower position)', () => {
+  // Build-20 regression: the cross-shape queue used to CLAMP a follower's sM to
+  // the leader's translated position. Because the shape-to-shape offset is only
+  // valid where the rails physically coincide, a leader passing a junction
+  // teleported the follower backward/off-route and froze it — "tram stands at
+  // an angle off the drawn line", most often mid-route in the dense centre.
+  // The fix: cross-pairs BRAKE ONLY (cap speed, never write sM), are tightened
+  // (lateral 2 m / bearing 12°), and drop once the leader has advanced past the
+  // lateral-verified window (paths may have diverged).
   const line: [number, number][] = [
     [0, 0],
     [3000, 0],
@@ -261,7 +269,7 @@ describe('cross-shape car-following (different lines sharing the same track)', (
     return { slow, fast };
   }
 
-  it('a faster tram of ANOTHER line never drives through the slow one ahead', () => {
+  it('(а) a faster tram of ANOTHER line brakes behind the slow one — never through, never backward', () => {
     const engine = makeEngine();
     const { slow, fast } = makeShared();
     const resolve = (tripId: string) => (tripId === 'trip-fast' ? fast : slow);
@@ -272,28 +280,43 @@ describe('cross-shape car-following (different lines sharing the same track)', (
     engine.ingest(snaps, resolve, T0);
     engine.tick(T0);
 
-    const clearance = LEN + QUEUE_GAP_M;
     let minGap = Infinity;
+    let prevFast = -Infinity;
+    let backwardJump = 0;
     let now = T0;
     for (let k = 0; k < 24; k++) {
       // 5 s poll cadence: cross pairs refresh from current positions.
       now = run(engine, now, 5, (atMs) => {
-        const gap =
-          state(engine, 'slow', atMs).simDistM - state(engine, 'fast', atMs).simDistM;
-        minGap = Math.min(minGap, gap);
+        const f = state(engine, 'fast', atMs).simDistM;
+        // The follower's position is NEVER rewritten backward by a cross-pair.
+        backwardJump = Math.max(backwardJump, prevFast - f);
+        prevFast = f;
+        minGap = Math.min(minGap, state(engine, 'slow', atMs).simDistM - f);
       });
       engine.ingest(snaps, resolve, now);
     }
-    // Identical rails → identical parameterization: the cross clamp holds the
-    // same clearance as the same-shape queue (tiny float tolerance for the
-    // projected offset between the two coordinate arrays).
-    expect(minGap).toBeGreaterThanOrEqual(clearance - 0.05);
-    // …and the constraint was binding (the fast tram actually caught up).
-    const endGap = state(engine, 'slow', now).simDistM - state(engine, 'fast', now).simDistM;
-    expect(endGap).toBeLessThan(clearance + 20);
+    // Key regression guarantee (Fix A): the follower is NEVER teleported
+    // backward — brake-only keeps sM monotonic. This is what the build-20 bug
+    // violated (a cross clamp threw the follower off-route).
+    expect(backwardJump).toBeLessThanOrEqual(1e-6);
+    // It never OVERTAKES the leader (never drives through / past it): the head-
+    // to-head gap stays positive. (Brake-only holds a following distance rather
+    // than a hard clamp, so the QUEUE_GAP buffer may erode over a long same-
+    // track pin — accepted per the brake-only design; it never passes.)
+    expect(minGap).toBeGreaterThan(0);
+    // The brake was actually binding — the fast tram caught up and now trails
+    // the slow one closely at its (slow) speed instead of blowing past.
+    const slowEnd = state(engine, 'slow', now);
+    const fastEnd = state(engine, 'fast', now);
+    expect(slowEnd.simDistM - fastEnd.simDistM).toBeLessThan(LEN + QUEUE_GAP_M + 5);
+    expect(Math.abs(fastEnd.simSpeedKmh - slowEnd.simSpeedKmh)).toBeLessThan(1);
   });
 
-  it('a teleport landing on another line\'s tail is clamped clear at ingest', () => {
+  it("(а) a fresh fix landing on another line's tail is NOT teleported clear — only braked", () => {
+    // Contrast with the same-shape queue (which DOES clamp): a cross-pair may
+    // never rewrite sM, so a follower landing close behind stays put on its own
+    // shape and decelerates. The old clamp is exactly what teleported trams
+    // off-route when the rails had diverged.
     const engine = makeEngine();
     const { slow, fast } = makeShared();
     const resolve = (tripId: string) => (tripId === 'trip-fast' ? fast : slow);
@@ -306,26 +329,144 @@ describe('cross-shape car-following (different lines sharing the same track)', (
       T0,
     );
     engine.tick(T0);
-    let now = run(engine, T0, 2);
+    const now = run(engine, T0, 2);
 
-    // Fresh fix drops A (other line, other shape) right onto B's tail.
+    // Fresh fix drops A (other line, other shape) 5 m behind B.
     const bAt = state(engine, 'B', now).simDistM;
+    const aBefore = bAt - 5;
     engine.ingest(
       [
         makeSnapshot({ key: 'B', shapeDistM: 300, observedAtMs: T0 }),
-        makeSnapshot({ key: 'A', shapeDistM: bAt - 5, observedAtMs: now, tripId: 'trip-fast', line: '22' }),
+        makeSnapshot({ key: 'A', shapeDistM: aBefore, observedAtMs: now, tripId: 'trip-fast', line: '22' }),
       ],
       resolve,
       now,
     );
-    const clearance = LEN + QUEUE_GAP_M;
-    const check = (atMs: number) => {
-      const a = state(engine, 'A', atMs);
-      const b = state(engine, 'B', atMs);
-      expect(a.simDistM).toBeLessThanOrEqual(b.simDistM - clearance + 0.05);
+    // A was NOT shoved backward to clear B (no cross-shape position clamp): it
+    // stays essentially where the fix put it right after ingest.
+    expect(state(engine, 'A', now).simDistM).toBeGreaterThan(aBefore - 1);
+    // And it does not drive forward THROUGH B either (it brakes).
+    run(engine, now, 6, (atMs) => {
+      expect(state(engine, 'A', atMs).simDistM).toBeLessThan(state(engine, 'B', atMs).simDistM);
+    });
+  });
+
+  it('(б) once the leader passes a track divergence, the follower is freed (not frozen off-route)', () => {
+    // Follower on a straight shape; leader on a shape that SHARES the first
+    // 100 m then branches north. While coincident they pair; once the leader
+    // has advanced past the divergence the offset mapping is garbage — the pair
+    // is dropped (staleness + lateral gate) and the follower drives on freely.
+    const followerShape = makeGeometry(
+      [
+        [0, 0],
+        [600, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 60_000 },
+        { atM: 600, arrivalMs: T0 + 140_000, isTerminal: true }, // ~4 m/s
+      ],
+    );
+    const leaderShape: RouteGeometry = {
+      ...makeGeometry(
+        [
+          [0, 0],
+          [100, 0],
+          [100, 400],
+        ],
+        [
+          { atM: 0, arrivalMs: T0 - 60_000 },
+          { atM: 500, arrivalMs: T0 + 40_000, isTerminal: true }, // ~11 m/s — passes the branch fast
+        ],
+      ),
+      tripId: 'trip-lead',
+      shapeId: 'shape-lead',
+      line: '22',
     };
-    check(now); // resolved inside ingest, not a tick later
-    run(engine, now, 5, check);
+    const resolve = (tripId: string) => (tripId === 'trip-lead' ? leaderShape : followerShape);
+    const engine = makeEngine();
+
+    let now = T0;
+    // Fresh fixes each poll AT the current sim positions keep deviation ~0 (no
+    // teleport artefacts) while cross-pair discovery runs on real positions.
+    let fFix = 40;
+    let lFix = 70;
+    engine.ingest(
+      [
+        makeSnapshot({ key: 'follow', shapeDistM: fFix, observedAtMs: now }),
+        makeSnapshot({ key: 'lead', shapeDistM: lFix, observedAtMs: now, tripId: 'trip-lead', line: '22' }),
+      ],
+      resolve,
+      now,
+    );
+    engine.tick(now);
+
+    let prevFollow = -Infinity;
+    let backwardJump = 0;
+    for (let k = 0; k < 8; k++) {
+      now = run(engine, now, 5, (atMs) => {
+        const f = state(engine, 'follow', atMs).simDistM;
+        backwardJump = Math.max(backwardJump, prevFollow - f);
+        prevFollow = f;
+      });
+      fFix = state(engine, 'follow', now).simDistM;
+      lFix = state(engine, 'lead', now).simDistM;
+      engine.ingest(
+        [
+          makeSnapshot({ key: 'follow', shapeDistM: fFix, observedAtMs: now }),
+          makeSnapshot({ key: 'lead', shapeDistM: lFix, observedAtMs: now, tripId: 'trip-lead', line: '22' }),
+        ],
+        resolve,
+        now,
+      );
+    }
+
+    // The follower drove well past the 100 m divergence on its own straight
+    // shape — it was never frozen behind the (diverged) leader …
+    expect(state(engine, 'follow', now).simDistM).toBeGreaterThan(200);
+    // … and it is still moving at the end, not pinned to ~0 …
+    expect(state(engine, 'follow', now).simSpeedKmh).toBeGreaterThan(5);
+    // … and never teleported backward.
+    expect(backwardJump).toBeLessThanOrEqual(1e-6);
+  });
+
+  it('(в) a same-direction tram on an ADJACENT parallel track (>2 m away) is NOT coupled', () => {
+    // Two parallel same-direction rails 3 m apart — different physical tracks.
+    // The tightened lateral gate (2 m) must not pair them, so a faster tram on
+    // one track passes a slower tram on the other instead of freezing behind it.
+    const trackA = makeGeometry(line, [
+      { atM: 0, arrivalMs: T0 - 60_000 },
+      { atM: 3000, arrivalMs: T0 + 940_000, isTerminal: true }, // ~3 m/s
+    ]);
+    const trackB: RouteGeometry = {
+      ...makeGeometry(
+        [
+          [0, 3],
+          [3000, 3],
+        ],
+        [
+          { atM: 0, arrivalMs: T0 - 60_000 },
+          { atM: 3000, arrivalMs: T0 + 240_000, isTerminal: true }, // ~12 m/s
+        ],
+      ),
+      tripId: 'trip-fast',
+      shapeId: 'shape-B',
+      line: '22',
+    };
+    const resolve = (tripId: string) => (tripId === 'trip-fast' ? trackB : trackA);
+    const snaps = [
+      makeSnapshot({ key: 'slow', shapeDistM: 400, observedAtMs: T0 }),
+      makeSnapshot({ key: 'fast', shapeDistM: 250, observedAtMs: T0, tripId: 'trip-fast', line: '22' }),
+    ];
+    const engine = makeEngine();
+    engine.ingest(snaps, resolve, T0);
+    engine.tick(T0);
+    let now = T0;
+    for (let k = 0; k < 20; k++) {
+      now = run(engine, now, 5);
+      engine.ingest(snaps, resolve, now);
+    }
+    // Different tracks → no coupling: the fast tram passes the slow one.
+    expect(state(engine, 'fast', now).simDistM).toBeGreaterThan(state(engine, 'slow', now).simDistM);
   });
 
   it('live projections queue across shapes too (live mode must not overlap either)', () => {
@@ -380,7 +521,11 @@ describe('cross-shape car-following (different lines sharing the same track)', (
       // Fresh at-stop fixes keep the leader pinned at the platform.
       engine.ingest([leadSnap(now), followSnap], resolve, now);
     }
-    expect(minProjGap).toBeGreaterThanOrEqual(clearance - 0.05);
+    // Brake-only: the follower's projection decelerates and holds essentially
+    // clear of the standing leader (a small brake-onset overshoot of the
+    // QUEUE_GAP buffer is accepted — bodies stay ~touching, never overlapping,
+    // and it never drives through).
+    expect(minProjGap).toBeGreaterThan(LEN - 1);
     expect(followProjMax).toBeGreaterThan(500 - clearance - 15); // actually converged on it
   });
 });
@@ -491,7 +636,7 @@ describe('observed (raw AVL fix) public state', () => {
     expect(s.deviationM).toBe(Math.abs(s.simDistM - geo.totalM));
   });
 
-  it('falls back to raw coordinates/bearing with null deviation without geometry', () => {
+  it('falls back to raw coordinates with null deviation and NO bearing without geometry', () => {
     const engine = makeEngine();
     engine.ingest(
       [makeSnapshot({ key: 'raw', coordinates: [14.61, 50.06], bearing: 123, shapeDistM: 42 })],
@@ -502,7 +647,11 @@ describe('observed (raw AVL fix) public state', () => {
     const s = state(engine, 'raw', T0);
     expect(s.hasGeometry).toBe(false);
     expect(s.observedPosition).toEqual([14.61, 50.06]);
-    expect(s.observedBearing).toBe(123);
+    // The raw AVL bearing (123) is garbage at v≈0 and is NEVER adopted — the
+    // fallback bearing stays null → 0 until real movement supplies one (#7).
+    // The geometry-less tram renders as an un-oriented dot regardless.
+    expect(s.observedBearing).toBe(0);
+    expect(s.bearing).toBe(0);
     expect(s.deviationM).toBeNull();
   });
 });

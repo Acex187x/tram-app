@@ -267,12 +267,24 @@ Three distinct failures fed the same symptom; the fix is a chain:
    **all** its sections; individual sections are never dropped
    (`featureBuilder.ts:35`,`:314`,`:379`). This kills the cut-at-edge case.
 
-2. **No-geometry multi-section fallback.** Before a trip's shape streams in, a
-   naïve renderer drew only the head section → "tram cut off, only the front
-   piece visible". `sectionsAtRawPosition` (`featureBuilder.ts:209`) now lays
-   **all** sections in a straight line trailing the raw AVL position along its
-   bearing, so a shapeless tram is still a whole tram. (With geometry,
-   `sectionsAlongShape` places each section at its distance along the polyline.)
+2. **No-geometry trams draw NO body — just a dot** (revised build-20, 2026-07-17).
+   A tram whose shape hasn't streamed in yet (`hasGeometry: false` — trip just
+   changed at an endpoint) is rendered as a **single un-oriented dot at the raw
+   GPS position**: no 3D sections, no perpendicular `TRACK_OFFSET`, no bearing
+   rotation. `buildFrame` sets `geometryless: 1` on the point and `continue`s
+   before the section loop; the raw AVL bearing is unreliable at v≈0, so an
+   articulated body laid along it stood the tram at an angle off the network
+   (sometimes inside buildings). *(This replaces the earlier
+   `sectionsAtRawPosition` straight-line-body fallback — a small dot for a
+   brief transient beats a broken body. The trip-change geometry is fetched at
+   raised priority to shorten the transient — see interpolation-engine.md.)*
+   With geometry, `sectionsAlongShape` places each section along the polyline.
+   Rendering: the `tram-geometryless-dots` `CircleLayer` (`TramLayers.tsx`) is
+   **filtered on `geometryless == 1` and drawn at ALL zooms** — including the 3D
+   band, where the sprite teardrops/badges fade out — so a shapeless tram never
+   vanishes; those sprite layers are conversely filtered to `geometryless != 1`.
+   The shared `tram-hit-targets` circle keeps the dot tappable. The additive
+   `PointFeatureProps.geometryless: 0 | 1` is the only new push field.
 
 3. **Sealed GLB end caps.** Even correctly placed, a section whose neighbour
    doesn't perfectly abut showed a hollow cut face. The model generator seals

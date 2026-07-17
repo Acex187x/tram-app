@@ -144,6 +144,14 @@ export interface PointFeatureProps {
   modelId: TramModelId;
   selected: 0 | 1;
   favorite: 0 | 1;
+  /**
+   * 1 when the tram has no loaded shape yet (trip just changed / geometry
+   * streaming in). Such a tram renders as a plain un-oriented dot at its raw
+   * GPS position — no 3D body, no bearing-rotated teardrop, no track offset —
+   * a brief transient until the shape loads. The dot layer keys off this so the
+   * tram stays visible (and tappable) even in the 3D zoom band.
+   */
+  geometryless: 0 | 1;
 }
 
 export interface SectionFeatureProps {

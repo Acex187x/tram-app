@@ -87,9 +87,10 @@ describe('points FC props consumed by the icon expressions', () => {
     expect(ALL_MODEL_IDS).toContain(props.modelId); // cap-<modelId>-<variant>
     expect(typeof props.bearing).toBe('number'); // iconRotate
     expect(props.favorite).toBe(1); // -fav / fav-star
+    expect(props.geometryless).toBe(0); // has geometry → drawn on-shape, not a dot
     // Payload guard: no unexpected prop creep on the 60 Hz push path.
     expect(Object.keys(props).sort()).toEqual(
-      ['bearing', 'favorite', 'key', 'line', 'modelId', 'selected'].sort(),
+      ['bearing', 'favorite', 'geometryless', 'key', 'line', 'modelId', 'selected'].sort(),
     );
   });
 });

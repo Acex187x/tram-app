@@ -201,47 +201,6 @@ function sectionsAlongShape(
 }
 
 /**
- * Fallback for trams without geometry: ALL sections rendered in a straight
- * line trailing behind the given anchor position along its bearing. (Rendering
- * only the head section here was the "tram cut off — only the front piece
- * visible" bug for multi-section trams whose shape hadn't loaded yet.)
- */
-function sectionsAtRawPosition(
-  state: TramPublicState,
-  spec: TramModelSpec,
-  anchor: [number, number],
-  bearing: number,
-  coupled: boolean,
-  dwelling: boolean,
-  out: SectionFeature[],
-): void {
-  const back = (bearing + 180) % 360;
-  const headHalf = spec.sections.length > 0 ? spec.sections[0].lengthM / 2 : 0;
-  let precedingLengths = 0;
-  for (let i = 0; i < spec.sections.length; i++) {
-    const section = spec.sections[i];
-    const modelKey = sectionModelKey(section, dwelling);
-    // Distance of this section's center behind the FIRST section's center, so
-    // section 0 stays exactly at the raw API position.
-    const behindM = precedingLengths + i * spec.jointGapM + section.lengthM / 2 - headHalf;
-    const position = behindM > 0 ? destinationPoint(anchor, back, behindM) : anchor;
-    out.push(sectionFeature(`${state.key}#${i}`, state.key, modelKey, position, bearing));
-    if (coupled) {
-      out.push(
-        sectionFeature(
-          `${state.key}#c${i}`,
-          state.key,
-          modelKey,
-          destinationPoint(anchor, back, behindM + COUPLED_OFFSET_M),
-          bearing,
-        ),
-      );
-    }
-    precedingLengths += section.lengthM;
-  }
-}
-
-/**
  * Polyline slice between two along-shape distances (either order), inclusive
  * of interpolated endpoints. Used for the fix-overlay connector line.
  */
@@ -349,13 +308,18 @@ export function buildFrame(
       }
     }
 
+    // A tram without a loaded shape renders as a plain dot at its RAW GPS
+    // position: no perpendicular track offset (there is no reliable bearing to
+    // offset by) and no 3D body below. Offsetting/rotating a geometry-less tram
+    // is what stood it at an angle beside the network while its shape loaded.
+    const geometryless = !state.hasGeometry;
     if (!opts.skipPoints) {
       points.push({
         type: 'Feature',
         id: state.key,
         geometry: {
           type: 'Point',
-          coordinates: offsetRight(anchor, bearing),
+          coordinates: geometryless ? anchor : offsetRight(anchor, bearing),
         },
         properties: {
           key: state.key,
@@ -364,6 +328,7 @@ export function buildFrame(
           modelId: state.model.id,
           selected: state.key === opts.selectedKey ? 1 : 0,
           favorite: opts.favoriteKeys.has(state.key) ? 1 : 0,
+          geometryless: geometryless ? 1 : 0,
         },
       });
     }
@@ -374,20 +339,25 @@ export function buildFrame(
       fixOverlay = buildFixOverlay(state, geometry, sHead, anchor);
     }
 
+    // A geometry-less tram draws NO 3D sections — only the dot above. Rendering
+    // a full articulated body along the raw AVL bearing (which is unreliable at
+    // v≈0) placed it at an angle off the drawn line, sometimes inside buildings.
+    // Better a small dot until the shape streams in (Fix 2 shortens that wait).
+    if (geometryless) continue;
+
     // Whole-tram cull by head position; the margin covers the longest possible
     // body + coupled trailer, so a partially-visible tram keeps all sections.
     if (!sectionsEnabled || !inBbox(anchor, cullBbox)) continue;
 
+    // geometry is defined here: geometryless was skipped above, and hasGeometry
+    // implies a live sim whose shape getGeometry() returns.
+    if (!geometry) continue;
     const spec = opts.getSpec?.(state.key) ?? state.model;
     const coupled = opts.coupledPairFn(state.key);
     // Doors open while dwelling at a stop (sections band only — this loop):
     // sections with an authored openModelKey render it, closing on departure.
     const dwelling = state.phase === 'dwell';
-    if (geometry) {
-      sectionsAlongShape(state, spec, geometry, sHead, coupled, dwelling, sections);
-    } else {
-      sectionsAtRawPosition(state, spec, anchor, bearing, coupled, dwelling, sections);
-    }
+    sectionsAlongShape(state, spec, geometry, sHead, coupled, dwelling, sections);
   }
 
   return {

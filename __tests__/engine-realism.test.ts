@@ -573,7 +573,7 @@ describe('bearing never turns perpendicular (#7)', () => {
     expect(angularDiff(b, 0)).toBeGreaterThan(60);
   });
 
-  it('geometry-less trams hold a movement-derived bearing, ignoring feed bearing at v≈0', () => {
+  it('geometry-less trams derive bearing ONLY from movement, never the feed bearing at v≈0', () => {
     const engine = makeEngine();
     const noGeo = () => undefined;
     const at = (x: number, y: number) => {
@@ -581,21 +581,23 @@ describe('bearing never turns perpendicular (#7)', () => {
       return [c[0], c[1]] as [number, number];
     };
 
-    // Spawn: nothing better than the feed bearing exists yet.
+    // Spawn: the feed's instantaneous bearing is garbage at v≈0 and is NEVER
+    // adopted — no orientation until real movement supplies one (the tram
+    // renders as an un-oriented dot). bearing falls back to 0.
     engine.ingest(
       [makeSnapshot({ key: 't', coordinates: at(0, 0), bearing: 45, observedAtMs: T0 })],
       noGeo,
       T0,
     );
-    expect(state(engine, 't', T0).bearing).toBe(45);
+    expect(state(engine, 't', T0).bearing).toBe(0);
 
-    // Standing (moved 2 m) with a garbage instantaneous bearing: HOLD the old one.
+    // Standing (moved only 2 m) with a garbage instantaneous bearing: still 0.
     engine.ingest(
       [makeSnapshot({ key: 't', coordinates: at(2, 0), bearing: 137, observedAtMs: T0 + 5_000 })],
       noGeo,
       T0 + 5_000,
     );
-    expect(state(engine, 't', T0 + 5_000).bearing).toBe(45);
+    expect(state(engine, 't', T0 + 5_000).bearing).toBe(0);
 
     // Real movement (50 m east): bearing derives from the position track (≈ 90°),
     // even when the feed reports none.

@@ -103,14 +103,44 @@ export const COUPLED_TRAILER_OFFSET_M = 14.5;
 
 /** Max world distance between two sims to be considered a cross-shape pair, m. */
 export const CROSS_CANDIDATE_RADIUS_M = 120;
-/** Max lateral offset between position and the other shape = same track, m. */
-export const CROSS_LATERAL_MAX_M = 4;
-/** Max bearing difference for "travelling the same way on the same track", deg. */
-export const CROSS_BEARING_MAX_DEG = 25;
+/**
+ * Max lateral offset between a sim and the other shape to count as the SAME
+ * physical track, m. Tightened 4 → 2 (build-20 regression, 2026-07-17): 4 m
+ * admitted adjacent parallel rails and near-misses at crossings/junctions in
+ * the dense centre, producing false cross-pairs that braked/froze trams. A
+ * truly shared rail projects within ~1 m; 2 m keeps float/scatter headroom
+ * without reaching the neighbouring track (~3 m centre-to-centre).
+ */
+export const CROSS_LATERAL_MAX_M = 2;
+/**
+ * Max bearing difference for "travelling the same way on the same track", deg.
+ * Tightened 25 → 12 (build-20 regression): 25° let momentarily-aligned trams
+ * at intersections and opposite/branching directions couple. Two trams on one
+ * rail heading the same way differ by only curve-sampling noise.
+ */
+export const CROSS_BEARING_MAX_DEG = 12;
+/**
+ * A cross-pair's shape-to-shape offset is measured ONCE at build (ingest) and
+ * is valid only where the two rails physically coincide. Once the leader has
+ * advanced more than this along its shape past the build point, the rails may
+ * have diverged (a switch/junction) and `leader.sM + offset` maps to a garbage
+ * point on the follower's shape — so the pair is dropped (no effect) until the
+ * next ingest re-discovers and re-validates it with a fresh projection. Cheap
+ * (O(1), zero-alloc — invariant #8) vs. re-projecting every tick. Small because
+ * a freshly-built pair was lateral-verified; a slow/dwelling leader (the case
+ * a follower must actually brake for) never advances this far within a poll.
+ */
+export const CROSS_PAIR_STALE_ADVANCE_M = 30;
 /** Grid cell size for candidate discovery, m (≥ CROSS_CANDIDATE_RADIUS_M). */
 const CROSS_GRID_CELL_M = 150;
 /** Ignore instantaneous AVL bearings; adopt a raw-position bearing only after this much movement, m. */
 const RAW_BEARING_MIN_MOVE_M = 10;
+/**
+ * A same-shape queue back-clamp larger than this renders as a teleport
+ * (lastTeleportMs → feature-builder opacity fade) instead of a visible reverse
+ * slide, m. Small clamps (braking-distance leftover) stay put.
+ */
+export const QUEUE_BACK_FADE_M = 5;
 
 /** A cross-shape follower/leader pair: leader.sM + offsetM ≈ leader's position
  *  in the FOLLOWER's shape coordinates (locally parallel tracks). */
@@ -118,6 +148,11 @@ interface CrossPair {
   leader: TramSim;
   follower: TramSim;
   offsetM: number;
+  /**
+   * leader.sM captured at pair-build time. The pair is dropped once the leader
+   * has advanced > CROSS_PAIR_STALE_ADVANCE_M past it — see the constant.
+   */
+  leaderSAtBuild: number;
 }
 
 /** Forward neighbor-cell key deltas (key = ix·2²⁰ + iy) so each unordered
@@ -166,13 +201,15 @@ interface Entry {
    */
   projSim: TramSim | null;
   /**
-   * Bearing for trams WITHOUT geometry (field feedback #7): derived from raw
-   * position movement (≥ RAW_BEARING_MIN_MOVE_M) and held while standing —
-   * never the feed's instantaneous bearing at v≈0, which is what rendered
-   * spawning trams perpendicular to the road. Seeded from the feed bearing
-   * once at entry creation (nothing better exists yet).
+   * Bearing for trams WITHOUT geometry (field feedback #7): derived ONLY from
+   * raw-position movement (≥ RAW_BEARING_MIN_MOVE_M) and held while standing.
+   * `null` until the tram has actually moved that far — the feed's
+   * instantaneous AVL bearing is noise at v≈0 (perpendicular spawns) and is
+   * NEVER adopted, not even at entry creation. Geometry-less trams render as an
+   * un-oriented dot (featureBuilder), so no orientation is shown until real
+   * movement supplies one.
    */
-  fallbackBearing: number;
+  fallbackBearing: number | null;
 }
 
 /** Default daytime rule: 07:00–19:00 Prague time (shared helper in speedProfile). */
@@ -291,7 +328,9 @@ export class TramEngine {
           lastSeenMs: nowMs,
           sim: null,
           projSim: null,
-          fallbackBearing: snapshot.bearing ?? 0,
+          // NOT the feed's instantaneous bearing — garbage at v≈0. Stays null
+          // until raw-position movement supplies a real heading (see below).
+          fallbackBearing: null,
         };
         this.entries.set(key, entry);
       } else if (haversineM(entry.snapshot.coordinates, snapshot.coordinates) >= RAW_BEARING_MIN_MOVE_M) {
@@ -402,7 +441,7 @@ export class TramEngine {
     // rebuilt from post-snapshot positions and applied immediately below).
     this.queueDirty = true;
     this.rebuildCrossPairs();
-    this.applyQueueConstraints();
+    this.applyQueueConstraints(nowMs);
   }
 
   /**
@@ -482,7 +521,7 @@ export class TramEngine {
       }
       // Car-following runs AFTER each substep's position updates so queues
       // compress correctly regardless of iteration order and tick cadence.
-      this.applyQueueConstraints();
+      this.applyQueueConstraints(t);
     }
   }
 
@@ -617,15 +656,22 @@ export class TramEngine {
     leaderIdx: number,
     followerIdx: number,
   ): void {
-    this.crossPairs.push({ leader, follower, offsetM });
+    this.crossPairs.push({ leader, follower, offsetM, leaderSAtBuild: leader.sM });
     const pl = projs[leaderIdx];
     const pf = projs[followerIdx];
     // The shape-to-shape offset is a local track-alignment constant — it holds
     // for the projections too. Orientation may differ (projections sit at the
     // raw fixes): assign leader/follower by projected order.
     if (pl && pf && pl.geometry.shapeId === sims[leaderIdx].geometry.shapeId) {
-      if (pl.sM + offsetM > pf.sM) this.projCrossPairs.push({ leader: pl, follower: pf, offsetM });
-      else this.projCrossPairs.push({ leader: pf, follower: pl, offsetM: -offsetM });
+      if (pl.sM + offsetM > pf.sM)
+        this.projCrossPairs.push({ leader: pl, follower: pf, offsetM, leaderSAtBuild: pl.sM });
+      else
+        this.projCrossPairs.push({
+          leader: pf,
+          follower: pl,
+          offsetM: -offsetM,
+          leaderSAtBuild: pf.sM,
+        });
     }
   }
 
@@ -641,15 +687,15 @@ export class TramEngine {
    * Trams on different shapeIds (opposite direction / other variants) are
    * intentionally NOT constrained.
    */
-  private applyQueueConstraints(): void {
+  private applyQueueConstraints(nowMs: number): void {
     if (this.queueDirty) this.rebuildQueueGroups();
-    this.applyGroupConstraints(this.queueGroups);
-    this.applyGroupConstraints(this.projQueueGroups);
+    this.applyGroupConstraints(this.queueGroups, nowMs);
+    this.applyGroupConstraints(this.projQueueGroups, nowMs);
     this.applyCrossPairs(this.crossPairs);
     this.applyCrossPairs(this.projCrossPairs);
   }
 
-  private applyGroupConstraints(groups: TramSim[][]): void {
+  private applyGroupConstraints(groups: TramSim[][], nowMs: number): void {
     for (const group of groups) {
       group.sort(compareBySimDist);
       for (let i = group.length - 2; i >= 0; i--) {
@@ -658,7 +704,13 @@ export class TramEngine {
         const limit = leader.sM - leader.lengthM - QUEUE_GAP_M;
         const gap = limit - follower.sM;
         if (gap <= 0) {
-          follower.sM = Math.max(0, limit);
+          // Same-shape queue: the follower shares the leader's geometry, so
+          // clamping its sM to the limit is ALWAYS a valid on-rail position
+          // (unlike cross-shape pairs — see applyCrossPairs). A noticeable
+          // backward clamp renders as a teleport fade, not a reverse slide.
+          const clamped = Math.max(0, limit);
+          if (follower.sM - clamped > QUEUE_BACK_FADE_M) follower.lastTeleportMs = nowMs;
+          follower.sM = clamped;
           follower.vMs = Math.min(follower.vMs, leader.vMs);
         } else {
           const vCap = leader.vMs + Math.sqrt(2 * A_BRK * gap);
@@ -669,17 +721,30 @@ export class TramEngine {
   }
 
   /**
-   * Cross-shape car-following: same clamp/brake semantics as the same-shape
-   * queue, with the leader's position translated into the follower's shape
-   * coordinates via the pair's precomputed along-shape offset. O(1) per pair,
-   * zero allocation (performance invariant #8).
+   * Cross-shape car-following: keep a follower on ANOTHER shape from driving
+   * into a leader sharing the same physical rail — by BRAKING ONLY. It never
+   * rewrites follower.sM.
+   *
+   * Why brake-only (build-20 regression fix, 2026-07-17): the leader→follower
+   * `offsetM` maps the leader's s into the follower's shape coordinates, but it
+   * is measured once at ingest and is valid only where the two rails physically
+   * coincide. When the leader passes a junction/divergence, `leader.sM + offset`
+   * maps to a garbage point on the follower's shape; the old `follower.sM =
+   * max(0, limit)` then TELEPORTED the follower backward/off-route and froze its
+   * speed — the "tram stands at an angle, off the drawn line" bug in the dense
+   * centre. A speed cap alone still satisfies the original goal (trams don't
+   * drive through each other): the follower decelerates and, if truly blocked,
+   * stops on ITS OWN shape. The staleness guard drops pairs whose leader has
+   * advanced past the lateral-verified window (rails may have diverged).
+   * O(1) per pair, zero allocation (performance invariant #8).
    */
   private applyCrossPairs(pairs: CrossPair[]): void {
     for (const p of pairs) {
+      if (p.leader.sM - p.leaderSAtBuild > CROSS_PAIR_STALE_ADVANCE_M) continue;
       const limit = p.leader.sM + p.offsetM - p.leader.lengthM - QUEUE_GAP_M;
       const gap = limit - p.follower.sM;
       if (gap <= 0) {
-        p.follower.sM = Math.max(0, limit);
+        // Brake to the leader's speed — NEVER clamp sM across shapes.
         if (p.follower.vMs > p.leader.vMs) p.follower.vMs = p.leader.vMs;
       } else {
         const vCap = p.leader.vMs + Math.sqrt(2 * A_BRK * gap);
@@ -716,10 +781,12 @@ export class TramEngine {
     const model = this.opts.resolveModel(snapshot);
 
     if (!sim) {
-      // No geometry: hold the raw API position (featureBuilder renders as-is).
-      // The observation IS the position — the sim can't deviate from it.
-      // Bearing comes from the movement-derived fallback, NEVER the feed's
-      // instantaneous bearing (garbage at v≈0 → perpendicular spawns, #7).
+      // No geometry: hold the raw API position (featureBuilder renders it as an
+      // un-oriented dot — NO 3D body, NO perpendicular track offset). The
+      // observation IS the position — the sim can't deviate from it. Bearing is
+      // the movement-derived fallback, or 0 while it is still null (the tram
+      // hasn't moved far enough to derive one — the dot needs no orientation).
+      // NEVER the feed's instantaneous bearing (garbage at v≈0, #7).
       return {
         key: entry.key,
         snapshot,
@@ -727,10 +794,10 @@ export class TramEngine {
         simDistM: snapshot.shapeDistM,
         simSpeedKmh: 0,
         position: [snapshot.coordinates[0], snapshot.coordinates[1]],
-        bearing: entry.fallbackBearing,
+        bearing: entry.fallbackBearing ?? 0,
         phase: 'unknown',
         observedPosition: [snapshot.coordinates[0], snapshot.coordinates[1]],
-        observedBearing: entry.fallbackBearing,
+        observedBearing: entry.fallbackBearing ?? 0,
         deviationM: null,
         projectedObservedDistM: null,
         nextStopName: null,

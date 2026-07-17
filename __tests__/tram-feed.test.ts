@@ -166,6 +166,35 @@ describe('TramRuntime driven by an injected TramFeed', () => {
     rt.release();
   });
 
+  it('a trip change with no loaded shape requests the new geometry at RAISED priority', () => {
+    const { feed, rt } = setup();
+    // First poll establishes the tram on trip-test (has geometry, no request).
+    feed.geometries.set('trip-test', makeGeo());
+    feed.push([makeSnapshot({ tripId: 'trip-test', shapeDistM: 300, observedAtMs: T0 })], T0);
+    expect(feed.requested).toHaveLength(0);
+
+    // Endpoint turn: same tram, NEW trip whose shape isn't loaded yet. It now
+    // renders geometry-less (a bare dot) — so its shape is fetched at priority 1
+    // (raised), not the background 2, to return it to the drawn line fast.
+    feed.push(
+      [makeSnapshot({ tripId: 'trip-next', shapeDistM: 0, observedAtMs: T0 + 5_000 })],
+      T0 + 5_000,
+    );
+    expect(feed.requested).toContainEqual({ tripIds: ['trip-next'], priority: 1 });
+    // …and it is NOT also re-queued behind the background lane.
+    expect(feed.requested).not.toContainEqual({ tripIds: ['trip-next'], priority: 2 });
+    rt.release();
+  });
+
+  it('a brand-new tram (no prior trip) still warms at background priority', () => {
+    const { feed, rt } = setup();
+    // No geometry loaded, first time this key is seen → background warm (2),
+    // NOT the raised trip-change lane (there is no previous trip to change FROM).
+    feed.push([makeSnapshot({ tripId: 'trip-test', shapeDistM: 0, observedAtMs: T0 })], T0);
+    expect(feed.requested).toEqual([{ tripIds: ['trip-test'], priority: 2 }]);
+    rt.release();
+  });
+
   it('reports one calibration batch per push, records shaped from engine states', () => {
     const { feed, rt } = setup();
     feed.geometries.set('trip-test', makeGeo());

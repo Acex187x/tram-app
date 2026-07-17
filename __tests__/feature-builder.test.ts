@@ -243,70 +243,76 @@ describe('coupled T3 pairs', () => {
   });
 });
 
-describe('trams without geometry', () => {
-  it('renders a single section at the raw position with the snapshot bearing', () => {
+describe('trams without geometry (render as a bare dot, no 3D body)', () => {
+  // A tram whose shape hasn't loaded yet (trip just changed / geometry
+  // streaming in) MUST NOT render an articulated 3D body: placing sections
+  // along the unreliable raw AVL bearing stood the tram at an angle off the
+  // drawn network (sometimes inside buildings). It renders as ONLY a point at
+  // its raw GPS position — no sections, no perpendicular track offset — with
+  // geometryless:1 so the map draws a plain un-oriented dot.
+  it('emits NO sections — only a single point at the RAW position (no track offset)', () => {
+    const rawPos = metersToCoord(ORIGIN, 50, 50);
     const state = makeState('8123', null, 0, {
       model: makeSpec1(),
-      position: metersToCoord(ORIGIN, 50, 50),
+      position: rawPos,
       bearing: 45,
     });
     const frame = buildFrame([state], WIDE, opts(null));
-    expect(frame.sections.features).toHaveLength(1);
-    const f = frame.sections.features[0];
-    expect(f.id).toBe('8123#0');
-    expect(f.properties.modelKey).toBe('t3rp');
-    expect(f.properties.bearing).toBe(45);
+
+    // No 3D sections at all.
+    expect(frame.sections.features).toHaveLength(0);
+
+    // Exactly one point, at the raw position with NO perpendicular offset.
+    expect(frame.points.features).toHaveLength(1);
+    const p = frame.points.features[0];
+    expect(p.id).toBe('8123');
+    expect(p.properties.geometryless).toBe(1);
+    expect(haversineM(p.geometry.coordinates as [number, number], rawPos)).toBeLessThan(1e-6);
+    // …and pointedly NOT offset to the right of the bearing (the old bug).
     expect(
-      haversineM(
-        f.geometry.coordinates as [number, number],
-        rightOf(metersToCoord(ORIGIN, 50, 50), 45),
-      ),
-    ).toBeLessThan(0.5);
+      haversineM(p.geometry.coordinates as [number, number], rightOf(rawPos, 45)),
+    ).toBeGreaterThan(TRACK_OFFSET_M - 0.2);
   });
 
-  it('renders ALL sections of an articulated tram trailing behind the raw bearing', () => {
-    // Regression: multi-section trams without loaded geometry used to render
-    // only the head section — "only the front piece visible" on device.
+  it('emits no sections for a multi-section (articulated) geometry-less tram', () => {
+    // Regression guard: articulated trams without geometry must not fall back
+    // to a straight-line body along the raw bearing.
     const state = makeState('9201', null, 0, {
       position: metersToCoord(ORIGIN, 0, 0),
-      bearing: 0, // heading north → body trails south
+      bearing: 0,
     });
     const frame = buildFrame([state], WIDE, opts(null));
-    expect(frame.sections.features).toHaveLength(3);
-    expect(frame.sections.features.map((f) => f.properties.modelKey)).toEqual([
-      '15t-a',
-      '15t-b',
-      '15t-c',
-    ]);
-    const pos = frame.sections.features.map((f) => f.geometry.coordinates as [number, number]);
-    // Section centers 10.5 m apart (10 m body + 0.5 m gap), straight south.
-    expect(haversineM(pos[0], pos[1])).toBeCloseTo(10.5, 1);
-    expect(haversineM(pos[1], pos[2])).toBeCloseTo(10.5, 1);
-    expect(pos[1][1]).toBeLessThan(pos[0][1]);
-    expect(pos[2][1]).toBeLessThan(pos[1][1]);
-    for (const f of frame.sections.features) {
-      expect(f.properties.bearing).toBe(0);
-    }
+    expect(frame.sections.features).toHaveLength(0);
+    expect(frame.points.features).toHaveLength(1);
+    expect(frame.points.features[0].properties.geometryless).toBe(1);
   });
 
-  it('places the coupled trailer behind along the raw bearing', () => {
+  it('emits no sections even when coupled', () => {
     const state = makeState('8123', null, 0, {
       model: makeSpec1(),
       position: metersToCoord(ORIGIN, 50, 50),
       bearing: 90,
     });
     const frame = buildFrame([state], WIDE, opts(null, { coupledPairFn: () => true }));
-    expect(frame.sections.features).toHaveLength(2);
-    const trail = frame.sections.features[1];
-    const d = haversineM(
-      frame.sections.features[0].geometry.coordinates as [number, number],
-      trail.geometry.coordinates as [number, number],
+    expect(frame.sections.features).toHaveLength(0);
+  });
+
+  it('marks trams WITH geometry as geometryless:0', () => {
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [0, 0.02],
+      ],
+      [
+        { atM: 0, arrivalMs: 0 },
+        { atM: 2000, arrivalMs: 600_000, isTerminal: true },
+      ],
     );
-    expect(d).toBeCloseTo(COUPLED_OFFSET_M, 0);
-    // Trailer is west of the lead (bearing 90 → behind = 270).
-    expect((trail.geometry.coordinates as [number, number])[0]).toBeLessThan(
-      (frame.sections.features[0].geometry.coordinates as [number, number])[0],
-    );
+    const state = makeState('7700', geo, 300);
+    const frame = buildFrame([state], WIDE, opts(geo));
+    expect(frame.points.features[0].properties.geometryless).toBe(0);
+    // …and it DOES draw a body (contrast with the geometry-less cases above).
+    expect(frame.sections.features.length).toBeGreaterThan(0);
   });
 });
 
@@ -462,37 +468,23 @@ describe('position mode (smooth vs live)', () => {
     ).toBeLessThan(1);
   });
 
-  it("'live' without geometry renders at the raw fix, trailing back along its bearing", () => {
-    // Sim position/bearing deliberately differ from the raw fix so the modes
-    // are distinguishable.
+  it("'live' without geometry renders ONLY a dot at the raw fix (no sections, no offset)", () => {
+    // Geometry-less trams never draw a 3D body in EITHER position mode; live
+    // mode anchors the dot at the raw fix.
+    const rawFix = metersToCoord(ORIGIN, 100, 0);
     const raw = makeState('9201', null, 0, {
-      snapshot: makeSnapshot({
-        key: '9201',
-        coordinates: metersToCoord(ORIGIN, 100, 0),
-        bearing: 90,
-      }),
+      snapshot: makeSnapshot({ key: '9201', coordinates: rawFix, bearing: 90 }),
+      observedPosition: rawFix,
       position: metersToCoord(ORIGIN, 50, 50),
       bearing: 45,
     });
     const frame = buildFrame([raw], WIDE, opts(null, { positionMode: 'live' }));
 
+    expect(frame.sections.features).toHaveLength(0);
+    expect(frame.points.features).toHaveLength(1);
     const point = frame.points.features[0];
-    expect(
-      haversineM(
-        point.geometry.coordinates as [number, number],
-        rightOf(metersToCoord(ORIGIN, 100, 0), 90),
-      ),
-    ).toBeLessThan(0.5);
-
-    // All 3 sections trail straight back (west) from the fix along bearing 90.
-    expect(frame.sections.features).toHaveLength(3);
-    const pos = frame.sections.features.map((f) => f.geometry.coordinates as [number, number]);
-    expect(haversineM(pos[0], rightOf(metersToCoord(ORIGIN, 100, 0), 90))).toBeLessThan(0.5);
-    expect(haversineM(pos[0], pos[1])).toBeCloseTo(10.5, 1);
-    expect(haversineM(pos[1], pos[2])).toBeCloseTo(10.5, 1);
-    for (const f of frame.sections.features) {
-      expect(f.properties.bearing).toBe(90);
-    }
+    expect(point.properties.geometryless).toBe(1);
+    expect(haversineM(point.geometry.coordinates as [number, number], rawFix)).toBeLessThan(1e-6);
   });
 
   it("'live' keeps the coupled trailer 14.5 m behind the observed anchor", () => {
@@ -637,7 +629,7 @@ describe('doors open while dwelling (openModelKey)', () => {
     ]);
   });
 
-  it('dwelling without geometry opens doors at the raw position as well', () => {
+  it('a dwelling geometry-less tram still draws NO body (doors moot — only a dot)', () => {
     const state = makeState('9201', null, 0, {
       model: specWithDoors(),
       phase: 'dwell',
@@ -645,11 +637,10 @@ describe('doors open while dwelling (openModelKey)', () => {
       bearing: 0,
     });
     const frame = buildFrame([state], WIDE, opts(null));
-    expect(frame.sections.features.map((f) => f.properties.modelKey)).toEqual([
-      '15t-a-open',
-      '15t-b',
-      '15t-c-open',
-    ]);
+    // No sections at all → no doors to open; the tram is a bare dot until its
+    // shape loads.
+    expect(frame.sections.features).toHaveLength(0);
+    expect(frame.points.features[0].properties.geometryless).toBe(1);
   });
 });
 

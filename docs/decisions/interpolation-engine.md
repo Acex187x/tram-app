@@ -308,22 +308,60 @@ discovered on **ingest only** (performance invariant #8 — the tick allocates n
 sims are grid-bucketed by world position (`CROSS_GRID_CELL_M = 150`), and a pair within a
 bucket (or forward-neighbor bucket) qualifies when it is on **different shapes**, within
 `CROSS_CANDIDATE_RADIUS_M = 120` (covers the worst closing speed over a 5 s poll), travelling
-the **same way** (`Δbearing ≤ CROSS_BEARING_MAX_DEG = 25°` — opposite directions on the same
-street never couple), and one sim's position projects onto the other's shape within
-`CROSS_LATERAL_MAX_M = 4` (same physical track; adjacent parallel tracks are further apart).
+the **same way** (`Δbearing ≤ CROSS_BEARING_MAX_DEG = 12°` — opposite/branching directions
+never couple), and one sim's position projects onto the other's shape within
+`CROSS_LATERAL_MAX_M = 2` (same physical rail; adjacent parallel tracks are ~3 m away).
 The projection also yields a per-pair **along-shape offset** mapping the leader's `s` into
-the follower's shape coordinates; per tick each pair costs O(1) — exactly the same
-clamp/braking-envelope speed cap as the same-shape queue. Pairs are applied inside `ingest`
-too, so a teleport/reseed landing on another line's tail is resolved immediately.
+the follower's shape coordinates. Pairs are applied inside `ingest` too, so a teleport/reseed
+landing on another line's tail is resolved immediately.
 
-**Live projections queue too.** `projSim`s get their own same-shape groups and cross-pairs:
-what live mode renders must not drive through the tram ahead either. (This supersedes the
-earlier "projections are not queue-constrained" rule — the projection redesign in §11 makes
-them physically plausible dead-reckoners, and physical plausibility includes not overlapping.)
-Known bound: pairs refresh on the 5 s poll, so a tram closing more than the candidate radius
-between two polls could briefly miss its pair — impossible at tram speeds (≤ ~70 m per poll).
-Tests: `engine-queue.test.ts` "cross-shape car-following" (same-direction clamp, teleport
-resolution at ingest, projection queueing, opposite-direction exclusion).
+### Cross-pairs BRAKE ONLY — never rewrite the follower's position (build-20 regression, 2026-07-17)
+
+**What broke.** `applyCrossPairs` originally used the *same* clamp as the same-shape queue:
+inside the buffer (`gap ≤ 0`) it set `follower.sM = max(0, limit)`. But `limit` is derived
+from the leader's `s` **translated through the build-time `offsetM`** — a mapping valid only
+where the two rails physically coincide. When the leader passed a junction/divergence,
+`leader.sM + offsetM` mapped to a **garbage point** on the follower's shape; the clamp then
+**teleported the follower backward / off the drawn line and froze it at an angle** — reported
+as "tram stands sideways off the route", *most often mid-route in the dense centre* where
+false pairs are common (crossings, parallel rails, momentary bearing alignment). It was a
+regression from the cross-shape queue landing in build 20.
+
+**Fix.** Cross-pairs now **only cap speed, never write `sM`** (`applyCrossPairs`): `gap ≤ 0`
+→ `follower.vMs = min(follower.vMs, leader.vMs)`; approaching → the same
+`leader.vMs + √(2·A_BRK·gap)` envelope. The follower decelerates and, if genuinely blocked,
+stops **on its own shape** — it can never be thrown off-route. Three guards make false pairs
+rare and harmless:
+- **Tighter gates** (above): lateral `4 → 2 m`, bearing `25 → 12°`. Only a truly shared rail,
+  truly same direction, qualifies.
+- **Staleness drop** (`CROSS_PAIR_STALE_ADVANCE_M = 30`): a pair is skipped once its leader has
+  advanced > 30 m past the point where lateral alignment was verified (the rails may have
+  diverged since). Cheap O(1)/zero-alloc vs. re-projecting each tick (invariant #8); a fresh
+  ingest re-discovers still-valid pairs with a new projection every 5 s. Small because a
+  freshly-built pair was just verified, and a slow/dwelling leader (the case a follower must
+  actually brake for) never advances 30 m within a poll.
+
+**Accepted trade-off.** Brake-only holds a *following distance* rather than a hard clamp, so
+over a long same-rail pin the `QUEUE_GAP_M` buffer can slowly erode (the follower ratchets
+closer over accel/decel cycles) — but it **never overtakes and never teleports**. This is far
+better than the off-route teleport it replaces; the same-shape queue (where `limit` is always
+a valid on-rail position) keeps its hard clamp.
+
+**Live projections queue too.** `projSim`s get their own same-shape groups and cross-pairs
+(same brake-only rule for cross): what live mode renders must not drive through the tram ahead
+either. Known bound: pairs refresh on the 5 s poll, so a tram closing more than the candidate
+radius between two polls could briefly miss its pair — impossible at tram speeds (≤ ~70 m per
+poll). Tests: `engine-queue.test.ts` "cross-shape car-following (brake-only …)" — (а) brakes
+without overtaking or backward-teleport, (б) freed once the leader passes a divergence,
+(в) adjacent parallel track (>2 m) is not coupled, plus the same-direction/opposite-direction
+and live-projection cases.
+
+### Same-shape back-clamp fade (`QUEUE_BACK_FADE_M = 5`)
+
+The same-shape queue *does* clamp `follower.sM` back to `limit` (always a valid on-rail point).
+A back-clamp larger than `QUEUE_BACK_FADE_M = 5 m` now stamps `follower.lastTeleportMs` so the
+renderer dips opacity (a teleport fade) instead of showing a visible reverse slide — the same
+convention as the other sanctioned backward corrections (stuck-hold, terminal un-latch).
 
 ---
 
@@ -543,11 +581,27 @@ the first post-jam fix by construction). See `analysis-2026-07-13.md` realism-wa
   `0.9 ×` the along-shape window, fall back to the nearest non-degenerate **segment**
   direction (always along the rails; even a 5 m-radius curve keeps chord/arc ≥ 0.97, so
   legitimate bends never trip the guard).
-- **Movement-derived fallback bearing** (`Entry.fallbackBearing`, engine.ts): trams without
-  geometry used the feed's instantaneous bearing — garbage at v≈0 (perpendicular spawns).
-  The engine now adopts a bearing only from raw-position movement ≥ 10 m and holds the last
-  good value while standing; the feed bearing is used once, at entry creation, when nothing
-  better exists.
+- **Movement-derived fallback bearing** (`Entry.fallbackBearing: number | null`, engine.ts):
+  trams without geometry used the feed's instantaneous bearing — garbage at v≈0 (perpendicular
+  spawns). The engine now adopts a bearing **only** from raw-position movement ≥ 10 m and holds
+  the last good value while standing. `fallbackBearing` starts **`null`** (not the feed bearing)
+  and the feed's instantaneous AVL bearing is **never** adopted, not even at entry creation —
+  at v≈0 there is simply no orientation, and `toPublicState` reports `bearing: 0`. This is safe
+  because a geometry-less tram now renders as an **un-oriented dot** (no 3D body, no rotated
+  teardrop — see map-rendering.md §8), so a missing heading has no visual consequence.
+
+### Geometry-less trams render as a bare dot (build-20 hardening, 2026-07-17)
+
+A tram with no loaded shape (`hasGeometry: false` — trip just changed at an endpoint, or the
+shape is still streaming in) is a **short-lived transient**. It is rendered as a single
+**un-oriented dot at the raw GPS position** — no articulated 3D body, no perpendicular
+`TRACK_OFFSET`, no bearing rotation. The old fallback drew a full body along the unreliable
+raw bearing, standing the tram at an angle off the network (sometimes inside buildings). The
+transient is shortened by fetching the new trip's geometry at **raised priority** on a trip
+change: `TramRuntime.onSnapshots` (`src/hooks/tramData.ts`) diffs each key's `tripId` against
+the previous poll and calls `feed.requestGeometry(changedTrips, 1)` (vs. the background `2`
+warm for brand-new trams), returning the tram to the drawn line within 1–2 polls. Render
+contract details in `docs/decisions/map-rendering.md` §8.
 
 ---
 
@@ -563,7 +617,9 @@ the first post-jam fix by construction). See `analysis-2026-07-13.md` realism-wa
 | `STUCK_FIX_EPS_M` / `STUCK_NEAR_STOP_M` | 8 / 40 m | tramSim.ts | stuck detection / near-stop suppression (§14) |
 | `DEPART_BURST_FACTOR` / `DEPART_BURST_DIST_M` | 1.25 / 150 m | tramSim.ts | departure burst (§15, main sims only) |
 | `CROSS_CANDIDATE_RADIUS_M` | 120 m | engine.ts | cross-shape pair discovery radius (§9) |
-| `CROSS_LATERAL_MAX_M` / `CROSS_BEARING_MAX_DEG` | 4 m / 25° | engine.ts | same-track / same-direction gates (§9) |
+| `CROSS_LATERAL_MAX_M` / `CROSS_BEARING_MAX_DEG` | 2 m / 12° | engine.ts | same-rail / same-direction gates — tightened, build-20 fix (§9) |
+| `CROSS_PAIR_STALE_ADVANCE_M` | 30 m | engine.ts | drop a cross-pair once the leader advances this far past the verified point (§9) |
+| `QUEUE_BACK_FADE_M` | 5 m | engine.ts | same-shape back-clamp beyond this → teleport fade (§9) |
 | `V_MAX_MS` / `V_CENTER_MS` | 13.9 / 8.6 m/s | speedProfile.ts | zone caps (50 / 31 km/h) — envelope/hard limits |
 | `V_CRUISE_REF_MS` | 11.7 m/s | speedProfile.ts | pace-controller cruise reference (42 km/h, round 1 R3) |
 | `DEFAULT_LOOKAHEAD_M` | 400 m | speedProfile.ts | braking-envelope horizon |

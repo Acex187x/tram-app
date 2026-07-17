@@ -95,6 +95,15 @@ export class TramRuntime {
    */
   private generation = 0;
   private lastSnapshots: TramSnapshot[] = [];
+  /**
+   * key → tripId seen on the previous poll, so a trip change (endpoint turn) is
+   * detectable here and its new shape fetched at RAISED priority — the tram is
+   * geometry-less (rendered as a bare dot) until the shape lands, so shortening
+   * that window returns it to the drawn line within 1–2 polls instead of
+   * waiting behind the background prefetch queue. Pruned to the live fleet each
+   * poll (keys absent from the batch are dropped) so it can't grow unbounded.
+   */
+  private lastTripByKey = new Map<string, string>();
   /** True while the map is in the glide band (see detailModeForZoom) → 60 Hz tick. */
   private detailMode = false;
   /**
@@ -316,16 +325,42 @@ export class TramRuntime {
    */
   private readonly onSnapshots = (snapshots: TramSnapshot[], atMs: number): void => {
     const gen = this.generation;
+    // Detect trip changes (endpoint turns) BEFORE ingest updates the engine.
+    // A tram whose tripId changed needs its NEW shape urgently — until it lands
+    // the tram renders geometry-less (a bare dot, off any drawn line). Fetch
+    // those at raised priority (1) rather than the background warm (2). Also
+    // prune the per-key trip memory to the current fleet.
+    const changedTrips: string[] = [];
+    const seen = new Set<string>();
+    for (const s of snapshots) {
+      seen.add(s.key);
+      const prevTrip = this.lastTripByKey.get(s.key);
+      this.lastTripByKey.set(s.key, s.tripId);
+      if (prevTrip !== undefined && prevTrip !== s.tripId && !this.feed.getGeometry(s.tripId)) {
+        changedTrips.push(s.tripId);
+      }
+    }
+    for (const key of this.lastTripByKey.keys()) {
+      if (!seen.has(key)) this.lastTripByKey.delete(key);
+    }
+    if (changedTrips.length > 0) this.feed.requestGeometry(changedTrips, 1);
+
     this.lastSnapshots = snapshots;
     this.engine.ingest(snapshots, (tripId) => this.feed.getGeometry(tripId), atMs);
     this.feed.reportCalibration(toCalibrationRecords(this.engine.getStates(atMs), atMs));
-    // Warm geometries for trips we don't have yet (background priority).
-    const missing = snapshots.filter((s) => !this.feed.getGeometry(s.tripId)).map((s) => s.tripId);
-    if (missing.length > 0) {
-      this.feed.requestGeometry(missing, 2);
-      // As geometries arrive, they are adopted on the next ingest; nudge one
-      // extra ingest shortly after so early geometries apply without waiting
-      // a full poll cycle. Tracked so teardown can cancel it.
+    // Warm geometries for trips we don't have yet (background priority). Trips
+    // already requested at raised priority above are excluded so they aren't
+    // re-queued behind the background lane.
+    const changedSet = changedTrips.length > 0 ? new Set(changedTrips) : null;
+    const missing = snapshots
+      .filter((s) => !this.feed.getGeometry(s.tripId) && !(changedSet?.has(s.tripId) ?? false))
+      .map((s) => s.tripId);
+    if (missing.length > 0) this.feed.requestGeometry(missing, 2);
+    // As geometries arrive (whether raised-priority trip changes or background
+    // warm), they are adopted on the next ingest; nudge one extra ingest
+    // shortly after so early geometries apply without waiting a full poll
+    // cycle. Tracked so teardown can cancel it.
+    if (missing.length > 0 || changedTrips.length > 0) {
       this.nudgeTimer = setTimeout(() => {
         this.nudgeTimer = null;
         if (gen !== this.generation) return;
