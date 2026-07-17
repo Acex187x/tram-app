@@ -5,6 +5,7 @@
 import {
   DEPARTED_PAST_M,
   MISSING_TIMEOUT_MS,
+  REEVAL_INTERVAL_MS,
   stepSpotter,
   type SpotterTracking,
 } from '@/lib/spotter';
@@ -97,6 +98,7 @@ function betaTracking(overrides: Partial<SpotterTracking> = {}): SpotterTracking
     stopDistM: 500,
     stopArrivalMs: BASE + 120 * S,
     lastSeenMs: BASE,
+    lastReevalMs: BASE,
     ...overrides,
   };
 }
@@ -119,6 +121,7 @@ describe('stepSpotter — acquisition', () => {
       stopDistM: 0,
       stopArrivalMs: BASE + 60 * S,
       lastSeenMs: BASE,
+      lastReevalMs: BASE,
     });
     expect(res.target).toEqual({ tramKey: '8001', line: '9', etaS: 60 });
   });
@@ -132,19 +135,48 @@ describe('stepSpotter — acquisition', () => {
 
 // ── hysteresis ───────────────────────────────────────────────────────────────
 
-describe('stepSpotter — hysteresis', () => {
-  it('never re-ranks a held target, even when a sooner candidate appears', () => {
+describe('stepSpotter — hysteresis & preemption', () => {
+  it('holds the target within the re-eval interval, even if a sooner tram appears', () => {
     const geos = [geoA(), geoB('trip-b', 30, 40, 200)];
-    const prev = betaTracking(); // holding the 22, Beta @ +120s
+    const prev = betaTracking(); // holding the 22, Beta @ +120s, reeval @ BASE
     const states = [
       makeState({ key: '9201', tripId: 'trip-a', line: '22', simDistM: 200 }),
-      // The 9 would arrive at Beta 90 s sooner — must NOT steal the target.
+      // Sooner, but the re-eval clock hasn't elapsed → no preemption yet.
+      makeState({ key: '8001', tripId: 'trip-b', line: '9', simDistM: 0 }),
+    ];
+    const res = stepSpotter(prev, 'beta', states, geos, BASE + (REEVAL_INTERVAL_MS - 1));
+    expect(res.event).toBe('none');
+    expect(res.tracking?.targetKey).toBe('9201');
+    expect(res.tracking?.lastReevalMs).toBe(BASE); // clock not reset
+  });
+
+  it('preempts to a meaningfully-sooner tram once the re-eval interval elapses', () => {
+    const geos = [geoA(), geoB('trip-b', 30, 40, 200)];
+    const prev = betaTracking(); // 22, Beta @ +120s
+    const states = [
+      makeState({ key: '9201', tripId: 'trip-a', line: '22', simDistM: 200 }),
+      // The 9 reaches Beta ~90 s sooner — well past PREEMPT_MARGIN_S.
+      makeState({ key: '8001', tripId: 'trip-b', line: '9', simDistM: 0 }),
+    ];
+    const res = stepSpotter(prev, 'beta', states, geos, BASE + 10 * S);
+    expect(res.event).toBe('switched');
+    expect(res.tracking?.targetKey).toBe('8001');
+    expect(res.tracking?.line).toBe('9');
+    expect(res.tracking?.lastReevalMs).toBe(BASE + 10 * S);
+  });
+
+  it('does NOT preempt when the rival is within the margin (no churn)', () => {
+    // Held 22 → Beta @ +120s; the 9 → Beta @ +110s (only 10 s sooner < margin).
+    const geos = [geoA(), geoB('trip-b', 110, 120, 300)];
+    const prev = betaTracking();
+    const states = [
+      makeState({ key: '9201', tripId: 'trip-a', line: '22', simDistM: 200 }),
       makeState({ key: '8001', tripId: 'trip-b', line: '9', simDistM: 0 }),
     ];
     const res = stepSpotter(prev, 'beta', states, geos, BASE + 10 * S);
     expect(res.event).toBe('none');
     expect(res.tracking?.targetKey).toBe('9201');
-    expect(res.tracking?.lastSeenMs).toBe(BASE + 10 * S); // seen-refresh
+    expect(res.tracking?.lastReevalMs).toBe(BASE + 10 * S); // re-ranked, held
   });
 
   it('applies the live delay to the held target ETA', () => {

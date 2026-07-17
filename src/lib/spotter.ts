@@ -5,11 +5,15 @@
 //
 // Selection: among all live trams that still have the spotted station AHEAD
 // on their own trip (computeArrivals — soonest ETA first), pick the first.
-// Hysteresis is by construction: while a target is held it is NEVER re-ranked
-// against other candidates — the spotter only moves on when the target
-// DEPARTS (passed the platform by > DEPARTED_PAST_M of shape distance, rolled
-// onto a new trip, or got canceled) or DISAPPEARS from the states list for
-// longer than MISSING_TIMEOUT_MS.
+// While a target is held the spotter keeps it through jitter, but every
+// REEVAL_INTERVAL_MS it re-ranks the arrivals and PREEMPTS to a different tram
+// that will now reach the platform at least PREEMPT_MARGIN_S sooner — near a
+// terminal a just-departed car often becomes the true soonest arrival. The
+// margin stops it flip-flopping between two trams with near-equal ETAs. The
+// spotter still moves on unconditionally when the target DEPARTS (passed the
+// platform by > DEPARTED_PAST_M of shape distance, rolled onto a new trip, or
+// got canceled) or DISAPPEARS from the states list for longer than
+// MISSING_TIMEOUT_MS.
 
 import { computeArrivals, nextStationStop } from '@/lib/arrivals';
 import type { RouteGeometry, TramPublicState } from '@/lib/types';
@@ -18,6 +22,11 @@ import type { RouteGeometry, TramPublicState } from '@/lib/types';
 export const DEPARTED_PAST_M = 80;
 /** A target missing from the feed for longer than this is treated as gone. */
 export const MISSING_TIMEOUT_MS = 15_000;
+/** How often a held target is re-ranked against the live arrivals list (ms). */
+export const REEVAL_INTERVAL_MS = 3_000;
+/** A different tram preempts the held one only if it arrives ≥ this much
+ *  sooner — the hysteresis that stops churn between near-equal ETAs (s). */
+export const PREEMPT_MARGIN_S = 20;
 
 /** What the spotter remembers about its current target between 1 Hz steps. */
 export interface SpotterTracking {
@@ -31,6 +40,8 @@ export interface SpotterTracking {
   stopArrivalMs: number;
   /** Last wall-clock ms the target was present in the states list. */
   lastSeenMs: number;
+  /** Last wall-clock ms the arrivals list was re-ranked for preemption. */
+  lastReevalMs: number;
 }
 
 export type SpotterEvent =
@@ -95,16 +106,29 @@ export function stepSpotter(
       st.snapshot.tripId === prev.tripId &&
       st.simDistM <= prev.stopDistM + DEPARTED_PAST_M
     ) {
-      // Still inbound / dwelling / just past within the window — keep it.
-      // No re-ranking against other candidates (hysteresis).
+      // Still inbound / dwelling / just past within the window — keep it,
+      // but periodically re-rank the arrivals and hand off to a genuinely
+      // sooner tram (a just-departed car near a terminal), with a margin so
+      // near-equal ETAs don't cause churn.
+      const heldEtaS = etaSeconds(prev.stopArrivalMs, st.snapshot.delaySeconds, nowMs);
+      if (nowMs - prev.lastReevalMs >= REEVAL_INTERVAL_MS) {
+        const arrivals = computeArrivals(stationKey, states, geometries, nowMs);
+        const rival = arrivals.find((a) => a.tramKey !== prev.targetKey) ?? null;
+        if (rival && rival.etaS + PREEMPT_MARGIN_S < heldEtaS) {
+          const acquired = acquireTarget(rival, stationKey, states, geometries, nowMs);
+          if (acquired) return { tracking: acquired, event: 'switched', target: targetOf(rival) };
+        }
+        // No preemption this cycle — reset the re-rank clock.
+        return {
+          tracking: { ...prev, lastSeenMs: nowMs, lastReevalMs: nowMs },
+          event: 'none',
+          target: { tramKey: prev.targetKey, line: prev.line, etaS: heldEtaS },
+        };
+      }
       return {
         tracking: { ...prev, lastSeenMs: nowMs },
         event: 'none',
-        target: {
-          tramKey: prev.targetKey,
-          line: prev.line,
-          etaS: etaSeconds(prev.stopArrivalMs, st.snapshot.delaySeconds, nowMs),
-        },
+        target: { tramKey: prev.targetKey, line: prev.line, etaS: heldEtaS },
       };
     } else {
       excludeKey = prev.targetKey; // departed / new trip / canceled
@@ -116,30 +140,53 @@ export function stepSpotter(
   // sorts by delay-shifted ETA.
   for (const a of computeArrivals(stationKey, states, geometries, nowMs)) {
     if (a.tramKey === excludeKey) continue;
-    const st = findState(states, a.tramKey);
-    if (!st) continue;
-    const geo = geometryForTrip(geometries, st.snapshot.tripId);
-    if (!geo) continue;
-    const stop = nextStationStop(geo, stationKey, st.simDistM);
-    if (!stop) continue;
-    return {
-      tracking: {
-        targetKey: a.tramKey,
-        line: a.line,
-        tripId: st.snapshot.tripId,
-        stopDistM: stop.distM,
-        stopArrivalMs: stop.arrivalMs,
-        lastSeenMs: nowMs,
-      },
-      event: prev ? 'switched' : 'acquired',
-      target: { tramKey: a.tramKey, line: a.line, etaS: a.etaS },
-    };
+    const acquired = acquireTarget(a, stationKey, states, geometries, nowMs);
+    if (acquired) {
+      return {
+        tracking: acquired,
+        event: prev ? 'switched' : 'acquired',
+        target: targetOf(a),
+      };
+    }
   }
 
   return { tracking: null, event: prev ? 'lost' : 'none', target: null };
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
+
+type Arrival = ReturnType<typeof computeArrivals>[number];
+
+/** Chip payload for an arrival (line + soonest ETA at the spotted stop). */
+function targetOf(a: Arrival): SpotterTargetInfo {
+  return { tramKey: a.tramKey, line: a.line, etaS: a.etaS };
+}
+
+/** Build the tracking record for an arrival, or null if its live state /
+ *  geometry / next platform can't be resolved this step. */
+function acquireTarget(
+  a: Arrival,
+  stationKey: string,
+  states: TramPublicState[],
+  geometries: RouteGeometry[],
+  nowMs: number,
+): SpotterTracking | null {
+  const st = findState(states, a.tramKey);
+  if (!st) return null;
+  const geo = geometryForTrip(geometries, st.snapshot.tripId);
+  if (!geo) return null;
+  const stop = nextStationStop(geo, stationKey, st.simDistM);
+  if (!stop) return null;
+  return {
+    targetKey: a.tramKey,
+    line: a.line,
+    tripId: st.snapshot.tripId,
+    stopDistM: stop.distM,
+    stopArrivalMs: stop.arrivalMs,
+    lastSeenMs: nowMs,
+    lastReevalMs: nowMs,
+  };
+}
 
 function findState(states: TramPublicState[], key: string): TramPublicState | undefined {
   for (const s of states) if (s.key === key) return s;
