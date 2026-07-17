@@ -130,9 +130,11 @@ Chrome (all `GlassPanel`, in `src/components/map/MapChrome.tsx`):
   §5, §7).
 
 Camera-event handling is deliberately **ref-only** (`onCameraChanged`,
-`index.tsx:83`) — no React state per camera frame. It updates the viewport ref
-(frame culling), sets the zoom-adaptive simulation rate, and captures follow
-gesture overrides. See §4 for splash timing and §6 for the light preset.
+`index.tsx`) — no React state per camera frame. It updates the viewport ref
+(frame culling) and sets the zoom-adaptive simulation rate; the one exception is
+a single `setFollowPaused(true)` store write when a gesture starts during follow
+(§5), which fires at most once per gesture. See §4 for splash timing and §6 for
+the light preset.
 
 ### 3.2 Tram sheet — `src/app/tram/[key].tsx`
 
@@ -242,20 +244,30 @@ is waiting for.
 
 ---
 
-## 5. Follow banner + gesture persistence
+## 5. Follow banner + pause / return-to-follow
 
 When following a tram, a **FollowChip** floats above the dock (line badge, reg,
-delay, "tap to stop"). It reads the followed tram via `useTramState(followKey)`
-and hides if the tram leaves service (`MapChrome.tsx:208`).
+delay, "Following"). It reads the followed tram via `useTramState(followKey)`
+and hides if the tram leaves service (`MapChrome.tsx`).
 
-**Follow gestures don't cancel follow.** While following, the user can pan/zoom/
-rotate; instead of dropping follow, `onCameraChanged` captures their chosen
-zoom, pitch, and **heading offset relative to the tram's bearing** and keeps
-re-applying them on each retarget (`index.tsx:97`). The heading offset is
-normalized to `(-180, 180]` so the shortest-way offset persists. Overrides are
-scoped to one follow session — a new follow (or follow end) resets to the
-default chase view (`index.tsx:143`). `onMapIdle` is a belt-and-braces reset for
-gesture-end paths that don't surface via `onCameraChanged`.
+**Follow holds the current map angle — it never auto-turns.** Engaging follow
+snapshots the *current* camera zoom/pitch/heading as a **fixed** orientation;
+the camera keeps the tram centered under exactly that angle and does **not**
+rotate toward the tram's bearing. (An earlier design captured a *heading offset
+relative to the bearing* and re-applied it every retarget — which meant a stray
+touch silently recorded an offset and the map lurched to a new heading. That
+whole mechanism was removed.)
+
+**A gesture pauses follow; it doesn't cancel it.** The moment the user pans/
+zooms/rotates/tilts, `onCameraChanged` sets `followPaused` (one store write per
+gesture, `src/stores/selection.ts`) and the camera is handed entirely to them.
+`followTramKey` is **kept** — we remember which tram — and the chip flips to a
+**"Return to follow"** control (`SymbolView location.viewfinder`). Tapping it
+re-snapshots the user's *current* zoom/pitch/heading and gently eases the center
+back onto the tram (`CAMERA_RETURN_MS`, 600 ms), preserving that angle/zoom. The
+chip **✕** ends follow entirely (`setFollowTramKey(null)`, clears both). Because
+`setFollowTramKey` always clears the paused flag, a spotter target hop lands as
+a live follow, never stuck paused.
 
 ---
 

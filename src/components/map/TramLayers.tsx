@@ -64,9 +64,11 @@ import {
   CAMERA_DWELL_SPEED_KMH,
   CAMERA_GLIDE_MS,
   CAMERA_RETARGET_MS,
+  CAMERA_RETURN_MS,
   leadTarget,
   withinDeadband,
   type FollowCameraTarget,
+  type FollowOrientation,
 } from './followCamera';
 import {
   BAND_BADGES_TO_MODELS,
@@ -85,26 +87,26 @@ const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', feature
 const EMPTY_FC_STRING = JSON.stringify(EMPTY_FC);
 
 /**
- * Follow-camera defaults: close chase view from BEHIND the tram, looking
- * forward over the roof (heading = tram bearing) — buildings no longer occlude
- * the followed tram. User gestures during follow adjust zoom/pitch/heading as
- * OFFSETS that persist for the rest of the follow (see FollowGestureState).
+ * Follow-camera FALLBACK orientation, used ONLY if the captured orientation is
+ * somehow null (it never is while following — the map screen snapshots the live
+ * camera on engage/return). Follow keeps the tram centered under the FIXED
+ * captured zoom/pitch/heading; it does NOT auto-rotate to the tram bearing.
  */
 const FOLLOW_ZOOM = 17.5;
 const FOLLOW_PITCH = 60;
 
 /**
- * Live gesture/override channel between the map screen (which owns
- * onCameraChanged / onMapIdle) and the follow-camera retarget loop here.
- * Gestures do NOT cancel follow — while a gesture is active the retarget loop
- * yields, and the user's chosen zoom/pitch/heading-offset are captured and
- * re-applied relative to the tram bearing on subsequent retargets.
+ * Orientation channel between the map screen (which owns the camera and its
+ * onCameraChanged snapshotting) and the follow-camera retarget loop here.
+ * `orientation` is the FIXED zoom/pitch/heading captured when follow was
+ * engaged or resumed ("Return to follow"); the loop centers the tram under it
+ * without ever turning the map toward the tram's bearing. The PAUSED state
+ * (user grabbed the camera) lives in the selection store (`followPaused`) so
+ * the follow chips can react to it; the loop reads it there each frame.
  */
 export interface FollowGestureState {
-  /** True while the user's fingers are on the map (retargeting pauses). */
-  gestureActive: boolean;
-  /** Camera overrides captured from the user's gesture; null = defaults. */
-  overrides: { zoom: number; pitch: number; headingOffset: number } | null;
+  /** Fixed camera orientation of the active follow; null when not following. */
+  orientation: FollowOrientation | null;
 }
 
 // Cadence constants, target leading and the stationary-target deadband live
@@ -112,6 +114,13 @@ export interface FollowGestureState {
 
 /** Night lines 90–99 use the navy sprite variants instead of PID red. */
 const NIGHT_LINE = ['>=', ['to-number', ['get', 'line']], 90];
+
+// Geometry-less trams (no loaded shape yet) are excluded from the bearing-
+// rotated teardrop / capsule sprites via an inline `['!=', ['get',
+// 'geometryless'], 1]` filter on each — they have no reliable heading, so they
+// render as a plain un-oriented dot (tram-geometryless-dots) at all zooms.
+// (Inlined per layer, not shared: rnmapbox's FilterExpression only type-checks
+// as a literal in prop position, not as a widened const.)
 
 /**
  * Direction teardrop sprite: dot-<day|night>[-fav]. Variant is derived from
@@ -223,6 +232,9 @@ export function TramLayers({
    * fingers are on the map — so the next retarget always fires.
    */
   const lastSentCameraRef = useRef<(FollowCameraTarget & { key: string }) | null>(null);
+  /** True on the frame right after follow was paused — the next active frame
+   *  does a gentle "Return to follow" ease instead of a snap retarget. */
+  const wasPausedRef = useRef(false);
   const favSetRef = useRef<{ source: string[]; set: Set<string> } | null>(null);
   const lineFilterRef = useRef<{
     source: PlannerItinerary | null;
@@ -319,38 +331,40 @@ export function TramLayers({
         fixEmptyRef.current = fixEmpty;
       }
 
-      // Follow camera: runs ONLY while following. Retarget every
-      // CAMERA_RETARGET_MS (NOT every tick — see followCamera.ts) with a
-      // longer overlapping glide; targets inside the stationary deadband are
-      // not re-sent at all, so a tram dwelling at a stop lets the native map
-      // go fully idle. Engine state is read fresh at each retarget. While the
-      // user's fingers are on the map the loop yields (gestures adjust the
-      // view WITHOUT cancelling follow); their captured zoom/pitch/heading-
-      // offset then override the defaults.
+      // Follow camera: runs ONLY while following AND not paused. Retarget every
+      // CAMERA_RETARGET_MS (NOT every tick — see followCamera.ts) with a longer
+      // overlapping glide; targets inside the stationary deadband are not
+      // re-sent at all, so a tram dwelling at a stop lets the native map go
+      // fully idle. Engine state is read fresh at each retarget. The camera
+      // holds the FIXED captured orientation (zoom/pitch/heading) — it centers
+      // the tram WITHOUT ever rotating the map toward the tram's bearing.
       const followKey = selection.followTramKey;
       if (!followKey) {
         lastSentCameraRef.current = null;
+        wasPausedRef.current = false;
         return;
       }
-      const gesture = followGestureRef.current;
-      if (gesture?.gestureActive) {
-        // The user owns the camera while touching. Forget the last-sent
-        // target and re-arm the eval clock so the first retarget after
-        // release fires immediately — the deadband must never leave the
-        // camera wherever a pan ended just because the tram itself is parked.
+      if (selection.followPaused) {
+        // Follow is paused: the user grabbed the map, so the whole camera is
+        // theirs. Forget the last-sent target and re-arm the eval clock so the
+        // first frame after "Return to follow" acts immediately; flag the
+        // resume so it eases back gently instead of snapping.
         lastSentCameraRef.current = null;
         cameraEvalDueMsRef.current = 0;
+        wasPausedRef.current = true;
         return;
       }
       const lastSent = lastSentCameraRef.current;
-      // A target switch (follow started / spotter hop to another tram)
+      // A target switch (follow started / spotter hop) or a resume from pause
       // retargets immediately; otherwise hold the eval cadence.
-      if (lastSent?.key === followKey && nowMs < cameraEvalDueMsRef.current) return;
+      const resuming = wasPausedRef.current;
+      if (!resuming && lastSent?.key === followKey && nowMs < cameraEvalDueMsRef.current) return;
       const state = rt.engine.getState(followKey, nowMs);
       if (!state) {
         // The followed tram disappeared (left service / pruned) — end follow.
         selection.setFollowTramKey(null);
         lastSentCameraRef.current = null;
+        wasPausedRef.current = false;
         return;
       }
       // Track where the tram is RENDERED. In live mode that is the PROJECTED
@@ -370,21 +384,38 @@ export function TramLayers({
           bearing = state.observedBearing;
         }
       }
-      const overrides = gesture?.overrides ?? null;
+      // FIXED orientation captured on engage/return (map screen snapshots the
+      // live camera). Fallbacks only fire in the impossible null case; heading
+      // falls back to the tram bearing (behind-view) purely defensively.
+      const orientation = followGestureRef.current?.orientation ?? null;
       const target: FollowCameraTarget = {
         // Lead slightly toward where the tram will be at the next retarget.
         center: leadTarget(anchor, bearing, state.simSpeedKmh),
-        zoom: overrides?.zoom ?? FOLLOW_ZOOM,
-        pitch: overrides?.pitch ?? FOLLOW_PITCH,
-        // Camera behind the tram, looking forward over the roof; the user's
-        // rotation gesture persists as an offset from the tram bearing.
-        heading: (((bearing + (overrides?.headingOffset ?? 0)) % 360) + 360) % 360,
+        zoom: orientation?.zoom ?? FOLLOW_ZOOM,
+        pitch: orientation?.pitch ?? FOLLOW_PITCH,
+        heading: orientation?.heading ?? (((bearing % 360) + 360) % 360),
       };
+      if (resuming) {
+        // Return to follow: gently ease the center back onto the tram under the
+        // user's current zoom/pitch/heading (already captured into orientation
+        // by the map screen). Suppress normal retargets until the ease lands.
+        wasPausedRef.current = false;
+        cameraEvalDueMsRef.current = nowMs + CAMERA_RETURN_MS;
+        lastSentCameraRef.current = { key: followKey, ...target };
+        cameraRef.current?.setCamera({
+          centerCoordinate: target.center,
+          zoomLevel: target.zoom,
+          pitch: target.pitch,
+          heading: target.heading,
+          animationMode: 'easeTo',
+          animationDuration: CAMERA_RETURN_MS,
+        });
+        return;
+      }
       // Deadband: visually identical to what the map is already showing —
       // skip the send (each one restarts a native animation). Movement, a
-      // teleport, a gesture override change or the dwell ending all exceed
-      // the deadband and send on the next eval; while parked, evals relax to
-      // the dwell cadence.
+      // teleport or the dwell ending all exceed the deadband and send on the
+      // next eval; while parked, evals relax to the dwell cadence.
       if (lastSent?.key === followKey && withinDeadband(lastSent, target)) {
         cameraEvalDueMsRef.current =
           nowMs +
@@ -513,6 +544,25 @@ export function TramLayers({
         circlePitchAlignment: 'map',
       }}
     />,
+    // Geometry-less trams (shape still streaming in): a plain dot at the raw
+    // GPS position across ALL zooms — including the 3D band, where the sprite
+    // teardrops/badges fade out, so a shapeless tram never vanishes. No 3D body
+    // and no bearing rotation (there is no reliable heading yet); the shared
+    // hit-target circle below keeps it tappable. A brief transient — Fix 2
+    // requests the new trip's geometry at raised priority to shorten it.
+    <CircleLayer
+      key="tram-geometryless-dots"
+      id="tram-geometryless-dots"
+      slot="top"
+      filter={['==', ['get', 'geometryless'], 1]}
+      style={{
+        circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 3, 16, 6],
+        circleColor: ['case', NIGHT_LINE, Tram.night, Tram.pidRed],
+        circleStrokeWidth: 1.5,
+        circleStrokeColor: '#FFFFFF',
+        circlePitchAlignment: 'map',
+      }}
+    />,
   ];
   if (iconImages != null) {
     pointLayers.push(
@@ -523,6 +573,10 @@ export function TramLayers({
         key="tram-dots"
         id="tram-dots"
         slot="top"
+        // Geometry-less trams are excluded from every bearing-rotated / badge
+        // sprite: they have no reliable heading and render as a plain dot
+        // (tram-geometryless-dots) at all zooms instead.
+        filter={['!=', ['get', 'geometryless'], 1]}
         maxZoomLevel={BAND_DOTS_TO_BADGES + BAND_FADE}
         style={{
           iconImage: DOT_ICON,
@@ -550,6 +604,7 @@ export function TramLayers({
         key="tram-badge-markers"
         id="tram-badge-markers"
         slot="top"
+        filter={['!=', ['get', 'geometryless'], 1]}
         minZoomLevel={BAND_DOTS_TO_BADGES - BAND_FADE}
         maxZoomLevel={BAND_BADGES_TO_MODELS + BAND_FADE + 0.1}
         style={{
@@ -571,6 +626,7 @@ export function TramLayers({
         key="tram-badges"
         id="tram-badges"
         slot="top"
+        filter={['!=', ['get', 'geometryless'], 1]}
         minZoomLevel={BAND_DOTS_TO_BADGES - BAND_FADE}
         maxZoomLevel={BAND_BADGES_TO_MODELS + BAND_FADE + 0.1}
         style={{
@@ -604,7 +660,7 @@ export function TramLayers({
         key="tram-badge-fav"
         id="tram-badge-fav"
         slot="top"
-        filter={['==', ['get', 'favorite'], 1]}
+        filter={['all', ['==', ['get', 'favorite'], 1], ['!=', ['get', 'geometryless'], 1]]}
         minZoomLevel={BAND_DOTS_TO_BADGES - BAND_FADE}
         maxZoomLevel={BAND_BADGES_TO_MODELS + BAND_FADE + 0.1}
         style={{
@@ -625,6 +681,7 @@ export function TramLayers({
         key="tram-dots-fallback"
         id="tram-dots-fallback"
         slot="top"
+        filter={['!=', ['get', 'geometryless'], 1]}
         maxZoomLevel={BAND_BADGES_TO_MODELS + BAND_FADE + 0.1}
         style={{
           circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 3, 14.8, 6],

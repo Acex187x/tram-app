@@ -32,6 +32,7 @@ import { RideOverlay } from '@/components/map/RideOverlay';
 import { SpotterController } from '@/components/map/SpotterController';
 import { RouteNetwork, STOP_TOTEM_MODEL_KEY } from '@/components/map/RouteNetwork';
 import { TramLayers, type FollowGestureState } from '@/components/map/TramLayers';
+import { orientationFromCamera, shouldPauseFollow } from '@/components/map/followCamera';
 import { useTramModels } from '@/components/map/useTramModels';
 import { getRuntime, useTramRuntime } from '@/hooks/tramData';
 import type { Viewport } from '@/lib/types';
@@ -88,11 +89,12 @@ export default function MapScreen() {
   }, [hideSplash]);
 
   // ── Viewport tracking (feeds frame culling + zoom banding via ref) ─────────
-  const followGestureRef = useRef<FollowGestureState>({ gestureActive: false, overrides: null });
-  /** Latest camera params — seeds follow sessions so engaging changes nothing. */
+  const followGestureRef = useRef<FollowGestureState>({ orientation: null });
+  /** Latest camera params — snapshotted as the follow orientation on engage. */
   const cameraStateRef = useRef({ zoom: INITIAL_ZOOM, pitch: INITIAL_PITCH, heading: 0 });
   const onCameraChanged = useCallback((state: MapState) => {
-    // Ref assignments only — no React work per camera event.
+    // Ref assignments + at most one store write per gesture — no React work per
+    // camera event.
     const { ne, sw } = state.properties.bounds;
     const zoom = state.properties.zoom;
     viewportRef.current = {
@@ -108,34 +110,20 @@ export default function MapScreen() {
     // (hysteresis inside setDetailZoom), ~10 Hz at far zooms.
     getRuntime().setDetailZoom(zoom);
 
-    // Follow-mode gestures do NOT cancel follow: while the user's fingers are
-    // on the map we capture their chosen zoom/pitch/heading-offset (relative
-    // to the tram bearing) and keep applying them on subsequent retargets.
-    const gesture = followGestureRef.current;
-    const isGestureActive = state.gestures.isGestureActive;
-    const followKey = useSelectionStore.getState().followTramKey;
-    if (followKey && isGestureActive) {
-      gesture.gestureActive = true;
-      const tram = getRuntime().engine.getState(followKey);
-      if (tram) {
-        const live = useSettingsStore.getState().positionMode === 'live';
-        const bearing = live ? tram.observedBearing : tram.bearing;
-        gesture.overrides = {
-          zoom,
-          pitch: state.properties.pitch,
-          // Normalized to (-180, 180] so the shortest-way offset persists.
-          headingOffset:
-            ((((state.properties.heading - bearing) % 360) + 540) % 360) - 180,
-        };
-      }
-    } else if (!isGestureActive) {
-      gesture.gestureActive = false;
+    // Any map gesture during follow PAUSES it: the camera is handed entirely to
+    // the user (no auto-recenter, no heading capture — that was the "map turns
+    // on touch" bug). followTramKey is kept; the "Return to follow" chip brings
+    // it back. One store write per gesture (guarded by !followPaused).
+    const selection = useSelectionStore.getState();
+    if (
+      shouldPauseFollow({
+        followKey: selection.followTramKey,
+        followPaused: selection.followPaused,
+        isGestureActive: state.gestures.isGestureActive,
+      })
+    ) {
+      selection.setFollowPaused(true);
     }
-  }, []);
-
-  // Belt-and-braces: some gesture-end paths only surface via onMapIdle.
-  const onMapIdle = useCallback(() => {
-    followGestureRef.current.gestureActive = false;
   }, []);
 
   // ── One-shot fly-to requests from search/line/favorites sheets ─────────────
@@ -153,31 +141,33 @@ export default function MapScreen() {
     selection.requestFlyTo(null);
   }, [flyToTarget]);
 
-  // Followed tram's geometry loads first (smooth on-shape follow ASAP). A new
-  // follow session KEEPS the user's current zoom/pitch/heading — the camera
-  // only flies to the tram, nothing else changes (the heading persists as an
-  // offset from the tram bearing, so later rotation-with-the-tram feels
-  // continuous). Gesture overrides still belong to a single follow session.
+  // Engaging follow snapshots the CURRENT camera orientation as the fixed
+  // follow angle: the camera keeps the tram centered under exactly this
+  // zoom/pitch/heading and never rotates toward the tram's bearing. Nothing
+  // about the view changes on engage — only the center starts tracking. The
+  // followed tram's geometry is prioritized so on-shape follow is smooth ASAP.
   const followTramKey = useSelectionStore((s) => s.followTramKey);
   useEffect(() => {
     if (!followTramKey) {
-      followGestureRef.current = { gestureActive: false, overrides: null };
+      followGestureRef.current = { orientation: null };
       return;
     }
+    followGestureRef.current = { orientation: orientationFromCamera(cameraStateRef.current) };
     const state = getRuntime().engine.getState(followTramKey);
-    const cam = cameraStateRef.current;
-    const live = useSettingsStore.getState().positionMode === 'live';
-    const bearing = state ? (live ? state.observedBearing : state.bearing) : cam.heading;
-    followGestureRef.current = {
-      gestureActive: false,
-      overrides: {
-        zoom: cam.zoom,
-        pitch: cam.pitch,
-        headingOffset: ((((cam.heading - bearing) % 360) + 540) % 360) - 180,
-      },
-    };
     if (state) getRuntime().prioritizeTrip(state.snapshot.tripId);
   }, [followTramKey]);
+
+  // "Return to follow": when a paused follow resumes, re-snapshot the user's
+  // current camera orientation (they may have zoomed/rotated while paused) so
+  // the retarget loop re-centers on the tram under THAT angle/zoom. The loop
+  // owns the actual smooth ease back (CAMERA_RETURN_MS) — this only refreshes
+  // the fixed orientation before the loop's next frame reads it.
+  const followPaused = useSelectionStore((s) => s.followPaused);
+  useEffect(() => {
+    if (followPaused) return;
+    if (!useSelectionStore.getState().followTramKey) return;
+    followGestureRef.current = { orientation: orientationFromCamera(cameraStateRef.current) };
+  }, [followPaused]);
 
   // Show the location puck from the start if permission was granted earlier.
   useEffect(() => {
@@ -240,7 +230,6 @@ export default function MapScreen() {
         onDidFinishLoadingMap={hideSplash}
         onDidFinishLoadingStyle={() => setStyleLoaded(true)}
         onCameraChanged={onCameraChanged}
-        onMapIdle={onMapIdle}
       >
         <Camera
           ref={cameraRef}

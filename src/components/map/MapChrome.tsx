@@ -308,6 +308,9 @@ export function FollowBanner() {
 function FollowChip() {
   const insets = useSafeAreaInsets();
   const followKey = useSelectionStore((s) => s.followTramKey);
+  // Paused = the user grabbed the map; the camera is theirs and the chip
+  // becomes "Return to follow" (body re-centers, ✕ still stops).
+  const paused = useSelectionStore((s) => s.followPaused);
   const state = useTramState(followKey);
   const plannerActive = usePlannerStore((s) => s.itinerary != null);
   const rideActive = useRidePreviewStore((s) => s.preview != null);
@@ -323,32 +326,51 @@ function FollowChip() {
     (rideActive ? CHIP_STACK_H : 0) +
     (spotterActive ? CHIP_STACK_H : 0);
   const reg = state.snapshot.registrationNumber;
-  // Chip body reopens the tram sheet (same pattern as the planner chip —
-  // users kept losing the sheet while following); only the ✕ stops the follow.
+  // Body: while following it reopens the tram sheet (users kept losing it);
+  // while PAUSED it returns the camera to the tram (keeping the user's current
+  // zoom/pitch/heading). The ✕ always stops the follow entirely.
+  const accent = colors.scheme === 'dark' ? Tram.liveryRed : Tram.pidRed;
   return (
     <View style={[styles.followWrap, { bottom }]}>
       <GlassPanel variant="regular" interactive appearance={colors.scheme} style={styles.followBanner}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Open tram ${reg ?? followKey} details`}
+          accessibilityLabel={
+            paused
+              ? `Return to following tram ${reg ?? followKey}`
+              : `Open tram ${reg ?? followKey} details`
+          }
           style={styles.followBody}
           onPress={() => {
             tapLight();
+            if (paused) {
+              useSelectionStore.getState().setFollowPaused(false);
+              return;
+            }
             useSelectionStore.getState().setSelectedTramKey(followKey);
             router.push(`/tram/${encodeURIComponent(followKey)}`);
           }}
         >
+          {paused && <SymbolView name="location.viewfinder" size={15} tintColor={accent} />}
           <LineBadge line={state.snapshot.line} size="sm" />
           {reg != null && (
             <Text style={[styles.followReg, { color: colors.text }]} allowFontScaling={false}>
               #{reg}
             </Text>
           )}
-          <DelayPill delaySeconds={state.snapshot.delaySeconds} />
-          <Text style={[styles.followHint, { color: colors.secondary }]} allowFontScaling={false}>
-            Following
-          </Text>
-          <SymbolView name="chevron.up" size={12} tintColor={colors.secondary} />
+          {paused ? (
+            <Text style={[styles.followHint, { color: colors.text }]} allowFontScaling={false}>
+              Return to follow
+            </Text>
+          ) : (
+            <>
+              <DelayPill delaySeconds={state.snapshot.delaySeconds} />
+              <Text style={[styles.followHint, { color: colors.secondary }]} allowFontScaling={false}>
+                Following
+              </Text>
+              <SymbolView name="chevron.up" size={12} tintColor={colors.secondary} />
+            </>
+          )}
         </Pressable>
         <Pressable
           accessibilityRole="button"

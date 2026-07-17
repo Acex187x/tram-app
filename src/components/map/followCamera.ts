@@ -15,6 +15,16 @@ export const CAMERA_RETARGET_MS = 80;
 export const CAMERA_GLIDE_MS = 170;
 
 /**
+ * "Return to follow" ease. When the user resumes a paused follow the camera may
+ * be anywhere they panned to, so the first re-center uses a longer, gentler
+ * glide than the steady-state retarget (which assumes the tram is already
+ * roughly centered). It preserves the user's zoom/pitch/heading — only the
+ * center eases back onto the tram. Normal retargets are suppressed until it
+ * lands.
+ */
+export const CAMERA_RETURN_MS = 600;
+
+/**
  * Stationary-target deadband (project-review P2 "follow camera never idles on
  * a dwell"): a retarget whose camera target is visually identical to the LAST
  * SENT one is suppressed entirely — every setCamera restarts a native
@@ -43,6 +53,37 @@ export const CAMERA_DWELL_SPEED_KMH = 0.5;
 
 /** Meters per degree of latitude (small-offset math only). */
 export const M_PER_DEG_LAT = 111_320;
+
+/**
+ * The FIXED camera orientation of an active follow session: the zoom, pitch and
+ * heading captured when follow was engaged (or when the user returned to it).
+ * The retarget loop keeps the tram centered under THIS orientation — it never
+ * auto-rotates heading toward the tram's bearing (that was the source of the
+ * "map turns on touch" bug), so following holds the current map angle.
+ */
+export interface FollowOrientation {
+  zoom: number;
+  pitch: number;
+  heading: number;
+}
+
+/** Snapshot the current camera params as a fixed follow orientation. */
+export function orientationFromCamera(cam: FollowOrientation): FollowOrientation {
+  return { zoom: cam.zoom, pitch: cam.pitch, heading: cam.heading };
+}
+
+/**
+ * Should an in-progress map gesture PAUSE the active follow? Yes exactly when a
+ * tram is being followed, the user's fingers are on the map, and follow is not
+ * already paused — one store write per gesture, not per camera frame.
+ */
+export function shouldPauseFollow(args: {
+  followKey: string | null;
+  followPaused: boolean;
+  isGestureActive: boolean;
+}): boolean {
+  return !!args.followKey && args.isGestureActive && !args.followPaused;
+}
 
 /** The full native camera target a retarget would send. */
 export interface FollowCameraTarget {

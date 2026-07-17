@@ -354,21 +354,14 @@ zero visible benefit when nothing on screen is moving fast.
    the tram covers in one retarget interval (`leadTarget`, `:97`) so the camera
    glides toward where the tram *will* be, not where it *was*.
 
-3. **v2 (behind-view, gesture-persistent follow, banner-only stop).** Default
-   chase view is `FOLLOW_ZOOM = 17.5`, `FOLLOW_PITCH = 60`, heading = the tram's
-   bearing — the camera sits **behind** the tram looking forward over the roof, so
-   buildings no longer occlude the followed tram (`TramLayers.tsx:61`,`:259`).
-   - **Gestures do NOT cancel follow.** While the user's fingers are on the map
-     the retarget loop **yields** (`FollowGestureState.gestureActive`,
-     `TramLayers.tsx:247`); their chosen zoom/pitch/heading are captured as
-     **offsets** relative to the tram bearing and re-applied on every subsequent
-     retarget (`index.tsx:97`, headingOffset normalized to (−180,180] for
-     shortest-way). `onMapIdle` clears the gesture flag belt-and-braces
-     (`index.tsx:120`). Overrides reset on each new follow session
-     (`index.tsx:143`).
-   - Follow is ended **only** by the banner (`MapChrome.tsx:222`) — not by
-     panning. It also auto-ends if the followed tram disappears (left service /
-     pruned) (`TramLayers.tsx:249`).
+3. **v2 (behind-view, gesture-persistent follow, banner-only stop).** *(Heading
+   auto-rotation superseded by v5 — kept for history.)* Default chase view was
+   `FOLLOW_ZOOM = 17.5`, `FOLLOW_PITCH = 60`, heading = the tram's bearing — the
+   camera sat **behind** the tram looking forward over the roof. Gestures did not
+   cancel follow: the user's zoom/pitch/**heading-offset relative to the tram
+   bearing** were captured and re-applied every retarget. This is exactly what
+   v5 removed — re-applying a bearing-relative heading meant a touch silently
+   recorded an offset and the map **jumped/rotated** on the next retarget.
    - In **live** position mode the camera anchors to the **projected
      observation** (the last fix dead-reckoned to now, same as the rendered
      position) rather than the raw fix — anchoring to the raw fix left the
@@ -388,12 +381,43 @@ zero visible benefit when nothing on screen is moving fast.
    crawl keeps retargeting (just at the rate it actually moves). While
    suppressed **and** the tram reads as dwelling (speed ≈ 0) evaluation relaxes
    from 12.5 Hz to 4 Hz (`CAMERA_DWELL_EVAL_MS`). Retarget is immediate (next
-   frame, cadence gate bypassed) on a follow-target switch, and a gesture
-   clears the last-sent reference so the first post-release retarget always
+   frame, cadence gate bypassed) on a follow-target switch, and a pause
+   clears the last-sent reference so the first retarget after resume always
    re-centers — a teleport exceeds the deadband by definition. Verified on-sim:
    at ~20 km/h every eval sends (glide smoothness untouched); parked, sends
    drop to ≈ 0. Pure math + policy unit-tested in
    `__tests__/follow-camera.test.ts`.
+
+5. **v5 (fixed-orientation follow + pause/return — no more surprise turns).**
+   The v2 heading auto-rotation (and its gesture-captured *heading-offset*) was
+   the source of a real bug: a mere touch during follow recorded an offset and
+   the map lurched to a new angle on the next retarget. It is **gone**. The new
+   model:
+   - **Follow holds a FIXED orientation.** When follow is engaged, the map
+     screen snapshots the *current* camera zoom/pitch/heading into
+     `FollowGestureState.orientation` (`orientationFromCamera`,
+     `index.tsx` followTramKey effect). The retarget loop centers the tram under
+     that exact orientation forever — it **never** turns the map toward the
+     tram's bearing. Following = "keep the tram centered at the current map
+     angle." `FOLLOW_ZOOM`/`FOLLOW_PITCH` survive only as defensive fallbacks
+     for the impossible `orientation == null` case.
+   - **Any gesture PAUSES follow.** `onCameraChanged` → `shouldPauseFollow(...)`
+     → `setFollowPaused(true)` (one store write per gesture, in
+     `src/stores/selection.ts`). While paused the retarget loop yields the whole
+     camera to the user (`followPaused` read per frame in `TramLayers`);
+     `followTramKey` is kept so we still remember the tram. `onMapIdle` is gone —
+     the paused flag persists until the user acts, so there is nothing to reset.
+   - **"Return to follow"** (`followPaused` true → the `FollowChip` body becomes
+     a Return control, `MapChrome.tsx`): tapping it `setFollowPaused(false)`. The
+     map screen re-snapshots the user's *current* camera into `orientation`
+     (they may have zoomed/rotated while paused), and the retarget loop eases the
+     center back onto the tram over `CAMERA_RETURN_MS` (600 ms), **preserving**
+     the user's zoom/pitch/heading. The chip ✕ still ends follow entirely
+     (`setFollowTramKey(null)`).
+   - **Spotter compatibility.** `setFollowTramKey` always clears `followPaused`,
+     so a spotter target hop (or any programmatic switch) lands as a live,
+     unpaused follow — never stuck paused. Behaviour pinned in
+     `__tests__/follow-session.test.ts`.
 
 ---
 
