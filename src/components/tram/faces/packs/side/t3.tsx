@@ -1,33 +1,34 @@
-// Side Profile pack — Tatra T3: the SHORT classic. One ~14 m rounded
-// "bathtub" car, cream window band over red body, THREE folding doors with
-// step wells, ribbed roof with the narrow route-number box up front, and the
-// signature red scissor pantograph. Shortest silhouette in the pack.
+// Side Profile pack — Tatra T3: the SHORT rounded classic. One bathtub car
+// with cream window band, bold red belt, narrow cream skirt; three cream
+// folding doors interrupting the red band; blue route box on the roof brow
+// and the yellow diamond (rhombus) pantograph. Shortest single silhouette.
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 
 const P = {
-  plate: '#232932',
-  edge: 'rgba(154,166,183,0.42)',
-  rail: '#909CAD',
-  wheel: '#3C434F',
-  red: '#C8332B',
-  cream: '#F2E7CE',
-  creamShade: '#DFD0AE',
-  glass: '#9AD4EA',
-  silver: '#C9CFD8',
+  plate: '#EDF0F4',
+  edge: 'rgba(90,102,120,0.35)',
+  rail: '#A7AEB9',
+  wheel: '#333941',
+  red: '#C8352C',
+  cream: '#F3E6C8',
+  door: '#E6D5AC',
+  glass: '#54788C',
+  roof: '#5A6068',
+  blue: '#2C56A8',
+  panto: '#C89A2E',
+  dark: '#23272E',
   lens: '#FFD98F',
-  dark: '#151A21',
 } as const;
 
 const BODY =
-  'M24 28.6 L40 28.6 C43.6 28.6 45 31 45 34 L45 41.2 Q45 43 43 43 L21 43 Q19 43 19 41.2 L19 34 C19 31 20.4 28.6 24 28.6 Z';
+  'M23.5 28 L40.5 28 C44 28 45.5 30.2 45.5 33.4 L45.5 42.3 Q45.5 44.5 43.3 44.5 L20.7 44.5 Q18.5 44.5 18.5 42.3 L18.5 33.4 C18.5 30.2 20 28 23.5 28 Z';
 
 function Door({ x }: { x: number }) {
   return (
     <>
-      <Rect x={x} y={30.2} width={2.9} height={11.7} rx={0.5} fill={P.creamShade} />
-      <Rect x={x + 0.45} y={30.5} width={2} height={3.8} rx={0.4} fill={P.glass} />
-      <Line x1={x + 1.45} y1={30.7} x2={x + 1.45} y2={41.6} stroke={P.dark} strokeWidth={0.45} />
-      <Rect x={x} y={42.1} width={2.9} height={0.7} fill={P.dark} opacity={0.5} />
+      <Rect x={x} y={29.4} width={3} height={14.6} fill={P.door} />
+      <Rect x={x + 0.4} y={30} width={2.2} height={3.6} rx={0.4} fill={P.glass} />
+      <Line x1={x + 1.5} y1={29.6} x2={x + 1.5} y2={43.8} stroke={P.dark} strokeWidth={0.4} opacity={0.7} />
     </>
   );
 }
@@ -36,42 +37,34 @@ export function Face({ size = 64 }: { size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 64 64">
       <Rect x={1.5} y={1.5} width={61} height={61} rx={14} fill={P.plate} stroke={P.edge} strokeWidth={1} />
-      <Line x1={5.5} y1={46.2} x2={58.5} y2={46.2} stroke={P.rail} strokeWidth={1.1} strokeLinecap="round" />
-      {/* red scissor pantograph */}
-      <Path
-        d="M29 28.2 L35 24.6 M35 28.2 L29 24.6"
-        stroke="#B04038"
-        strokeWidth={1.1}
-        strokeLinecap="round"
-        fill="none"
-      />
-      <Line x1={27.8} y1={24.2} x2={36.2} y2={24.2} stroke="#B04038" strokeWidth={1.1} strokeLinecap="round" />
-      {/* wheels: two 2-axle bogies */}
-      <Circle cx={23.2} cy={44.6} r={1.6} fill={P.wheel} />
-      <Circle cx={26.6} cy={44.6} r={1.6} fill={P.wheel} />
-      <Circle cx={37.4} cy={44.6} r={1.6} fill={P.wheel} />
-      <Circle cx={40.8} cy={44.6} r={1.6} fill={P.wheel} />
-      {/* cream bathtub body, rounded both ends */}
+      {/* yellow diamond pantograph */}
+      <Path d="M32 21.9 L36.6 25 L32 28 L27.4 25 Z" fill="none" stroke={P.panto} strokeWidth={1.1} strokeLinejoin="round" />
+      <Line x1={29.6} y1={21.5} x2={34.4} y2={21.5} stroke={P.panto} strokeWidth={1.2} strokeLinecap="round" />
+      {/* rails + wheels (two 2-axle bogies) */}
+      <Line x1={6} y1={46.8} x2={58} y2={46.8} stroke={P.rail} strokeWidth={1.1} strokeLinecap="round" />
+      <Circle cx={23.5} cy={45} r={1.7} fill={P.wheel} />
+      <Circle cx={27} cy={45} r={1.7} fill={P.wheel} />
+      <Circle cx={37} cy={45} r={1.7} fill={P.wheel} />
+      <Circle cx={40.5} cy={45} r={1.7} fill={P.wheel} />
+      {/* cream bathtub body */}
       <Path d={BODY} fill={P.cream} />
-      {/* red lower band */}
-      <Path d="M19 36.6 L45 36.6 L45 41.2 Q45 43 43 43 L21 43 Q19 43 19 41.2 Z" fill={P.red} />
-      <Line x1={19.2} y1={36.6} x2={44.8} y2={36.6} stroke={P.silver} strokeWidth={0.5} opacity={0.7} />
-      {/* narrow route-number box on the roof front — the classic-T3 tell */}
-      <Rect x={20.6} y={27.7} width={2.2} height={1} rx={0.3} fill={P.cream} stroke={P.dark} strokeWidth={0.4} />
-      {/* roof resistor boxes */}
-      <Rect x={27.5} y={27.8} width={2.4} height={0.9} rx={0.45} fill={P.creamShade} />
-      <Rect x={34} y={27.8} width={2.4} height={0.9} rx={0.45} fill={P.creamShade} />
-      {/* wrap-around cab windscreen (front = left) */}
-      <Path d="M19.9 34.9 L19.9 31.9 C19.9 30.3 21 29.6 22.7 29.6 L24.1 29.6 L24.1 34.9 Z" fill={P.glass} />
-      {/* three folding doors + side windows */}
-      <Door x={24.9} />
-      <Rect x={28.5} y={30.2} width={3} height={4.1} rx={0.7} fill={P.glass} />
-      <Door x={32.2} />
-      <Rect x={35.8} y={30.2} width={3} height={4.1} rx={0.7} fill={P.glass} />
-      <Door x={39.5} />
-      <Rect x={42.9} y={30.2} width={1.5} height={4} rx={0.6} fill={P.glass} />
-      {/* headlight edge */}
-      <Circle cx={19.9} cy={40} r={1.05} fill={P.lens} stroke={P.silver} strokeWidth={0.5} />
+      {/* red belt (cream skirt stays below) */}
+      <Rect x={18.5} y={36.2} width={27} height={6.2} fill={P.red} />
+      {/* grey roof strip */}
+      <Path d="M23 28.9 L41 28.9" stroke={P.roof} strokeWidth={1.6} strokeLinecap="round" />
+      {/* wrap-around windscreen (front = left) */}
+      <Path d="M19.3 30.8 C19.3 29.8 20.4 29.4 21.6 29.4 L23.6 29.4 L23.6 35.3 L19.3 35.3 Z" fill={P.glass} />
+      {/* doors + windows: door, window, door, window, door, small rear window */}
+      <Door x={24.6} />
+      <Rect x={28.4} y={29.9} width={2.6} height={4.7} rx={0.5} fill={P.glass} />
+      <Door x={31.8} />
+      <Rect x={35.6} y={29.9} width={2.6} height={4.7} rx={0.5} fill={P.glass} />
+      <Door x={39} />
+      <Rect x={42.6} y={29.9} width={2.1} height={4.7} rx={0.5} fill={P.glass} />
+      {/* blue route-number box on the roof brow — the classic-T3 tell */}
+      <Rect x={20.1} y={26.5} width={3.6} height={2} rx={0.4} fill={P.blue} stroke={P.dark} strokeWidth={0.35} />
+      {/* round headlight peeking at the nose */}
+      <Circle cx={19.6} cy={40.6} r={1} fill={P.lens} stroke={P.dark} strokeWidth={0.4} />
       <Path d={BODY} fill="none" stroke={P.dark} strokeWidth={0.9} />
     </Svg>
   );

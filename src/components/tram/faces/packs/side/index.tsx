@@ -1,8 +1,9 @@
-// Face pack "side" — Side Profile. Full-length flat-vector side silhouettes
-// on a dark depot plate: length, section count, doors and pantograph type are
-// the spotter cues (T3 short single, T3R.P coupled pair, KT8D5 two-headed
-// three-section, 14T five-section caterpillar, 15T three long sections,
-// 52T glassy five-section flagship).
+// Face pack "side" — Side Profile. Bold flat-vector side silhouettes on a
+// light plate: length, section count, livery bands and pantograph type are
+// the spotter cues (T3 short cream/red single, T3R.P coupled LED-brow pair,
+// T3R.PLF silver single, KT8D5 boxy three-section with two diamonds, 14T red
+// wedge-nosed five-module, 15T black-band four-section, 52T white three-
+// section with the black helmet visor).
 import type * as React from 'react';
 
 import type { TramModelId } from '@/lib/types';

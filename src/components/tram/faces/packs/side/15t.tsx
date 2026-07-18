@@ -1,32 +1,34 @@
-// Side Profile pack — Škoda 15T ForCity Alfa: the workhorse. Only THREE long
-// sections (vs the 14T's five), continuous low window line, angular polygonal
-// headlight "cheekbone" on the raked nose, grey skirt, roof AC boxes.
+// Side Profile pack — Škoda 15T ForCity: the sloped-face workhorse. Long
+// four-section body: red cab with a big raked black windscreen and red brow
+// flowing over the roof, then a continuous glossy BLACK window band over a
+// SILVER mid band over a RED skirt. Three slim joints, single-arm pantograph.
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 
 const P = {
-  plate: '#232932',
-  edge: 'rgba(154,166,183,0.42)',
-  rail: '#909CAD',
-  wheel: '#3C434F',
-  red: '#C8332B',
-  cream: '#F2E7CE',
-  glass: '#9AD4EA',
-  glassDeep: '#6FB6D4',
-  grey: '#7A828E',
-  silver: '#C9CFD8',
-  amber: '#FFB03A',
-  lens: '#FFD98F',
-  dark: '#151A21',
+  plate: '#EDF0F4',
+  edge: 'rgba(90,102,120,0.35)',
+  rail: '#A7AEB9',
+  wheel: '#333941',
+  red: '#C8352C',
+  silver: '#C9CED6',
+  black: '#1E2126',
+  glassDoor: '#3E4650',
+  joint: '#737A84',
+  jointEdge: '#4E555F',
+  roof: '#4E545C',
+  panto: '#3A4048',
+  dark: '#23272E',
+  drl: '#F5F7FA',
 } as const;
 
-const BODY =
-  'M8.4 28.7 L58.6 28.7 Q60.7 28.7 60.7 30.7 L60.7 41.2 Q60.7 43 58.7 43 L5.8 43 Q4.2 43 4.3 41.4 L4.7 34 C5 31.4 6.3 29.2 8.4 28.7 Z';
+const BODY = 'M12 28 L55.6 28 L58.5 44.5 L5.5 44.5 Z';
 
-function WideDoor({ x }: { x: number }) {
+function Joint({ x }: { x: number }) {
   return (
     <>
-      <Rect x={x} y={30.1} width={3.6} height={12.9} rx={0.5} fill={P.glassDeep} stroke={P.dark} strokeWidth={0.5} />
-      <Line x1={x + 1.8} y1={30.5} x2={x + 1.8} y2={42.6} stroke={P.dark} strokeWidth={0.45} />
+      <Rect x={x} y={28.5} width={1.8} height={15.6} fill={P.joint} />
+      <Line x1={x} y1={28.7} x2={x} y2={44.1} stroke={P.jointEdge} strokeWidth={0.45} />
+      <Line x1={x + 1.8} y1={28.7} x2={x + 1.8} y2={44.1} stroke={P.jointEdge} strokeWidth={0.45} />
     </>
   );
 }
@@ -35,65 +37,41 @@ export function Face({ size = 64 }: { size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 64 64">
       <Rect x={1.5} y={1.5} width={61} height={61} rx={14} fill={P.plate} stroke={P.edge} strokeWidth={1} />
-      <Line x1={3} y1={46.2} x2={61} y2={46.2} stroke={P.rail} strokeWidth={1.1} strokeLinecap="round" />
-      {/* single-arm pantograph over the front section */}
-      <Path
-        d="M12.5 28.5 L16.2 25.1 L19 25.1"
-        stroke={P.rail}
-        strokeWidth={1.1}
-        strokeLinecap="round"
-        fill="none"
-      />
-      <Line x1={16.8} y1={24.7} x2={21.2} y2={24.7} stroke={P.rail} strokeWidth={1.1} strokeLinecap="round" />
-      {/* bogies under each long section */}
-      <Circle cx={8.8} cy={44.6} r={1.6} fill={P.wheel} />
-      <Circle cx={12.2} cy={44.6} r={1.6} fill={P.wheel} />
-      <Circle cx={26.6} cy={44.6} r={1.6} fill={P.wheel} />
-      <Circle cx={30} cy={44.6} r={1.6} fill={P.wheel} />
-      <Circle cx={43.6} cy={44.6} r={1.6} fill={P.wheel} />
-      <Circle cx={47} cy={44.6} r={1.6} fill={P.wheel} />
-      <Circle cx={54.8} cy={44.6} r={1.6} fill={P.wheel} />
-      <Circle cx={58.2} cy={44.6} r={1.6} fill={P.wheel} />
-      {/* red base, rounded-trapezoid raked nose */}
-      <Path d={BODY} fill={P.red} />
-      {/* cream upper band, straight continuous beltline */}
-      <Path
-        d="M8.4 28.7 L58.6 28.7 Q60.7 28.7 60.7 30.7 L60.7 36.3 L4.62 36.3 L4.7 34 C5 31.4 6.3 29.2 8.4 28.7 Z"
-        fill={P.cream}
-      />
-      <Line x1={4.8} y1={36.3} x2={60.4} y2={36.3} stroke={P.silver} strokeWidth={0.5} opacity={0.6} />
-      {/* grey skirt */}
-      <Rect x={5.2} y={41.4} width={55} height={1.6} rx={0.5} fill={P.grey} />
-      {/* roof AC boxes */}
-      <Rect x={25.5} y={27.6} width={5} height={1.1} rx={0.4} fill={P.grey} />
-      <Rect x={45.5} y={27.6} width={5} height={1.1} rx={0.4} fill={P.grey} />
-      {/* raked windscreen */}
-      <Path d="M5.35 34.9 C5.75 31.9 6.9 30 9 29.6 L10.9 29.6 L10.9 34.9 Z" fill={P.glass} />
-      {/* full-width LED destination at the roofline */}
-      <Rect x={11.3} y={29.3} width={4.2} height={1.05} rx={0.35} fill={P.amber} />
-      {/* angular polygonal headlight cluster — the 15T "cheekbone" */}
-      <Path d="M4.75 38.4 L7.3 38 L7.9 39.9 L5 40.4 Z" fill={P.lens} stroke={P.dark} strokeWidth={0.4} />
-      {/* two joints = three LONG sections */}
-      <Rect x={21} y={28.8} width={1.5} height={14} fill={P.dark} opacity={0.9} />
-      <Line x1={21.75} y1={29.3} x2={21.75} y2={42.5} stroke="#4A5260" strokeWidth={0.35} />
-      <Rect x={39.4} y={28.8} width={1.5} height={14} fill={P.dark} opacity={0.9} />
-      <Line x1={40.15} y1={29.3} x2={40.15} y2={42.5} stroke="#4A5260" strokeWidth={0.35} />
-      {/* continuous low window line, section 1 */}
-      <Rect x={11.7} y={30.4} width={2.6} height={5} rx={0.6} fill={P.glass} />
-      <WideDoor x={14.9} />
-      <Rect x={19.1} y={30.4} width={1.5} height={5} rx={0.5} fill={P.glass} />
-      {/* section 2 */}
-      <Rect x={22.9} y={30.4} width={1.8} height={5} rx={0.5} fill={P.glass} />
-      <WideDoor x={25.3} />
-      <Rect x={29.5} y={30.4} width={3} height={5} rx={0.6} fill={P.glass} />
-      <WideDoor x={33.1} />
-      <Rect x={37.3} y={30.4} width={1.7} height={5} rx={0.5} fill={P.glass} />
-      {/* section 3 */}
-      <Rect x={41.4} y={30.4} width={2.8} height={5} rx={0.6} fill={P.glass} />
-      <WideDoor x={44.8} />
-      <Rect x={49} y={30.4} width={3.2} height={5} rx={0.6} fill={P.glass} />
-      <Rect x={52.8} y={30.4} width={3.2} height={5} rx={0.6} fill={P.glass} />
-      <Rect x={56.6} y={30.4} width={3} height={5} rx={0.6} fill={P.glass} />
+      {/* single-arm pantograph over the cab */}
+      <Path d="M18.5 27.8 L22.5 22.8 L28 21.9" stroke={P.panto} strokeWidth={1.1} strokeLinecap="round" fill="none" />
+      <Line x1={26.3} y1={21.5} x2={29.7} y2={21.5} stroke={P.panto} strokeWidth={1.2} strokeLinecap="round" />
+      <Line x1={4.5} y1={46.8} x2={59.5} y2={46.8} stroke={P.rail} strokeWidth={1.1} strokeLinecap="round" />
+      <Circle cx={9.8} cy={45} r={1.6} fill={P.wheel} />
+      <Circle cx={13} cy={45} r={1.6} fill={P.wheel} />
+      <Circle cx={27.6} cy={45} r={1.6} fill={P.wheel} />
+      <Circle cx={30.8} cy={45} r={1.6} fill={P.wheel} />
+      <Circle cx={47.4} cy={45} r={1.6} fill={P.wheel} />
+      <Circle cx={50.6} cy={45} r={1.6} fill={P.wheel} />
+      {/* silver base body */}
+      <Path d={BODY} fill={P.silver} />
+      {/* glossy black window band */}
+      <Rect x={17.5} y={29} width={40} height={6.9} fill={P.black} />
+      {/* red skirt along the bottom */}
+      <Path d="M5.5 41 L57.9 41 L58.5 44.5 L5.5 44.5 Z" fill={P.red} />
+      {/* dark roof strip */}
+      <Rect x={13} y={28} width={42} height={1.2} fill={P.roof} />
+      {/* red cab: brow over the roof + raked nose */}
+      <Path d="M12 28 L18.2 28 L18.2 44.5 L5.5 44.5 Z" fill={P.red} />
+      {/* big raked black windscreen dominating the sloped face */}
+      <Path d="M13 28.9 L17.4 28.9 L17.4 38.8 L8.7 38.8 Z" fill={P.black} />
+      {/* white DRL dash low on the nose */}
+      <Rect x={7} y={41.6} width={2.2} height={1} rx={0.5} fill={P.drl} />
+      {/* glazed doors breaking the black band down through the silver */}
+      <Rect x={21.5} y={29.4} width={3} height={13.8} fill={P.glassDoor} />
+      <Line x1={23} y1={29.6} x2={23} y2={43} stroke={P.dark} strokeWidth={0.4} opacity={0.8} />
+      <Rect x={35} y={29.4} width={3} height={13.8} fill={P.glassDoor} />
+      <Line x1={36.5} y1={29.6} x2={36.5} y2={43} stroke={P.dark} strokeWidth={0.4} opacity={0.8} />
+      <Rect x={48.5} y={29.4} width={3} height={13.8} fill={P.glassDoor} />
+      <Line x1={50} y1={29.6} x2={50} y2={43} stroke={P.dark} strokeWidth={0.4} opacity={0.8} />
+      {/* three slim joints = four sections */}
+      <Joint x={26} />
+      <Joint x={40} />
+      <Joint x={53} />
       <Path d={BODY} fill="none" stroke={P.dark} strokeWidth={0.9} />
     </Svg>
   );

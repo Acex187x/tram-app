@@ -36,4 +36,10 @@ export const P = {
   ledOrange: '#F78A1D',
   gold: '#E0A526',
   warmLens: '#FCEFC5',
+  /** DPP blue route-number box (classic T3). */
+  blue: '#1D4E9E',
+  /** Wine/maroon T3R.PLF bib. */
+  wine: '#6E1E29',
+  /** Green-yellow LED destination displays (T3R.P / T3R.PLF / 14T). */
+  ledGreen: '#A6D82F',
 } as const;

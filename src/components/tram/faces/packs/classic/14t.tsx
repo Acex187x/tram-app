@@ -1,94 +1,59 @@
-// Škoda 14T "Elektra" — the Porsche-designed one. Smooth one-piece rounded
-// mask; steeply raked windscreen whose rounded top corners BLEND into the
-// roofline; round lamp clusters recessed low into the curved mask; no front
-// door. Cream upper, red lower front, grey skirt. Tilted glints keep the
-// signature smirk. Yellow single-arm pantograph. Expression: sporty, sleek.
-import Svg, { Circle, Path, Rect } from 'react-native-svg';
+// Škoda 14T "Elektra" — the Porsche-designed WEDGE. Angular SILVER cab, tall
+// flat raked windscreen in a black frame that WIDENS DOWNWARD (trapezoid),
+// green LED route display up in the glass, vertical clusters of small round
+// lens lights recessed in dark niches low at each corner (amber on top), red
+// body flanks peeking past the silver nose, single-arm pantograph.
+// Expression: sharp, faceted, sporty.
+import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 
 import { P, VB, type FaceProps } from './palette';
 
-const POD = '#1A1D21';
+const MASK = '#101317';
+const NICHE = '#22262B';
 
 const BODY =
-  'M13.5 56.5 L13.5 30 C13.5 15.4 21 9.8 32 9.8 C43 9.8 50.5 15.4 50.5 30 L50.5 56.5 Q50.5 60 47 60 L17 60 Q13.5 60 13.5 56.5 Z';
+  'M13.2 56.8 L14.9 12.6 Q15 10 17.6 10 L46.4 10 Q49 10 49.1 12.6 L50.8 56.8 Q50.9 59.6 47.9 59.6 L16.1 59.6 Q13.1 59.6 13.2 56.8 Z';
 
 export function Face({ size = 64 }: FaceProps) {
   return (
     <Svg width={size} height={size} viewBox={VB}>
-      {/* yellow single-arm pantograph */}
-      <Path
-        d="M31 9.4 L39.5 4.8 M36.4 4.2 L42.6 4.2"
-        stroke="#D9A31B"
-        strokeWidth={1.5}
-        strokeLinecap="round"
-        fill="none"
-      />
-      {/* black mirror ears at the A-pillars */}
-      <Rect x={10.8} y={24.4} width={3.2} height={4.6} rx={1.4} fill="#1B1D20" />
-      <Rect x={50} y={24.4} width={3.2} height={4.6} rx={1.4} fill="#1B1D20" />
-      {/* smooth one-piece rounded mask */}
-      <Path d={BODY} fill={P.cream} />
-      {/* steeply raked windscreen, top corners rounding into the roofline */}
-      <Path
-        d="M17.3 34.2 L17.3 24 C17.3 16.4 23.4 13.2 32 13.2 C40.6 13.2 46.7 16.4 46.7 24 L46.7 34.2 Q46.7 36.4 44.5 36.4 L19.5 36.4 Q17.3 36.4 17.3 34.2 Z"
-        fill={P.glass}
-      />
-      {/* orange LED destination glowing behind the glass top */}
-      <Rect x={24.6} y={15.4} width={14.8} height={2.7} rx={1.1} fill="#0C0F12" />
-      <Rect x={26.4} y={16.3} width={5.4} height={1.1} rx={0.55} fill={P.ledOrange} />
-      <Rect x={33.2} y={16.3} width={4} height={1.1} rx={0.55} fill={P.ledOrange} opacity={0.7} />
-      {/* tilted narrow glints — the smirk */}
-      <Rect
-        x={20.8}
-        y={21.6}
-        width={4.6}
-        height={10.4}
-        rx={2.3}
-        fill={P.glint}
-        opacity={0.44}
-        transform="rotate(-15 23.1 26.8)"
-      />
-      <Rect
-        x={38.6}
-        y={21.6}
-        width={4.6}
-        height={10.4}
-        rx={2.3}
-        fill={P.glint}
-        opacity={0.44}
-        transform="rotate(-15 40.9 26.8)"
-      />
-      <Circle cx={24.4} cy={23.6} r={1} fill={P.glint} opacity={0.8} />
-      <Circle cx={42.2} cy={23.6} r={1} fill={P.glint} opacity={0.8} />
-      {/* parked wiper hanging from the glass top */}
-      <Path
-        d="M35.6 18.6 L38 25.6"
-        stroke="#0F1215"
-        strokeWidth={0.9}
-        strokeLinecap="round"
-        fill="none"
-      />
-      {/* red lower front with a gentle upswept top edge */}
-      <Path
-        d="M13.5 40 Q32 38 50.5 40 L50.5 55.2 L13.5 55.2 Z"
-        fill={P.red}
-      />
-      {/* round lamp clusters recessed LOW into the curved mask */}
-      <Circle cx={21.8} cy={46.8} r={3.9} fill={POD} />
-      <Circle cx={42.2} cy={46.8} r={3.9} fill={POD} />
-      <Circle cx={21} cy={45.9} r={1.5} fill="#EDF1F5" />
-      <Circle cx={41.4} cy={45.9} r={1.5} fill="#EDF1F5" />
-      <Circle cx={23.1} cy={48.3} r={1.1} fill={P.amber} />
-      <Circle cx={43.5} cy={48.3} r={1.1} fill={P.amber} />
-      {/* Škoda winged-arrow roundel between the pods */}
-      <Circle cx={32} cy={46.8} r={1.8} fill="none" stroke="#2E7D4F" strokeWidth={1} />
-      {/* cream reg plate under the roundel */}
-      <Rect x={28.8} y={50.6} width={6.4} height={2.2} rx={0.7} fill="#F2ECDD" />
-      {/* grey skirt — the Elektra's low hem */}
-      <Rect x={15} y={55.2} width={34} height={3.2} rx={1.4} fill={P.silverDark} />
-      {/* dark under-lip */}
-      <Rect x={17} y={58.6} width={30} height={1.4} rx={0.7} fill={P.charcoal} />
-      {/* crisp silhouette re-stroked over the livery */}
+      {/* single-arm pantograph */}
+      <Path d="M32 9.6 L40 4.8" stroke="#8A8E94" strokeWidth={1.3} strokeLinecap="round" fill="none" />
+      <Line x1={36.8} y1={4} x2={43.2} y2={4} stroke="#6B6F75" strokeWidth={1.1} strokeLinecap="round" />
+      {/* angular SILVER wedge body */}
+      <Path d={BODY} fill="#CDD1D6" />
+      {/* soft sheen across the lower silver nose */}
+      <Path d="M25.5 46.8 L38.5 46.8 L38.9 56.8 L25.1 56.8 Z" fill="#DBDEE2" opacity={0.5} />
+      {/* RED body flanks peeking past the silver cab at each edge */}
+      <Path d="M14.1 30 L18.6 30.6 L19.6 57.2 L13.6 57.2 Z" fill={P.pidRed} />
+      <Path d="M49.9 30 L45.4 30.6 L44.4 57.2 L50.4 57.2 Z" fill={P.pidRed} />
+      {/* black windscreen frame — trapezoid that WIDENS DOWNWARD */}
+      <Path d="M24.2 13 L39.8 13 L44.6 46 L19.4 46 Z" fill={MASK} />
+      {/* raked glass inside the frame */}
+      <Path d="M25.5 14.8 L38.5 14.8 L42.6 44.2 L21.4 44.2 Z" fill={P.glass} />
+      {/* green LED route display up in the glass */}
+      <Rect x={26.6} y={16.4} width={10.8} height={2.2} rx={0.6} fill="#15130F" />
+      <Rect x={27.6} y={17} width={2.2} height={1.1} rx={0.3} fill={P.ledGreen} />
+      <Rect x={30.6} y={17} width={5.8} height={1.1} rx={0.5} fill={P.ledGreen} opacity={0.8} />
+      {/* tilted wedge glints */}
+      <Path d="M25.4 21 L29 21 L30.6 42.6 L26.6 42.6 Z" fill={P.glint} opacity={0.34} />
+      <Path d="M35.6 21 L38 21 L39.6 42.6 L36.9 42.6 Z" fill={P.glint} opacity={0.24} />
+      <Circle cx={27.4} cy={23.4} r={1} fill={P.glint} opacity={0.85} />
+      {/* recessed dark light niches, vertical 3-lens stacks (amber on top) */}
+      <Rect x={17.2} y={47} width={5.6} height={9.2} rx={1.4} fill={NICHE} />
+      <Rect x={41.2} y={47} width={5.6} height={9.2} rx={1.4} fill={NICHE} />
+      <Circle cx={20} cy={49.3} r={1.35} fill={P.amber} />
+      <Circle cx={20} cy={52.2} r={1.35} fill={P.warmLens} />
+      <Circle cx={20} cy={55} r={1.35} fill={P.warmLens} />
+      <Circle cx={44} cy={49.3} r={1.35} fill={P.amber} />
+      <Circle cx={44} cy={52.2} r={1.35} fill={P.warmLens} />
+      <Circle cx={44} cy={55} r={1.35} fill={P.warmLens} />
+      {/* Škoda roundel + charcoal fleet plate under the glass */}
+      <Circle cx={32} cy={48.6} r={1.5} fill="none" stroke="#3D8B57" strokeWidth={0.9} />
+      <Rect x={28.9} y={51.6} width={6.2} height={2} rx={0.5} fill="#4A4F55" />
+      {/* grey skirt line at the rails */}
+      <Rect x={16} y={57.4} width={32} height={1.4} rx={0.7} fill={P.silverDark} />
+      {/* crisp silhouette re-stroked */}
       <Path d={BODY} fill="none" stroke={P.outline} strokeWidth={1.6} />
     </Svg>
   );

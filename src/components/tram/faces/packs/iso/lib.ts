@@ -103,4 +103,32 @@ export const ISO = {
   amber: '#FFAF36',
   warm: '#FFE9B8',
   shadow: '#151021',
+  // T3R.PLF wine bib + champagne-silver body
+  wine: '#8A2131',
+  wineSide: '#671723',
+  silver: '#DCD8CC',
+  silverSide: '#B9B3A4',
+  silverRoof: '#ECE9E0',
+  // modern glossy black (52T visor, 15T windscreen)
+  visor: '#17191F',
+  // LED destination orange + classic blue route box
+  ledOrange: '#FF8F1F',
+  blue: '#1D4E9E',
+  // Tatra scissor/diamond pantograph yellow
+  pantoY: '#C9971F',
 } as const;
+
+/** Skewed diamond (rhombus) pantograph path — the Tatra scissor tell. */
+export const diamond = (m: Pt, span = 5.4, lift = 4.6, apex = 10): string => {
+  const [mx, my] = m;
+  const left: Pt = [r1(mx - span), r1(my + span / 2 - lift)];
+  const right: Pt = [r1(mx + span), r1(my - span / 2 - lift)];
+  const top: Pt = [r1(mx), r1(my - apex)];
+  return `M${P([mx, my])} L${P(left)} L${P(top)} L${P(right)} Z`;
+};
+
+/** Contact bar sitting on the diamond apex. */
+export const diamondBar = (m: Pt, apex = 10): string => {
+  const [mx, my] = m;
+  return `M${r1(mx - 3.2)} ${r1(my - apex + 1.6)} L${r1(mx + 3.2)} ${r1(my - apex - 1.6)}`;
+};

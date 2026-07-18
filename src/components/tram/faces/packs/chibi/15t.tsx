@@ -1,66 +1,78 @@
-// Chibi 15T — ForCity Alfa, the friendly workhorse ROBOT. Broad
-// rounded-trapezoid face, big windscreen with the tell-tale V-peak at the top
-// center, glowing round robot eyes, ANGULAR polygonal headlight cheekbones
-// (sharper than the 14T's round lamps), full-width roofline LED, big open
-// smile, and an antenna bobble. White upper / red lower / grey skirt.
-import Svg, { Circle, Ellipse, Line, Path, Rect } from 'react-native-svg';
+// Chibi 15T ForCity — the sloped face with the SILVER light-band. Big raked
+// CURVED black windscreen framed by a RED brow/cap that flows down the
+// A-pillars (the body reads red around the glass), amber LED destination in
+// the glass top, a SILVER horizontal mid-band carrying clusters of ROUND
+// headlights, RED lower bumper with white DRL dashes, dark skirt, single-arm
+// pantograph. The whole cute face lives inside the big black glass.
+import Svg, { Circle, Ellipse, Path, Rect } from 'react-native-svg';
 
 import { C, VIEWBOX, type ChibiFaceProps } from './palette';
 
+const GLASSBLACK = '#1E1F27';
+const SILVER = '#D3D7DE';
+const DARKSKIRT = '#4A4E58';
+
 const BODY =
-  'M11 50 C11 52.8 13 54 15.5 54 L48.5 54 C51 54 53 52.8 53 50 L52.2 19.5 C51.9 11.5 45 8.5 32 8.5 C19 8.5 12.1 11.5 11.8 19.5 Z';
+  'M11.5 50 C11.5 52.8 13.5 54 16 54 L48 54 C50.5 54 52.5 52.8 52.5 50 L52.5 21.5 C52.5 12 44 7.5 32 7.5 C20 7.5 11.5 12 11.5 21.5 Z';
 
 export function Face({ size = 64 }: ChibiFaceProps) {
   return (
     <Svg width={size} height={size} viewBox={VIEWBOX}>
       {/* ground shadow + wheel-feet */}
-      <Ellipse cx={32} cy={59.6} rx={20} ry={2.4} fill={C.shadow} />
+      <Ellipse cx={32} cy={59.6} rx={20.5} ry={2.4} fill={C.shadow} />
       <Circle cx={21} cy={54} r={4} fill={C.dark} />
       <Circle cx={43} cy={54} r={4} fill={C.dark} />
       <Circle cx={21} cy={55.4} r={1.2} fill={C.chrome} />
       <Circle cx={43} cy={55.4} r={1.2} fill={C.chrome} />
-      {/* robot antenna bobble */}
-      <Line x1={32} y1={8.5} x2={32} y2={5} stroke={C.outline} strokeWidth={1.6} strokeLinecap="round" />
-      <Circle cx={32} cy={3.6} r={1.8} fill={C.red} stroke={C.outline} strokeWidth={1.1} />
-      {/* broad rounded-trapezoid body, white upper */}
-      <Path d={BODY} fill={C.white} />
-      {/* red lower band and grey skirt */}
-      <Rect x={11.2} y={38} width={41.6} height={10.5} fill={C.red} />
+      {/* single-arm pantograph */}
       <Path
-        d="M11 48.5 L53 48.5 L53 50 C53 52.8 51 54 48.5 54 L15.5 54 C13 54 11 52.8 11 50 Z"
-        fill={C.grey}
+        d="M30 7.6 L36.5 3.6 M33.6 3 L39.8 3"
+        stroke="#4A5566"
+        strokeWidth={1.6}
+        strokeLinecap="round"
+        fill="none"
       />
-      {/* full-width roofline LED display */}
-      <Rect x={15.5} y={10.8} width={33} height={4.6} rx={2} fill={C.dark} />
-      <Rect x={19} y={12.6} width={9} height={1.1} rx={0.55} fill={C.amber} />
-      <Rect x={31} y={12.6} width={4} height={1.1} rx={0.55} fill={C.amber} opacity={0.7} />
-      <Rect x={38} y={12.6} width={7} height={1.1} rx={0.55} fill={C.amber} />
-      {/* big windscreen visor with the V-peak at top center */}
+      {/* RED body — shows as the brow cap + A-pillars around the glass */}
+      <Path d={BODY} fill={C.red} />
+      {/* huge raked CURVED black windscreen */}
       <Path
-        d="M16 33.5 L16 23 Q16 20.8 18.5 20 L30.5 16.8 Q32 16.4 33.5 16.8 L45.5 20 Q48 20.8 48 23 L48 33.5 Q48 36 45.5 36 L18.5 36 Q16 36 16 33.5 Z"
-        fill={C.glass}
+        d="M15 34 L15 22.5 C15 14.6 22 11 32 11 C42 11 49 14.6 49 22.5 L49 34 Q49 36.6 46.4 36.6 L17.6 36.6 Q15 36.6 15 34 Z"
+        fill={GLASSBLACK}
         stroke={C.outline}
-        strokeWidth={1.9}
+        strokeWidth={1.7}
       />
-      {/* glass shading + reflection under the peak */}
-      <Path d="M16 31 L48 31 L48 33.5 Q48 36 45.5 36 L18.5 36 Q16 36 16 33.5 Z" fill={C.glassDeep} opacity={0.55} />
-      <Path d="M28.5 18.2 L33 17 L30 20.6 Z" fill={C.sparkle} opacity={0.55} />
-      {/* glowing round robot eyes */}
-      <Circle cx={24.5} cy={27.2} r={4.8} fill={C.pupil} />
-      <Circle cx={39.5} cy={27.2} r={4.8} fill={C.pupil} />
-      <Circle cx={24.5} cy={27.2} r={2.1} fill={C.glow} />
-      <Circle cx={39.5} cy={27.2} r={2.1} fill={C.glow} />
-      <Circle cx={23} cy={25.4} r={1.3} fill={C.sparkle} />
-      <Circle cx={38} cy={25.4} r={1.3} fill={C.sparkle} />
-      {/* ANGULAR polygonal headlight cheekbones set into the mask */}
-      <Path d="M11.6 39.5 L19.5 38.6 L17.8 43.4 L11.8 43.9 Z" fill={C.lens} stroke={C.outline} strokeWidth={1.2} />
-      <Path d="M52.4 39.5 L44.5 38.6 L46.2 43.4 L52.2 43.9 Z" fill={C.lens} stroke={C.outline} strokeWidth={1.2} />
-      {/* big friendly open smile */}
-      <Path d="M26.5 41.5 Q32 47.8 37.5 41.5 Q32 43.4 26.5 41.5 Z" fill={C.dark} />
-      <Path d="M29.5 44.6 Q32 46.2 34.5 44.6 Q32 47 29.5 44.6 Z" fill={C.blush} />
-      {/* blush inside the visor — the robot's whole face lives in the glass */}
-      <Ellipse cx={20.8} cy={32.8} rx={2.6} ry={1.6} fill={C.blush} opacity={0.85} />
-      <Ellipse cx={43.2} cy={32.8} rx={2.6} ry={1.6} fill={C.blush} opacity={0.85} />
+      {/* amber LED destination in the glass top */}
+      <Rect x={23} y={13.4} width={3} height={2} rx={0.45} fill={C.amber} />
+      <Rect x={28} y={13.8} width={9.5} height={1.3} rx={0.65} fill={C.amber} opacity={0.9} />
+      {/* glass reflection */}
+      <Path d="M19.6 17.6 L24 16.2 L20.8 31 L17.6 28.8 Z" fill={C.sparkle} opacity={0.2} />
+      {/* friendly round eyes glowing in the dark glass */}
+      <Circle cx={25.5} cy={25} r={4.4} fill={C.sparkle} />
+      <Circle cx={38.5} cy={25} r={4.4} fill={C.sparkle} />
+      <Circle cx={26.2} cy={26} r={2.2} fill={C.pupil} />
+      <Circle cx={37.8} cy={26} r={2.2} fill={C.pupil} />
+      <Circle cx={25.4} cy={25.1} r={0.8} fill={C.sparkle} />
+      <Circle cx={37} cy={25.1} r={0.8} fill={C.sparkle} />
+      {/* blush + smile inside the glass */}
+      <Ellipse cx={21.4} cy={30.6} rx={2.3} ry={1.4} fill={C.blush} opacity={0.9} />
+      <Ellipse cx={42.6} cy={30.6} rx={2.3} ry={1.4} fill={C.blush} opacity={0.9} />
+      <Path d="M28.5 30.6 Q32 33.6 35.5 30.6" stroke={C.sparkle} strokeWidth={1.8} strokeLinecap="round" fill="none" />
+      {/* SILVER horizontal mid-band with ROUND headlight clusters */}
+      <Path d="M11.5 38.5 L52.5 38.5 L52.5 44.5 L11.5 44.5 Z" fill={SILVER} />
+      <Circle cx={17.6} cy={41.5} r={2.2} fill={C.lens} stroke={C.outline} strokeWidth={1} />
+      <Circle cx={22.6} cy={41.5} r={1.7} fill={C.sparkle} stroke={C.outline} strokeWidth={0.9} />
+      <Circle cx={26.3} cy={41.5} r={1.1} fill={C.amber} />
+      <Circle cx={46.4} cy={41.5} r={2.2} fill={C.lens} stroke={C.outline} strokeWidth={1} />
+      <Circle cx={41.4} cy={41.5} r={1.7} fill={C.sparkle} stroke={C.outline} strokeWidth={0.9} />
+      <Circle cx={37.7} cy={41.5} r={1.1} fill={C.amber} />
+      {/* RED lower bumper with white DRL dashes */}
+      <Rect x={15.5} y={46.6} width={7} height={1.9} rx={0.95} fill={C.sparkle} stroke={C.outline} strokeWidth={0.8} />
+      <Rect x={41.5} y={46.6} width={7} height={1.9} rx={0.95} fill={C.sparkle} stroke={C.outline} strokeWidth={0.8} />
+      {/* dark skirt */}
+      <Path
+        d="M11.55 50.5 L52.45 50.5 C52.2 53 50.3 54 48 54 L16 54 C13.7 54 11.8 53 11.55 50.5 Z"
+        fill={DARKSKIRT}
+      />
       {/* thick storybook silhouette */}
       <Path d={BODY} fill="none" stroke={C.outline} strokeWidth={2.2} />
     </Svg>

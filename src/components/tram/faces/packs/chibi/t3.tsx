@@ -1,67 +1,71 @@
-// Chibi T3 — the dependable grandpa of the fleet. Cream egg squished into a
-// chubby mascot, two HUGE round wrap-around-glass eyes with a hairline red
-// gasket seam between them, the classic NARROW route-number box as a tiny cap
-// badge (the t3 tell), chrome-ring headlight freckles, warm chrome-bumper
-// smile, red scissor-pantograph ahoge, tiny wheels for feet.
+// Chibi T3 — the round friendly classic. Grounded in the real car: cream bun
+// nose with a split two-pane windscreen, the BLUE route-number box above the
+// glass (the classic-T3 tell), a bold RED apron whose top edge dips in a
+// shallow V, two BIG chrome-ringed round headlights set LOW in the red, a
+// cream skirt below, and the yellow DIAMOND pantograph up top.
 import Svg, { Circle, Ellipse, Line, Path, Rect } from 'react-native-svg';
 
 import { C, VIEWBOX, type ChibiFaceProps } from './palette';
 
+const BLUE = '#2456A4'; // route-number box
+const PANTO = '#D9A62E'; // yellow diamond pantograph
+
 const BODY =
-  'M11 50 C11 52.8 13 54 15.5 54 L48.5 54 C51 54 53 52.8 53 50 L53 26 C53 13 44 7 32 7 C20 7 11 13 11 26 Z';
+  'M11 50 C11 52.8 13 54 15.5 54 L48.5 54 C51 54 53 52.8 53 50 L53 25 C53 12.5 44 7 32 7 C20 7 11 12.5 11 25 Z';
+
+// red apron: top edge dips in a shallow V at center, cream skirt stays below
+const APRON =
+  'M11 33.5 L28.5 33.5 L32 36.6 L35.5 33.5 L53 33.5 L53 48 L11 48 Z';
 
 export function Face({ size = 64 }: ChibiFaceProps) {
   return (
     <Svg width={size} height={size} viewBox={VIEWBOX}>
-      {/* ground shadow + wheel-feet (peek below body) */}
+      {/* ground shadow + wheel-feet */}
       <Ellipse cx={32} cy={59.6} rx={20} ry={2.4} fill={C.shadow} />
       <Circle cx={21} cy={54} r={4} fill={C.dark} />
       <Circle cx={43} cy={54} r={4} fill={C.dark} />
       <Circle cx={21} cy={55.4} r={1.2} fill={C.chrome} />
       <Circle cx={43} cy={55.4} r={1.2} fill={C.chrome} />
-      {/* red scissor pantograph ahoge */}
+      {/* yellow DIAMOND (rhombus) pantograph */}
       <Path
-        d="M24.5 7.5 L33 3.2 M39.5 7.5 L31 3.2 M27.6 2.8 L36.4 2.8"
-        stroke={C.redDeep}
+        d="M32 1.4 L37.4 4.3 L32 7.2 L26.6 4.3 Z"
+        stroke={PANTO}
         strokeWidth={1.5}
-        strokeLinecap="round"
+        strokeLinejoin="round"
         fill="none"
       />
-      {/* cream egg body */}
+      {/* cream bun body */}
       <Path d={BODY} fill={C.cream} />
-      {/* red lower band — dips at the corners like the real belt line */}
+      {/* BLUE route-number box above the windscreen — the classic tell */}
+      <Rect x={25.2} y={9.4} width={13.6} height={6} rx={1.3} fill={BLUE} stroke={C.outline} strokeWidth={1} />
+      <Path d="M28.6 13.2 Q28.6 10.9 30.4 10.9 Q31.8 10.9 31.8 12 L29 13.2 Z" fill={C.sparkle} />
+      <Path d="M33.2 10.9 L36.4 10.9 L34.2 13.3" stroke={C.sparkle} strokeWidth={1.1} strokeLinecap="round" fill="none" />
+      {/* split windscreen: two rounded panes with a cream center pillar */}
+      <Rect x={14.6} y={17.6} width={16} height={13.2} rx={4.4} fill={C.glass} stroke={C.outline} strokeWidth={1.8} />
+      <Rect x={33.4} y={17.6} width={16} height={13.2} rx={4.4} fill={C.glass} stroke={C.outline} strokeWidth={1.8} />
+      {/* big soft eyes in the glass */}
+      <Circle cx={23.4} cy={24.6} r={3.8} fill={C.pupil} />
+      <Circle cx={40.6} cy={24.6} r={3.8} fill={C.pupil} />
+      <Circle cx={22.1} cy={23.1} r={1.5} fill={C.sparkle} />
+      <Circle cx={39.3} cy={23.1} r={1.5} fill={C.sparkle} />
+      <Circle cx={24.8} cy={26.4} r={0.7} fill={C.sparkle} opacity={0.85} />
+      <Circle cx={42} cy={26.4} r={0.7} fill={C.sparkle} opacity={0.85} />
+      {/* rosy blush on the cream just under the glass */}
+      <Ellipse cx={17.6} cy={32.2} rx={2.5} ry={1.5} fill={C.blush} opacity={0.85} />
+      <Ellipse cx={46.4} cy={32.2} rx={2.5} ry={1.5} fill={C.blush} opacity={0.85} />
+      {/* RED apron with the shallow center V dip */}
+      <Path d={APRON} fill={C.red} />
+      <Line x1={11} y1={48} x2={53} y2={48} stroke={C.outline} strokeWidth={0.9} opacity={0.35} />
+      {/* two BIG chrome-ringed round headlights, LOW in the red */}
+      <Circle cx={20.5} cy={42} r={3.5} fill={C.lens} stroke={C.chrome} strokeWidth={1.7} />
+      <Circle cx={43.5} cy={42} r={3.5} fill={C.lens} stroke={C.chrome} strokeWidth={1.7} />
+      <Circle cx={19.4} cy={40.9} r={1} fill={C.sparkle} opacity={0.95} />
+      <Circle cx={42.4} cy={40.9} r={1} fill={C.sparkle} opacity={0.95} />
+      {/* warm cream smile between the lights */}
       <Path
-        d="M11 36.5 Q32 40.5 53 36.5 L53 50 C53 52.8 51 54 48.5 54 L15.5 54 C13 54 11 52.8 11 50 Z"
-        fill={C.red}
-      />
-      {/* NARROW number box cap badge (classic-T3 tell — not full width) */}
-      <Rect x={26.5} y={10.2} width={11} height={4.6} rx={1.6} fill={C.dark} />
-      <Rect x={28.6} y={11.9} width={6.8} height={1.3} rx={0.65} fill={C.amber} opacity={0.95} />
-      {/* two HUGE round glass eyes (the wrap-around windscreen) */}
-      <Circle cx={22.5} cy={27.5} r={8} fill={C.glass} stroke={C.outline} strokeWidth={1.8} />
-      <Circle cx={41.5} cy={27.5} r={8} fill={C.glass} stroke={C.outline} strokeWidth={1.8} />
-      {/* hairline red gasket seam between the panes */}
-      <Line x1={32} y1={23.5} x2={32} y2={31.5} stroke="#8E2A22" strokeWidth={0.9} />
-      {/* big soft pupils + sparkle highlights */}
-      <Circle cx={23.8} cy={28.3} r={4.2} fill={C.pupil} />
-      <Circle cx={40.2} cy={28.3} r={4.2} fill={C.pupil} />
-      <Circle cx={22.4} cy={26.6} r={1.7} fill={C.sparkle} />
-      <Circle cx={38.8} cy={26.6} r={1.7} fill={C.sparkle} />
-      <Circle cx={25.3} cy={30.2} r={0.8} fill={C.sparkle} opacity={0.85} />
-      <Circle cx={41.7} cy={30.2} r={0.8} fill={C.sparkle} opacity={0.85} />
-      {/* rosy blush on the cream cheeks */}
-      <Ellipse cx={15.6} cy={34.6} rx={2.7} ry={1.8} fill={C.blush} opacity={0.85} />
-      <Ellipse cx={48.4} cy={34.6} rx={2.7} ry={1.8} fill={C.blush} opacity={0.85} />
-      {/* chrome-ring round headlight freckles low in the red band */}
-      <Circle cx={20} cy={45.8} r={2.7} fill={C.lens} stroke={C.chrome} strokeWidth={1.3} />
-      <Circle cx={44} cy={45.8} r={2.7} fill={C.lens} stroke={C.chrome} strokeWidth={1.3} />
-      <Circle cx={19.2} cy={45} r={0.8} fill={C.sparkle} opacity={0.9} />
-      <Circle cx={43.2} cy={45} r={0.8} fill={C.sparkle} opacity={0.9} />
-      {/* warm chrome-bumper smile */}
-      <Path
-        d="M26 45.6 Q32 50.4 38 45.6"
-        stroke={C.chrome}
-        strokeWidth={2.2}
+        d="M27.5 42.6 Q32 46.2 36.5 42.6"
+        stroke={C.cream}
+        strokeWidth={2}
         strokeLinecap="round"
         fill="none"
       />

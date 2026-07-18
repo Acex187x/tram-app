@@ -1,72 +1,73 @@
-// Side Profile pack — T3R.P: modernized T3s in their trademark COUPLED PAIR.
-// Two identical rounded T3 bodies with a coupling bar between them; each car
-// carries the full-width amber LED destination brow (the #1 tell vs classic
-// T3) and a modern single-arm pantograph instead of the scissor.
-import Svg, { Circle, G, Line, Path, Rect } from 'react-native-svg';
+// Side Profile pack — Tatra T3R.P: the classic T3 shape but ALWAYS drawn as
+// the coupled two-car set it runs as, each car with the orange LED destination
+// strip in the brow (instead of the blue box) and its own yellow diamond
+// pantograph. Cream/red T3 livery, cream doors breaking the red belt.
+import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 
 const P = {
-  plate: '#232932',
-  edge: 'rgba(154,166,183,0.42)',
-  rail: '#909CAD',
-  wheel: '#3C434F',
-  red: '#C8332B',
-  cream: '#F2E7CE',
-  creamShade: '#DFD0AE',
-  glass: '#9AD4EA',
-  silver: '#C9CFD8',
-  amber: '#FFB03A',
-  lens: '#FFD98F',
-  dark: '#151A21',
+  plate: '#EDF0F4',
+  edge: 'rgba(90,102,120,0.35)',
+  rail: '#A7AEB9',
+  wheel: '#333941',
+  red: '#C8352C',
+  cream: '#F3E6C8',
+  door: '#E6D5AC',
+  glass: '#54788C',
+  roof: '#5A6068',
+  led: '#F59B1A',
+  panto: '#C89A2E',
+  dark: '#23272E',
 } as const;
 
-const CAR_BODY =
-  'M5 28.6 L21 28.6 C24.6 28.6 26 31 26 34 L26 41.2 Q26 43 24 43 L2 43 Q0 43 0 41.2 L0 34 C0 31 1.4 28.6 5 28.6 Z';
+function carBody(x: number): string {
+  return (
+    `M${x + 3.6} 28.5 L${x + 19.4} 28.5 C${x + 21.9} 28.5 ${x + 23} 30.3 ${x + 23} 32.8 ` +
+    `L${x + 23} 42.7 Q${x + 23} 44.5 ${x + 21.2} 44.5 L${x + 1.8} 44.5 Q${x} 44.5 ${x} 42.7 ` +
+    `L${x} 32.8 C${x} 30.3 ${x + 1.1} 28.5 ${x + 3.6} 28.5 Z`
+  );
+}
 
-function Door({ x }: { x: number }) {
+function Panto({ cx }: { cx: number }) {
   return (
     <>
-      <Rect x={x} y={30.2} width={2.9} height={11.7} rx={0.5} fill={P.creamShade} />
-      <Rect x={x + 0.45} y={30.5} width={2} height={3.8} rx={0.4} fill={P.glass} />
-      <Line x1={x + 1.45} y1={30.7} x2={x + 1.45} y2={41.6} stroke={P.dark} strokeWidth={0.45} />
-      <Rect x={x} y={42.1} width={2.9} height={0.7} fill={P.dark} opacity={0.5} />
+      <Path
+        d={`M${cx} 23.2 L${cx + 3.8} 25.8 L${cx} 28.4 L${cx - 3.8} 25.8 Z`}
+        fill="none"
+        stroke={P.panto}
+        strokeWidth={1}
+        strokeLinejoin="round"
+      />
+      <Line x1={cx - 2} y1={22.8} x2={cx + 2} y2={22.8} stroke={P.panto} strokeWidth={1.1} strokeLinecap="round" />
     </>
   );
 }
 
 function Car({ x }: { x: number }) {
   return (
-    <G x={x}>
-      {/* modern single-arm pantograph */}
+    <>
+      <Circle cx={x + 4.5} cy={45} r={1.5} fill={P.wheel} />
+      <Circle cx={x + 7.5} cy={45} r={1.5} fill={P.wheel} />
+      <Circle cx={x + 15.5} cy={45} r={1.5} fill={P.wheel} />
+      <Circle cx={x + 18.5} cy={45} r={1.5} fill={P.wheel} />
+      <Path d={carBody(x)} fill={P.cream} />
+      <Rect x={x} y={37.2} width={23} height={5.1} fill={P.red} />
+      <Path d={`M${x + 3.4} 29.4 L${x + 19.6} 29.4`} stroke={P.roof} strokeWidth={1.5} strokeLinecap="round" />
+      {/* windscreen */}
       <Path
-        d="M10.8 28.4 L14.4 25.1 L17.2 25.1"
-        stroke={P.rail}
-        strokeWidth={1.1}
-        strokeLinecap="round"
-        fill="none"
+        d={`M${x + 0.7} 31.2 C${x + 0.7} 30.2 ${x + 1.7} 29.9 ${x + 2.8} 29.9 L${x + 4.4} 29.9 L${x + 4.4} 35.2 L${x + 0.7} 35.2 Z`}
+        fill={P.glass}
       />
-      <Line x1={14.8} y1={24.7} x2={19.6} y2={24.7} stroke={P.rail} strokeWidth={1.1} strokeLinecap="round" />
-      <Circle cx={4.2} cy={44.6} r={1.6} fill={P.wheel} />
-      <Circle cx={7.6} cy={44.6} r={1.6} fill={P.wheel} />
-      <Circle cx={18.4} cy={44.6} r={1.6} fill={P.wheel} />
-      <Circle cx={21.8} cy={44.6} r={1.6} fill={P.wheel} />
-      <Path d={CAR_BODY} fill={P.cream} />
-      <Path d="M0 36.6 L26 36.6 L26 41.2 Q26 43 24 43 L2 43 Q0 43 0 41.2 Z" fill={P.red} />
-      <Line x1={0.2} y1={36.6} x2={25.8} y2={36.6} stroke={P.silver} strokeWidth={0.5} opacity={0.7} />
-      {/* full-width amber LED destination brow — the modernization tell */}
-      <Rect x={0.9} y={28.9} width={3.6} height={1.05} rx={0.35} fill={P.amber} />
-      {/* wrap-around cab windscreen */}
-      <Path d="M0.9 34.9 L0.9 31.9 C0.9 30.3 2 29.6 3.7 29.6 L5.1 29.6 L5.1 34.9 Z" fill={P.glass} />
-      <Door x={5.9} />
-      <Rect x={9.5} y={30.2} width={3} height={4.1} rx={0.7} fill={P.glass} />
-      <Door x={13.2} />
-      <Rect x={16.8} y={30.2} width={3} height={4.1} rx={0.7} fill={P.glass} />
-      <Door x={20.5} />
-      <Rect x={23.9} y={30.2} width={1.5} height={4} rx={0.6} fill={P.glass} />
-      {/* headlight + modern rectangular turn signal */}
-      <Circle cx={0.9} cy={40} r={1} fill={P.lens} stroke={P.silver} strokeWidth={0.5} />
-      <Rect x={0.6} y={37.9} width={1} height={0.7} rx={0.2} fill={P.amber} opacity={0.9} />
-      <Path d={CAR_BODY} fill="none" stroke={P.dark} strokeWidth={0.9} />
-    </G>
+      {/* doors + windows */}
+      <Rect x={x + 5.4} y={29.9} width={2.6} height={14.1} fill={P.door} />
+      <Line x1={x + 6.7} y1={30.1} x2={x + 6.7} y2={43.8} stroke={P.dark} strokeWidth={0.35} opacity={0.7} />
+      <Rect x={x + 8.8} y={30.3} width={3.4} height={4.3} rx={0.5} fill={P.glass} />
+      <Rect x={x + 13} y={29.9} width={2.6} height={14.1} fill={P.door} />
+      <Line x1={x + 14.3} y1={30.1} x2={x + 14.3} y2={43.8} stroke={P.dark} strokeWidth={0.35} opacity={0.7} />
+      <Rect x={x + 16.4} y={30.3} width={3.4} height={4.3} rx={0.5} fill={P.glass} />
+      {/* orange LED destination strip in the brow — the T3R.P tell */}
+      <Rect x={x + 0.9} y={28.6} width={5.2} height={1.3} rx={0.35} fill={P.led} />
+      <Path d={carBody(x)} fill="none" stroke={P.dark} strokeWidth={0.85} />
+    </>
   );
 }
 
@@ -74,11 +75,13 @@ export function Face({ size = 64 }: { size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 64 64">
       <Rect x={1.5} y={1.5} width={61} height={61} rx={14} fill={P.plate} stroke={P.edge} strokeWidth={1} />
-      <Line x1={4} y1={46.2} x2={60} y2={46.2} stroke={P.rail} strokeWidth={1.1} strokeLinecap="round" />
-      {/* coupling bar between the two cars */}
-      <Line x1={30.2} y1={41.4} x2={33.8} y2={41.4} stroke={P.rail} strokeWidth={1.2} strokeLinecap="round" />
-      <Car x={4.5} />
-      <Car x={33.5} />
+      <Panto cx={18.5} />
+      <Panto cx={45.5} />
+      <Line x1={5} y1={46.8} x2={59} y2={46.8} stroke={P.rail} strokeWidth={1.1} strokeLinecap="round" />
+      {/* coupler bar between the two cars */}
+      <Line x1={29.6} y1={41.3} x2={34.4} y2={41.3} stroke={P.dark} strokeWidth={1.2} strokeLinecap="round" />
+      <Car x={7} />
+      <Car x={34} />
     </Svg>
   );
 }
