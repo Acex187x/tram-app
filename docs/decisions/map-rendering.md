@@ -172,7 +172,7 @@ opacity crossfades, and render 3D only near the top. Band edges
 | band | zoom | rendering |
 |---|---|---|
 | 1 | < 13.2 | direction **teardrops** (`tram-dots`) — sprite rotated to the tram bearing, map-aligned (FR24-style), so heading reads at city scale |
-| 2 | 13.2–14.8 | teardrop **marker** at the true position + **model capsule badge** floating above it (`tram-badge-markers` / `tram-badges`) |
+| 2 | 13.2–14.8 | teardrop **marker** at the true position + **model face badge** floating above it, decluttered by displacement (`tram-badge-markers` / `tram-badges`; see "Band-2 badge declutter" below) |
 | 3–4 | ≥ 14.8 | articulated 3D `ModelLayer` (sections source) |
 
 `BAND_DOTS_TO_BADGES = 13.2`, `BAND_BADGES_TO_MODELS = 14.8`, `BAND_FADE = 0.3`
@@ -203,6 +203,41 @@ opacity crossfades, and render 3D only near the top. Band edges
   registration (`useMapIcons` returns null while loading). Until then a
   minimal fallback `CircleLayer` dot keeps the whole fleet visible and
   tappable — a sprite load failure degrades, never blanks the map.
+
+**Band-2 badge declutter — badges ADAPT (displace), never hide** (2026-07-18;
+supersedes both the brief native-collision pass of `1408cdf`, which HID
+overlapping badges, and the capsule anatomy above — badges are now per-model
+FACE plates with the line number beside them). Overlapping plates are pushed
+apart by a screen-space separation solve in `buildFrame`
+(`featureBuilder.declutterBadges`), not by Mapbox collision:
+
+- The solve runs at the points-push cadence over the **viewport-culled**
+  band-2 trams only (O(n²) Gauss-Seidel over a handful of plates —
+  microseconds; payload ∝ visible; no per-frame React, no new timers). It
+  emits a dedicated `badges` FC → `trams-badges` ShapeSource: plate anchors at
+  their DISPLACED positions + thin leader `LineString`s from a displaced plate
+  back to its true marker (POI-label / flight-tracker style).
+- The heading **teardrop marker always stays at the TRUE position** on the
+  points source; displacement never lies about where the tram is. EVERY
+  marker is also an immovable obstacle box in the solve
+  (`MARKER_OBSTACLE_HALF_PX`) and the plate floats `FACE_GAP_PX` above its
+  anchor, so **no plate ever covers any direction arrow** — its own or a
+  neighbour's (the arrows-over-plates mess this replaced).
+- **Selected/followed/favorite plates are immovable** (pinned): they render
+  from the points FC on `tram-badges-pinned` at the exact tram position,
+  never hidden, drawn over the crowd; neighbours displace around them.
+- **Temporal coherence:** each solve is SEEDED from the previous push's
+  offsets (`BadgeDisplacementMemory`, a ref owned by `TramLayers`) with a
+  gentle pull home — stacks keep their arrangement as trams crawl instead of
+  re-shuffling every push, and glide back once the crowd dissolves.
+- **Pitch foreshortening:** anchors are projected with a conservative
+  `BADGE_PITCH_Y_SCALE = cos 55°` on the y axis — billboard plates keep full
+  screen height while ground distances compress under the default 45°/55°
+  camera; solving in raw map-plane px visibly re-overlapped the stacks.
+- Badge box metrics (`FACE_*` consts) live in `featureBuilder` as the single
+  source of truth: the symbol style in `TramLayers` and the solver's boxes are
+  built from the SAME numbers. Behaviour pinned in
+  `__tests__/feature-builder-declutter.test.ts`.
 
 **The comic scale curve.** `modelScale` follows an `exponential(1.6)` interpolate
 on zoom (`TramLayers.tsx:326`):

@@ -6,14 +6,19 @@
 // plus transparent hit-test circles on BOTH sources (tap anywhere on a tram
 // body) and a gold selection halo.
 //
-// Badge declutter (band 2): the badge SymbolLayer runs Mapbox's NATIVE
-// collision pass (icon/text allowOverlap OFF) with a stable symbolSortKey, so
-// overlapping badges hide instead of stacking unreadably — while the heading
-// teardrop marker at the true position always renders, so a decluttered tram
-// never loses its position dot. Selected/followed/favorite trams render on a
-// separate pinned badge layer that opts out of collision entirely — they are
-// NEVER hidden. All of it is style-side: zero extra JS work, zero payload
-// growth, no per-frame React.
+// Badge declutter (band 2): overlapping badges are PUSHED APART, never hidden.
+// buildFrame runs a screen-space separation solve over the visible band-2
+// trams (featureBuilder.declutterBadges, at the points cadence — no extra
+// timers, no per-frame React) and emits a dedicated badges FC: face-badge
+// anchors at their DISPLACED positions plus thin leader LineStrings from each
+// displaced badge back to its true marker (POI-label / flight-tracker style).
+// The heading teardrop marker always stays at the TRUE position on the points
+// source, so displacement never lies about where the tram is. That FC feeds
+// the separate `trams-badges` ShapeSource here (leader LineLayer under the
+// badge SymbolLayer, allowOverlap — the solve already resolved collisions).
+// Selected/followed/favorite trams are immovable in the solve and are NOT in
+// the badges FC — they render from the points FC on the pinned layer, always
+// visible, always exactly at their tram, drawn on top.
 //
 // Sprites (teardrops + fav star from MAP_ICON_ASSETS, one face PNG per icon
 // pack × model from ICON_PACKS[..].sprites) are loaded through expo-asset
@@ -73,7 +78,15 @@ import {
 } from '@/lib/fleet/iconPacks';
 import { MAP_ICON_ASSETS, MAP_ICON_SCALE } from '@/lib/fleet/modelSpecs';
 import { bearingAt, pointAt } from '@/lib/geo/polyline';
-import { buildFrame } from '@/lib/render/featureBuilder';
+import {
+  buildFrame,
+  FACE_GAP_PX,
+  FACE_MAX_ICON_SIZE,
+  FACE_MIN_RATIO,
+  FACE_NATURAL_PT,
+  FACE_TEXT_MAX_SIZE,
+  type BadgeDisplacementMemory,
+} from '@/lib/render/featureBuilder';
 import type { PlannerItinerary, Viewport } from '@/lib/types';
 import { useFavoritesStore } from '@/stores/favorites';
 import { usePlannerStore } from '@/stores/planner';
@@ -181,12 +194,11 @@ function faceIcon(pack: IconPackId): string {
  * the face. textSize interpolates in lockstep with iconSize, so the constant
  * em offsets keep the number seated across the whole band's size ramp (same
  * trick as the old capsule).
+ *
+ * The FACE_* metric constants live in featureBuilder (single source of truth)
+ * because the declutter solve models each badge's screen box from the SAME
+ * numbers this style renders with.
  */
-const FACE_NATURAL_PT = 64;
-const FACE_MAX_ICON_SIZE = 0.5;
-const FACE_MIN_RATIO = 0.78;
-const FACE_GAP_PX = 20; // × iconSize → ≈10 pt above the marker at band top
-const FACE_TEXT_MAX_SIZE = 15;
 /** Line number: left-anchored 3 pt right of the face edge, centered on it. */
 const FACE_TEXT_OFFSET_X_EM =
   ((FACE_NATURAL_PT * FACE_MAX_ICON_SIZE) / 2 + 3) / FACE_TEXT_MAX_SIZE;
@@ -212,22 +224,14 @@ const BADGE_BAND_OPACITY = [
 type BadgeSymbolStyle = NonNullable<ComponentProps<typeof SymbolLayer>['style']>;
 
 /**
- * Shared face-badge style for the two band-2 badge layers. `pinned` selects
- * the collision behaviour:
- *  - false (tram-badges, the bulk of the fleet): Mapbox's NATIVE collision
- *    pass hides badges that would overlap (icon+text placement both checked —
- *    a badge either fully shows or fully hides). symbolSortKey gives a STABLE
- *    deterministic priority (by line number) so the same badges win every
- *    placement pass — no flicker from churning priorities. The heading
- *    teardrop marker underneath ignores placement, so a hidden badge's tram
- *    keeps its position dot.
- *  - true (tram-badges-pinned: selected/followed/favorite trams): opts out of
- *    collision entirely — these are NEVER hidden — and, drawn as the later
- *    layer, renders on top of the crowd.
- * Everything is a style expression over props the points FC already carries;
- * the declutter costs zero JS work and zero push payload.
+ * Shared face-badge style for both band-2 badge layers (the decluttered bulk
+ * on the `trams-badges` source and the pinned selected/followed/favorite
+ * layer on the points source). Overlap is ALWAYS allowed: the bulk layer's
+ * anchors were already pushed apart by the declutter solve in buildFrame
+ * (badges adapt, they never hide), and pinned badges must never be hidden by
+ * anything. Everything else is style expressions over props both FCs carry.
  */
-function faceBadgeStyle(pinned: boolean, pack: IconPackId): BadgeSymbolStyle {
+function faceBadgeStyle(pack: IconPackId): BadgeSymbolStyle {
   return {
     iconImage: faceIcon(pack),
     iconAnchor: 'bottom',
@@ -261,15 +265,34 @@ function faceBadgeStyle(pinned: boolean, pack: IconPackId): BadgeSymbolStyle {
     textAnchor: 'left',
     textOffset: [FACE_TEXT_OFFSET_X_EM, FACE_TEXT_OFFSET_Y_EM],
     textOpacity: BADGE_BAND_OPACITY,
-    iconAllowOverlap: pinned,
-    iconIgnorePlacement: pinned,
-    textAllowOverlap: pinned,
-    textIgnorePlacement: pinned,
-    ...(pinned
-      ? {}
-      : { symbolSortKey: ['to-number', ['get', 'line']] as unknown as number }),
+    iconAllowOverlap: true,
+    iconIgnorePlacement: true,
+    textAllowOverlap: true,
+    textIgnorePlacement: true,
   };
 }
+
+/**
+ * Leader lines: thin line-colored connector from a DISPLACED badge's anchor
+ * back to its tram's true marker (drawn under the badge). Same band crossfade
+ * as the badges, at reduced peak opacity so leaders read as annotation, not
+ * route. (Stops are pre-multiplied — a zoom interpolate may not be nested
+ * inside an arithmetic expression.)
+ */
+const LEADER_PEAK_OPACITY = 0.55;
+const LEADER_OPACITY = [
+  'interpolate',
+  ['linear'],
+  ['zoom'],
+  BAND_DOTS_TO_BADGES - BAND_FADE,
+  0,
+  BAND_DOTS_TO_BADGES + BAND_FADE,
+  LEADER_PEAK_OPACITY,
+  BAND_BADGES_TO_MODELS,
+  LEADER_PEAK_OPACITY,
+  BAND_BADGES_TO_MODELS + BAND_FADE,
+  0,
+] as unknown as number;
 
 /**
  * Map icon sprites resolved through expo-asset (same Fabric-safe localUri
@@ -344,9 +367,13 @@ export function TramLayers({
   const iconPack = useSettingsStore((s) => s.iconPack);
   const pointsRef = useRef<ShapeSource>(null);
   const sectionsRef = useRef<ShapeSource>(null);
+  const badgesRef = useRef<ShapeSource>(null);
   const fixOverlayRef = useRef<ShapeSource>(null);
   const sectionsFedRef = useRef(false);
   const sectionsEmptyRef = useRef(true);
+  const badgesEmptyRef = useRef(true);
+  /** Push-to-push badge displacement memory — keeps stacks from re-shuffling. */
+  const badgeMemoryRef = useRef<BadgeDisplacementMemory>(new Map());
   const fixEmptyRef = useRef(true);
   const lastPointsPushMsRef = useRef(0);
   /** Next follow-camera evaluation is skipped until this timestamp. */
@@ -416,15 +443,16 @@ export function TramLayers({
 
         const frame = buildFrame(rt.engine.getStates(nowMs), viewport, {
           selectedKey: selection.selectedTramKey,
-          // The follow target gets selected:1 too — it must never be hidden
-          // by the badge collision pass (and keeps its halo/fix overlay when
-          // follow outlives the sheet's selection).
+          // The follow target gets selected:1 too — the declutter solve pins
+          // it in place (never hidden, never displaced), and it keeps its
+          // halo/fix overlay when follow outlives the sheet's selection.
           followedKey: selection.followTramKey,
           favoriteKeys: favSetRef.current.set,
           coupledPairFn: rt.coupledPairFn,
           getGeometry,
           lineFilter: lineFilterRef.current.set,
           skipPoints: !wantPoints,
+          badgeMemory: badgeMemoryRef.current,
           positionMode,
           nowMs,
         });
@@ -435,6 +463,19 @@ export function TramLayers({
             id: 'trams-points',
             shape: JSON.stringify(frame.points),
           });
+          // Decluttered badge anchors + leaders, same cadence as the points.
+          // Empty outside the badge band (stringify+push skipped while it
+          // STAYS empty; the one clearing push stops stale badges — the badge
+          // layers' zoom gates hide them anyway until then).
+          const badgesFC = (frame.badges ?? EMPTY_FC) as GeoJSON.FeatureCollection;
+          const badgesEmpty = badgesFC.features.length === 0;
+          if (!badgesEmpty || !badgesEmptyRef.current) {
+            badgesRef.current?.setNativeProps({
+              id: 'trams-badges',
+              shape: badgesEmpty ? EMPTY_FC_STRING : JSON.stringify(badgesFC),
+            });
+          }
+          badgesEmptyRef.current = badgesEmpty;
         }
 
         // While the FC stays empty (no visible trams) the stringify+push is
@@ -801,29 +842,11 @@ export function TramLayers({
           iconOpacity: BADGE_BAND_OPACITY,
         }}
       />,
-      // Band 2: model FACE badge floating just above the marker — the model's
-      // recognizable face sprite with the live line number seated beside it.
-      // This is the DECLUTTERED layer: Mapbox's native collision pass hides
-      // badges that would overlap (stable line-number sort key picks the
-      // winners), while the teardrop marker above keeps every tram's position
-      // visible. Selected/followed/favorite trams are excluded here — they
-      // render on the pinned layer below instead.
-      <SymbolLayer
-        key="tram-badges"
-        id="tram-badges"
-        slot="top"
-        filter={[
-          'all',
-          ['!=', ['get', 'geometryless'], 1],
-          ['!=', ['get', 'selected'], 1],
-          ['!=', ['get', 'favorite'], 1],
-        ]}
-        minZoomLevel={BAND_DOTS_TO_BADGES - BAND_FADE}
-        maxZoomLevel={BAND_BADGES_TO_MODELS + BAND_FADE + 0.1}
-        style={faceBadgeStyle(false, iconPack)}
-      />,
-      // Band 2: PINNED face badges — selected/followed/favorite trams. No
-      // collision (never hidden), drawn over the decluttered crowd.
+      // Band 2: PINNED face badges — selected/followed/favorite trams. Drawn
+      // from the points FC (true position, never displaced by the declutter
+      // solve — they are its immovable obstacles), never hidden, on top of
+      // the decluttered crowd (the bulk badges live on the trams-badges
+      // source below).
       <SymbolLayer
         key="tram-badges-pinned"
         id="tram-badges-pinned"
@@ -835,7 +858,7 @@ export function TramLayers({
         ]}
         minZoomLevel={BAND_DOTS_TO_BADGES - BAND_FADE}
         maxZoomLevel={BAND_BADGES_TO_MODELS + BAND_FADE + 0.1}
-        style={faceBadgeStyle(true, iconPack)}
+        style={faceBadgeStyle(iconPack)}
       />,
       // Band 2: gold star pinned to favorite trams' face badges (top-right).
       <SymbolLayer
@@ -850,7 +873,10 @@ export function TramLayers({
           iconAllowOverlap: true,
           iconIgnorePlacement: true,
           iconSize: 0.65,
-          iconOffset: [25, -62],
+          // Top-right corner of the face plate (offset units × iconSize 0.65;
+          // plate top ≈ (FACE_GAP_PX + FACE_NATURAL_PT) × iconSize 0.5 = 48 pt
+          // above the marker at band top).
+          iconOffset: [25, -71],
           iconOpacity: BADGE_BAND_OPACITY,
         }}
       />,
@@ -891,10 +917,58 @@ export function TramLayers({
     />,
   );
 
+  // Declutter source layers (band 2, bulk fleet): leader lines under the
+  // displaced face badges. Mounted BEFORE the points source, so the true-
+  // position markers, the pinned badges and the fav star all draw over the
+  // decluttered crowd. Plain element array, no holes (spike rule); the badge
+  // symbol layer joins only once the face sprites are registered.
+  const badgeLayers: ReactElement[] = [
+    <LineLayer
+      key="tram-badge-leaders"
+      id="tram-badge-leaders"
+      slot="top"
+      filter={['==', ['get', 'kind'], 'leader']}
+      minZoomLevel={BAND_DOTS_TO_BADGES - BAND_FADE}
+      maxZoomLevel={BAND_BADGES_TO_MODELS + BAND_FADE + 0.1}
+      style={{
+        lineColor: LINE_COLOR,
+        lineWidth: 1.2,
+        lineOpacity: LEADER_OPACITY,
+        lineCap: 'round',
+      }}
+    />,
+  ];
+  if (iconImages != null) {
+    badgeLayers.push(
+      // Band 2: the DECLUTTERED bulk-fleet face badges, at anchors the solve
+      // in buildFrame pushed apart — overlap is allowed because it no longer
+      // happens; a badge is never hidden. Its tram's true position stays
+      // marked by the teardrop on the points source (leader connects the two
+      // when displaced).
+      <SymbolLayer
+        key="tram-badges"
+        id="tram-badges"
+        slot="top"
+        filter={['==', ['geometry-type'], 'Point']}
+        minZoomLevel={BAND_DOTS_TO_BADGES - BAND_FADE}
+        maxZoomLevel={BAND_BADGES_TO_MODELS + BAND_FADE + 0.1}
+        style={faceBadgeStyle(iconPack)}
+      />,
+    );
+  }
+
   return (
     <>
       {modelUris != null && <Models models={modelUris} />}
       {iconImages != null && <Images images={iconImages} />}
+
+      {/* Decluttered bulk badges + leaders (band 2). Mounted first so the
+          points-source layers (markers at true positions, pinned badges,
+          fav stars) draw over it. Tapping a displaced badge still selects
+          its tram — features carry the tram key. */}
+      <ShapeSource id="trams-badges" ref={badgesRef} shape={EMPTY_FC} onPress={onPressTram}>
+        {badgeLayers}
+      </ShapeSource>
 
       <ShapeSource id="trams-points" ref={pointsRef} shape={EMPTY_FC} onPress={onPressTram}>
         {pointLayers}

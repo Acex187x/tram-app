@@ -166,6 +166,14 @@ export interface EngineFrame {
   /** One feature per visible tram section — drives the ModelLayer. */
   sections: GeoJSON.FeatureCollection<GeoJSON.Point, SectionFeatureProps>;
   /**
+   * Band-2 badge declutter (additive, optional): DISPLACED face-badge anchor
+   * Points (props: key/line/modelId/displaced) plus leader LineStrings from a
+   * displaced badge back to its true marker. Empty outside the badge zoom
+   * band / on skipPoints frames. Pinned (selected/followed/favorite) badges
+   * are absent — the map draws them from the points FC, never displaced.
+   */
+  badges?: GeoJSON.FeatureCollection;
+  /**
    * Last-real-fix visualization for the SELECTED/followed tram: the raw fix
    * point + a connector line to the rendered position (empty when none).
    */
