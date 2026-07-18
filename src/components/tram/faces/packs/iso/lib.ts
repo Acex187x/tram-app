@@ -1,10 +1,23 @@
 // Pack-local helpers for the "iso" pack — cute 3/4 isometric tram portraits.
+//
 // Camera contract (identical for all 7 models): the tram sits on a 2:1 iso
 // grid, FRONT face toward the lower-left, SIDE receding to the upper-right,
 // vertical edges stay vertical. Light comes from the front-left, so the front
 // face is the lightest body tone, the roof is lighter still, and the side is
-// a darker shade. Every face draws its own soft ground shadow + cel outline
-// so icons read on both light and dark backgrounds.
+// a darker shade.
+//
+// SIZE NORMALIZATION — the whole pack shares ONE icon gauge:
+//   • every body is BODY_H tall,
+//   • every body's projected footprint is exactly SPAN = w + l,
+//   • isoBox() centers that footprint in the 96×96 viewBox.
+// Because the projected bbox is (w+l) wide and (h + (w+l)/2) tall, equal SPAN
+// + equal BODY_H ⇒ literally identical silhouette bounds for all models. A
+// long tram reads long through its front/side PROPORTION (narrow front, long
+// flank, more windows), never through a bigger icon. Do not hand-roll Box
+// values in faces — always go through isoBox().
+//
+// Every face draws the same light rounded backdrop tile + soft ground shadow
+// so icons read as one family on both light and dark map styles.
 //
 // Pure module (no react imports) so it stays bundler-friendly.
 
@@ -16,13 +29,35 @@ export interface Box {
   cy: number;
   /** Projected front-face width. */
   w: number;
-  /** Projected side length (long models get a bigger l). */
+  /** Projected side length. */
   l: number;
   /** Body height. */
   h: number;
 }
 
 const r1 = (n: number): number => Math.round(n * 10) / 10;
+
+/** Shared body height — identical for every model in the pack. */
+export const BODY_H = 24;
+/** Shared projected footprint w + l — identical for every model in the pack. */
+export const SPAN = 58;
+
+/** Front width of the short T3 family (~14 m cars): stubby front, short flank. */
+export const SHORT_W = 26;
+/** Front width of the long cars (~30 m): narrow front, long receding flank. */
+export const LONG_W = 20;
+
+/**
+ * The one true Box factory: give it a front width, get a Box whose projected
+ * bounds are identical for every model and centered in the 96×96 viewBox.
+ */
+export const isoBox = (w: number): Box => ({
+  cx: (96 - SPAN) / 2 + w,
+  cy: 72,
+  w,
+  l: SPAN - w,
+  h: BODY_H,
+});
 
 /** Front plane. u: 0 = near corner → 1 = far-left edge. v: 0 = floor → 1 = roofline. */
 export const F = (b: Box, u: number, v: number): Pt => [
@@ -59,11 +94,11 @@ export const sQuad = (b: Box, u0: number, v0: number, u1: number, v1: number): s
 export const rQuad = (b: Box, u0: number, v0: number, u1: number, v1: number): string =>
   poly(R(b, u0, v0), R(b, u1, v0), R(b, u1, v1), R(b, u0, v1));
 
-/** Soft ground-contact shadow under the whole footprint. */
+/** Ground-contact shadow under the whole footprint (soft-drawn by isoStage). */
 export const ground = (b: Box): string => {
-  const left: Pt = [r1(b.cx - b.w - 2.5), r1(b.cy - b.w / 2 + 1)];
-  const near: Pt = [r1(b.cx + 1.5), r1(b.cy + 2.5)];
-  const back: Pt = [r1(b.cx + b.l + 2.5), r1(b.cy - b.l / 2 + 1)];
+  const left: Pt = [r1(b.cx - b.w - 2), r1(b.cy - b.w / 2 + 1)];
+  const near: Pt = [r1(b.cx + 1.5), r1(b.cy + 2)];
+  const back: Pt = [r1(b.cx + b.l + 2), r1(b.cy - b.l / 2 + 1)];
   const far: Pt = [r1(b.cx - b.w + b.l), r1(b.cy - b.w / 2 - b.l / 2 - 0.5)];
   return poly(left, near, back, far);
 };
@@ -71,9 +106,15 @@ export const ground = (b: Box): string => {
 /** The square viewBox every iso face is authored in. */
 export const VB = '0 0 96 96';
 
+/** Shared backdrop tile geometry — same for every face. */
+export const TILE = { x: 7, y: 7, size: 82, r: 26 } as const;
+
 /** Shared pack palette — front tone / darker side tone / lighter roof tone triads. */
 export const ISO = {
-  outline: '#2E2532',
+  outline: '#39323C',
+  // light neutral backdrop tile
+  bg: '#F1EFE9',
+  bgEdge: '#DEDACE',
   // glazing
   glass: '#2B3746',
   glassSide: '#212B37',
@@ -84,25 +125,25 @@ export const ISO = {
   creamSide: '#DECBA3',
   creamRoof: '#FBF3DF',
   // PID red
-  red: '#B5271E',
-  redSide: '#8E1B13',
+  red: '#BC2A20',
+  redSide: '#93201A',
   redRoof: '#C63A2E',
   maroon: '#6E1310',
   // 52T / modern white
-  white: '#F7F8F5',
-  whiteSide: '#D6DAD8',
+  white: '#FBFBF9',
+  whiteSide: '#D9DCDA',
   whiteRoof: '#FFFFFF',
   // greys
   grey: '#9BA0A6',
   greySide: '#797E85',
   skirt: '#41454C',
-  under: '#2C2F35',
+  under: '#33363C',
   chrome: '#E7EAED',
   charcoal: '#33363B',
   // lights
   amber: '#FFAF36',
   warm: '#FFE9B8',
-  shadow: '#151021',
+  shadow: '#4E483E',
   // T3R.PLF wine bib + champagne-silver body
   wine: '#8A2131',
   wineSide: '#671723',
@@ -110,7 +151,7 @@ export const ISO = {
   silverSide: '#B9B3A4',
   silverRoof: '#ECE9E0',
   // modern glossy black (52T visor, 15T windscreen)
-  visor: '#17191F',
+  visor: '#191B21',
   // LED destination orange + classic blue route box
   ledOrange: '#FF8F1F',
   blue: '#1D4E9E',
@@ -119,7 +160,7 @@ export const ISO = {
 } as const;
 
 /** Skewed diamond (rhombus) pantograph path — the Tatra scissor tell. */
-export const diamond = (m: Pt, span = 5.4, lift = 4.6, apex = 10): string => {
+export const diamond = (m: Pt, span = 5.2, lift = 4.4, apex = 9.5): string => {
   const [mx, my] = m;
   const left: Pt = [r1(mx - span), r1(my + span / 2 - lift)];
   const right: Pt = [r1(mx + span), r1(my - span / 2 - lift)];
@@ -128,7 +169,17 @@ export const diamond = (m: Pt, span = 5.4, lift = 4.6, apex = 10): string => {
 };
 
 /** Contact bar sitting on the diamond apex. */
-export const diamondBar = (m: Pt, apex = 10): string => {
+export const diamondBar = (m: Pt, apex = 9.5): string => {
   const [mx, my] = m;
   return `M${r1(mx - 3.2)} ${r1(my - apex + 1.6)} L${r1(mx + 3.2)} ${r1(my - apex - 1.6)}`;
+};
+
+/** Single-arm pantograph (modern Škoda cars) anchored at roof point p0. */
+export const singleArm = (p0: Pt): { arm: string; bar: string } => {
+  const knee: Pt = [r1(p0[0] - 1.2), r1(p0[1] - 5.4)];
+  const head: Pt = [r1(knee[0] + 4.4), r1(knee[1] - 2.2)];
+  return {
+    arm: `M${P(p0)} L${P(knee)} L${P(head)}`,
+    bar: `M${r1(head[0] - 2.8)} ${r1(head[1] + 1.4)} L${r1(head[0] + 2.8)} ${r1(head[1] - 1.4)}`,
+  };
 };
