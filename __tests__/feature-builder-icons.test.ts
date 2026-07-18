@@ -1,40 +1,46 @@
 /// <reference types="jest" />
 
 // Contract between the points FC and the sprite-driven map layers
-// (TramLayers tram-dots / tram-badge-pointers / tram-badges):
+// (TramLayers tram-dots / tram-badge-markers / tram-badges[-pinned]):
 //  1. every sprite name the layers' iconImage EXPRESSIONS can produce exists
-//     both in MAP_ICON_ASSETS and as a generated PNG on disk;
-//  2. buildFrame keeps emitting the point props those expressions read
-//     (line, modelId, bearing, favorite) — the icon variants are derived from
-//     existing props precisely so the 60 Hz push payload does not grow.
+//     in a registry (dot-*/fav-star in MAP_ICON_ASSETS, face-<modelId> in
+//     FACE_SPRITE_ASSETS) and as a generated PNG on disk;
+//  2. buildFrame keeps emitting the point props those expressions AND the
+//     declutter filters read (line, modelId, bearing, favorite, selected) —
+//     the icon variants + collision pinning are derived from existing props
+//     precisely so the 60 Hz push payload does not grow.
 
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { FACE_SPRITE_ASSETS, FACE_SPRITE_SCALE } from '@/lib/fleet/faceIcons';
 import { MAP_ICON_ASSETS, MAP_ICON_SCALE } from '@/lib/fleet/modelSpecs';
 import { buildFrame } from '@/lib/render/featureBuilder';
 import type { TramModelId, Viewport } from '@/lib/types';
 import { makeGeometry, makeSnapshot, makeSpec1, ORIGIN } from './helpers';
 
 const ICONS_DIR = join(__dirname, '../assets/images/map-icons');
+const FACES_DIR = join(__dirname, '../assets/images/faces');
 const ALL_MODEL_IDS: TramModelId[] = ['t3', 't3rp', 't3rplf', 'kt8d5', '14t', '15t', '52t'];
 
-/** Every name the layers' iconImage expressions can evaluate to. */
-const EXPECTED_SPRITES = [
-  ...['day', 'night'].flatMap((variant) => [
-    `dot-${variant}`,
-    `dot-${variant}-fav`,
-    ...ALL_MODEL_IDS.map((id) => `cap-${id}-${variant}`),
-  ]),
+/**
+ * Every MAP_ICON_ASSETS name the dot/star layers' iconImage expressions can
+ * evaluate to. (The cap-* capsule sprites remain in the registry/on disk but
+ * no layer references them since the face-badge redesign.)
+ */
+const EXPECTED_DOT_SPRITES = [
+  ...['day', 'night'].flatMap((variant) => [`dot-${variant}`, `dot-${variant}-fav`]),
   'fav-star',
 ];
 
 describe('map icon sprites', () => {
-  it('MAP_ICON_ASSETS registers exactly the names the layer expressions produce', () => {
-    expect(Object.keys(MAP_ICON_ASSETS).sort()).toEqual([...EXPECTED_SPRITES].sort());
+  it('MAP_ICON_ASSETS contains every name the dot/star layer expressions produce', () => {
+    for (const name of EXPECTED_DOT_SPRITES) {
+      expect(Object.keys(MAP_ICON_ASSETS)).toContain(name);
+    }
   });
 
-  it.each(EXPECTED_SPRITES)('%s.png is generated and non-empty', (name) => {
+  it.each(EXPECTED_DOT_SPRITES)('%s.png is generated and non-empty', (name) => {
     const file = join(ICONS_DIR, `${name}.png`);
     expect(existsSync(file)).toBe(true);
     expect(statSync(file).size).toBeGreaterThan(200);
@@ -43,6 +49,24 @@ describe('map icon sprites', () => {
   it('sprite count stays fixed and small (perf invariant: ≤ 20)', () => {
     expect(Object.keys(MAP_ICON_ASSETS).length).toBeLessThanOrEqual(20);
     expect(MAP_ICON_SCALE).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('face badge sprites (band-2 model badges)', () => {
+  it('FACE_SPRITE_ASSETS covers exactly the model ids the FACE_ICON expression can produce', () => {
+    // The badge layers' iconImage is concat('face-', modelId) — one sprite per
+    // TramModelId, nothing more (registered-image count stays flat).
+    expect(Object.keys(FACE_SPRITE_ASSETS).sort()).toEqual([...ALL_MODEL_IDS].sort());
+  });
+
+  it.each(ALL_MODEL_IDS)('faces/%s.png exists and is non-empty', (id) => {
+    const file = join(FACES_DIR, `${id}.png`);
+    expect(existsSync(file)).toBe(true);
+    expect(statSync(file).size).toBeGreaterThan(200);
+  });
+
+  it('face sprite scale is a sane pixel ratio', () => {
+    expect(FACE_SPRITE_SCALE).toBeGreaterThanOrEqual(1);
   });
 });
 

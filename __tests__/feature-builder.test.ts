@@ -99,6 +99,22 @@ describe('points collection', () => {
     expect(p2.properties.selected).toBe(0);
     expect(p2.properties.favorite).toBe(1);
   });
+
+  it('marks the FOLLOWED tram selected:1 (badge pinning must survive follow outliving selection)', () => {
+    // The map's badge declutter pins selected:1 trams out of the collision
+    // pass; a followed tram must never be hidden even when the sheet's
+    // selection was cleared.
+    const states = [makeState('9201', geo, 300), makeState('8123', geo, 500)];
+    const frame = buildFrame(states, WIDE, {
+      ...opts(geo),
+      selectedKey: null,
+      followedKey: '8123',
+    });
+    const followed = frame.points.features.find((f) => f.id === '8123')!;
+    expect(followed.properties.selected).toBe(1);
+    const other = frame.points.features.find((f) => f.id === '9201')!;
+    expect(other.properties.selected).toBe(0);
+  });
 });
 
 describe('section placement on an L-shaped track', () => {

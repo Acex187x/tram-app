@@ -47,7 +47,11 @@ export interface BuildFrameOptions {
   /**
    * Followed tram key: the fix overlay (raw last fix point + connector line to
    * the rendered position) is emitted for this tram, falling back to
-   * selectedKey when unset. The overlay is empty when neither is set.
+   * selectedKey when unset. The overlay is empty when neither is set. A
+   * followed tram also gets `selected: 1` on its point — the map's badge
+   * layers pin selected trams out of the collision/declutter pass, and a
+   * follow target must NEVER be hidden by it (nor lose its halo when follow
+   * outlives the selection).
    */
   followedKey?: string | null;
   favoriteKeys: ReadonlySet<string>;
@@ -326,7 +330,15 @@ export function buildFrame(
           line: state.snapshot.line,
           bearing,
           modelId: state.model.id,
-          selected: state.key === opts.selectedKey ? 1 : 0,
+          // The followed tram counts as selected: badge layers pin selected
+          // trams out of the collision/declutter pass (they must never be
+          // hidden), and the gold halo keeps marking a follow that outlives
+          // the sheet's selection.
+          selected:
+            state.key === opts.selectedKey ||
+            (opts.followedKey != null && state.key === opts.followedKey)
+              ? 1
+              : 0,
           favorite: opts.favoriteKeys.has(state.key) ? 1 : 0,
           geometryless: geometryless ? 1 : 0,
         },
