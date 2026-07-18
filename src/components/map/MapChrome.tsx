@@ -78,6 +78,12 @@ const CHIP_STACK_H = CONTROL_BUTTON_SIZE + 10;
 const CHIP_ROW_GAP = 10;
 /** Most chips that can stack at once: planner + ride + spotter + follow. */
 const MAX_STACKED_CHIPS = 4;
+/**
+ * ONE element height for everything inside a chip row — line badge (md),
+ * delay pill (md), follow/resume button, ✕ circle — so the pills read as a
+ * single consistent set instead of four differently-sized controls.
+ */
+const CHIP_ELEMENT_H = 30;
 
 // ── Status chip (top-left): poll ring + live tram count + sync detail ────────
 
@@ -312,21 +318,35 @@ export function BottomDock() {
 // follow chip floats on top of whichever are visible (each +CHIP_STACK_H,
 // relative to the cluster row's bottom).
 
-/** Shared big ✕ for all chips: 34 pt touch box + hitSlop, 20 pt glyph. */
+/**
+ * Shared ✕ for all chips: a 30 pt tinted circle — the SAME element height as
+ * the other chip pills (line badge md, delay pill md, follow button) so the
+ * row reads as one set — inside a 34 pt touch box (+ hitSlop → ~46 pt target).
+ */
 function ChipClose({ label, onPress }: { label: string; onPress: () => void }) {
   const colors = useTextColors();
+  const bg = colors.scheme === 'dark' ? 'rgba(120,120,128,0.32)' : 'rgba(120,120,128,0.18)';
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      hitSlop={8}
+      hitSlop={6}
       style={styles.chipClose}
       onPress={() => {
         tapLight();
         onPress();
       }}
     >
-      <SymbolView name="xmark.circle.fill" size={20} tintColor={colors.secondary} />
+      {({ pressed }) => (
+        <View
+          style={[
+            styles.chipCloseCircle,
+            { backgroundColor: bg, opacity: pressed ? 0.65 : 1 },
+          ]}
+        >
+          <SymbolView name="xmark" size={13} weight="semibold" tintColor={colors.secondary} />
+        </View>
+      )}
     </Pressable>
   );
 }
@@ -361,8 +381,10 @@ function FollowChip() {
       >
         {/* The tram identity (line + reg + delay) stays visible in BOTH states;
             tapping it reopens the detail sheet. Only the trailing control
-            changes: "Following" hint while locked, a compact "Follow" pill to
-            re-center while paused — never a full-width button over the info. */}
+            changes: "Following ⌃" hint while locked, a compact accent "Follow"
+            pill to re-center while paused — never a full-width button over the
+            info. Every element shares the 30 pt pill height (badge md, delay
+            pill md, follow button, ✕ circle) so the row reads as one set. */}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Open tram ${reg ?? followKey} details`}
@@ -373,13 +395,13 @@ function FollowChip() {
             router.push(`/tram/${encodeURIComponent(followKey)}`);
           }}
         >
-          <LineBadge line={state.snapshot.line} size="sm" />
+          <LineBadge line={state.snapshot.line} size="md" />
           {reg != null && (
             <Text style={[styles.followReg, { color: colors.text }]} allowFontScaling={false}>
               #{reg}
             </Text>
           )}
-          <DelayPill delaySeconds={state.snapshot.delaySeconds} />
+          <DelayPill delaySeconds={state.snapshot.delaySeconds} size="md" />
           <View style={styles.chipSpacer} />
           {!paused && (
             <>
@@ -389,7 +411,12 @@ function FollowChip() {
               >
                 Following
               </Text>
-              <SymbolView name="chevron.up" size={12} tintColor={colors.secondary} />
+              <SymbolView
+                name="chevron.up"
+                size={12}
+                weight="semibold"
+                tintColor={colors.secondary}
+              />
             </>
           )}
         </Pressable>
@@ -685,13 +712,27 @@ const styles = StyleSheet.create({
   },
   chipBody: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   chipSpacer: { flex: 1 },
+  // ✕: 34 pt touch box wrapping a 30 pt visible circle (CHIP_ELEMENT_H).
   chipClose: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
-  followReg: { fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  followHint: { fontSize: 13, fontWeight: '500' },
+  chipCloseCircle: {
+    width: CHIP_ELEMENT_H,
+    height: CHIP_ELEMENT_H,
+    borderRadius: CHIP_ELEMENT_H / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  followReg: {
+    fontSize: 14,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+    fontFamily: Fonts?.rounded,
+  },
+  followHint: { fontSize: 14, fontWeight: '500' },
   // Paused follow: a COMPACT accent pill sitting where "Following" was — the
-  // tram identity to its left stays visible; never full-width.
+  // tram identity to its left stays visible; never full-width. Same 30 pt
+  // element height as everything else in the row.
   followResume: {
-    height: 30,
+    height: CHIP_ELEMENT_H,
     paddingHorizontal: 12,
     borderRadius: 999,
     flexDirection: 'row',
