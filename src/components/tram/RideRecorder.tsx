@@ -96,7 +96,10 @@ export function RideRecorder({ tramKey, line }: { tramKey: string; line: string 
         // recording exists (two early rides vanished silently).
         Alert.alert(
           'Ride saved',
-          `${saved.relPath}\n${saved.points} point${saved.points === 1 ? '' : 's'} · ${fmtBytes(saved.bytes)}`,
+          `${saved.relPath}\n${saved.points} GPS point${saved.points === 1 ? '' : 's'} · ` +
+            `${saved.motionSamples} motion sample${saved.motionSamples === 1 ? '' : 's'}` +
+            `${saved.gpsRejects > 0 ? ` · ${saved.gpsRejects} outlier${saved.gpsRejects === 1 ? '' : 's'} flagged` : ''}` +
+            ` · ${fmtBytes(saved.bytes)}`,
           [
             { text: 'View rides', onPress: () => router.push('/rides' as Href) },
             { text: 'OK', style: 'default' },
@@ -135,6 +138,7 @@ export function RideRecorder({ tramKey, line }: { tramKey: string; line: string 
   if (recordingThis && ride) {
     const bytes = log.rideFileBytes();
     const mode = log.rideLocationMode();
+    const motionOn = log.rideMotionActive();
     const lastAgoS =
       ride.lastPointMs != null ? Math.max(0, Math.round((Date.now() - ride.lastPointMs) / 1000)) : null;
     const lastLabel =
@@ -150,7 +154,15 @@ export function RideRecorder({ tramKey, line }: { tramKey: string; line: string 
               Recording · {fmtElapsed(Date.now() - ride.startedMs)}
             </Text>
             <Text style={[styles.subtitle, { color: c.textSecondary }]}>
-              {ride.points} pt{ride.points === 1 ? '' : 's'} · {lastLabel} · {fmtBytes(bytes)} on disk
+              {ride.points} GPS pt{ride.points === 1 ? '' : 's'} · {lastLabel} · {fmtBytes(bytes)} on disk
+            </Text>
+            <Text style={[styles.subtitle, { color: c.textSecondary }]}>
+              {motionOn
+                ? `${ride.motionSamples} motion samples @ 25 Hz`
+                : 'Motion sensor off — GPS only'}
+              {ride.gpsRejects > 0
+                ? ` · ${ride.gpsRejects} outlier${ride.gpsRejects === 1 ? '' : 's'} filtered`
+                : ''}
             </Text>
             {mode === 'background' ? (
               <Text style={[styles.statusLine, { color: Tram.onTime }]}>

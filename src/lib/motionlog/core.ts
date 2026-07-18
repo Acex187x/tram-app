@@ -19,10 +19,17 @@
 //
 //   • Ride recording (rides/<ts>-<key>.jsonl): while the user is physically on a
 //     tram, GPS fixes (~1 Hz) are correlated with the simulated state and
-//     appended live (ride schema v3 — see rideRecord and
-//     docs/calibration/plan.md). Auto-stops after RIDE_MAX_MS to spare the
-//     battery. CRASH-SAFETY CONTRACT (two device recordings were lost to the
-//     pre-v3 design — see the fix notes below):
+//     appended live (ride schema v4 — see rideRecord and
+//     docs/calibration/plan.md). Each fix also runs through the pure GpsFilter
+//     (gpsFilter.ts): the RAW fix is always written verbatim, plus the
+//     filtered position and its shape projection (fLat/fLng/rej/fDist/fOffM/
+//     fLagM). In parallel an optional MotionWatcher (sensors.ts, DeviceMotion
+//     ~25 Hz) streams IMU samples that are buffered briefly and appended as
+//     compact {type:'motion'} batch lines (≤1 s / ≤MOTION_FLUSH_AT samples per
+//     batch — a crash loses at most ~1 s of motion, never any GPS point).
+//     Auto-stops after RIDE_MAX_MS to spare the battery. CRASH-SAFETY CONTRACT
+//     (two device recordings were lost to the pre-v3 design — see the fix
+//     notes below):
 //       – startRide writes a {type:'ride-start'} header line IMMEDIATELY, so
 //         the file exists on disk from second zero;
 //       – every GPS point is appended to disk synchronously (no buffering);
@@ -46,6 +53,8 @@ import { toCalibrationRecord, toCalibrationRecords } from '@/lib/feed/calibratio
 import type { CalibrationRecord } from '@/lib/feed/types';
 import { projectPointToPolyline, type PolylineProjection } from '@/lib/geo/polyline';
 import type { RouteGeometry, TramPublicState } from '@/lib/types';
+
+import { GpsFilter, type GpsFilterOutput } from './gpsFilter';
 
 // ── injected boundaries ──────────────────────────────────────────────────────
 
@@ -89,6 +98,36 @@ export interface LocationSample {
 /** How ride GPS fixes are being delivered (honest UI status). */
 export type LocationWatchMode = 'background' | 'foreground';
 
+/**
+ * One IMU sample (ride schema v4). Nulls where the device/platform withholds
+ * a channel (e.g. no gyroscope → no user acceleration / attitude).
+ */
+export interface MotionSample {
+  /** Wall-clock ms at delivery. */
+  t: number;
+  /** User acceleration (gravity removed), m/s². */
+  ax: number | null;
+  ay: number | null;
+  az: number | null;
+  /** Rotation rate, deg/s. */
+  ra: number | null;
+  rb: number | null;
+  rg: number | null;
+  /** Attitude (orientation in space), rad. */
+  oa: number | null;
+  ob: number | null;
+  og: number | null;
+}
+
+/**
+ * High-rate motion seam (expo-sensors DeviceMotion in prod, fake in tests).
+ * `start` resolves once samples flow; rejects when unavailable/denied — the
+ * core treats that as "GPS-only ride", never as a failed recording.
+ */
+export interface MotionWatcher {
+  start(onSample: (s: MotionSample) => void): Promise<() => void>;
+}
+
 /** Location seam. `start` resolves once watching begins; rejects if denied. */
 export interface LocationWatcher {
   start(onSample: (s: LocationSample) => void): Promise<() => void>;
@@ -104,6 +143,11 @@ export interface LocationWatcher {
 export interface MotionLogDeps {
   fs: MotionLogFS;
   location: LocationWatcher;
+  /**
+   * Optional high-rate IMU stream recorded alongside ride GPS (schema v4
+   * motion batches). A missing/failing watcher degrades to a GPS-only ride.
+   */
+  motion?: MotionWatcher;
   /** Current wall-clock ms. */
   now: () => number;
   /** Latest public state for a tram key (from the engine), or undefined. */
@@ -138,8 +182,13 @@ export const MAX_PENDING = 4_000;
 export const FLUSH_MS = 30_000;
 /** Force a flush when the pending buffer reaches this size. */
 export const FLUSH_AT_LINES = 600;
-/** Total on-disk budget for all motion data; oldest files evicted past this. */
-export const DIR_CAP_BYTES = 8 * 1024 * 1024;
+/**
+ * Total on-disk budget for all motion data; oldest files evicted past this.
+ * Raised 8 → 24 MB for schema v4: a 90 min ride with 25 Hz motion batches is
+ * ~8 MB by itself, and rides are never evicted — an 8 MB cap would force every
+ * passive-log archive out within one long ride.
+ */
+export const DIR_CAP_BYTES = 24 * 1024 * 1024;
 /**
  * Soft ceiling for the ACTIVE daily-log part alone. The active part is never
  * evicted by the disk cap (R9), so the directory may exceed DIR_CAP_BYTES by
@@ -151,7 +200,16 @@ export const ACTIVE_LOG_ROTATE_BYTES = 16 * 1024 * 1024;
 /** Auto-stop a ride after this long (battery guard). */
 export const RIDE_MAX_MS = 90 * 60 * 1000;
 /** Ride on-disk schema version, written into the ride-start header. */
-export const RIDE_SCHEMA = 'v3';
+export const RIDE_SCHEMA = 'v4';
+/** Flush buffered motion samples to the ride file at least this often. */
+export const MOTION_FLUSH_MS = 1_000;
+/** …or as soon as this many samples are buffered (25 ≈ 1 s at 25 Hz). */
+export const MOTION_FLUSH_AT = 25;
+/**
+ * Hard memory bound on unflushed motion samples across append failures
+ * (~20 s at 25 Hz); oldest are shed past this. GPS points are NEVER buffered.
+ */
+export const MOTION_MAX_PENDING = 500;
 
 // ── record shapes (kept compact on disk) ─────────────────────────────────────
 
@@ -162,6 +220,10 @@ export interface RideInfo {
   relPath: string;
   /** Wall-clock ms of the last appended GPS point; null before the first. */
   lastPointMs: number | null;
+  /** IMU samples flushed to disk so far (v4 motion batches). */
+  motionSamples: number;
+  /** GPS fixes rejected as outliers by the filter (still written raw). */
+  gpsRejects: number;
 }
 
 /** What stopRide hands back for the "ride saved" confirmation UI. */
@@ -171,6 +233,10 @@ export interface RideStopResult {
   points: number;
   /** On-disk size after the ride-end footer, bytes (0 if unlistable). */
   bytes: number;
+  /** IMU samples recorded (v4 motion batches). */
+  motionSamples: number;
+  /** GPS fixes flagged as outliers by the filter. */
+  gpsRejects: number;
 }
 
 export interface MotionStats {
@@ -237,6 +303,8 @@ export function rideRecord(
   s: TramPublicState | undefined,
   posMode?: string | null,
   gpsProj?: PolylineProjection | null,
+  filt?: GpsFilterOutput | null,
+  fProj?: PolylineProjection | null,
 ): string {
   return JSON.stringify({
     t: sample.t,
@@ -275,6 +343,54 @@ export function rideRecord(
     gpsDist: gpsProj ? r(gpsProj.distM, 1) : null,
     gpsOffM: gpsProj ? r(gpsProj.offsetM, 1) : null,
     lagM: gpsProj && s && Number.isFinite(s.simDistM) ? r(s.simDistM - gpsProj.distM, 1) : null,
+    // Ride schema v4 — appended AFTER the v3 fields (old parsers see a strict
+    // prefix; detect by presence of `tripId`).
+    //   tripId          trip the sim/AVL context belongs to (can change mid-ride)
+    //   fLat/fLng       FILTERED rider position (GpsFilter: accuracy+jump gates
+    //                   + alpha-beta smoothing); on a rejected fix this is the
+    //                   coasted prediction — see `rej`
+    //   rej             null = accepted; 'acc' (bad horizontalAccuracy) or
+    //                   'jump' (physically impossible displacement). The RAW
+    //                   fix above is always recorded verbatim either way.
+    //   fDist/fOffM     filtered position projected onto the tram's shape
+    //   fLagM           simDist − fDist — the PREFERRED ground-truth lag
+    //                   (lagM from the raw fix is kept for comparison)
+    tripId: s ? (s.snapshot.tripId ?? null) : null,
+    fLat: filt ? r(filt.lat, 6) : null,
+    fLng: filt ? r(filt.lng, 6) : null,
+    rej: filt ? filt.reason : null,
+    fDist: fProj ? r(fProj.distM, 1) : null,
+    fOffM: fProj ? r(fProj.offsetM, 1) : null,
+    fLagM: fProj && s && Number.isFinite(s.simDistM) ? r(s.simDistM - fProj.distM, 1) : null,
+  });
+}
+
+/**
+ * One compact motion batch line (no newline): `t0` = wall-clock ms of the
+ * first sample, `n` = sample count, `s` = per-sample arrays
+ * [dtMs, ax, ay, az, ra, rb, rg, oa, ob, og] (dt relative to t0; user accel
+ * m/s² 3 dp, rotation rate deg/s 2 dp, attitude rad 3 dp; null where the
+ * device withholds a channel). Carries `type:'motion'` so pre-v4 parsers skip
+ * it as an unknown meta line.
+ */
+export function motionRecord(samples: readonly MotionSample[]): string {
+  const t0 = samples[0]?.t ?? 0;
+  return JSON.stringify({
+    type: 'motion',
+    t0,
+    n: samples.length,
+    s: samples.map((m) => [
+      Math.max(0, Math.round(m.t - t0)),
+      r(m.ax, 3),
+      r(m.ay, 3),
+      r(m.az, 3),
+      r(m.ra, 2),
+      r(m.rb, 2),
+      r(m.rg, 2),
+      r(m.oa, 3),
+      r(m.ob, 3),
+      r(m.og, 3),
+    ]),
   });
 }
 
@@ -291,6 +407,8 @@ export function rideStartRecord(
     line: s ? s.snapshot.line : null,
     t,
     schema: RIDE_SCHEMA,
+    // v4: appended after the historic header fields (key-based parsers only).
+    tripId: s ? (s.snapshot.tripId ?? null) : null,
   });
 }
 
@@ -320,6 +438,13 @@ export class MotionLog {
 
   private ride: RideInfo | null = null;
   private rideStop: (() => void) | null = null;
+  /** Stop handle of the active motion (IMU) watcher; null = GPS-only ride. */
+  private rideMotionStop: (() => void) | null = null;
+  /** Motion samples awaiting their next ≤1 s batch append. */
+  private motionPending: MotionSample[] = [];
+  private lastMotionFlushMs = 0;
+  /** Per-ride GPS outlier filter (gpsFilter.ts); fresh on every startRide. */
+  private gpsFilter: GpsFilter | null = null;
   private autoStopTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * Wall-clock ms past which the active ride must stop (battery guard),
@@ -526,6 +651,14 @@ export class MotionLog {
   }
 
   /**
+   * True while the active ride is also recording high-rate IMU motion
+   * (DeviceMotion started successfully); false = GPS-only (honest UI status).
+   */
+  rideMotionActive(): boolean {
+    return this.ride !== null && this.rideMotionStop !== null;
+  }
+
+  /**
    * Begin a GPS ride recording for `tramKey`. One at a time. Resolves true when
    * watching started, false if a ride is already active or permission failed.
    * Crash-safety: the ride file + its {type:'ride-start'} header hit the disk
@@ -537,7 +670,20 @@ export class MotionLog {
     const startedMs = this.deps.now();
     const relPath = `${RIDE_DIR}/${fileStamp(startedMs)}-${sanitizeKey(tramKey)}.jsonl`;
     // Claim the slot before awaiting so concurrent calls can't double-start.
-    this.ride = { key: tramKey, startedMs, points: 0, relPath, lastPointMs: null };
+    this.ride = {
+      key: tramKey,
+      startedMs,
+      points: 0,
+      relPath,
+      lastPointMs: null,
+      motionSamples: 0,
+      gpsRejects: 0,
+    };
+    // Fresh per-ride filter/motion state BEFORE any await: background-task
+    // location delivery can begin while startRide is still awaiting.
+    this.gpsFilter = new GpsFilter();
+    this.motionPending = [];
+    this.lastMotionFlushMs = startedMs;
     // Deadline is an absolute timestamp (not just a timer): survives JS-timer
     // suspension and is enforced in every location callback.
     this.rideDeadlineMs = startedMs + RIDE_MAX_MS;
@@ -553,6 +699,8 @@ export class MotionLog {
       this.ride = null;
       this.rideDeadlineMs = null;
       this.rideStop = null;
+      this.gpsFilter = null;
+      this.motionPending = [];
       try {
         // Nothing was recorded — drop the header-only file instead of leaving
         // a phantom "ride" in the export list.
@@ -571,7 +719,69 @@ export class MotionLog {
     }
     this.autoStopTimer = this.setTimer(() => void this.stopRide(), RIDE_MAX_MS);
     this.notify(); // rideLocationMode is known now
+    // High-rate IMU stream — strictly best-effort AFTER GPS is secured: an
+    // unavailable sensor / denied motion permission degrades to a GPS-only
+    // ride, never a failed one.
+    if (this.deps.motion) {
+      try {
+        const stopMotion = await this.deps.motion.start((m) => this.onMotionSample(m));
+        if (this.ride) {
+          this.rideMotionStop = stopMotion;
+          this.notify(); // rideMotionActive is known now
+        } else {
+          // The ride stopped while the sensor was starting up.
+          try {
+            stopMotion();
+          } catch {
+            // ignore
+          }
+        }
+      } catch {
+        this.rideMotionStop = null;
+      }
+    }
     return true;
+  }
+
+  /** Buffer an IMU sample; batch-append at most every MOTION_FLUSH_MS/AT. */
+  private onMotionSample(m: MotionSample): void {
+    if (!this.ride) return;
+    try {
+      this.motionPending.push(m);
+      const now = this.deps.now();
+      if (
+        this.motionPending.length >= MOTION_FLUSH_AT ||
+        now - this.lastMotionFlushMs >= MOTION_FLUSH_MS
+      ) {
+        this.flushMotion(now);
+      }
+    } catch {
+      // never throw from a sensor callback
+    }
+  }
+
+  /**
+   * Append the buffered motion samples as one {type:'motion'} batch line.
+   * On a write failure the samples are retained for the next attempt (bounded
+   * by MOTION_MAX_PENDING). notify() fires only here (≤1 Hz), never per
+   * 25 Hz sample — perf invariant #1.
+   */
+  private flushMotion(nowMs: number): void {
+    const ride = this.ride;
+    if (!ride || this.motionPending.length === 0) return;
+    this.lastMotionFlushMs = nowMs;
+    const batch = this.motionPending;
+    this.motionPending = [];
+    try {
+      this.deps.fs.append(ride.relPath, motionRecord(batch) + '\n');
+      ride.motionSamples += batch.length;
+      this.notify();
+    } catch {
+      this.motionPending = batch.concat(this.motionPending);
+      if (this.motionPending.length > MOTION_MAX_PENDING) {
+        this.motionPending.splice(0, this.motionPending.length - MOTION_MAX_PENDING);
+      }
+    }
   }
 
   private onRideSample(sample: LocationSample): void {
@@ -594,11 +804,34 @@ export class MotionLog {
         geom && geom.coordinates.length > 1
           ? projectPointToPolyline([sample.lng, sample.lat], geom.coordinates, geom.cumDistM)
           : null;
+      // v4: outlier-filtered position (raw fix is still written verbatim) and
+      // ITS shape projection — the preferred fDist/fLagM ground truth.
+      const filt =
+        this.gpsFilter?.push({
+          t: sample.t,
+          lat: sample.lat,
+          lng: sample.lng,
+          accuracy: sample.accuracy,
+        }) ?? null;
+      if (filt && !filt.accepted) ride.gpsRejects += 1;
+      const fProj =
+        filt && filt.lat != null && filt.lng != null && geom && geom.coordinates.length > 1
+          ? projectPointToPolyline([filt.lng, filt.lat], geom.coordinates, geom.cumDistM)
+          : null;
       // Appended to disk IMMEDIATELY (never buffered) — a crash/jetsam loses
       // at most the point being written, not the recording.
-      this.deps.fs.append(ride.relPath, rideRecord(sample, state, posMode, gpsProj) + '\n');
+      this.deps.fs.append(
+        ride.relPath,
+        rideRecord(sample, state, posMode, gpsProj, filt, fProj) + '\n',
+      );
       ride.points += 1;
       ride.lastPointMs = this.deps.now();
+      // Backstop for the motion batch clock: while backgrounded, GPS callbacks
+      // are the only reliable ticks — an overdue motion batch flushes here
+      // even if the 25 Hz stream has stalled.
+      if (this.motionPending.length > 0 && this.deps.now() - this.lastMotionFlushMs >= MOTION_FLUSH_MS) {
+        this.flushMotion(this.deps.now());
+      }
       // Rides are low-volume; still keep total disk usage bounded (rides are
       // never victims — this evicts log archives to compensate).
       if (ride.points % 30 === 0) this.enforceDirCap();
@@ -612,6 +845,17 @@ export class MotionLog {
   async stopRide(): Promise<RideStopResult | null> {
     const ride = this.ride;
     if (!ride) return null;
+    // Stop + drain the motion stream while `this.ride` is still set (the tail
+    // batch must land BEFORE the footer so the file stays footer-terminated).
+    try {
+      this.rideMotionStop?.();
+    } catch {
+      // ignore
+    }
+    this.rideMotionStop = null;
+    this.flushMotion(this.deps.now());
+    this.motionPending = [];
+    this.gpsFilter = null;
     this.ride = null;
     this.rideDeadlineMs = null;
     if (this.autoStopTimer != null) {
@@ -627,7 +871,14 @@ export class MotionLog {
     try {
       this.deps.fs.append(
         ride.relPath,
-        JSON.stringify({ type: 'ride-end', t: this.deps.now(), points: ride.points }) + '\n',
+        JSON.stringify({
+          type: 'ride-end',
+          t: this.deps.now(),
+          points: ride.points,
+          // v4: appended after the historic footer fields.
+          motionSamples: ride.motionSamples,
+          gpsRejects: ride.gpsRejects,
+        }) + '\n',
       );
     } catch {
       // best-effort — an unclosed file is orphan-recovered on next launch
@@ -639,6 +890,8 @@ export class MotionLog {
       relPath: ride.relPath,
       points: ride.points,
       bytes: this.safeList(RIDE_DIR).find((f) => f.relPath === ride.relPath)?.size ?? 0,
+      motionSamples: ride.motionSamples,
+      gpsRejects: ride.gpsRejects,
     };
   }
 

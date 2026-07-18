@@ -407,6 +407,7 @@ describe('MotionLog ride recording', () => {
       line: '9',
       t: info!.startedMs,
       schema: RIDE_SCHEMA,
+      tripId: 't',
     });
     expect(JSON.parse(lines[3])).toMatchObject({ type: 'ride-end', points: 2 });
     const rec = JSON.parse(lines[1]);
@@ -426,11 +427,12 @@ describe('MotionLog ride recording', () => {
     expect(rec.lagM).toBeNull();
     // New keys are appended AFTER the historic ones — old lines stay a prefix.
     const keys = Object.keys(rec);
-    expect(keys.slice(-9)).toEqual([
+    expect(keys.slice(-16)).toEqual([
       'obsAt', 'statePos', 'delayS', 'nextSeq', 'bias', 'posMode',
       'gpsDist', 'gpsOffM', 'lagM',
+      'tripId', 'fLat', 'fLng', 'rej', 'fDist', 'fOffM', 'fLagM',
     ]);
-    expect(keys.indexOf('phase')).toBe(keys.length - 10);
+    expect(keys.indexOf('phase')).toBe(keys.length - 17);
   });
 
   it('records nulls for sim fields when no state is available', async () => {

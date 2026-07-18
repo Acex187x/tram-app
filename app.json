@@ -58,6 +58,12 @@
         {
           "isIosBackgroundLocationEnabled": true
         }
+      ],
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "Tram Spotter records motion-sensor data during ride recordings to calibrate the tram physics simulation."
+        }
       ]
     ],
     "experiments": {

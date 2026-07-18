@@ -29,6 +29,7 @@ and HOW (with `src/…` references) for one subsystem.
 | [`decisions/3d-models.md`](decisions/3d-models.md) | Programmatic GLB authoring (`@gltf-transform/core`), the −Z front convention, per-type sections, and the expo-gl + three interactive viewer (WebGL1 chain). |
 | [`decisions/ux-screens.md`](decisions/ux-screens.md) | The Liquid Glass shell and the form-sheet screens (tram / line / search / favorites / planner / stop / settings), follow/selection UX. |
 | [`decisions/process-and-tooling.md`](decisions/process-and-tooling.md) | Testing strategy, EAS build config, model-generation scripts, and the review/QA loop. |
+| [`decisions/ride-recording.md`](decisions/ride-recording.md) | Ride recording (schema v4): 25 Hz DeviceMotion batches, the GPS outlier filter, background-recording mechanics + researched options (Live Activity, CMSensorRecorder, why not audio). |
 
 ## Research (`research/`)
 

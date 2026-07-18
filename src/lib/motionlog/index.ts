@@ -15,10 +15,13 @@ import { useSettingsStore } from '@/stores/settings';
 import { MotionLog } from './core';
 import { createExpoFS } from './fs';
 import { createExpoLocationWatcher } from './location';
+import { createExpoDeviceMotionWatcher } from './sensors';
 
 export type {
   MotionFileInfo,
+  MotionSample,
   MotionStats,
+  MotionWatcher,
   RideInfo,
   RideStopResult,
   LocationSample,
@@ -28,6 +31,15 @@ export type {
 } from './core';
 export { MotionLog } from './core';
 export { parseRideFile, type ParsedRide } from './rideFile';
+export {
+  GpsFilter,
+  GPS_FILTER_DEFAULTS,
+  type GpsFilterInput,
+  type GpsFilterOptions,
+  type GpsFilterOutput,
+  type GpsFilterStats,
+  type GpsRejectReason,
+} from './gpsFilter';
 
 let instance: MotionLog | null = null;
 
@@ -41,6 +53,7 @@ export function getMotionLog(): MotionLog {
     const log = new MotionLog({
       fs: createExpoFS(),
       location: createExpoLocationWatcher(),
+      motion: createExpoDeviceMotionWatcher(),
       now: () => Date.now(),
       stateProvider: (key) => getRuntime().engine.getState(key, Date.now()),
       geometry: (key) => getRuntime().engine.getGeometry(key),

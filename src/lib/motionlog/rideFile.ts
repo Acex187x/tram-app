@@ -1,8 +1,9 @@
-// Pure ride-JSONL parser (schema v1–v3) for the recorded-rides list and the
+// Pure ride-JSONL parser (schema v1–v4) for the recorded-rides list and the
 // on-map ride preview. Deliberately forgiving: meta lines carry a `type`
-// ('ride-start' header, 'ride-end'/'ride-orphaned' footers — v3 only), every
-// other parseable line is a GPS point, and corrupt/half-written lines are
-// skipped — so interrupted (orphaned) files render exactly like completed ones.
+// ('ride-start' header, 'ride-end'/'ride-orphaned' footers — v3+; 'motion'
+// IMU batches — v4), every other parseable line is a GPS point, and
+// corrupt/half-written lines are skipped — so interrupted (orphaned) files
+// render exactly like completed ones.
 import type { LngLat } from '@/lib/geo/polyline';
 
 export interface ParsedRidePoint {
@@ -34,6 +35,12 @@ export interface ParsedRide {
   simTrack: LngLat[];
   /** Mean of the available lagM values (m), null when none. */
   meanLagM: number | null;
+  /** v4: IMU samples across all {type:'motion'} batch lines (0 pre-v4). */
+  motionSamples: number;
+  /** v4: GPS points flagged as outliers by the filter (`rej` non-null). */
+  rejectedPoints: number;
+  /** v4: mean of the available fLagM values (filtered-lag, m), null when none. */
+  meanFLagM: number | null;
 }
 
 function num(v: unknown): number | null {
@@ -58,11 +65,16 @@ export function parseRideFile(text: string): ParsedRide {
     gpsTrack: [],
     simTrack: [],
     meanLagM: null,
+    motionSamples: 0,
+    rejectedPoints: 0,
+    meanFLagM: null,
   };
   let firstPointMs: number | null = null;
   let lastPointMs: number | null = null;
   let lagSum = 0;
   let lagN = 0;
+  let fLagSum = 0;
+  let fLagN = 0;
 
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
@@ -89,6 +101,13 @@ export function parseRideFile(text: string): ParsedRide {
       ride.endedMs = num(rec.t) ?? ride.endedMs;
       continue;
     }
+    if (type === 'motion') {
+      // v4 IMU batch: prefer the sample-array length; `n` is the fallback for
+      // a hand-truncated line.
+      const s = rec.s;
+      ride.motionSamples += Array.isArray(s) ? s.length : (num(rec.n) ?? 0);
+      continue;
+    }
     if (type != null) continue; // unknown future meta line
 
     // A GPS point (any schema version).
@@ -112,10 +131,18 @@ export function parseRideFile(text: string): ParsedRide {
       lagSum += lagM;
       lagN += 1;
     }
+    // v4 extras.
+    if (str(rec.rej) != null) ride.rejectedPoints += 1;
+    const fLagM = num(rec.fLagM);
+    if (fLagM != null) {
+      fLagSum += fLagM;
+      fLagN += 1;
+    }
   }
 
   ride.startedMs = ride.startedMs ?? firstPointMs;
   ride.endedMs = ride.endedMs ?? lastPointMs;
   ride.meanLagM = lagN > 0 ? lagSum / lagN : null;
+  ride.meanFLagM = fLagN > 0 ? fLagSum / fLagN : null;
   return ride;
 }

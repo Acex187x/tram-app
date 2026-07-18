@@ -99,6 +99,41 @@ The existing daytime center-zone cap (07:00–19:00) folds into this table event
   (expo-location background task); sim-side fields then tick at 1 Hz with 10 s polls
   (`rideBackground` mode, docs/performance.md) — expect slightly coarser `simDist`
   steps in backgrounded stretches.
+- **v4** (device builds from 2026-07-18): high-rate IMU motion + in-app GPS
+  filtering. Backward-tolerant: v3 point lines remain a strict prefix (detect v4 by
+  presence of `tripId` on a point line); pre-v4 parsers skip the new meta lines by
+  their unknown `type`.
+  1. **Appended point fields** (after `lagM`):
+     - `tripId` — trip the sim/AVL context belongs to (can change mid-ride; the
+       header also carries the start-of-ride `tripId`);
+     - `fLat`/`fLng` — FILTERED rider position (`src/lib/motionlog/gpsFilter.ts`:
+       accuracy gate > 45 m → `rej:'acc'`; physically-impossible-jump gate
+       (> 40 m/s·dt + slack + accuracy) → `rej:'jump'`; alpha-beta smoothing
+       α=0.45 β=0.15 in a local meter frame; 5 consecutive jump-rejects re-anchor —
+       the jump was real). On a rejected fix `fLat/fLng` is the coasted prediction;
+       the RAW `gpsLat/gpsLng/gpsAcc` stay verbatim on every line;
+     - `rej` — null (accepted) | `'acc'` | `'jump'`;
+     - `fDist`/`fOffM`/`fLagM` — the filtered position projected onto the tram's
+       shape; **`fLagM` (simDist − fDist) is the PREFERRED ground-truth lag** —
+       `lagM` from the raw fix is kept for comparison. Same `fOffM` gating rule as
+       `gpsOffM` (< 30 m before trusting `fDist`).
+  2. **Motion meta lines** — `{type:'motion', t0, n, s:[[dt,ax,ay,az,ra,rb,rg,oa,ob,og],…]}`:
+     ~25 Hz DeviceMotion batches (expo-sensors), flushed every ≤1 s / ≤25 samples
+     (a crash loses at most ~1 s of motion; GPS points are still written per-fix,
+     never buffered). Per sample: `dt` ms since `t0`; `ax..az` user acceleration
+     (gravity removed) m/s² (null on gyro-less devices); `ra..rg` rotation rate
+     deg/s; `oa..og` attitude rad (rotate accel into the world frame offline).
+     Motion is guaranteed only while foregrounded; in background the location
+     session usually keeps the process alive so batches often continue — gaps are
+     visible in the `t0`/`dt` timeline itself (see docs/decisions/ride-recording.md).
+  3. **Header/footer extras**: header adds `tripId`; footer (`ride-end`) adds
+     `motionSamples` and `gpsRejects`.
+  Per-point completeness contract (pinned by `__tests__/motionlog-ride-v4.test.ts`):
+  time (`t`, `obsAt`) · line/trip/model (`line`, `tripId`, `model`, header `tramKey`) ·
+  sim state (`simDist`, `simLat/simLng`, `simKmh`, `phase`, `bias`) · raw AVL
+  (`obsDist`, `obsAt`, `projDist`, `devM`, `statePos`, `delayS`, `nextSeq`) · raw GPS
+  (`gpsLat/gpsLng/gpsAcc/gpsSpeed`) · rider-on-shape (`gpsDist/gpsOffM/lagM` raw +
+  `fLat/fLng/rej/fDist/fOffM/fLagM` filtered) · rendering context (`posMode`).
 
 ## Where things are
 
