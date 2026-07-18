@@ -357,9 +357,43 @@ function FollowChip() {
         variant="regular"
         interactive
         appearance={colors.scheme}
-        style={[styles.chip, paused && styles.chipPausedPad]}
+        style={styles.chip}
       >
-        {paused ? (
+        {/* The tram identity (line + reg + delay) stays visible in BOTH states;
+            tapping it reopens the detail sheet. Only the trailing control
+            changes: "Following" hint while locked, a compact "Follow" pill to
+            re-center while paused — never a full-width button over the info. */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Open tram ${reg ?? followKey} details`}
+          style={styles.chipBody}
+          onPress={() => {
+            tapLight();
+            useSelectionStore.getState().setSelectedTramKey(followKey);
+            router.push(`/tram/${encodeURIComponent(followKey)}`);
+          }}
+        >
+          <LineBadge line={state.snapshot.line} size="sm" />
+          {reg != null && (
+            <Text style={[styles.followReg, { color: colors.text }]} allowFontScaling={false}>
+              #{reg}
+            </Text>
+          )}
+          <DelayPill delaySeconds={state.snapshot.delaySeconds} />
+          <View style={styles.chipSpacer} />
+          {!paused && (
+            <>
+              <Text
+                style={[styles.followHint, { color: colors.secondary }]}
+                allowFontScaling={false}
+              >
+                Following
+              </Text>
+              <SymbolView name="chevron.up" size={12} tintColor={colors.secondary} />
+            </>
+          )}
+        </Pressable>
+        {paused && (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Return to following tram ${reg ?? followKey}`}
@@ -372,34 +406,10 @@ function FollowChip() {
               useSelectionStore.getState().setFollowPaused(false);
             }}
           >
-            <SymbolView name="location.viewfinder" size={17} tintColor="#FFFFFF" />
+            <SymbolView name="location.viewfinder" size={14} tintColor="#FFFFFF" />
             <Text style={styles.followResumeLabel} allowFontScaling={false}>
               Follow
             </Text>
-          </Pressable>
-        ) : (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Open tram ${reg ?? followKey} details`}
-            style={styles.chipBody}
-            onPress={() => {
-              tapLight();
-              useSelectionStore.getState().setSelectedTramKey(followKey);
-              router.push(`/tram/${encodeURIComponent(followKey)}`);
-            }}
-          >
-            <LineBadge line={state.snapshot.line} size="sm" />
-            {reg != null && (
-              <Text style={[styles.followReg, { color: colors.text }]} allowFontScaling={false}>
-                #{reg}
-              </Text>
-            )}
-            <DelayPill delaySeconds={state.snapshot.delaySeconds} />
-            <View style={styles.chipSpacer} />
-            <Text style={[styles.followHint, { color: colors.secondary }]} allowFontScaling={false}>
-              Following
-            </Text>
-            <SymbolView name="chevron.up" size={12} tintColor={colors.secondary} />
           </Pressable>
         )}
         <ChipClose
@@ -673,25 +683,24 @@ const styles = StyleSheet.create({
     paddingRight: 6,
     borderRadius: 999,
   },
-  // Paused follow: the big accent button hugs the glass like the dock's
-  // search field (6 pt inset all round).
-  chipPausedPad: { paddingLeft: 6 },
   chipBody: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   chipSpacer: { flex: 1 },
   chipClose: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
   followReg: { fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
   followHint: { fontSize: 13, fontWeight: '500' },
+  // Paused follow: a COMPACT accent pill sitting where "Following" was — the
+  // tram identity to its left stays visible; never full-width.
   followResume: {
-    flex: 1,
-    height: 34,
+    height: 30,
+    paddingHorizontal: 12,
     borderRadius: 999,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 5,
   },
   followResumeLabel: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',
     fontFamily: Fonts?.rounded,
