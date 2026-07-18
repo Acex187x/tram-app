@@ -1,8 +1,9 @@
 // Chibi KT8D5 — the LONG boxy articulated one. Angular near-rectangular head
 // (no bun curves!), dark anthracite windscreen mask holding two square glass
 // eyes, red belt with the WHITE bumper stripe carrying two round headlights,
-// grey skirt — and two accordion-jointed body sections peeking out on BOTH
-// sides so it reads as the three-section giant. Yellow diamond pantograph.
+// grey skirt — and two accordion-jointed WHITE body sections peeking out on
+// BOTH sides so it reads as the three-section giant (kept plain white: red
+// patches out there muddied the face). Yellow diamond pantograph.
 import Svg, { Circle, Ellipse, Line, Path, Rect } from 'react-native-svg';
 
 import { C, VIEWBOX, type ChibiFaceProps } from './palette';
@@ -21,8 +22,6 @@ export function Face({ size = 64 }: ChibiFaceProps) {
       {/* trailing SECTIONS peeking on both sides — the articulated tell */}
       <Path d="M6.5 20 L12.5 20 L12.5 52 L8 52 C6.9 52 6.5 51.4 6.5 50.4 Z" fill={C.white} stroke={C.outline} strokeWidth={1.6} />
       <Path d="M57.5 20 L51.5 20 L51.5 52 L56 52 C57.1 52 57.5 51.4 57.5 50.4 Z" fill={C.white} stroke={C.outline} strokeWidth={1.6} />
-      <Path d="M6.5 33 L12.5 33 L12.5 46 L6.7 46 Z" fill={C.red} />
-      <Path d="M57.5 33 L51.5 33 L51.5 46 L57.3 46 Z" fill={C.red} />
       {/* accordion joint pleats */}
       <Line x1={9.6} y1={21.5} x2={9.6} y2={50.5} stroke={C.outline} strokeWidth={1.1} opacity={0.55} />
       <Line x1={54.4} y1={21.5} x2={54.4} y2={50.5} stroke={C.outline} strokeWidth={1.1} opacity={0.55} />

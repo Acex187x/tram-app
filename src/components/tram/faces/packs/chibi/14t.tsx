@@ -1,9 +1,10 @@
 // Chibi 14T — the Porsche-designed angular WEDGE. Faceted SILVER cab with
 // straight chamfered sides (no bun curves), a tall BLACK windscreen frame
 // that WIDENS downward (trapezoid), green LED strip at its top, stacked pairs
-// of small round lights in dark recessed niches low on the mask, RED body
-// sections peeking behind the silver cab, single-arm pantograph, grey skirt.
-// Slightly googly eyes keep its lovable-oddball personality.
+// of small round lights in dark recessed niches low on the mask, single-arm
+// pantograph, grey skirt. The nose is all silver — like the real 14T front
+// (no red side panels). Slightly googly eyes keep its lovable-oddball
+// personality.
 import Svg, { Circle, Ellipse, Line, Path, Rect } from 'react-native-svg';
 
 import { C, VIEWBOX, type ChibiFaceProps } from './palette';
@@ -21,9 +22,6 @@ export function Face({ size = 64 }: ChibiFaceProps) {
     <Svg width={size} height={size} viewBox={VIEWBOX}>
       {/* ground shadow */}
       <Ellipse cx={32} cy={59.6} rx={23} ry={2.4} fill={C.shadow} />
-      {/* RED body sections peeking behind the silver cab — the red/silver tell */}
-      <Path d="M7.5 24 L12 24 L12 51 L9 51 C8 51 7.5 50.4 7.5 49.4 Z" fill={C.red} stroke={C.outline} strokeWidth={1.5} />
-      <Path d="M56.5 24 L52 24 L52 51 L55 51 C56 51 56.5 50.4 56.5 49.4 Z" fill={C.red} stroke={C.outline} strokeWidth={1.5} />
       {/* wheel-feet */}
       <Circle cx={21} cy={54} r={4} fill={C.dark} />
       <Circle cx={43} cy={54} r={4} fill={C.dark} />
