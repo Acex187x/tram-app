@@ -1,88 +1,81 @@
-// Side Profile pack — Škoda 52T ForCity Plus: the WHITE tram with the BLACK
-// helmet visor. Long white/light-grey body, glossy black visor sweeping from
-// the rounded raked nose up over the cab roof, amber destination strip in the
-// glass, tall dark window band, red only as accents (nose diagonal, door
-// panels, roof segments over the joints), low white skirt, single-arm panto.
-import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
+// Side Profile pack — Škoda 52T ForCity Plus: NOSE PORTRAIT in side view.
+// The opposite of the 15T: a TALL, almost vertical front with one big rounded
+// top corner, wrapped in the glossy BLACK helmet visor (amber destination
+// dashes inside), white body with a white rim around the visor, red stripe on
+// the leading edge of the nose and a red module behind the white cab.
+// Single-arm pantograph horns. Nose faces left.
+import Svg, { Circle, ClipPath, Defs, G, Line, Path, Rect } from 'react-native-svg';
 
 const P = {
-  plate: '#E8ECF1',
+  plate: '#EDF0F4',
   edge: 'rgba(90,102,120,0.35)',
   rail: '#A7AEB9',
   wheel: '#333941',
-  white: '#FAFBFC',
-  roofGrey: '#D2D7DD',
-  visor: '#16181D',
-  band: '#252932',
-  glassDoor: '#3A414B',
-  joint: '#9AA0A8',
-  jointEdge: '#6A717B',
-  red: '#C8352C',
-  amber: '#E8971A',
-  panto: '#3A4048',
+  body: '#F2F1ED',
+  visor: '#1E2226',
+  red: '#D5372E',
+  glass: '#2A3138',
+  roof: '#8E9296',
+  skirt: '#B9BCBF',
+  amber: '#FFB03A',
+  panto: '#C89A2E',
   dark: '#23272E',
 } as const;
 
+// Tall upright prow: big rounded top corner, near-vertical face, flat chin.
 const BODY =
-  'M13 28 L54.5 28 Q58.5 28 58.5 31.5 L58.5 42.8 Q58.5 44.5 56.8 44.5 L8.2 44.5 Q5.9 44.5 6.3 42 C6.9 36.8 8.7 30.4 13 28 Z';
-
-function Joint({ x }: { x: number }) {
-  return (
-    <>
-      <Rect x={x} y={28.6} width={1.8} height={15.5} fill={P.joint} />
-      <Line x1={x} y1={28.8} x2={x} y2={44} stroke={P.jointEdge} strokeWidth={0.45} />
-      <Line x1={x + 1.8} y1={28.8} x2={x + 1.8} y2={44} stroke={P.jointEdge} strokeWidth={0.45} />
-    </>
-  );
-}
+  'M63 14.5 L29 14.5 C22.8 14.8 19.2 17.2 17.8 21.6 C16.9 24.8 16.5 30.4 16.5 36 C16.5 42 17.2 46.2 19.8 48.7 L63 48.7 Z';
 
 export function Face({ size = 64 }: { size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 64 64">
+      <Defs>
+        <ClipPath id="side52tPlate">
+          <Rect x={1.5} y={1.5} width={61} height={61} rx={14} />
+        </ClipPath>
+        <ClipPath id="side52tBody">
+          <Path d={BODY} />
+        </ClipPath>
+      </Defs>
       <Rect x={1.5} y={1.5} width={61} height={61} rx={14} fill={P.plate} stroke={P.edge} strokeWidth={1} />
-      {/* single-arm pantograph */}
-      <Path d="M33 27.8 L37 22.8 L42.5 21.9" stroke={P.panto} strokeWidth={1.1} strokeLinecap="round" fill="none" />
-      <Line x1={40.8} y1={21.5} x2={44.2} y2={21.5} stroke={P.panto} strokeWidth={1.2} strokeLinecap="round" />
-      <Line x1={4.5} y1={46.8} x2={59.5} y2={46.8} stroke={P.rail} strokeWidth={1.1} strokeLinecap="round" />
-      <Circle cx={10.4} cy={45} r={1.6} fill={P.wheel} />
-      <Circle cx={13.6} cy={45} r={1.6} fill={P.wheel} />
-      <Circle cx={31} cy={45} r={1.6} fill={P.wheel} />
-      <Circle cx={34.2} cy={45} r={1.6} fill={P.wheel} />
-      <Circle cx={50.4} cy={45} r={1.6} fill={P.wheel} />
-      <Circle cx={53.6} cy={45} r={1.6} fill={P.wheel} />
-      {/* white body with rounded raked nose */}
-      <Path d={BODY} fill={P.white} />
-      {/* light grey roof strip */}
-      <Rect x={15} y={28} width={40} height={1.1} fill={P.roofGrey} />
-      {/* red roof segments over the joints */}
-      <Rect x={26.5} y={28} width={6} height={1.1} fill={P.red} />
-      <Rect x={41.5} y={28} width={6} height={1.1} fill={P.red} />
-      {/* tall dark window band */}
-      <Rect x={18.5} y={29.5} width={39} height={6.2} fill={P.band} />
-      {/* red accents: nose diagonal + door panels */}
-      <Path d="M13.2 36.6 L16.4 36.6 L14 44.5 L10.8 44.5 Z" fill={P.red} />
-      <Rect x={32.6} y={36.6} width={5.4} height={7.9} fill={P.red} />
-      <Rect x={51} y={36.6} width={4.6} height={7.9} fill={P.red} />
-      {/* glossy black helmet visor: windscreen sweeping over the cab roof */}
-      <Path
-        d="M17.8 27.3 L17.8 36.2 C14.6 36.2 11.4 37.9 9.1 40.9 C7.8 37.4 9.5 30.6 12.6 27.9 Q15.1 27 17.8 27.3 Z"
-        fill={P.visor}
-      />
-      {/* amber destination strip in the visor glass */}
-      <Rect x={13.6} y={28.9} width={3.2} height={1} rx={0.3} fill={P.amber} />
-      {/* slim LED dash low at the visor tip */}
-      <Rect x={7.6} y={41.2} width={2.6} height={0.9} rx={0.45} fill={P.visor} />
-      {/* tall glazed doors */}
-      <Rect x={21.5} y={29.8} width={3.2} height={13.6} fill={P.glassDoor} />
-      <Line x1={23.1} y1={30} x2={23.1} y2={43.2} stroke={P.dark} strokeWidth={0.4} opacity={0.8} />
-      <Rect x={33.7} y={29.8} width={3.2} height={13.6} fill={P.glassDoor} />
-      <Line x1={35.3} y1={30} x2={35.3} y2={43.2} stroke={P.dark} strokeWidth={0.4} opacity={0.8} />
-      <Rect x={46} y={29.8} width={3.2} height={13.6} fill={P.glassDoor} />
-      <Line x1={47.6} y1={30} x2={47.6} y2={43.2} stroke={P.dark} strokeWidth={0.4} opacity={0.8} />
-      {/* two joints = three sections */}
-      <Joint x={28.5} />
-      <Joint x={43.5} />
-      <Path d={BODY} fill="none" stroke={P.dark} strokeWidth={0.9} />
+      <G clipPath="url(#side52tPlate)">
+        {/* single-arm pantograph horns */}
+        <Line x1={50} y1={14.3} x2={55} y2={7.8} stroke={P.panto} strokeWidth={1.2} strokeLinecap="round" />
+        <Line x1={55} y1={7.8} x2={49.6} y2={5.8} stroke={P.panto} strokeWidth={1.2} strokeLinecap="round" />
+        <Line x1={47.2} y1={5.4} x2={52.2} y2={5.4} stroke={P.panto} strokeWidth={1.3} strokeLinecap="round" />
+        {/* rail + wheels tucked under the low skirt */}
+        <Line x1={7} y1={53.6} x2={57} y2={53.6} stroke={P.rail} strokeWidth={1.2} strokeLinecap="round" />
+        <Circle cx={30} cy={50.4} r={2.7} fill={P.wheel} />
+        <Circle cx={46} cy={50.4} r={2.7} fill={P.wheel} />
+        {/* tall white prow */}
+        <Path d={BODY} fill={P.body} />
+        <G clipPath="url(#side52tBody)">
+          {/* red module behind the white cab */}
+          <Rect x={50} y={14} width={14} height={35} fill={P.red} />
+          <Rect x={36} y={14.5} width={28} height={1.8} fill={P.roof} />
+          {/* red stripe on the leading edge of the nose */}
+          <Rect x={15.5} y={35.5} width={4.6} height={13.2} fill={P.red} />
+          {/* grey skirt line */}
+          <Rect x={14} y={47} width={50} height={1.7} fill={P.skirt} />
+        </G>
+        {/* tall side window band flowing back (crosses the red module) */}
+        <Rect x={31.5} y={18.5} width={31} height={17.5} fill={P.glass} />
+        <Line x1={39} y1={19.5} x2={39} y2={35} stroke="#8E969E" strokeWidth={0.7} opacity={0.6} />
+        <Line x1={50.5} y1={19.5} x2={50.5} y2={35} stroke="#8E969E" strokeWidth={0.7} opacity={0.6} />
+        {/* BLACK helmet visor: tall near-vertical glass with the rounded crown */}
+        <Path
+          d="M34 14.5 L29 14.5 C23.4 14.8 20.1 17.1 18.7 21.8 C17.9 24.6 17.6 29 17.6 33.6 L28.4 33.6 C29 26.4 31.2 18.9 34 14.5 Z"
+          fill={P.visor}
+        />
+        {/* amber destination dashes inside the visor */}
+        <Rect x={21.6} y={18.6} width={3.2} height={1} fill={P.amber} />
+        <Rect x={25.6} y={18.6} width={2.2} height={1} fill={P.amber} />
+        {/* LED headlight slit on the red nose stripe */}
+        <Rect x={17.4} y={36.8} width={1.6} height={3} rx={0.8} fill="#F4F7FA" stroke={P.dark} strokeWidth={0.35} />
+        {/* dark under-bumper lip at the chin */}
+        <Path d="M17.2 44.6 C17.6 46.6 18.6 48 20.2 48.7 L26 48.7 L26 44.6 Z" fill="#33383D" />
+        <Path d={BODY} fill="none" stroke={P.dark} strokeWidth={1.1} />
+      </G>
     </Svg>
   );
 }

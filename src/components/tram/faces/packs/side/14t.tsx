@@ -1,88 +1,74 @@
-// Side Profile pack — Škoda 14T (Porsche design): the RED caterpillar. Long
-// angular wedge with silver raked noses at both ends and a continuous silver
-// roof band; five red modules separated by four slim grey accordion joints;
-// modern single-arm pantograph. Red is the dominant color — unlike anything
-// else in the fleet at a glance.
-import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
+// Side Profile pack — Škoda 14T (Porsche design): NOSE PORTRAIT in side view.
+// The WEDGE: windscreen on a hard backward rake flowing into a silver nose
+// that bulges forward then curls under — a ski-jump profile. Silver front
+// module with dark headlight pod, red body taking over behind the cab on a
+// slanted module cut, silver skirt. Single-arm pantograph horns. Nose left.
+import Svg, { Circle, ClipPath, Defs, G, Line, Path, Rect } from 'react-native-svg';
 
 const P = {
   plate: '#EDF0F4',
   edge: 'rgba(90,102,120,0.35)',
   rail: '#A7AEB9',
   wheel: '#333941',
-  red: '#C8352C',
-  silver: '#C9CED6',
-  glass: '#2E3640',
-  joint: '#6A717B',
-  jointEdge: '#4A515B',
-  door: '#39414C',
-  panto: '#3A4048',
+  silver: '#C9CBCE',
+  red: '#CE2B26',
+  doorRed: '#B72420',
+  glass: '#35444E',
+  roof: '#7E8286',
+  panto: '#C89A2E',
   dark: '#23272E',
+  pod: '#2B333B',
 } as const;
 
-const BODY = 'M9.8 28 L54.2 28 L58.5 44.5 L5.5 44.5 Z';
-
-function Joint({ x }: { x: number }) {
-  return (
-    <>
-      <Rect x={x} y={28.5} width={1.8} height={15.6} fill={P.joint} />
-      <Line x1={x} y1={28.7} x2={x} y2={44.1} stroke={P.jointEdge} strokeWidth={0.45} />
-      <Line x1={x + 1.8} y1={28.7} x2={x + 1.8} y2={44.1} stroke={P.jointEdge} strokeWidth={0.45} />
-    </>
-  );
-}
-
-function Door({ x }: { x: number }) {
-  return (
-    <>
-      <Rect x={x} y={30.7} width={2.8} height={13.1} fill={P.door} />
-      <Line x1={x + 1.4} y1={30.9} x2={x + 1.4} y2={43.5} stroke="#20262E" strokeWidth={0.45} opacity={0.9} />
-    </>
-  );
-}
+// Porsche wedge prow: raked screen, forward-bulging nose, curled underside.
+const BODY =
+  'M63 15.5 L33.5 15.5 C28.5 16 24.8 19.4 21.9 25.6 C19.4 30.9 17.9 36.5 18.7 41.5 C19.5 45.7 22.6 48.6 27.5 49 L63 49 Z';
 
 export function Face({ size = 64 }: { size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 64 64">
+      <Defs>
+        <ClipPath id="side14tPlate">
+          <Rect x={1.5} y={1.5} width={61} height={61} rx={14} />
+        </ClipPath>
+        <ClipPath id="side14tBody">
+          <Path d={BODY} />
+        </ClipPath>
+      </Defs>
       <Rect x={1.5} y={1.5} width={61} height={61} rx={14} fill={P.plate} stroke={P.edge} strokeWidth={1} />
-      {/* single-arm pantograph */}
-      <Path d="M21.5 27.8 L25.5 22.8 L31 21.9" stroke={P.panto} strokeWidth={1.1} strokeLinecap="round" fill="none" />
-      <Line x1={29.3} y1={21.5} x2={32.7} y2={21.5} stroke={P.panto} strokeWidth={1.2} strokeLinecap="round" />
-      <Line x1={4.5} y1={46.8} x2={59.5} y2={46.8} stroke={P.rail} strokeWidth={1.1} strokeLinecap="round" />
-      <Circle cx={9.6} cy={45} r={1.6} fill={P.wheel} />
-      <Circle cx={12.8} cy={45} r={1.6} fill={P.wheel} />
-      <Circle cx={30.4} cy={45} r={1.6} fill={P.wheel} />
-      <Circle cx={33.6} cy={45} r={1.6} fill={P.wheel} />
-      <Circle cx={51.2} cy={45} r={1.6} fill={P.wheel} />
-      <Circle cx={54.4} cy={45} r={1.6} fill={P.wheel} />
-      {/* red wedge body */}
-      <Path d={BODY} fill={P.red} />
-      {/* continuous silver roof band */}
-      <Path d="M9.8 28 L54.2 28 L54.8 30.3 L9.2 30.3 Z" fill={P.silver} />
-      {/* silver raked noses at both ends */}
-      <Path d="M9.8 28 L15.4 28 L11.2 44.5 L5.5 44.5 Z" fill={P.silver} />
-      <Path d="M48.6 28 L54.2 28 L58.5 44.5 L52.8 44.5 Z" fill={P.silver} />
-      {/* big raked dark windscreens on the noses */}
-      <Path d="M11.2 29.3 L14.4 29.3 L12 38.6 L8.9 38.6 Z" fill={P.glass} />
-      <Path d="M49.6 29.3 L52.8 29.3 L55.1 38.6 L52 38.6 Z" fill={P.glass} />
-      {/* windows in the red modules */}
-      <Rect x={16.2} y={30.9} width={1.6} height={5} rx={0.4} fill={P.glass} />
-      <Rect x={24.8} y={30.9} width={4.4} height={5} rx={0.5} fill={P.glass} />
-      <Rect x={31.2} y={30.9} width={2.2} height={5} rx={0.4} fill={P.glass} />
-      <Rect x={34.6} y={30.9} width={4.4} height={5} rx={0.5} fill={P.glass} />
-      <Rect x={43.4} y={30.9} width={0.9} height={5} rx={0.3} fill={P.glass} />
-      <Rect x={46.4} y={30.9} width={2.4} height={5} rx={0.5} fill={P.glass} />
-      {/* doors */}
-      <Door x={20.2} />
-      <Door x={40.4} />
-      {/* four slim accordion joints = FIVE modules */}
-      <Joint x={18} />
-      <Joint x={27.4} />
-      <Joint x={36.8} />
-      <Joint x={44.2} />
-      {/* recessed round lamp on the nose */}
-      <Circle cx={7.6} cy={41.2} r={0.9} fill="#FFF3D8" stroke={P.dark} strokeWidth={0.4} />
-      <Path d={BODY} fill="none" stroke={P.dark} strokeWidth={0.9} />
+      <G clipPath="url(#side14tPlate)">
+        {/* single-arm pantograph horns */}
+        <Line x1={49} y1={15.2} x2={54} y2={8.6} stroke={P.panto} strokeWidth={1.2} strokeLinecap="round" />
+        <Line x1={54} y1={8.6} x2={48.6} y2={6.6} stroke={P.panto} strokeWidth={1.2} strokeLinecap="round" />
+        <Line x1={46.2} y1={6.2} x2={51.2} y2={6.2} stroke={P.panto} strokeWidth={1.3} strokeLinecap="round" />
+        {/* rail + wheels tucked under the low skirt */}
+        <Line x1={7} y1={53.6} x2={57} y2={53.6} stroke={P.rail} strokeWidth={1.2} strokeLinecap="round" />
+        <Circle cx={30} cy={50.6} r={2.7} fill={P.wheel} />
+        <Circle cx={46} cy={50.6} r={2.7} fill={P.wheel} />
+        {/* silver wedge prow */}
+        <Path d={BODY} fill={P.silver} />
+        <G clipPath="url(#side14tBody)">
+          {/* red body takes over on a slanted module cut behind the cab */}
+          <Path d="M41.5 14 L37.5 50 L64 50 L64 14 Z" fill={P.red} />
+          <Rect x={14} y={15.5} width={50} height={1.8} fill={P.roof} />
+          {/* continuous silver skirt under the red modules */}
+          <Rect x={14} y={44.8} width={50} height={4.2} fill={P.silver} />
+        </G>
+        {/* hard-raked windscreen flowing into the nose — the Porsche tell */}
+        <Path d="M33.6 17 C30 17.6 26.6 20.9 23.9 26.2 L21.3 32.2 L28.6 32.2 C29.2 27 30.9 21.2 33.6 17 Z" fill={P.glass} />
+        {/* cab side window */}
+        <Rect x={34.6} y={19} width={5.4} height={10.8} rx={1} fill={P.glass} />
+        {/* red section: window, tall glazed door, window */}
+        <Rect x={42.2} y={18.2} width={4} height={11} rx={0.8} fill={P.glass} />
+        <Rect x={48} y={17.5} width={8} height={27.2} fill={P.doorRed} />
+        <Rect x={49.2} y={19} width={5.6} height={13} rx={0.8} fill={P.glass} />
+        <Line x1={52} y1={18} x2={52} y2={44.4} stroke={P.dark} strokeWidth={0.5} opacity={0.5} />
+        <Rect x={58.2} y={18.2} width={5} height={11} rx={0.8} fill={P.glass} />
+        {/* dark headlight pod low on the silver nose */}
+        <Rect x={19.2} y={37.4} width={2.9} height={2.1} rx={1} fill={P.pod} />
+        <Circle cx={20.4} cy={38.45} r={0.6} fill="#EAF2F8" />
+        <Path d={BODY} fill="none" stroke={P.dark} strokeWidth={1.1} />
+      </G>
     </Svg>
   );
 }

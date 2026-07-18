@@ -1,9 +1,10 @@
-// Face pack "side" — Side Profile. Bold flat-vector side silhouettes on a
-// light plate: length, section count, livery bands and pantograph type are
-// the spotter cues (T3 short cream/red single, T3R.P coupled LED-brow pair,
-// T3R.PLF silver single, KT8D5 boxy three-section with two diamonds, 14T red
-// wedge-nosed five-module, 15T black-band four-section, 52T white three-
-// section with the black helmet visor).
+// Face pack "side" — Side Profile. Big NOSE PORTRAITS in side view on a
+// light plate: only the front cab, cropped large, nose facing left, with a
+// bit of pantograph as horns. The windscreen rake in profile is the spotter
+// cue (T3/T3R.P rounded bathtub prow, T3R.PLF the same prow in silver with a
+// wine cheek mask, KT8D5 boxy flat rake, 14T Porsche ski-jump wedge, 15T
+// extreme black-glass sweep with the red brow cap, 52T tall near-vertical
+// black helmet visor on a white body).
 import type * as React from 'react';
 
 import type { TramModelId } from '@/lib/types';
@@ -19,7 +20,7 @@ import { Face as FaceT3rplf } from './t3rplf';
 export const PACK_META = {
   id: 'side',
   name: 'Side Profile',
-  description: 'Full-length side silhouettes — length, sections, doors and pantographs tell the fleet apart',
+  description: 'Nose portraits in side view — the windscreen rake and prow shape tell the fleet apart',
 } as const;
 
 export const FACES: Record<TramModelId, React.FC<{ size?: number }>> = {
