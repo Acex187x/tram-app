@@ -53,8 +53,9 @@ Key insights behind it:
 
 ### Network
 - Rate-limited scheduler (16 starts/8 s, 4 concurrent) — bursts are impossible by design.
-- Trip geometries disk-cached (24 h, service-day re-anchored) — steady state fetches only the
-  5 s positions poll (~0.9 MB) and geometry deltas for new trips.
+- Trip geometries disk-cached (3 days, service-day re-anchored) — steady state fetches only the
+  5 s positions poll (~0.9 MB) and geometry deltas for new trips, and a next-day cold start
+  re-opens warm instead of re-fetching the fleet.
 
 ## B. Invariants — do not break these
 

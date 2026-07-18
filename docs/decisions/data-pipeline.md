@@ -156,9 +156,21 @@ funnels through via `golemioFetch` (line 245). Design:
   in `/v2/gtfs/trips/{id}` can be promoted without threading a tag through every
   intermediate module. Returns whether it matched, so the caller knows the request
   is already in flight and need not re-issue.
-- **Anti-starvation aging.** A priority ≥1 waiter older than `AGING_MS = 30_000`
-  is bumped up one level and its aging clock reset (line 104-115), so a sustained
-  urgent/normal stream cannot keep background work queued forever.
+- **Anti-starvation aging — floored at priority 1.** A background waiter older
+  than `AGING_MS = 30_000` is bumped up one level and its aging clock reset, so a
+  sustained urgent/normal stream cannot keep background work queued forever. Aging
+  **never lifts a waiter into the urgent lane** (`AGING_FLOOR = 1`): 0 is reserved
+  for the live poll and tapped-tram promotions. Unbounded aging marched a
+  cold-start geometry backlog (hundreds of waiters) 2→1→0 within two windows,
+  where its older `seq` numbers outranked every fresh poll/tap — the fleet froze
+  and visible trams sat as loading dots for minutes (red-dot recurrence,
+  2026-07-18).
+- **Tag / path demotion.** `demoteTag(tag, priority)` mirrors `promoteTag`: the
+  per-poll geometry warm-up demotes a queued shape whose tram left the viewport
+  (never urgent waiters; a demotion restarts the aging clock). Promote + demote
+  together re-assert queue priorities from the freshest poll + viewport every
+  cycle, so a deep backlog keeps tracking what is on screen NOW instead of its
+  enqueue order.
 - **Wake scheduling.** `pump` computes the soonest instant it must re-run (window
   slot freeing, or next aging deadline) and arms a single `pumpTimer`
   (line 142-151) rather than polling.
@@ -189,14 +201,19 @@ teleport/stick. (This is the "day-stale timetable bug", fix wave `77e193f`:
   `has()`/`getLoaded()`/`getAllLoaded()` for the render loop and planner graph
   (line 178-190).
 - **Disk** — one JSON file per trip under `Paths.cache/tripgeo/`
-  (`<sanitized-tripId>.json`, line 51-58); survives restarts. `TTL_MS = 24h`
-  (line 17). (Not a single JSONL file — one file per trip, best-effort writes that
+  (`<sanitized-tripId>.json`); survives restarts. `TTL_MS = 3 days` — raised from
+  24 h (red-dot recurrence, 2026-07-18): trip_ids live ~12 days and every read is
+  service-day re-anchored anyway, but the 24 h TTL expired between daily sessions,
+  so EVERY cold start re-fetched the whole visible fleet through the 16-starts/8 s
+  rate limit. (Not a single JSONL file — one file per trip, best-effort writes that
   swallow errors so the in-memory cache still serves the session.)
 - **Single-flight** — `getTripGeometry` (line 131) dedupes concurrent requests for
   the same trip_id through an `inFlight` promise map. Lookup order: memory → disk →
   network; a disk/network hit populates memory.
-- **Prefetch** — `requestPrefetch` (line 165) warms a batch at background priority
-  (2), skipping already-cached/in-flight ids, swallowing errors.
+- **Prefetch** — `requestPrefetch` warms a batch at the caller's priority,
+  skipping already-cached/in-flight ids (a re-request for an in-flight id
+  promotes/demotes its queued scheduler waiter instead — priorities re-asserted
+  each poll), swallowing errors.
 
 **Service-day re-anchoring (the fix).** On every disk read, `reanchor`
 (line 93) shifts stop epochs onto the *current* service day. The timetable

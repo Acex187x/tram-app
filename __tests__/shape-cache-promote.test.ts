@@ -10,7 +10,7 @@
 //     what revives a geometry-less tram without a tap).
 
 import * as shapeCache from '@/lib/golemio/shapeCache';
-import { promoteTag } from '@/lib/golemio/client';
+import { demoteTag, promoteTag } from '@/lib/golemio/client';
 import { fetchTripGeometry } from '@/lib/golemio/gtfs';
 import type { RouteGeometry } from '@/lib/types';
 
@@ -35,15 +35,17 @@ jest.mock('@/lib/golemio/gtfs', () => ({
   serviceDayShiftMs: jest.fn(() => 0),
 }));
 
-// Real client module except promoteTag (observed) — the scheduler itself is
-// covered by golemio-client tests.
+// Real client module except promoteTag/demoteTag (observed) — the scheduler
+// itself is covered by golemio-client tests.
 jest.mock('@/lib/golemio/client', () => ({
   ...jest.requireActual('@/lib/golemio/client'),
   promoteTag: jest.fn(() => true),
+  demoteTag: jest.fn(() => true),
 }));
 
 const fetchGeoMock = fetchTripGeometry as jest.MockedFunction<typeof fetchTripGeometry>;
 const promoteTagMock = promoteTag as jest.MockedFunction<typeof promoteTag>;
+const demoteTagMock = demoteTag as jest.MockedFunction<typeof demoteTag>;
 
 function makeGeometry(tripId: string): RouteGeometry {
   return {
@@ -79,6 +81,7 @@ describe('shapeCache prefetch promotion + loaded notifications', () => {
     shapeCache.clearMemoryCache();
     fetchGeoMock.mockReset();
     promoteTagMock.mockClear();
+    demoteTagMock.mockClear();
   });
 
   it('re-requesting an in-flight trip at a higher priority promotes its waiter', async () => {
@@ -93,13 +96,35 @@ describe('shapeCache prefetch promotion + loaded notifications', () => {
     shapeCache.requestPrefetch(['trip-a'], 1);
     expect(promoteTagMock).toHaveBeenCalledWith('trip-a', 1);
 
-    // A repeated BACKGROUND request never promotes (and never re-issues).
+    // A repeated BACKGROUND request never promotes — it DEMOTES the queued
+    // waiter instead (the tram left the viewport; priorities are re-asserted
+    // both ways every poll) and never re-issues the fetch.
     promoteTagMock.mockClear();
     shapeCache.requestPrefetch(['trip-a'], 2);
     expect(promoteTagMock).not.toHaveBeenCalled();
+    expect(demoteTagMock).toHaveBeenCalledWith('trip-a', 2);
     expect(fetchGeoMock).toHaveBeenCalledTimes(1); // still a single fetch
 
     d.resolve(makeGeometry('trip-a'));
+    await flush();
+  });
+
+  it('a cold-start burst re-requested across polls issues exactly ONE fetch per trip', async () => {
+    const d = deferred<RouteGeometry>();
+    fetchGeoMock.mockReturnValue(d.promise);
+
+    // Poll 1 (cold start): the whole visible fleet is missing.
+    shapeCache.requestPrefetch(['trip-x', 'trip-y', 'trip-z'], 1);
+    await flush(); // in-flight tasks pass their disk reads
+    expect(fetchGeoMock).toHaveBeenCalledTimes(3);
+
+    // Polls 2–3 re-request the same still-missing trips at shifting
+    // priorities (viewport moved): only promotions/demotions, no new fetches.
+    shapeCache.requestPrefetch(['trip-x', 'trip-y', 'trip-z'], 2);
+    shapeCache.requestPrefetch(['trip-y', 'trip-z'], 1);
+    expect(fetchGeoMock).toHaveBeenCalledTimes(3);
+
+    d.resolve(makeGeometry('trip-x'));
     await flush();
   });
 

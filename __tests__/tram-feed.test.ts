@@ -233,6 +233,93 @@ describe('TramRuntime driven by an injected TramFeed', () => {
     rt.release();
   });
 
+  it('a cold-start burst warms VISIBLE trams nearest the viewport center first', () => {
+    const { feed, rt } = setup();
+    // Viewport center is [14.6, 50.05].
+    rt.setViewportProvider(() => ({ bbox: [14.5, 50.0, 14.7, 50.1], zoom: 13.8 }));
+
+    // Whole-fleet cold start: everything in one batch, nothing cached. The
+    // visible lane must be enqueued nearest-to-center first — within one
+    // scheduler priority the queue drains in insertion order, so this decides
+    // which loading dots materialize first.
+    feed.push(
+      [
+        makeSnapshot({
+          key: '9301',
+          registrationNumber: 9301,
+          tripId: 'trip-edge',
+          coordinates: [14.68, 50.09],
+        }),
+        makeSnapshot({
+          key: '9302',
+          registrationNumber: 9302,
+          tripId: 'trip-center',
+          coordinates: [14.601, 50.051],
+        }),
+        makeSnapshot({
+          key: '9303',
+          registrationNumber: 9303,
+          tripId: 'trip-mid',
+          coordinates: [14.55, 50.02],
+        }),
+        makeSnapshot({
+          key: '9304',
+          registrationNumber: 9304,
+          tripId: 'trip-off',
+          coordinates: [15.6, 49.5], // far outside the viewport (+ margin)
+        }),
+      ],
+      T0,
+    );
+
+    expect(feed.requested).toEqual([
+      { tripIds: ['trip-center', 'trip-mid', 'trip-edge'], priority: 1 },
+      { tripIds: ['trip-off'], priority: 2 },
+    ]);
+    rt.release();
+  });
+
+  it('falls back to the LAST known viewport when the provider gaps (unregistered/null)', () => {
+    const { feed, rt } = setup();
+    rt.setViewportProvider(() => ({ bbox: [14.5, 50.0, 14.7, 50.1], zoom: 14 }));
+
+    // Poll 1 records the viewport (ORIGIN [14.6, 50.05] is inside it).
+    feed.push([makeSnapshot({ tripId: 'trip-a' })], T0);
+    expect(feed.requested).toContainEqual({ tripIds: ['trip-a'], priority: 1 });
+
+    // The map layer remounts between polls: provider gone for one poll. The
+    // on-screen tram must NOT silently drop to the background lane — the last
+    // known bbox still classifies it as visible.
+    rt.setViewportProvider(null);
+    feed.push([makeSnapshot({ tripId: 'trip-a' })], T0 + 5_000);
+    expect(feed.requested[feed.requested.length - 1]).toEqual({
+      tripIds: ['trip-a'],
+      priority: 1,
+    });
+    rt.release();
+  });
+
+  it('re-asserts the visibility split EVERY poll — a tram left behind by the camera drops to background', () => {
+    const { feed, rt } = setup();
+    let bbox: [number, number, number, number] = [14.5, 50.0, 14.7, 50.1];
+    rt.setViewportProvider(() => ({ bbox, zoom: 14 }));
+
+    // Poll 1: the tram (at ORIGIN) is on screen → raised priority.
+    feed.push([makeSnapshot({ tripId: 'trip-a' })], T0);
+    expect(feed.requested).toContainEqual({ tripIds: ['trip-a'], priority: 1 });
+
+    // The camera flies elsewhere; the still-missing trip is re-requested at
+    // BACKGROUND — the feed (shapeCache → demoteTag) uses this to demote its
+    // queued waiter so on-screen trams overtake it.
+    bbox = [14.0, 49.6, 14.2, 49.8];
+    feed.push([makeSnapshot({ tripId: 'trip-a' })], T0 + 5_000);
+    expect(feed.requested[feed.requested.length - 1]).toEqual({
+      tripIds: ['trip-a'],
+      priority: 2,
+    });
+    rt.release();
+  });
+
   it('a geometry landing (feed event) re-ingests within the debounce — the sim appears with NO tap', () => {
     const { feed, rt } = setup();
     feed.push([makeSnapshot({ shapeDistM: 300, observedAtMs: T0 })], T0);

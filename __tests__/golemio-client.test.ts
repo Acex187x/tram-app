@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals
 
 import {
   __resetGolemioScheduler,
+  demoteTag,
   golemioFetch,
   GolemioHttpError,
   GolemioAbortError,
@@ -158,6 +159,94 @@ describe('starvation aging', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(5);
     expect(fetchedUrls()[4]).toContain('OLD');
+  });
+
+  it('aging never lifts a waiter into the URGENT lane — a cold-start backlog cannot starve the poll', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(0);
+    __resetGolemioScheduler();
+
+    // Occupy all 4 concurrency slots.
+    for (let i = 0; i < 4; i++) issue(`/v2/block/${i}`, 1);
+    await flush();
+    expect(pending).toHaveLength(4);
+
+    // A background geometry waiter enqueues at t=0 (cold-start backlog member).
+    issue('/v2/gtfs/trips/OLD', 2);
+    await flush();
+
+    // Two full aging windows elapse, with pumps in between (in production the
+    // drain pumps continuously). Pumps are triggered here by new enqueues so
+    // no slot frees up. The old unbounded aging marched OLD 2→1→0 across these
+    // two pumps; the floor stops it at 1.
+    jest.setSystemTime(30_001);
+    issue('/v2/filler/one', 2);
+    await flush();
+    jest.setSystemTime(60_002);
+    issue('/v2/filler/two', 2);
+    await flush();
+
+    // The live poll (urgent, newest seq) arrives — it must dispatch FIRST.
+    // Under the old aging, OLD sat at priority 0 with an older seq and won.
+    issue('/v2/vehiclepositions', 0);
+    await flush();
+    settleFetch('/v2/block/0');
+    await flush();
+
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchedUrls()[4]).toContain('vehiclepositions');
+
+    // The aged (capped at 1) backlog member still goes next — aging works.
+    settleFetch('/v2/block/1');
+    await flush();
+    expect(fetchedUrls()[5]).toContain('OLD');
+  });
+});
+
+describe('demoteTag', () => {
+  it('a demoted queued waiter yields to newer raised-priority work', async () => {
+    for (let i = 0; i < 4; i++) issue(`/v2/block/${i}`, 1);
+    await flush();
+
+    // Enqueued FIRST at raised priority (classified visible under an earlier
+    // whole-city bbox)…
+    issue('/v2/gtfs/trips/STALE', 1);
+    await flush();
+    // …then the camera moved away: the next poll demotes it…
+    expect(demoteTag('STALE', 2)).toBe(true);
+    // …and a tram actually on screen NOW enqueues at raised priority.
+    issue('/v2/gtfs/trips/FRESH', 1);
+    await flush();
+
+    settleFetch('/v2/block/0');
+    await flush();
+    expect(fetchedUrls()[4]).toContain('FRESH');
+
+    settleFetch('/v2/block/1');
+    await flush();
+    expect(fetchedUrls()[5]).toContain('STALE');
+  });
+
+  it('never demotes an urgent (tapped-tram) waiter', async () => {
+    for (let i = 0; i < 4; i++) issue(`/v2/block/${i}`, 1);
+    await flush();
+
+    issue('/v2/gtfs/trips/TAPPED', 0);
+    issue('/v2/gtfs/trips/OTHER', 1);
+    await flush();
+
+    // Matched, but the urgent priority is untouched.
+    expect(demoteTag('TAPPED', 2)).toBe(true);
+
+    settleFetch('/v2/block/0');
+    await flush();
+    expect(fetchedUrls()[4]).toContain('TAPPED');
+  });
+
+  it('returns false when no queued waiter matches', async () => {
+    for (let i = 0; i < 4; i++) issue(`/v2/block/${i}`, 1);
+    await flush();
+    expect(demoteTag('NOPE', 2)).toBe(false);
   });
 });
 

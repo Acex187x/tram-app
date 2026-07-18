@@ -102,6 +102,16 @@ const WINDOW_MS = 8000;
 /** A priority-2 (background) waiter older than this is aged up one level so a
  * sustained higher-priority stream cannot starve it forever. */
 const AGING_MS = 30_000;
+/**
+ * Aging FLOOR: anti-starvation aging never lifts a waiter above (numerically
+ * below) this priority. The urgent lane (0) is reserved for the 5 s poll and
+ * tapped-tram promotions. Without the floor, a cold-start geometry backlog
+ * (hundreds of background waiters) aged 2→1→0 within two windows; their older
+ * seq numbers then outranked every fresh poll, tap and visible-lane request —
+ * the fleet froze and visible trams sat as loading dots for minutes (the
+ * red-dot recurrence, 2026-07-18).
+ */
+const AGING_FLOOR: GolemioPriority = 1;
 
 interface Waiter {
   priority: number;
@@ -137,10 +147,11 @@ function pump(): void {
   pruneWindow(now);
 
   // Starvation aging: bump long-waiting background requests up one level so a
-  // sustained stream of higher-priority work cannot keep them queued forever.
+  // sustained stream of higher-priority work cannot keep them queued forever —
+  // but never into the urgent lane (AGING_FLOOR).
   let nextAgingDueInMs = Number.POSITIVE_INFINITY;
   for (const w of waiters) {
-    if (w.priority <= 0) continue;
+    if (w.priority <= AGING_FLOOR) continue;
     const age = now - w.enqueuedAt;
     if (age >= AGING_MS) {
       w.priority = (w.priority - 1) as GolemioPriority;
@@ -262,6 +273,34 @@ export function promoteTag(tag: string, priority: GolemioPriority): boolean {
     if (priority < w.priority) w.priority = priority;
   }
   if (matched) pump();
+  return matched;
+}
+
+/**
+ * Lower the priority of a request still waiting in the scheduler queue — the
+ * mirror of {@link promoteTag}. Used by the per-poll geometry warm-up to
+ * DEMOTE a queued shape whose tram is no longer on screen (the camera moved
+ * away, or a whole-city bbox shrank on zoom-in). Together the pair re-asserts
+ * queue priorities from the freshest poll + viewport every cycle, so a deep
+ * cold-start backlog can never pin stale priorities for minutes: what the
+ * user looks at NOW always outranks what was enqueued first.
+ *
+ * Urgent waiters (priority 0 — tapped/followed trams) are never demoted, and
+ * a demotion restarts the waiter's anti-starvation aging clock (it just
+ * changed lanes; its old age must not age it straight back up).
+ */
+export function demoteTag(tag: string, priority: GolemioPriority): boolean {
+  let matched = false;
+  const now = Date.now();
+  for (const w of waiters) {
+    if (!waiterMatchesTag(w, tag)) continue;
+    matched = true;
+    if (w.priority > 0 && priority > w.priority) {
+      w.priority = priority;
+      w.enqueuedAt = now;
+    }
+  }
+  // Lowering a priority never unblocks dispatch — no pump needed.
   return matched;
 }
 

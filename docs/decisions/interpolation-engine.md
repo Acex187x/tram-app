@@ -629,6 +629,45 @@ and the tram "came alive" — so the tap looked like the trigger. Three fixes, a
 Tests: `tram-feed.test.ts` (visible > background priority, no-tap revival, burst
 coalescing), `shape-cache-promote.test.ts` (waiter promotion, loaded notifications).
 
+### Red-dot RECURRENCE (2026-07-18, same day) — why the fix above wasn't enough
+
+The dots came back in the field. Three compounding causes, all in the queue/cache
+layer (the visible-first split and the geometry-landed re-ingest above were working
+as designed — they were being *starved*):
+
+1. **Scheduler aging inverted every priority.** Anti-starvation aging bumped ANY
+   waiter with priority ≥ 1 up one level per 30 s window with no floor. A
+   cold-start backlog (hundreds of background geometry waiters draining at ~2/s
+   for minutes) marched 2→1→0 within two windows; at priority 0 their older `seq`
+   won every tie — against fresh visible-lane requests, against taps, and against
+   the 5 s poll itself. Fix: `AGING_FLOOR = 1` — aging never enters the urgent
+   lane (`client.ts`).
+2. **Priority was assigned once, at enqueue, under whatever bbox was current.**
+   At the initial zoom (13.8) the bbox covers most of the network, so on a cold
+   start essentially the WHOLE fleet classified "visible" → one giant FIFO lane;
+   zooming in later couldn't reorder it (a re-request only *promoted*, never
+   *demoted*). Fix: the per-poll warm-up now re-asserts the split in BOTH
+   directions — `requestPrefetch` demotes a queued waiter re-requested at
+   background (`demoteTag`, never urgent waiters) — and the visible lane is
+   enqueued **nearest-to-viewport-center first** (`orderByViewportProximity`,
+   once per poll). The queue continuously tracks what is on screen NOW.
+3. **Cold starts were the daily norm.** The disk cache TTL (24 h) expired between
+   daily sessions although trip_ids live ~12 days and reads are service-day
+   re-anchored — so every morning was a whole-fleet burst against 16 starts/8 s.
+   Fix: TTL → 3 days; a returning user re-opens on a warm cache and the burst
+   path becomes the exception again.
+
+Also hardened: `TramRuntime` keeps the **last known viewport** as a fallback for
+provider gaps (map-layer effect remounts previously degraded a poll to
+"everything background"), and the post-poll nudge timer no longer leaks when
+overwritten. Rate-limit contract untouched (16 starts/8 s, 4 concurrent).
+
+Tests: `golemio-client.test.ts` (aging floor: a 2-window-old backlog never
+starves an urgent poll; demotion ordering; urgent never demoted),
+`shape-cache-promote.test.ts` (background re-request demotes; one fetch per trip
+across re-polled bursts), `tram-feed.test.ts` (nearest-first burst ordering,
+last-viewport fallback, per-poll re-assertion of the split).
+
 ---
 
 ## Tuning constants (single source of truth: the code)

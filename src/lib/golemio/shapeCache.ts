@@ -11,10 +11,22 @@ import {
   geometryServiceMidnight,
   serviceDayShiftMs,
 } from './gtfs';
-import { GolemioAbortError, promoteTag, type GolemioPriority } from './client';
+import { GolemioAbortError, demoteTag, promoteTag, type GolemioPriority } from './client';
 
 const CACHE_DIR_NAME = 'tripgeo';
-const TTL_MS = 24 * 60 * 60 * 1000; // 24h
+/**
+ * Disk TTL: 3 days (service-day re-anchored on every read — see `reanchor`).
+ * A trip_id is stable for the ~12-day life of a GTFS dataset and its timetable
+ * (seconds-of-service-day) practically never changes within one, so a user
+ * returning the next day (or after a weekend) re-opens on a WARM disk cache.
+ * The previous 24 h TTL expired between daily sessions, making EVERY cold
+ * start a whole-fleet geometry burst against the 16-starts/8 s rate limit —
+ * visible trams sat as loading dots for minutes (red-dot recurrence,
+ * 2026-07-18). Kept well under the dataset life so an upstream schedule
+ * revision still converges within days; the sim itself is observation-anchored
+ * either way, so a briefly stale timetable only nudges pacing, not position.
+ */
+const TTL_MS = 3 * 24 * 60 * 60 * 1000;
 
 interface DiskEntry {
   savedAt: number;
@@ -222,11 +234,17 @@ export function requestPrefetch(
   for (const tripId of tripIds) {
     if (memCache.has(tripId)) continue;
     if (inFlight.has(tripId)) {
-      // Already queued or fetching. A re-request at a HIGHER priority promotes
-      // the still-queued scheduler waiter (matched by the trip id in its URL
-      // path) instead of being dropped — e.g. a background-warmed trip whose
-      // tram scrolled into the viewport jumps ahead of the background lane.
+      // Already queued or fetching. Re-assert the still-queued scheduler
+      // waiter's priority from THIS (freshest) request, matched by the trip id
+      // in its URL path: a higher-priority re-request PROMOTES it (a
+      // background-warmed trip whose tram scrolled into the viewport jumps the
+      // background lane), a background re-request DEMOTES a previously-raised
+      // waiter whose tram left the viewport (demoteTag never touches urgent/
+      // tapped waiters). The per-poll warm-up thereby continuously reorders a
+      // deep queue to match what is on screen NOW — enqueue order stops
+      // mattering on a cold-start burst.
       if (priority < 2) promoteTag(tripId, priority);
+      else demoteTag(tripId, priority);
       continue;
     }
     void getTripGeometry(tripId, priority, signal).catch(() => {

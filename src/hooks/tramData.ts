@@ -131,6 +131,16 @@ export class TramRuntime {
    */
   private viewportProvider: (() => Viewport | null) | null = null;
   /**
+   * Last non-null viewport ever supplied by a provider. Fallback when the
+   * provider is momentarily unregistered (map layer effect re-run/remount) or
+   * returns null: the camera rarely leaps across the city between polls, so
+   * the previous bbox is a far better prioritization signal than the old
+   * "no viewport → everything warms at background" degradation (one of the
+   * red-dot recurrence paths — a poll landing during a provider gap dropped
+   * every visible tram's shape to the back of the queue).
+   */
+  private lastViewport: Viewport | null = null;
+  /**
    * Bumped whenever the runtime is paused/torn down. Deferred work (the 2.5 s
    * geometry nudge) captures the generation at schedule time and no-ops if it
    * changed — so stale completions can't mutate the engine after teardown.
@@ -406,23 +416,28 @@ export class TramRuntime {
     // missing shape whose tram is ON SCREEN (viewport + margin) loads at
     // raised priority (1) — a visible tram stuck as a bare dot is the
     // user-facing failure — while off-screen trams warm at background (2).
-    // Both lanes stay behind the tapped-tram urgent lane (0). Re-requesting a
-    // still-queued trip at a higher priority PROMOTES its scheduler waiter
-    // (shapeCache.requestPrefetch → promoteTag), so a background-warmed tram
-    // that scrolls into view jumps the queue on the next poll. Trips already
-    // requested at raised priority above (trip changes) are excluded so they
-    // aren't re-queued behind the background lane.
+    // Both lanes stay behind the tapped-tram urgent lane (0). The split is
+    // RE-ASSERTED every poll, in both directions: re-requesting a still-queued
+    // trip at a higher priority PROMOTES its scheduler waiter, at background
+    // DEMOTES a previously-raised one (shapeCache.requestPrefetch →
+    // promoteTag/demoteTag). So on a deep cold-start backlog the queue keeps
+    // tracking what is on screen NOW — a tram scrolling into view jumps the
+    // queue next poll, and hundreds of waiters enqueued under an earlier
+    // whole-city bbox stop outranking it the moment the user zooms in. Trips
+    // already requested at raised priority above (trip changes) are excluded
+    // so they aren't re-queued behind the background lane.
     const changedSet = changedTrips.length > 0 ? new Set(changedTrips) : null;
-    const viewport = this.viewportProvider?.() ?? null;
+    const viewport = this.resolveViewport();
     const bbox = viewport ? expandBbox(viewport.bbox, VIEWPORT_GEO_MARGIN_M) : null;
-    const missingVisible: string[] = [];
+    const missingVisible: TramSnapshot[] = [];
     const missingBackground: string[] = [];
     for (const s of snapshots) {
       if (this.feed.getGeometry(s.tripId) || (changedSet?.has(s.tripId) ?? false)) continue;
-      if (bbox && inBbox(s.coordinates, bbox)) missingVisible.push(s.tripId);
+      if (bbox && inBbox(s.coordinates, bbox)) missingVisible.push(s);
       else missingBackground.push(s.tripId);
     }
-    if (missingVisible.length > 0) this.feed.requestGeometry(missingVisible, 1);
+    const visibleIds = this.orderByViewportProximity(missingVisible, viewport);
+    if (visibleIds.length > 0) this.feed.requestGeometry(visibleIds, 1);
     if (missingBackground.length > 0) this.feed.requestGeometry(missingBackground, 2);
     // As geometries arrive (whether raised-priority trip changes or background
     // warm), they are adopted on the next ingest; nudge one extra ingest
@@ -431,6 +446,9 @@ export class TramRuntime {
     // onGeometryLoaded — usually beats this; the nudge remains the fallback
     // for feeds without the optional subscribeGeometry capability.)
     if (missingVisible.length > 0 || missingBackground.length > 0 || changedTrips.length > 0) {
+      // One pending nudge at a time — a fresh poll supersedes the previous one
+      // (the old timer was silently overwritten and leaked until it fired).
+      if (this.nudgeTimer) clearTimeout(this.nudgeTimer);
       this.nudgeTimer = setTimeout(() => {
         this.nudgeTimer = null;
         if (gen !== this.generation) return;
@@ -462,12 +480,47 @@ export class TramRuntime {
   };
 
   /**
-   * Register the live-viewport supplier (map layer mount/unmount). Null while
-   * no map is mounted → every missing geometry warms at background priority,
-   * exactly the pre-viewport behavior.
+   * Register the live-viewport supplier (map layer mount/unmount). While no
+   * provider has EVER supplied a viewport, every missing geometry warms at
+   * background priority (pre-map behavior); once one has, the last known
+   * viewport keeps serving through provider gaps (see lastViewport).
    */
   setViewportProvider(provider: (() => Viewport | null) | null): void {
     this.viewportProvider = provider;
+  }
+
+  /** Freshest viewport: the live provider, else the last one it ever gave. */
+  private resolveViewport(): Viewport | null {
+    const vp = this.viewportProvider?.() ?? null;
+    if (vp) this.lastViewport = vp;
+    return vp ?? this.lastViewport;
+  }
+
+  /**
+   * Order missing-geometry trams nearest-to-viewport-center first. Within one
+   * scheduler priority the queue drains in insertion order, so on a burst
+   * (cold start with an expired disk cache — the whole visible fleet missing
+   * at once, possibly under a whole-city bbox) the trams the user is most
+   * likely looking at materialize first instead of in arbitrary fleet order.
+   * Runs once per poll on at most the fleet size — far off the frame path.
+   */
+  private orderByViewportProximity(
+    missing: TramSnapshot[],
+    viewport: Viewport | null,
+  ): string[] {
+    if (missing.length < 2 || !viewport) return missing.map((s) => s.tripId);
+    const [w, s, e, n] = viewport.bbox;
+    const cLng = (w + e) / 2;
+    const cLat = (s + n) / 2;
+    const kx = Math.max(Math.cos(cLat * (Math.PI / 180)), 0.01);
+    return missing
+      .map((snap) => {
+        const dx = (snap.coordinates[0] - cLng) * kx;
+        const dy = snap.coordinates[1] - cLat;
+        return { tripId: snap.tripId, d2: dx * dx + dy * dy };
+      })
+      .sort((a, b) => a.d2 - b.d2)
+      .map((x) => x.tripId);
   }
 
   /** Raise fetch priority for the selected/followed tram's geometry. */
