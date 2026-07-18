@@ -1,40 +1,29 @@
-// Shared stage every iso face stands on: the light neutral backdrop tile and
-// the soft two-layer ground shadow. Rendering it from one place keeps the
-// "coin" identical across all 7 models — same tile, same shadow softness.
-import { Path, Rect } from 'react-native-svg';
+// Shared ground every iso face stands on: NOTHING but a very soft contact
+// shadow — the background is fully transparent (no tile, no plate). Rendering
+// it from one place keeps the shadow softness identical across all 7 models.
+import { Path } from 'react-native-svg';
 
-import { type Box, ground, ISO, TILE } from './lib';
+import { type Box, ground, ISO } from './lib';
 
 export function Stage({ b }: { b: Box }) {
   return (
     <>
-      {/* light neutral backdrop tile */}
-      <Rect
-        x={TILE.x}
-        y={TILE.y}
-        width={TILE.size}
-        height={TILE.size}
-        rx={TILE.r}
-        fill={ISO.bg}
-        stroke={ISO.bgEdge}
-        strokeWidth={1.5}
-      />
-      {/* soft ground shadow: wide faint halo + tighter core */}
+      {/* whisper-soft contact shadow: wide faint halo + slightly tighter core */}
       <Path
         d={ground(b)}
         fill={ISO.shadow}
         stroke={ISO.shadow}
-        strokeWidth={9}
+        strokeWidth={8}
         strokeLinejoin="round"
-        opacity={0.07}
+        opacity={0.05}
       />
       <Path
         d={ground(b)}
         fill={ISO.shadow}
         stroke={ISO.shadow}
-        strokeWidth={3}
+        strokeWidth={2.5}
         strokeLinejoin="round"
-        opacity={0.12}
+        opacity={0.08}
       />
     </>
   );

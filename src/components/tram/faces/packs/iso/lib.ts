@@ -16,8 +16,12 @@
 // flank, more windows), never through a bigger icon. Do not hand-roll Box
 // values in faces — always go through isoBox().
 //
-// Every face draws the same light rounded backdrop tile + soft ground shadow
-// so icons read as one family on both light and dark map styles.
+// REAL SHAPE, NOT A BOX — every face is drawn against its -34 reference
+// photo. The N3() helper projects a full 3D body point (across, back, up) so
+// windscreens RAKE backwards, crowns ROUND into the roof and noses slope:
+// the front of a model with a slanted nose is never a flat vertical
+// parallelogram. Icons sit straight on a TRANSPARENT background — no backdrop
+// tile, only a whisper of contact shadow.
 //
 // Pure module (no react imports) so it stays bundler-friendly.
 
@@ -42,8 +46,9 @@ export const BODY_H = 24;
 /** Shared projected footprint w + l — identical for every model in the pack. */
 export const SPAN = 58;
 
-/** Front width of the short T3 family (~14 m cars): stubby front, short flank. */
-export const SHORT_W = 26;
+/** Front width of the short T3 family (~14 m cars): a touch wider than the
+ * long cars — the flank still dominates, as it does in every photo. */
+export const SHORT_W = 23;
 /** Front width of the long cars (~30 m): narrow front, long receding flank. */
 export const LONG_W = 20;
 
@@ -70,6 +75,20 @@ export const S = (b: Box, u: number, v: number): Pt => [
   r1(b.cx + u * b.l),
   r1(b.cy - (u * b.l) / 2 - v * b.h),
 ];
+
+/**
+ * Full 3D body point — the tool that kills the cube. a: across the front
+ * (0 = near corner → 1 = far-left edge). dpx: PIXELS back along the length
+ * axis (0 = nose tip plane). z: 0 = floor → 1 = roofline. A raked windscreen
+ * is simply a quad whose top edge has a bigger dpx than its bottom edge.
+ */
+export const N3 = (b: Box, a: number, dpx: number, z: number): Pt => [
+  r1(b.cx - a * b.w + dpx),
+  r1(b.cy - (a * b.w) / 2 - dpx / 2 - z * b.h),
+];
+
+/** Shift an already-projected point back along the length axis by dpx pixels. */
+export const back = (p: Pt, dpx: number): Pt => [r1(p[0] + dpx), r1(p[1] - dpx / 2)];
 
 /** Roof plane. u: across width (0 = side edge → 1 = far-left). v: along length (0 = front → 1 = rear). */
 export const R = (b: Box, u: number, v: number): Pt => [
@@ -106,15 +125,9 @@ export const ground = (b: Box): string => {
 /** The square viewBox every iso face is authored in. */
 export const VB = '0 0 96 96';
 
-/** Shared backdrop tile geometry — same for every face. */
-export const TILE = { x: 7, y: 7, size: 82, r: 26 } as const;
-
 /** Shared pack palette — front tone / darker side tone / lighter roof tone triads. */
 export const ISO = {
   outline: '#39323C',
-  // light neutral backdrop tile
-  bg: '#F1EFE9',
-  bgEdge: '#DEDACE',
   // glazing
   glass: '#2B3746',
   glassSide: '#212B37',
