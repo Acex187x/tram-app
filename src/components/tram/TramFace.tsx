@@ -1,43 +1,34 @@
-// TramFace — THE entry point for the tram model "face" icon set. A flat-vector
-// front-view мордочка per Prague tram model (react-native-svg), cute but
-// recognizable to an enthusiast: each face keeps its real windshield shape,
-// headlight layout, livery and pantograph. Faces are self-contained (own body
-// fill + outline) and read on light and dark backgrounds at any square size.
+// TramFace — THE entry point for the tram model "face" icon. The art now comes
+// in multiple icon PACKS (src/components/tram/faces/packs/*, registered in
+// '@/lib/fleet/iconPacks'), each a full 7-model set in a distinct style. By
+// default the face renders in the user's selected pack (settings store); pass
+// `pack` to pin a specific one (settings picker previews do).
 //
-// The same art is rasterized for map sprites by
-// scripts/tram-models/render-face-sprites.mjs → assets/images/faces/*.png,
-// registered via FACE_SPRITE_ASSETS in '@/lib/fleet/faceIcons'.
-import type { ComponentType, ReactElement } from 'react';
+// The same vector art is rasterized per pack for map sprites by
+// scripts/tram-models/render-face-sprites.mjs →
+// assets/images/faces/<packId>/<modelId>.png, registered via
+// ICON_PACKS[pack].sprites.
+import type { ReactElement } from 'react';
 
+import { getFace, type IconPackId } from '@/lib/fleet/iconPacks';
 import type { TramModelId } from '@/lib/types';
-
-import { Face14T } from './faces/14t';
-import { Face15T } from './faces/15t';
-import { Face52T } from './faces/52t';
-import type { FaceProps } from './faces/common';
-import { FaceKT8D5 } from './faces/kt8d5';
-import { FaceT3 } from './faces/t3';
-import { FaceT3RP } from './faces/t3rp';
-import { FaceT3RPLF } from './faces/t3rplf';
-
-const FACE_COMPONENTS: Record<TramModelId, ComponentType<FaceProps>> = {
-  t3: FaceT3,
-  t3rp: FaceT3RP,
-  t3rplf: FaceT3RPLF,
-  kt8d5: FaceKT8D5,
-  '14t': Face14T,
-  '15t': Face15T,
-  '52t': Face52T,
-};
+import { useSettingsStore } from '@/stores/settings';
 
 export interface TramFaceProps {
   modelId: TramModelId;
   /** Square size in pt. Defaults to 64. */
   size?: number;
+  /** Icon pack to render; defaults to the user's selected pack (settings). */
+  pack?: IconPackId;
 }
 
-/** The face icon for a tram model. Unknown ids fall back to the classic T3. */
-export function TramFace({ modelId, size = 64 }: TramFaceProps): ReactElement {
-  const Face = FACE_COMPONENTS[modelId] ?? FaceT3;
+/**
+ * The face icon for a tram model. Unknown models fall back to the classic T3;
+ * existing callers (tram sheet header, model info, AboutTramRow) pass only
+ * modelId/size and automatically honor the selected pack.
+ */
+export function TramFace({ modelId, size = 64, pack }: TramFaceProps): ReactElement {
+  const selectedPack = useSettingsStore((s) => s.iconPack);
+  const Face = getFace(pack ?? selectedPack, modelId);
   return <Face size={size} />;
 }

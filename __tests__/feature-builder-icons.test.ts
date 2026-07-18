@@ -3,8 +3,8 @@
 // Contract between the points FC and the sprite-driven map layers
 // (TramLayers tram-dots / tram-badge-markers / tram-badges[-pinned]):
 //  1. every sprite name the layers' iconImage EXPRESSIONS can produce exists
-//     in a registry (dot-*/fav-star in MAP_ICON_ASSETS, face-<modelId> in
-//     FACE_SPRITE_ASSETS) and as a generated PNG on disk;
+//     in a registry (dot-*/fav-star in MAP_ICON_ASSETS, face-<pack>-<modelId>
+//     in ICON_PACKS[pack].sprites) and as a generated PNG on disk;
 //  2. buildFrame keeps emitting the point props those expressions AND the
 //     declutter filters read (line, modelId, bearing, favorite, selected) —
 //     the icon variants + collision pinning are derived from existing props
@@ -13,7 +13,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { FACE_SPRITE_ASSETS, FACE_SPRITE_SCALE } from '@/lib/fleet/faceIcons';
+import { FACE_SPRITE_SCALE, ICON_PACKS, ICON_PACK_IDS } from '@/lib/fleet/iconPacks';
 import { MAP_ICON_ASSETS, MAP_ICON_SCALE } from '@/lib/fleet/modelSpecs';
 import { buildFrame } from '@/lib/render/featureBuilder';
 import type { TramModelId, Viewport } from '@/lib/types';
@@ -53,17 +53,25 @@ describe('map icon sprites', () => {
 });
 
 describe('face badge sprites (band-2 model badges)', () => {
-  it('FACE_SPRITE_ASSETS covers exactly the model ids the FACE_ICON expression can produce', () => {
-    // The badge layers' iconImage is concat('face-', modelId) — one sprite per
-    // TramModelId, nothing more (registered-image count stays flat).
-    expect(Object.keys(FACE_SPRITE_ASSETS).sort()).toEqual([...ALL_MODEL_IDS].sort());
+  it('every pack covers exactly the model ids the faceIcon expression can produce', () => {
+    // The badge layers' iconImage is concat('face-<pack>-', modelId) over the
+    // SELECTED pack — every pack must therefore have one sprite per
+    // TramModelId, nothing more (registered-image count stays flat: 4 × 7).
+    for (const packId of ICON_PACK_IDS) {
+      expect(Object.keys(ICON_PACKS[packId].sprites).sort()).toEqual(
+        [...ALL_MODEL_IDS].sort(),
+      );
+    }
   });
 
-  it.each(ALL_MODEL_IDS)('faces/%s.png exists and is non-empty', (id) => {
-    const file = join(FACES_DIR, `${id}.png`);
-    expect(existsSync(file)).toBe(true);
-    expect(statSync(file).size).toBeGreaterThan(200);
-  });
+  it.each(ICON_PACK_IDS.flatMap((p) => ALL_MODEL_IDS.map((id) => [p, id] as const)))(
+    'faces/%s/%s.png exists and is non-empty',
+    (packId, id) => {
+      const file = join(FACES_DIR, packId, `${id}.png`);
+      expect(existsSync(file)).toBe(true);
+      expect(statSync(file).size).toBeGreaterThan(200);
+    },
+  );
 
   it('face sprite scale is a sane pixel ratio', () => {
     expect(FACE_SPRITE_SCALE).toBeGreaterThanOrEqual(1);

@@ -15,12 +15,15 @@
 // NEVER hidden. All of it is style-side: zero extra JS work, zero payload
 // growth, no per-frame React.
 //
-// Sprites (teardrops + fav star from MAP_ICON_ASSETS, one face PNG per model
-// from FACE_SPRITE_ASSETS) are loaded through expo-asset localUri — same
-// Fabric-safe pattern as the GLBs — and registered via <Images>. All icon
-// variants are picked by style EXPRESSIONS over props the points FC already
-// carried (line/modelId/bearing/favorite/selected), so the push payload did
-// not grow.
+// Sprites (teardrops + fav star from MAP_ICON_ASSETS, one face PNG per icon
+// pack × model from ICON_PACKS[..].sprites) are loaded through expo-asset
+// localUri — same Fabric-safe pattern as the GLBs — and registered via
+// <Images> as 'face-<pack>-<modelId>'. All icon variants are picked by style
+// EXPRESSIONS over props the points FC already carried
+// (line/modelId/bearing/favorite/selected), so the push payload did not grow;
+// the SELECTED pack is baked into the badge iconImage expression and only
+// changes on a settings-store pack change (single re-render, no per-frame
+// React).
 //
 // Cadence (zoom-adaptive, thermal-aware): the engine ticks at TICK_MS (~16 ms)
 // while the map is in the glide band (zoom ≥ 14, hysteresis down to 13.7 —
@@ -62,7 +65,12 @@ import {
 
 import { Tram } from '@/constants/theme';
 import { getRuntime, pointsPushIntervalMs } from '@/hooks/tramData';
-import { FACE_SPRITE_ASSETS, FACE_SPRITE_SCALE } from '@/lib/fleet/faceIcons';
+import {
+  FACE_SPRITE_SCALE,
+  ICON_PACKS,
+  ICON_PACK_IDS,
+  type IconPackId,
+} from '@/lib/fleet/iconPacks';
 import { MAP_ICON_ASSETS, MAP_ICON_SCALE } from '@/lib/fleet/modelSpecs';
 import { bearingAt, pointAt } from '@/lib/geo/polyline';
 import { buildFrame } from '@/lib/render/featureBuilder';
@@ -148,12 +156,18 @@ const DOT_ICON = [
 ] as unknown as string;
 
 /**
- * Model FACE badge sprite: face-<modelId> — one recognizable "mugshot" PNG per
- * model (FACE_SPRITE_ASSETS), so the model reads at a glance where the old
- * side-silhouette capsule did not. The live line number sits beside the face
- * as SymbolLayer text.
+ * Model FACE badge sprite: face-<packId>-<modelId> — one recognizable
+ * "mugshot" PNG per icon pack × model (ICON_PACKS[pack].sprites; every pack's
+ * sprites are registered in <Images> up front). The pack half is baked into
+ * the expression when the badge style is built — the selected pack is a
+ * SETTING that changes rarely, so TramLayers subscribes to it via React (one
+ * re-render + native style re-push per change, zero per-frame work) and the
+ * per-tram half stays a style-side ['get','modelId'] with no payload growth.
+ * The live line number sits beside the face as SymbolLayer text.
  */
-const FACE_ICON = ['concat', 'face-', ['get', 'modelId']] as unknown as string;
+function faceIcon(pack: IconPackId): string {
+  return ['concat', `face-${pack}-`, ['get', 'modelId']] as unknown as string;
+}
 
 /**
  * Face-badge anatomy. The face sprite is 64 pt natural (192 px @ scale 3);
@@ -210,9 +224,9 @@ type BadgeSymbolStyle = NonNullable<ComponentProps<typeof SymbolLayer>['style']>
  * Everything is a style expression over props the points FC already carries;
  * the declutter costs zero JS work and zero push payload.
  */
-function faceBadgeStyle(pinned: boolean): BadgeSymbolStyle {
+function faceBadgeStyle(pinned: boolean, pack: IconPackId): BadgeSymbolStyle {
   return {
-    iconImage: FACE_ICON,
+    iconImage: faceIcon(pack),
     iconAnchor: 'bottom',
     iconOffset: [0, -FACE_GAP_PX],
     iconSize: [
@@ -261,9 +275,11 @@ function faceBadgeStyle(pinned: boolean): BadgeSymbolStyle {
  * need the sprites mount only once they're registered.
  *
  * Registers the teardrop/star sprites from MAP_ICON_ASSETS plus one
- * face-<modelId> sprite per model from FACE_SPRITE_ASSETS (the badge faces).
- * The legacy cap-* capsule sprites are no longer used by any layer and are
- * skipped, keeping the registered-image count flat.
+ * face-<packId>-<modelId> sprite per icon pack × model (ICON_PACKS[..].sprites
+ * — the badge faces; 28 small PNGs). ALL packs are registered up front so
+ * switching the pack setting is a pure style-expression change with no image
+ * (re)loading. The legacy cap-* capsule sprites are no longer used by any
+ * layer and are skipped.
  */
 function useMapIcons(): Record<string, { url: string; scale: number }> | null {
   const [icons, setIcons] = useState<Record<string, { url: string; scale: number }> | null>(
@@ -276,11 +292,13 @@ function useMapIcons(): Record<string, { url: string; scale: number }> | null {
         ...Object.entries(MAP_ICON_ASSETS)
           .filter(([key]) => !key.startsWith('cap-'))
           .map(([key, moduleId]): [string, number, number] => [key, moduleId, MAP_ICON_SCALE]),
-        ...Object.entries(FACE_SPRITE_ASSETS).map(([modelId, moduleId]): [
-          string,
-          number,
-          number,
-        ] => [`face-${modelId}`, moduleId, FACE_SPRITE_SCALE]),
+        ...ICON_PACK_IDS.flatMap((packId) =>
+          Object.entries(ICON_PACKS[packId].sprites).map(([modelId, moduleId]): [
+            string,
+            number,
+            number,
+          ] => [`face-${packId}-${modelId}`, moduleId, FACE_SPRITE_SCALE]),
+        ),
       ].filter(([, moduleId]) => !!moduleId);
       const pairs = await Promise.all(
         entries.map(async ([key, moduleId, scale]) => {
@@ -316,6 +334,11 @@ export function TramLayers({
   modelUris,
 }: TramLayersProps) {
   const iconImages = useMapIcons();
+  // Selected icon pack: a SETTING (changes rarely, from the settings sheet).
+  // Subscribing via React is deliberate — one re-render per change rebuilds
+  // the badge layers' iconImage expression and re-pushes the style natively.
+  // NO per-frame cost: the selector only fires on actual pack changes.
+  const iconPack = useSettingsStore((s) => s.iconPack);
   const pointsRef = useRef<ShapeSource>(null);
   const sectionsRef = useRef<ShapeSource>(null);
   const fixOverlayRef = useRef<ShapeSource>(null);
@@ -741,7 +764,7 @@ export function TramLayers({
         ]}
         minZoomLevel={BAND_DOTS_TO_BADGES - BAND_FADE}
         maxZoomLevel={BAND_BADGES_TO_MODELS + BAND_FADE + 0.1}
-        style={faceBadgeStyle(false)}
+        style={faceBadgeStyle(false, iconPack)}
       />,
       // Band 2: PINNED face badges — selected/followed/favorite trams. No
       // collision (never hidden), drawn over the decluttered crowd.
@@ -756,7 +779,7 @@ export function TramLayers({
         ]}
         minZoomLevel={BAND_DOTS_TO_BADGES - BAND_FADE}
         maxZoomLevel={BAND_BADGES_TO_MODELS + BAND_FADE + 0.1}
-        style={faceBadgeStyle(true)}
+        style={faceBadgeStyle(true, iconPack)}
       />,
       // Band 2: gold star pinned to favorite trams' face badges (top-right).
       <SymbolLayer

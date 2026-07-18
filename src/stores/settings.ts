@@ -5,6 +5,8 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
+import { DEFAULT_ICON_PACK, type IconPackId } from '@/lib/fleet/iconPacks';
+
 import { fileSystemStorage } from './favorites';
 
 export type LightPreset = 'auto' | 'day' | 'dusk' | 'night';
@@ -24,11 +26,14 @@ export interface SettingsState {
    * an independent stream and ignores this switch.
    */
   passiveFleetLogging: boolean;
+  /** Selected tram icon pack (face art on badges, sheets, settings). */
+  iconPack: IconPackId;
   setLightPreset: (preset: LightPreset) => void;
   setPositionMode: (mode: PositionMode) => void;
   setShowRouteLines: (show: boolean) => void;
   setFollowHeadingLock: (lock: boolean) => void;
   setPassiveFleetLogging: (on: boolean) => void;
+  setIconPack: (pack: IconPackId) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -39,11 +44,13 @@ export const useSettingsStore = create<SettingsState>()(
       showRouteLines: true,
       followHeadingLock: false,
       passiveFleetLogging: true,
+      iconPack: DEFAULT_ICON_PACK,
       setLightPreset: (lightPreset) => set({ lightPreset }),
       setPositionMode: (positionMode) => set({ positionMode }),
       setShowRouteLines: (showRouteLines) => set({ showRouteLines }),
       setFollowHeadingLock: (followHeadingLock) => set({ followHeadingLock }),
       setPassiveFleetLogging: (passiveFleetLogging) => set({ passiveFleetLogging }),
+      setIconPack: (iconPack) => set({ iconPack }),
     }),
     {
       name: 'settings',

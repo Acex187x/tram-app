@@ -22,10 +22,13 @@ import {
 
 import { InsetGroup, RowSeparator, SectionLabel } from '@/components/favorites/InsetGroup';
 import { SheetHeader } from '@/components/favorites/SheetHeader';
+import { TramFace } from '@/components/tram/TramFace';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { SheetContent } from '@/components/ui/SheetContent';
 import { Colors, Tram } from '@/constants/theme';
+import { ICON_PACKS, ICON_PACK_IDS, type IconPackId } from '@/lib/fleet/iconPacks';
 import { useMotionLog, type MotionFileInfo } from '@/lib/motionlog';
+import type { TramModelId } from '@/lib/types';
 import { useSettingsStore, type LightPreset, type PositionMode } from '@/stores/settings';
 
 /** Left inset aligning separators with row text (padding + icon + gap). */
@@ -183,6 +186,81 @@ function PositionModeSegments() {
   const positionMode = useSettingsStore((s) => s.positionMode);
   const setPositionMode = useSettingsStore((s) => s.setPositionMode);
   return <Segments options={POSITION_MODES} value={positionMode} onChange={setPositionMode} />;
+}
+
+/** Models shown in each pack's live preview strip (varied silhouettes). */
+const PACK_PREVIEW_MODELS: TramModelId[] = ['t3', '15t', '52t'];
+
+/**
+ * 'Tram icons' picker: one selectable card per icon pack, each with a LIVE
+ * vector preview (TramFace pinned to that pack), name + description, and a
+ * checkmark on the selected pack. Selecting re-skins the map badges and every
+ * face portrait in the app.
+ */
+function IconPackSection() {
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const palette = Colors[scheme];
+  const iconPack = useSettingsStore((s) => s.iconPack);
+  const setIconPack = useSettingsStore((s) => s.setIconPack);
+
+  return (
+    <View>
+      <SectionLabel>Tram icons</SectionLabel>
+      <InsetGroup>
+        {ICON_PACK_IDS.map((packId, i) => {
+          const meta = ICON_PACKS[packId].meta;
+          const selected = packId === iconPack;
+          return (
+            <Fragment key={packId}>
+              {i > 0 && <RowSeparator inset={16} />}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                onPress={() => {
+                  if (selected) return;
+                  void Haptics.selectionAsync();
+                  setIconPack(packId);
+                }}
+                style={({ pressed }) => [
+                  styles.packRow,
+                  pressed && {
+                    backgroundColor:
+                      scheme === 'dark' ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
+                  },
+                ]}
+              >
+                <View style={styles.packPreview}>
+                  {PACK_PREVIEW_MODELS.map((modelId) => (
+                    <TramFace key={modelId} pack={packId} modelId={modelId} size={36} />
+                  ))}
+                </View>
+                <View style={styles.packTexts}>
+                  <Text style={[styles.packName, { color: palette.text }]} numberOfLines={1}>
+                    {meta.name}
+                  </Text>
+                  <Text
+                    style={[styles.packDescription, { color: palette.textSecondary }]}
+                    numberOfLines={2}
+                  >
+                    {meta.description}
+                  </Text>
+                </View>
+                <SymbolView
+                  name={selected ? 'checkmark.circle.fill' : 'circle'}
+                  size={22}
+                  tintColor={selected ? Tram.pidRed : palette.textSecondary}
+                />
+              </Pressable>
+            </Fragment>
+          );
+        })}
+      </InsetGroup>
+      <Text style={[styles.footnote, { color: palette.textSecondary }]}>
+        Changes the tram faces on map badges and everywhere a tram portrait
+        appears.
+      </Text>
+    </View>
+  );
 }
 
 function formatBytes(n: number): string {
@@ -404,6 +482,8 @@ export default function SettingsScreen() {
           </InsetGroup>
         </View>
 
+        <IconPackSection />
+
         <MotionDataSection />
 
         <View>
@@ -517,6 +597,31 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     paddingVertical: 7,
+  },
+  packRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 64,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  packPreview: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 2,
+  },
+  packTexts: {
+    flex: 1,
+    gap: 2,
+  },
+  packName: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  packDescription: {
+    fontSize: 12,
+    lineHeight: 16,
   },
   blurbCell: {
     gap: 6,
