@@ -22,7 +22,7 @@ import { TramSheetHeader } from '@/components/tram/TramSheetHeader';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
 import { SheetContent } from '@/components/ui/SheetContent';
-import { Colors } from '@/constants/theme';
+import { Colors, Tram } from '@/constants/theme';
 import { getRuntime, useLoadedGeometries, useTramState } from '@/hooks/tramData';
 import type { TramPublicState } from '@/lib/types';
 import { useFavoritesStore } from '@/stores/favorites';
@@ -34,6 +34,44 @@ function SectionHeader({ title }: { title: string }) {
     <Text style={[styles.sectionHeader, { color: Colors[scheme].textSecondary }]}>
       {title.toUpperCase()}
     </Text>
+  );
+}
+
+// ── photos-of-this-car row ───────────────────────────────────────────────────
+
+/**
+ * Compact sibling of AboutTramRow: opens /tram-photos/[reg] — community
+ * photo history of this PHYSICAL car (TransPhoto) by registration number.
+ * Rendered only when the feed exposes a registration number.
+ */
+function PhotosRow({ reg, onPress }: { reg: number; onPress: () => void }) {
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const c = Colors[scheme];
+  const cardFill = scheme === 'dark' ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.55)';
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.photosRow,
+        { backgroundColor: cardFill },
+        pressed && { opacity: 0.7 },
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={`Photos of this car, number ${reg}, from TransPhoto`}
+    >
+      <View style={styles.photosIcon}>
+        <SymbolView name="photo.on.rectangle.angled" size={20} tintColor={Tram.gold} />
+      </View>
+      <View style={styles.photosTextCol}>
+        <Text style={[styles.photosTitle, { color: c.text }]} numberOfLines={1}>
+          Photos of this car
+        </Text>
+        <Text style={[styles.photosSubtitle, { color: c.textSecondary }]} numberOfLines={1}>
+          Spotter shots of #{reg} · TransPhoto
+        </Text>
+      </View>
+      <SymbolView name="chevron.right" size={13} tintColor={c.textSecondary} />
+    </Pressable>
   );
 }
 
@@ -191,6 +229,17 @@ export default function TramDetailSheet() {
             {/* Second door to the model reference screen, carrying the
                 per-vehicle amenities the per-model screen can't know. */}
             <AboutTramRow model={state.model} snapshot={state.snapshot} onPress={onAbout} />
+
+            {/* Community photo history of this physical car (TransPhoto) —
+                only when the feed exposes a registration number. */}
+            {state.snapshot.registrationNumber != null && (
+              <PhotosRow
+                reg={state.snapshot.registrationNumber}
+                onPress={() =>
+                  router.push(`/tram-photos/${state.snapshot.registrationNumber}`)
+                }
+              />
+            )}
           </>
         )}
         </SheetContent>
@@ -225,4 +274,18 @@ const styles = StyleSheet.create({
   goneButton: { marginTop: 8 },
   goneButtonPress: { paddingHorizontal: 28, paddingVertical: 10 },
   goneButtonText: { fontSize: 15, fontWeight: '600' },
+  photosIcon: { alignItems: 'center', width: 28 },
+  photosRow: {
+    alignItems: 'center',
+    borderCurve: 'continuous',
+    borderRadius: 16,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 52,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  photosSubtitle: { fontSize: 12 },
+  photosTextCol: { flex: 1, gap: 1 },
+  photosTitle: { fontSize: 15, fontWeight: '600' },
 });

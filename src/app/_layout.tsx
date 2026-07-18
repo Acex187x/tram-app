@@ -39,6 +39,7 @@ export default function RootLayout() {
         <Stack.Screen name="settings" options={sheet([0.55, 0.95])} />
         <Stack.Screen name="rides" options={sheet([0.5, 0.95])} />
         <Stack.Screen name="model-info/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="tram-photos/[reg]" options={{ headerShown: false }} />
         <Stack.Screen
           name="model/[id]"
           options={{ presentation: 'fullScreenModal', headerShown: false, animation: 'fade' }}
