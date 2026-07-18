@@ -110,6 +110,14 @@ export interface TramFeed {
   /** Urgent geometry promotion (tapped/followed tram). */
   promoteGeometry(tripId: string): void;
   /**
+   * Optional capability: notifies when a requested geometry has landed in the
+   * local cache (getGeometry now returns it). The runtime uses it to re-ingest
+   * promptly so a geometry-less tram starts simulating without waiting for the
+   * next poll (or a tap). Feeds without it still work — the runtime falls back
+   * to its post-poll nudge + the regular poll cadence.
+   */
+  subscribeGeometry?(cb: () => void): () => void;
+  /**
    * Telemetry sink: deviation/calibration records (server-side aggregation
    * later). Must never throw into the caller — the render/ingest path calls it.
    */

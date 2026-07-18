@@ -11,7 +11,7 @@ import {
   geometryServiceMidnight,
   serviceDayShiftMs,
 } from './gtfs';
-import { GolemioAbortError, type GolemioPriority } from './client';
+import { GolemioAbortError, promoteTag, type GolemioPriority } from './client';
 
 const CACHE_DIR_NAME = 'tripgeo';
 const TTL_MS = 24 * 60 * 60 * 1000; // 24h
@@ -36,6 +36,30 @@ interface DiskEntry {
 // dedicated long-running app would need periodic memCache invalidation.
 const memCache = new Map<string, RouteGeometry>();
 const inFlight = new Map<string, Promise<RouteGeometry>>();
+
+/**
+ * Geometry-landed listeners (LocalGolemioFeed.subscribeGeometry → the
+ * runtime's debounced re-ingest): fired after every memCache.set, i.e. the
+ * moment getLoaded()/has() starts returning the trip. Listener errors are
+ * swallowed — a bad subscriber must never fail the fetch path.
+ */
+const loadedListeners = new Set<() => void>();
+
+/** Subscribe to "a geometry became resolvable" notifications. */
+export function subscribeLoaded(cb: () => void): () => void {
+  loadedListeners.add(cb);
+  return () => loadedListeners.delete(cb);
+}
+
+function notifyLoaded(): void {
+  for (const l of loadedListeners) {
+    try {
+      l();
+    } catch {
+      // subscriber errors must not disturb the cache/fetch path
+    }
+  }
+}
 
 function cacheDir(): Directory {
   return new Directory(Paths.cache, CACHE_DIR_NAME);
@@ -163,6 +187,7 @@ export async function getTripGeometry(
     if (signal?.aborted) throw new GolemioAbortError(); // no cache writes after abort
     if (disk) {
       memCache.set(tripId, disk);
+      notifyLoaded();
       return disk;
     }
     const geometry = await fetchTripGeometry(tripId, { priority, signal });
@@ -171,6 +196,7 @@ export async function getTripGeometry(
     if (signal?.aborted) throw new GolemioAbortError();
     memCache.set(tripId, geometry);
     writeDisk(tripId, geometry);
+    notifyLoaded();
     return geometry;
   })();
 
@@ -194,7 +220,15 @@ export function requestPrefetch(
 ): void {
   if (signal?.aborted) return;
   for (const tripId of tripIds) {
-    if (memCache.has(tripId) || inFlight.has(tripId)) continue;
+    if (memCache.has(tripId)) continue;
+    if (inFlight.has(tripId)) {
+      // Already queued or fetching. A re-request at a HIGHER priority promotes
+      // the still-queued scheduler waiter (matched by the trip id in its URL
+      // path) instead of being dropped — e.g. a background-warmed trip whose
+      // tram scrolled into the viewport jumps ahead of the background lane.
+      if (priority < 2) promoteTag(tripId, priority);
+      continue;
+    }
     void getTripGeometry(tripId, priority, signal).catch(() => {
       // ignore: prefetch failures are non-fatal
     });

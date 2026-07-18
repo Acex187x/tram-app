@@ -169,6 +169,12 @@ export class LocalGolemioFeed implements TramFeed {
     return shapeCache.getLoaded(tripId);
   }
 
+  /** Geometry-landed events (optional TramFeed capability): the shape cache
+   *  announces every trip geometry that becomes resolvable via getGeometry. */
+  subscribeGeometry(cb: () => void): () => void {
+    return shapeCache.subscribeLoaded(cb);
+  }
+
   requestGeometry(tripIds: string[], priority: FeedPriority): void {
     shapeCache.requestPrefetch(tripIds, priority, this.sessionAbort?.signal);
   }

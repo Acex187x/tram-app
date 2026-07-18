@@ -279,12 +279,17 @@ Three distinct failures fed the same symptom; the fix is a chain:
    brief transient beats a broken body. The trip-change geometry is fetched at
    raised priority to shorten the transient — see interpolation-engine.md.)*
    With geometry, `sectionsAlongShape` places each section along the polyline.
-   Rendering: the `tram-geometryless-dots` `CircleLayer` (`TramLayers.tsx`) is
-   **filtered on `geometryless == 1` and drawn at ALL zooms** — including the 3D
-   band, where the sprite teardrops/badges fade out — so a shapeless tram never
-   vanishes; those sprite layers are conversely filtered to `geometryless != 1`.
-   The shared `tram-hit-targets` circle keeps the dot tappable. The additive
-   `PointFeatureProps.geometryless: 0 | 1` is the only new push field.
+   Rendering (revised 2026-07-18, red-dot fix): a "materializing" **roundel**,
+   not a solid red blob — `tram-geometryless-halo` (soft line-colored aura) +
+   `tram-geometryless-dots` (white fill, line-colored ring) + the line number
+   beside it (`tram-geometryless-line`), all **filtered on `geometryless == 1`
+   and drawn at ALL zooms** — including the 3D band, where the sprite
+   teardrops/badges fade out — so a shapeless tram never vanishes and reads as
+   "a tram, loading" instead of a broken marker; the sprite layers are
+   conversely filtered to `geometryless != 1`. All three are static style
+   expressions over the existing `line` prop (zero per-frame JS, zero payload
+   growth). The shared `tram-hit-targets` circle keeps the roundel tappable.
+   The additive `PointFeatureProps.geometryless: 0 | 1` is the only push field.
 
 3. **Sealed GLB end caps.** Even correctly placed, a section whose neighbour
    doesn't perfectly abut showed a hollow cut face. The model generator seals

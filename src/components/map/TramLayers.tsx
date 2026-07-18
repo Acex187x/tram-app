@@ -135,6 +135,9 @@ export interface FollowGestureState {
 /** Night lines 90–99 use the navy sprite variants instead of PID red. */
 const NIGHT_LINE = ['>=', ['to-number', ['get', 'line']], 90];
 
+/** The line's PID color (day red / night navy) as a style expression. */
+const LINE_COLOR = ['case', NIGHT_LINE, Tram.night, Tram.pidRed] as unknown as string;
+
 // Geometry-less trams (no loaded shape yet) are excluded from the bearing-
 // rotated teardrop / capsule sprites via an inline `['!=', ['get',
 // 'geometryless'], 1]` filter on each — they have no reliable heading, so they
@@ -252,7 +255,7 @@ function faceBadgeStyle(pinned: boolean, pack: IconPackId): BadgeSymbolStyle {
     ] as unknown as number,
     // PID red (night navy for lines 90+) with a white halo — readable on both
     // the day and night basemap lightPresets.
-    textColor: ['case', NIGHT_LINE, Tram.night, Tram.pidRed] as unknown as string,
+    textColor: LINE_COLOR,
     textHaloColor: '#FFFFFF',
     textHaloWidth: 1.6,
     textAnchor: 'left',
@@ -368,7 +371,12 @@ export function TramLayers({
     const rt = getRuntime();
     const getGeometry = (key: string) => rt.engine.getGeometry(key);
 
-    return rt.subscribeFrame((nowMs) => {
+    // Viewport supplier for the runtime's geometry warm-up: missing shapes of
+    // ON-SCREEN trams load at raised priority so a visible tram doesn't sit as
+    // a bare loading dot. Read once per POLL (not per frame) by the runtime.
+    rt.setViewportProvider(() => viewportRef.current);
+
+    const unsubscribe = rt.subscribeFrame((nowMs) => {
       const viewport = viewportRef.current;
       const selection = useSelectionStore.getState();
 
@@ -559,6 +567,11 @@ export function TramLayers({
         animationDuration: CAMERA_GLIDE_MS,
       });
     });
+
+    return () => {
+      rt.setViewportProvider(null);
+      unsubscribe();
+    };
   }, [cameraRef, viewportRef, followGestureRef]);
 
   // Tap ANY tram feature (badge/dot or any 3D body section): light haptic,
@@ -670,23 +683,66 @@ export function TramLayers({
         circlePitchAlignment: 'map',
       }}
     />,
-    // Geometry-less trams (shape still streaming in): a plain dot at the raw
-    // GPS position across ALL zooms — including the 3D band, where the sprite
-    // teardrops/badges fade out, so a shapeless tram never vanishes. No 3D body
-    // and no bearing rotation (there is no reliable heading yet); the shared
-    // hit-target circle below keeps it tappable. A brief transient — Fix 2
-    // requests the new trip's geometry at raised priority to shorten it.
+    // Geometry-less trams (shape still streaming in) render at the raw GPS
+    // position across ALL zooms — including the 3D band, where the sprite
+    // teardrops/badges fade out, so a shapeless tram never vanishes. No 3D
+    // body and no bearing rotation (there is no reliable heading yet).
+    //
+    // LOOK: a "materializing" roundel, not an alarming solid red blob — a soft
+    // line-colored halo + a white-filled circle with a line-colored ring + the
+    // line number beside it. Reads as "a tram, still loading its route".
+    // Everything is a static style expression over props the points FC already
+    // carries (`line`) — zero per-frame JS, zero payload growth (perf
+    // invariants #1/#5); the shared hit-target circle keeps it tappable, and
+    // the viewport-priority warm-up + geometry-landed re-ingest keep the
+    // transient short.
+    <CircleLayer
+      key="tram-geometryless-halo"
+      id="tram-geometryless-halo"
+      slot="top"
+      filter={['==', ['get', 'geometryless'], 1]}
+      style={{
+        circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 8, 16, 14],
+        circleColor: LINE_COLOR,
+        circleOpacity: 0.14,
+        circleStrokeColor: LINE_COLOR,
+        circleStrokeWidth: 1,
+        circleStrokeOpacity: 0.3,
+        circlePitchAlignment: 'map',
+      }}
+    />,
     <CircleLayer
       key="tram-geometryless-dots"
       id="tram-geometryless-dots"
       slot="top"
       filter={['==', ['get', 'geometryless'], 1]}
       style={{
-        circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 3, 16, 6],
-        circleColor: ['case', NIGHT_LINE, Tram.night, Tram.pidRed],
-        circleStrokeWidth: 1.5,
-        circleStrokeColor: '#FFFFFF',
+        circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 4, 16, 7],
+        circleColor: '#FFFFFF',
+        circleStrokeWidth: 2,
+        circleStrokeColor: LINE_COLOR,
         circlePitchAlignment: 'map',
+      }}
+    />,
+    // Line number seated right of the roundel — the dot is identifiably "tram
+    // <line>" while its shape loads. Never decluttered (it is the tram's only
+    // identity in this state).
+    <SymbolLayer
+      key="tram-geometryless-line"
+      id="tram-geometryless-line"
+      slot="top"
+      filter={['==', ['get', 'geometryless'], 1]}
+      style={{
+        textField: ['get', 'line'] as unknown as string,
+        textFont: ['DIN Pro Bold', 'Arial Unicode MS Regular'],
+        textSize: ['interpolate', ['linear'], ['zoom'], 10, 9, 16, 12] as unknown as number,
+        textColor: LINE_COLOR,
+        textHaloColor: '#FFFFFF',
+        textHaloWidth: 1.4,
+        textAnchor: 'left',
+        textOffset: [0.9, 0],
+        textAllowOverlap: true,
+        textIgnorePlacement: true,
       }}
     />,
   ];
@@ -811,7 +867,7 @@ export function TramLayers({
         maxZoomLevel={BAND_BADGES_TO_MODELS + BAND_FADE + 0.1}
         style={{
           circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 3, 14.8, 6],
-          circleColor: ['case', NIGHT_LINE, Tram.night, Tram.pidRed],
+          circleColor: LINE_COLOR,
           circleStrokeWidth: 1.5,
           circleStrokeColor: '#FFFFFF',
         }}

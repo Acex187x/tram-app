@@ -57,6 +57,19 @@ class FakeFeed implements TramFeed {
     this.promoted.push(tripId);
   }
 
+  geometryListeners = new Set<() => void>();
+
+  subscribeGeometry(cb: () => void): () => void {
+    this.geometryListeners.add(cb);
+    return () => this.geometryListeners.delete(cb);
+  }
+
+  /** Test driver: a geometry "lands" in the cache and the feed announces it. */
+  loadGeometry(tripId: string, geometry: RouteGeometry): void {
+    this.geometries.set(tripId, geometry);
+    this.geometryListeners.forEach((l) => l());
+  }
+
   reportCalibration(records: CalibrationRecord[]): void {
     this.calibrationBatches.push(records);
   }
@@ -122,10 +135,12 @@ describe('TramRuntime driven by an injected TramFeed', () => {
     const { feed, rt } = setup();
     expect(feed.started).toBe(1);
     expect(feed.listeners.size).toBe(1);
+    expect(feed.geometryListeners.size).toBe(1);
 
     rt.release();
     expect(feed.stopped).toBe(1);
     expect(feed.listeners.size).toBe(0);
+    expect(feed.geometryListeners.size).toBe(0);
   });
 
   it('a pushed batch is ingested and geometry resolves through the feed', () => {
@@ -183,6 +198,69 @@ describe('TramRuntime driven by an injected TramFeed', () => {
     expect(feed.requested).toContainEqual({ tripIds: ['trip-next'], priority: 1 });
     // …and it is NOT also re-queued behind the background lane.
     expect(feed.requested).not.toContainEqual({ tripIds: ['trip-next'], priority: 2 });
+    rt.release();
+  });
+
+  it('a VISIBLE tram without geometry warms at RAISED priority; off-screen at background', () => {
+    const { feed, rt } = setup();
+    // Map registers the live viewport (ORIGIN [14.6, 50.05] is inside it).
+    rt.setViewportProvider(() => ({ bbox: [14.5, 50.0, 14.7, 50.1], zoom: 14 }));
+
+    feed.push(
+      [
+        makeSnapshot({ key: '9201', registrationNumber: 9201, tripId: 'trip-vis' }),
+        makeSnapshot({
+          key: '9202',
+          registrationNumber: 9202,
+          tripId: 'trip-far',
+          coordinates: [15.6, 49.5], // far outside the viewport (+ margin)
+        }),
+      ],
+      T0,
+    );
+
+    expect(feed.requested).toContainEqual({ tripIds: ['trip-vis'], priority: 1 });
+    expect(feed.requested).toContainEqual({ tripIds: ['trip-far'], priority: 2 });
+    // The visible trip is NOT also queued behind the background lane.
+    expect(feed.requested).not.toContainEqual({ tripIds: ['trip-vis'], priority: 2 });
+    rt.release();
+  });
+
+  it('without a viewport provider every missing geometry warms at background (pre-map behavior)', () => {
+    const { feed, rt } = setup();
+    feed.push([makeSnapshot({ tripId: 'trip-test' })], T0);
+    expect(feed.requested).toEqual([{ tripIds: ['trip-test'], priority: 2 }]);
+    rt.release();
+  });
+
+  it('a geometry landing (feed event) re-ingests within the debounce — the sim appears with NO tap', () => {
+    const { feed, rt } = setup();
+    feed.push([makeSnapshot({ shapeDistM: 300, observedAtMs: T0 })], T0);
+    expect(rt.engine.getState('9201', T0)!.hasGeometry).toBe(false);
+
+    // The shape streams into the cache and the feed announces it. Well before
+    // the 2.5 s nudge, and with NO prioritizeTrip (no tap), the debounced
+    // geometry-adopt ingest brings the sim up — the dot comes alive by itself.
+    feed.loadGeometry('trip-test', makeGeo());
+    jest.advanceTimersByTime(400);
+    expect(rt.engine.getState('9201', Date.now())!.hasGeometry).toBe(true);
+    expect(feed.promoted).toEqual([]); // no tap was needed
+    rt.release();
+  });
+
+  it('a burst of geometry events coalesces into one debounced ingest', () => {
+    const { feed, rt } = setup();
+    const ingestSpy = jest.spyOn(rt.engine, 'ingest');
+    feed.push([makeSnapshot({ tripId: 'trip-test' })], T0);
+    const ingestsAfterPush = ingestSpy.mock.calls.length;
+
+    // Four geometries land back-to-back (a scheduler window draining).
+    feed.loadGeometry('trip-test', makeGeo());
+    feed.geometryListeners.forEach((l) => l());
+    feed.geometryListeners.forEach((l) => l());
+    feed.geometryListeners.forEach((l) => l());
+    jest.advanceTimersByTime(400);
+    expect(ingestSpy.mock.calls.length).toBe(ingestsAfterPush + 1);
     rt.release();
   });
 

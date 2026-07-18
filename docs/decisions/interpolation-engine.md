@@ -603,6 +603,32 @@ the previous poll and calls `feed.requestGeometry(changedTrips, 1)` (vs. the bac
 warm for brand-new trams), returning the tram to the drawn line within 1–2 polls. Render
 contract details in `docs/decisions/map-rendering.md` §8.
 
+### Red-dot hardening (2026-07-18) — visible-first warm-up + geometry-landed re-ingest
+
+Field report: trams sometimes sat as a **motionless dot** until tapped. Cause chain: a
+geometry-less tram renders at its raw fix (moves only on the 5 s poll); ALL missing shapes
+were warmed at background priority `2`, so in dense frames a visible tram could wait out a
+long scheduler queue (16 starts/8 s); tapping promoted the trip to `0`, loaded the shape,
+and the tram "came alive" — so the tap looked like the trigger. Three fixes, all in
+`tramData.ts` / `shapeCache.ts` (rate-limit contract untouched):
+
+- **Visible-first priority.** `onSnapshots` reads the map's viewport (provider registered
+  by `TramLayers`; read once per poll, never per frame) and splits missing shapes:
+  on-screen (+500 m margin) → priority `1`, off-screen → `2`. Trip changes stay at `1`,
+  taps at `0`. `shapeCache.requestPrefetch` now also **promotes an already-queued waiter**
+  (`promoteTag`) when re-requested at a higher priority, so a background-warmed tram that
+  scrolls into view jumps the queue on the next poll.
+- **Geometry-landed re-ingest.** `shapeCache` announces every geometry that lands
+  (`subscribeLoaded` → optional `TramFeed.subscribeGeometry`); the runtime debounces the
+  bursts (`GEOMETRY_ADOPT_DEBOUNCE_MS = 300`) into one extra `ingest`, so the sim appears
+  ≤ ~0.3 s after the shape arrives — **without a tap and without waiting for the next
+  poll**. The 2.5 s post-poll nudge remains as the fallback for feeds without the event.
+- **Loading look.** The dot renders as a line-colored "loading roundel" with the line
+  number, not an alarming solid red marker (map-rendering.md §8).
+
+Tests: `tram-feed.test.ts` (visible > background priority, no-tap revival, burst
+coalescing), `shape-cache-promote.test.ts` (waiter promotion, loaded notifications).
+
 ---
 
 ## Tuning constants (single source of truth: the code)

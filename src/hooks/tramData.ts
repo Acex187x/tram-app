@@ -17,7 +17,7 @@ import { toCalibrationRecords } from '@/lib/feed/calibration';
 import { LocalGolemioFeed } from '@/lib/feed/localGolemioFeed';
 import type { FeedStatus, TramFeed } from '@/lib/feed/types';
 import * as shapeCache from '@/lib/golemio/shapeCache';
-import type { RouteGeometry, TramPublicState, TramSnapshot } from '@/lib/types';
+import type { RouteGeometry, TramPublicState, TramSnapshot, Viewport } from '@/lib/types';
 import { useSettingsStore, type PositionMode } from '@/stores/settings';
 
 export { POLL_MS } from '@/lib/feed/localGolemioFeed';
@@ -42,6 +42,39 @@ export const RIDE_BG_POLL_MS = 10_000;
 export const RIDE_BG_TICK_MS = 1_000;
 /** Re-ingest shortly after a prefetch so early geometries apply without waiting a poll. */
 const GEOMETRY_NUDGE_MS = 2_500;
+/**
+ * Debounce for the geometry-landed re-ingest (feed.subscribeGeometry): the
+ * scheduler drains several geometry fetches per rate-limit window, so arrivals
+ * come in bursts — one ingest per burst, not one per shape. This is what makes
+ * a geometry-less tram "come alive" by itself (no tap, no waiting out the poll):
+ * shape lands → ingest ≤ this much later → sim exists → the dot becomes a tram.
+ */
+export const GEOMETRY_ADOPT_DEBOUNCE_MS = 300;
+/**
+ * Margin around the viewport bbox when classifying a missing-geometry tram as
+ * ON SCREEN for the warm-up priority split (see onSnapshots), meters. Generous
+ * (> featureBuilder's 300 m cull margin) so trams about to scroll in are ready.
+ */
+const VIEWPORT_GEO_MARGIN_M = 500;
+
+const M_PER_DEG_LAT = 111_320;
+
+/** Expand a [w,s,e,n] bbox by marginM meters (local flat-earth, fine at city scale). */
+function expandBbox(
+  bbox: [number, number, number, number],
+  marginM: number,
+): [number, number, number, number] {
+  const [w, s, e, n] = bbox;
+  const dLat = marginM / M_PER_DEG_LAT;
+  const midLat = (s + n) / 2;
+  const dLng =
+    marginM / (M_PER_DEG_LAT * Math.max(Math.cos(midLat * (Math.PI / 180)), 0.01));
+  return [w - dLng, s - dLat, e + dLng, n + dLat];
+}
+
+function inBbox(p: [number, number], bbox: [number, number, number, number]): boolean {
+  return p[0] >= bbox[0] && p[0] <= bbox[2] && p[1] >= bbox[1] && p[1] <= bbox[3];
+}
 
 /**
  * Points FC (badges/dots, whole fleet) push cadence by zoom — at far zooms the
@@ -85,8 +118,18 @@ export class TramRuntime {
   private tickTimer: ReturnType<typeof setInterval> | null = null;
   private uiNotifyTimer: ReturnType<typeof setInterval> | null = null;
   private nudgeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Pending debounced geometry-adopt ingest (see onGeometryLoaded). */
+  private adoptTimer: ReturnType<typeof setTimeout> | null = null;
   private appStateSub: { remove(): void } | null = null;
   private feedUnsub: (() => void) | null = null;
+  /** Unsubscribe from the feed's geometry-landed event (optional capability). */
+  private geometryUnsub: (() => void) | null = null;
+  /**
+   * Live viewport supplier, registered by the map layer while it is mounted
+   * (null otherwise). Read once per poll to split missing-geometry warm-ups
+   * into on-screen (raised priority) vs background — never per frame.
+   */
+  private viewportProvider: (() => Viewport | null) | null = null;
   /**
    * Bumped whenever the runtime is paused/torn down. Deferred work (the 2.5 s
    * geometry nudge) captures the generation at schedule time and no-ops if it
@@ -162,6 +205,11 @@ export class TramRuntime {
       // The feed subscription also spans the retained lifetime; pause/resume
       // only toggles feed.stop()/start() (a stopped feed emits nothing).
       this.feedUnsub = this.feed.subscribeSnapshots(this.onSnapshots);
+      // Optional feed capability: geometry-landed events drive a debounced
+      // re-ingest so freshly-shaped trams start simulating without a tap or a
+      // poll-cycle wait. A stopped feed aborts its prefetches, so no events
+      // arrive while paused (the handler also guards on runMode).
+      this.geometryUnsub = this.feed.subscribeGeometry?.(this.onGeometryLoaded) ?? null;
       // Projection-sim cadence tracks the position-mode setting: full-rate
       // dead-reckoning is only needed while 'live' renders it every frame; in
       // 'smooth' it is consumed at ~1 Hz, so the engine coarsens it to 500 ms.
@@ -182,6 +230,8 @@ export class TramRuntime {
       this.appStateSub = null;
       this.feedUnsub?.();
       this.feedUnsub = null;
+      this.geometryUnsub?.();
+      this.geometryUnsub = null;
       this.settingsUnsub?.();
       this.settingsUnsub = null;
     }
@@ -276,6 +326,10 @@ export class TramRuntime {
       clearTimeout(this.nudgeTimer);
       this.nudgeTimer = null;
     }
+    if (this.adoptTimer) {
+      clearTimeout(this.adoptTimer);
+      this.adoptTimer = null;
+    }
     this.feed.stop();
     // Every mode transition is a tick-clock boundary: the first tick of the
     // next mode must anchor, never integrate (or budget-drop) the gap the
@@ -348,19 +402,35 @@ export class TramRuntime {
     this.lastSnapshots = snapshots;
     this.engine.ingest(snapshots, (tripId) => this.feed.getGeometry(tripId), atMs);
     this.feed.reportCalibration(toCalibrationRecords(this.engine.getStates(atMs), atMs));
-    // Warm geometries for trips we don't have yet (background priority). Trips
-    // already requested at raised priority above are excluded so they aren't
-    // re-queued behind the background lane.
+    // Warm geometries for trips we don't have yet, split by visibility: a
+    // missing shape whose tram is ON SCREEN (viewport + margin) loads at
+    // raised priority (1) — a visible tram stuck as a bare dot is the
+    // user-facing failure — while off-screen trams warm at background (2).
+    // Both lanes stay behind the tapped-tram urgent lane (0). Re-requesting a
+    // still-queued trip at a higher priority PROMOTES its scheduler waiter
+    // (shapeCache.requestPrefetch → promoteTag), so a background-warmed tram
+    // that scrolls into view jumps the queue on the next poll. Trips already
+    // requested at raised priority above (trip changes) are excluded so they
+    // aren't re-queued behind the background lane.
     const changedSet = changedTrips.length > 0 ? new Set(changedTrips) : null;
-    const missing = snapshots
-      .filter((s) => !this.feed.getGeometry(s.tripId) && !(changedSet?.has(s.tripId) ?? false))
-      .map((s) => s.tripId);
-    if (missing.length > 0) this.feed.requestGeometry(missing, 2);
+    const viewport = this.viewportProvider?.() ?? null;
+    const bbox = viewport ? expandBbox(viewport.bbox, VIEWPORT_GEO_MARGIN_M) : null;
+    const missingVisible: string[] = [];
+    const missingBackground: string[] = [];
+    for (const s of snapshots) {
+      if (this.feed.getGeometry(s.tripId) || (changedSet?.has(s.tripId) ?? false)) continue;
+      if (bbox && inBbox(s.coordinates, bbox)) missingVisible.push(s.tripId);
+      else missingBackground.push(s.tripId);
+    }
+    if (missingVisible.length > 0) this.feed.requestGeometry(missingVisible, 1);
+    if (missingBackground.length > 0) this.feed.requestGeometry(missingBackground, 2);
     // As geometries arrive (whether raised-priority trip changes or background
     // warm), they are adopted on the next ingest; nudge one extra ingest
     // shortly after so early geometries apply without waiting a full poll
-    // cycle. Tracked so teardown can cancel it.
-    if (missing.length > 0 || changedTrips.length > 0) {
+    // cycle. Tracked so teardown can cancel it. (The geometry-landed event —
+    // onGeometryLoaded — usually beats this; the nudge remains the fallback
+    // for feeds without the optional subscribeGeometry capability.)
+    if (missingVisible.length > 0 || missingBackground.length > 0 || changedTrips.length > 0) {
       this.nudgeTimer = setTimeout(() => {
         this.nudgeTimer = null;
         if (gen !== this.generation) return;
@@ -370,6 +440,35 @@ export class TramRuntime {
     }
     this.bumpUi();
   };
+
+  /**
+   * A geometry landed in the local cache (feed.subscribeGeometry): schedule ONE
+   * debounced re-ingest so the newly-shaped tram gets its sim right away —
+   * tapping must never be the only way a dot comes back to life. Arrivals
+   * burst (several fetches drain per rate-limit window) and coalesce into a
+   * single ingest per debounce interval; the ingest itself is the same work a
+   * poll does every 5 s, so this stays far below frame-rate cadences
+   * (perf invariant #1/#3 — timer registered with halt(), generation-guarded).
+   */
+  private readonly onGeometryLoaded = (): void => {
+    if (this.runMode === 'paused' || this.adoptTimer || this.lastSnapshots.length === 0) return;
+    const gen = this.generation;
+    this.adoptTimer = setTimeout(() => {
+      this.adoptTimer = null;
+      if (gen !== this.generation) return;
+      this.engine.ingest(this.lastSnapshots, (tripId) => this.feed.getGeometry(tripId), Date.now());
+      this.bumpUi();
+    }, GEOMETRY_ADOPT_DEBOUNCE_MS);
+  };
+
+  /**
+   * Register the live-viewport supplier (map layer mount/unmount). Null while
+   * no map is mounted → every missing geometry warms at background priority,
+   * exactly the pre-viewport behavior.
+   */
+  setViewportProvider(provider: (() => Viewport | null) | null): void {
+    this.viewportProvider = provider;
+  }
 
   /** Raise fetch priority for the selected/followed tram's geometry. */
   prioritizeTrip(tripId: string | null | undefined): void {
