@@ -1,7 +1,8 @@
 // Liquid Glass chrome floating over the map: status chip (poll ring + live
-// count + sync detail), top-right control stack (2D/3D · settings), the
-// bottom-right locate button, bottom dock (search + favorites + planner), and
-// the follow/planner/ride chips. All surfaces are GlassPanel over the map.
+// count + sync detail), top-right control stack (2D/3D · settings), the bottom
+// dock (search + favorites + planner), and the bottom cluster — locate button
+// plus the follow/spotter/ride/planner chips sharing one row above the dock.
+// All surfaces are GlassPanel over the map.
 //
 // APPEARANCE: the chrome floats over the BASEMAP, not over app UI — so its
 // light/dark styling follows the map's resolved light preset (day/dawn →
@@ -69,18 +70,14 @@ export const COMPASS_RIGHT = CONTROL_RIGHT + 1;
 
 /** Bottom dock footprint (38 pt search field + vertical padding). */
 const DOCK_H = 54;
-/** Locate button slot: bottom-right, floating just above the dock. */
+/** Bottom-cluster row slot: floating just above the dock. */
 const LOCATE_BOTTOM = Spacing.three + DOCK_H + 12;
-/** Vertical footprint of one stacked bottom chip (banner height + gap). */
+/** Vertical footprint of one stacked bottom chip (chip height + gap). */
 const CHIP_STACK_H = CONTROL_BUTTON_SIZE + 10;
-/**
- * Bottom offset of the follow/planner/ride chip base slot — the base chip sits
- * on the SAME row as the locate button (same bottom, same height). The chip is
- * left-aligned to the dock and its right edge is fenced short of the locate
- * button (see `followWrap`), so they share the row as `[ chip … ] [locate]`.
- * Multiple active chips stack UPWARD from this row (each +CHIP_STACK_H).
- */
-const BANNER_SLOT = LOCATE_BOTTOM;
+/** Gap between a chip's right edge and the locate button in the base row. */
+const CHIP_ROW_GAP = 10;
+/** Most chips that can stack at once: planner + ride + spotter + follow. */
+const MAX_STACKED_CHIPS = 4;
 
 // ── Status chip (top-left): poll ring + live tram count + sync detail ────────
 
@@ -219,13 +216,32 @@ export function ControlStack({ is3D, onTogglePitch }: ControlStackProps) {
   );
 }
 
-// ── Locate button (bottom-right, above the dock — standard nav-app slot) ─────
+// ── Bottom cluster: [ chip … ][locate] row + chips stacking upward ───────────
+//
+// One centered wrap using the SAME horizontal language as the dock below it
+// (left/right Spacing.three, width capped at 560 pt on iPad) so the row reads
+// as part of the dock family: the locate button is the right end of the row
+// (its right edge flush with the dock/search field), and the base chip
+// stretches from the dock's left edge all the way to the button. Additional
+// chips stack upward at the same full width. `box-none` keeps the transparent
+// stacking area gesture-transparent for the map.
 
-export function LocateButton({ onLocate }: { onLocate: () => void }) {
+export function BottomCluster({ onLocate }: { onLocate: () => void }) {
   const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.locateWrap, { bottom: insets.bottom + LOCATE_BOTTOM }]}>
-      <ControlButton symbol="location" label="Show my location" onPress={onLocate} />
+    <View
+      pointerEvents="box-none"
+      style={[styles.clusterWrap, { bottom: insets.bottom + LOCATE_BOTTOM }]}
+    >
+      <View pointerEvents="box-none" style={styles.clusterRow}>
+        <FollowChip />
+        <SpotterChip />
+        <RideChip />
+        <PlannerChip />
+        <View style={styles.locateSlot}>
+          <ControlButton symbol="location" label="Show my location" onPress={onLocate} />
+        </View>
+      </View>
     </View>
   );
 }
@@ -287,31 +303,39 @@ export function BottomDock() {
   );
 }
 
-// ── Bottom banners: follow + spotter + planner-route clear + ride preview ────
+// ── Bottom chips: follow + spotter + planner-route clear + ride preview ──────
 //
-// All are left-aligned glass chips (same height as the locate button), fenced
-// short of the bottom-right button so the base chip shares its row:
-// `[ chip … ] [locate]` just above the dock. The planner chip owns the base
-// row, the ride-preview chip stacks above it, the spotter chip above that, and
-// the follow banner floats on top of whichever are visible. Rendered together
-// from a single exported node so `app/index.tsx` keeps its one `<FollowBanner />`.
+// All are full-width glass chips inside the BottomCluster row (same height as
+// the locate button), stretching from the dock's left edge to the locate
+// button: `[ chip ……………… ][locate]`. The planner chip owns the base row, the
+// ride-preview chip stacks above it, the spotter chip above that, and the
+// follow chip floats on top of whichever are visible (each +CHIP_STACK_H,
+// relative to the cluster row's bottom).
 
-export function FollowBanner() {
+/** Shared big ✕ for all chips: 34 pt touch box + hitSlop, 20 pt glyph. */
+function ChipClose({ label, onPress }: { label: string; onPress: () => void }) {
+  const colors = useTextColors();
   return (
-    <>
-      <FollowChip />
-      <SpotterChip />
-      <RideChip />
-      <PlannerChip />
-    </>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      hitSlop={8}
+      style={styles.chipClose}
+      onPress={() => {
+        tapLight();
+        onPress();
+      }}
+    >
+      <SymbolView name="xmark.circle.fill" size={20} tintColor={colors.secondary} />
+    </Pressable>
   );
 }
 
 function FollowChip() {
-  const insets = useSafeAreaInsets();
   const followKey = useSelectionStore((s) => s.followTramKey);
-  // Paused = the user grabbed the map; the camera is theirs and the chip
-  // becomes "Return to follow" (body re-centers, ✕ still stops).
+  // Paused = the user grabbed the map; the camera is theirs and the chip body
+  // becomes one big accent "Follow" button (re-centers under the user's
+  // current zoom/pitch/heading). The ✕ always stops the follow entirely.
   const paused = useSelectionStore((s) => s.followPaused);
   const state = useTramState(followKey);
   const plannerActive = usePlannerStore((s) => s.itinerary != null);
@@ -322,69 +346,66 @@ function FollowChip() {
 
   // Float above the planner/ride/spotter chips when they are visible.
   const bottom =
-    insets.bottom +
-    BANNER_SLOT +
     (plannerActive ? CHIP_STACK_H : 0) +
     (rideActive ? CHIP_STACK_H : 0) +
     (spotterActive ? CHIP_STACK_H : 0);
   const reg = state.snapshot.registrationNumber;
-  // Body: while following it reopens the tram sheet (users kept losing it);
-  // while PAUSED it returns the camera to the tram (keeping the user's current
-  // zoom/pitch/heading). The ✕ always stops the follow entirely.
   const accent = colors.scheme === 'dark' ? Tram.liveryRed : Tram.pidRed;
   return (
-    <View style={[styles.followWrap, { bottom }]}>
-      <GlassPanel variant="regular" interactive appearance={colors.scheme} style={styles.followBanner}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={
-            paused
-              ? `Return to following tram ${reg ?? followKey}`
-              : `Open tram ${reg ?? followKey} details`
-          }
-          style={styles.followBody}
-          onPress={() => {
-            tapLight();
-            if (paused) {
+    <View style={[styles.chipSlot, { bottom }]}>
+      <GlassPanel
+        variant="regular"
+        interactive
+        appearance={colors.scheme}
+        style={[styles.chip, paused && styles.chipPausedPad]}
+      >
+        {paused ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Return to following tram ${reg ?? followKey}`}
+            style={({ pressed }) => [
+              styles.followResume,
+              { backgroundColor: accent, opacity: pressed ? 0.82 : 1 },
+            ]}
+            onPress={() => {
+              tapLight();
               useSelectionStore.getState().setFollowPaused(false);
-              return;
-            }
-            useSelectionStore.getState().setSelectedTramKey(followKey);
-            router.push(`/tram/${encodeURIComponent(followKey)}`);
-          }}
-        >
-          {paused && <SymbolView name="location.viewfinder" size={15} tintColor={accent} />}
-          <LineBadge line={state.snapshot.line} size="sm" />
-          {reg != null && (
-            <Text style={[styles.followReg, { color: colors.text }]} allowFontScaling={false}>
-              #{reg}
+            }}
+          >
+            <SymbolView name="location.viewfinder" size={17} tintColor="#FFFFFF" />
+            <Text style={styles.followResumeLabel} allowFontScaling={false}>
+              Follow
             </Text>
-          )}
-          {paused ? (
-            <Text style={[styles.followHint, { color: colors.text }]} allowFontScaling={false}>
-              Return to follow
-            </Text>
-          ) : (
-            <>
-              <DelayPill delaySeconds={state.snapshot.delaySeconds} />
-              <Text style={[styles.followHint, { color: colors.secondary }]} allowFontScaling={false}>
-                Following
+          </Pressable>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Open tram ${reg ?? followKey} details`}
+            style={styles.chipBody}
+            onPress={() => {
+              tapLight();
+              useSelectionStore.getState().setSelectedTramKey(followKey);
+              router.push(`/tram/${encodeURIComponent(followKey)}`);
+            }}
+          >
+            <LineBadge line={state.snapshot.line} size="sm" />
+            {reg != null && (
+              <Text style={[styles.followReg, { color: colors.text }]} allowFontScaling={false}>
+                #{reg}
               </Text>
-              <SymbolView name="chevron.up" size={12} tintColor={colors.secondary} />
-            </>
-          )}
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Stop following"
-          hitSlop={10}
-          onPress={() => {
-            tapLight();
-            useSelectionStore.getState().setFollowTramKey(null);
-          }}
-        >
-          <SymbolView name="xmark.circle.fill" size={18} tintColor={colors.secondary} />
-        </Pressable>
+            )}
+            <DelayPill delaySeconds={state.snapshot.delaySeconds} />
+            <View style={styles.chipSpacer} />
+            <Text style={[styles.followHint, { color: colors.secondary }]} allowFontScaling={false}>
+              Following
+            </Text>
+            <SymbolView name="chevron.up" size={12} tintColor={colors.secondary} />
+          </Pressable>
+        )}
+        <ChipClose
+          label="Stop following"
+          onPress={() => useSelectionStore.getState().setFollowTramKey(null)}
+        />
       </GlassPanel>
     </View>
   );
@@ -399,7 +420,6 @@ function FollowChip() {
  * any follow change it didn't make (no orphaned spotter sessions).
  */
 function SpotterChip() {
-  const insets = useSafeAreaInsets();
   const station = useSpotterStore((s) => s.station);
   const target = useSpotterStore((s) => s.target); // ~1 Hz while ETA changes
   const plannerActive = usePlannerStore((s) => s.itinerary != null);
@@ -410,18 +430,14 @@ function SpotterChip() {
   const detail = target
     ? `line ${target.line} · ${formatEtaMinutes(target.etaS)}`
     : 'waiting for next tram';
-  const bottom =
-    insets.bottom +
-    BANNER_SLOT +
-    (plannerActive ? CHIP_STACK_H : 0) +
-    (rideActive ? CHIP_STACK_H : 0);
+  const bottom = (plannerActive ? CHIP_STACK_H : 0) + (rideActive ? CHIP_STACK_H : 0);
   return (
-    <View style={[styles.followWrap, { bottom }]}>
-      <GlassPanel variant="regular" interactive appearance={colors.scheme} style={styles.followBanner}>
+    <View style={[styles.chipSlot, { bottom }]}>
+      <GlassPanel variant="regular" interactive appearance={colors.scheme} style={styles.chip}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Spotting ${station.name}, ${detail}. Reopen stop details`}
-          style={styles.plannerBody}
+          style={styles.chipBody}
           onPress={() => {
             tapLight();
             router.push(('/stop/' + encodeURIComponent(station.key)) as Href);
@@ -448,20 +464,15 @@ function SpotterChip() {
           </Text>
           <SymbolView name="chevron.up" size={12} tintColor={colors.secondary} />
         </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Stop spotting"
-          hitSlop={8}
+        <ChipClose
+          label="Stop spotting"
           onPress={() => {
-            tapLight();
             // Order matters: stop() unmounts the controller first, then the
             // follow it was driving is released.
             useSpotterStore.getState().stop();
             useSelectionStore.getState().setFollowTramKey(null);
           }}
-        >
-          <SymbolView name="xmark.circle.fill" size={16} tintColor={colors.secondary} />
-        </Pressable>
+        />
       </GlassPanel>
     </View>
   );
@@ -473,7 +484,6 @@ function SpotterChip() {
  * the preview. Stacks one slot above the planner chip when both are active.
  */
 function RideChip() {
-  const insets = useSafeAreaInsets();
   const preview = useRidePreviewStore((s) => s.preview);
   const plannerActive = usePlannerStore((s) => s.itinerary != null);
   const colors = useTextColors();
@@ -490,14 +500,14 @@ function RideChip() {
     .filter(Boolean)
     .join(' · ');
 
-  const bottom = insets.bottom + BANNER_SLOT + (plannerActive ? CHIP_STACK_H : 0);
+  const bottom = plannerActive ? CHIP_STACK_H : 0;
   return (
-    <View style={[styles.followWrap, { bottom }]}>
-      <GlassPanel variant="regular" interactive appearance={colors.scheme} style={styles.followBanner}>
+    <View style={[styles.chipSlot, { bottom }]}>
+      <GlassPanel variant="regular" interactive appearance={colors.scheme} style={styles.chip}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Reopen recorded rides"
-          style={styles.plannerBody}
+          style={styles.chipBody}
           onPress={() => {
             tapLight();
             router.push('/rides' as Href);
@@ -513,17 +523,10 @@ function RideChip() {
           </Text>
           <SymbolView name="chevron.up" size={12} tintColor={colors.secondary} />
         </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Hide ride preview"
-          hitSlop={8}
-          onPress={() => {
-            tapLight();
-            useRidePreviewStore.getState().setPreview(null);
-          }}
-        >
-          <SymbolView name="xmark.circle.fill" size={16} tintColor={colors.secondary} />
-        </Pressable>
+        <ChipClose
+          label="Hide ride preview"
+          onPress={() => useRidePreviewStore.getState().setPreview(null)}
+        />
       </GlassPanel>
     </View>
   );
@@ -536,7 +539,6 @@ function RideChip() {
  * the chip itself is tappable.
  */
 function PlannerChip() {
-  const insets = useSafeAreaInsets();
   const itinerary = usePlannerStore((s) => s.itinerary);
   const colors = useTextColors();
   if (!itinerary) return null;
@@ -547,12 +549,12 @@ function PlannerChip() {
   const label = from && to ? `${from} → ${to}` : 'Planned route';
 
   return (
-    <View style={[styles.followWrap, { bottom: insets.bottom + BANNER_SLOT }]}>
-      <GlassPanel variant="regular" interactive appearance={colors.scheme} style={styles.followBanner}>
+    <View style={[styles.chipSlot, { bottom: 0 }]}>
+      <GlassPanel variant="regular" interactive appearance={colors.scheme} style={styles.chip}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Reopen trip planner"
-          style={styles.plannerBody}
+          style={styles.chipBody}
           onPress={() => {
             tapLight();
             router.push('/planner');
@@ -568,17 +570,10 @@ function PlannerChip() {
           </Text>
           <SymbolView name="chevron.up" size={12} tintColor={colors.secondary} />
         </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Clear planned route"
-          hitSlop={8}
-          onPress={() => {
-            tapLight();
-            usePlannerStore.getState().setItinerary(null);
-          }}
-        >
-          <SymbolView name="xmark.circle.fill" size={16} tintColor={colors.secondary} />
-        </Pressable>
+        <ChipClose
+          label="Clear planned route"
+          onPress={() => usePlannerStore.getState().setItinerary(null)}
+        />
       </GlassPanel>
     </View>
   );
@@ -608,8 +603,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  locateWrap: { position: 'absolute', right: CONTROL_RIGHT },
 
   // Wide layouts (iPad): the dock caps at 560 pt and centers instead of
   // stretching edge-to-edge; on phones maxWidth never binds.
@@ -646,29 +639,63 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  // Left-aligned to the dock; right edge fenced short of the locate button so
-  // the base chip shares that row without overlapping it. The chip sizes to its
-  // content (flex-start), never the full width.
-  followWrap: {
+  // Bottom cluster: same horizontal language as the dock (left/right
+  // Spacing.three, 560 pt cap centered on iPad) so `[ chip … ][locate]` reads
+  // as one family with the dock below. The row is tall enough to CONTAIN the
+  // full upward chip stack — iOS hit-testing is bounds-limited, so chips
+  // rendered outside the row would be visible but untappable.
+  clusterWrap: {
     position: 'absolute',
     left: Spacing.three,
-    right: CONTROL_RIGHT + CONTROL_BUTTON_SIZE + 12,
-    alignItems: 'flex-start',
+    right: Spacing.three,
+    alignItems: 'center',
   },
-  followBanner: {
+  clusterRow: {
+    width: '100%',
+    maxWidth: 560,
+    height: CONTROL_BUTTON_SIZE + (MAX_STACKED_CHIPS - 1) * CHIP_STACK_H,
+  },
+  locateSlot: { position: 'absolute', right: 0, bottom: 0 },
+  // Chips stretch the full row width, fenced short of the locate button; the
+  // stack offset (`bottom`) is set inline per chip.
+  chipSlot: {
+    position: 'absolute',
+    left: 0,
+    right: CONTROL_BUTTON_SIZE + CHIP_ROW_GAP,
+  },
+  chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    // Match the locate button's height and center content vertically (pill).
+    // Match the locate button's height (pill row).
     height: CONTROL_BUTTON_SIZE,
-    justifyContent: 'center',
     gap: Spacing.two,
-    paddingHorizontal: 12,
+    paddingLeft: 12,
+    paddingRight: 6,
     borderRadius: 999,
   },
-  followBody: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  // Paused follow: the big accent button hugs the glass like the dock's
+  // search field (6 pt inset all round).
+  chipPausedPad: { paddingLeft: 6 },
+  chipBody: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  chipSpacer: { flex: 1 },
+  chipClose: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
   followReg: { fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  followHint: { fontSize: 12, fontWeight: '500' },
-  plannerRoute: { fontSize: 13, fontWeight: '600', maxWidth: 200, flexShrink: 1 },
-  plannerBody: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  followHint: { fontSize: 13, fontWeight: '500' },
+  followResume: {
+    flex: 1,
+    height: 34,
+    borderRadius: 999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  followResumeLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    fontFamily: Fonts?.rounded,
+  },
+  plannerRoute: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
   spotterDetail: { fontSize: 12, fontWeight: '500', fontVariant: ['tabular-nums'] },
 });

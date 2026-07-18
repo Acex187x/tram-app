@@ -18,12 +18,11 @@ import { StyleSheet, View } from 'react-native';
 
 import { resolveLightPreset, STANDARD_CONFIG } from '@/components/map/mapStyle';
 import {
+  BottomCluster,
   BottomDock,
   COMPASS_RIGHT,
   COMPASS_TOP,
   ControlStack,
-  FollowBanner,
-  LocateButton,
   MapChromeSchemeContext,
   StatusChip,
 } from '@/components/map/MapChrome';
@@ -217,7 +216,7 @@ export default function MapScreen() {
         styleURL="mapbox://styles/mapbox/standard"
         scaleBarEnabled={false}
         // Keep required Mapbox ornaments clear of the BottomDock (centre) and
-        // the LocateButton (bottom-right): pin both to the bottom-left corner.
+        // the bottom cluster (chips + locate): pin both to the bottom-left corner.
         // iOS ornament offsets are already safe-area-relative.
         logoPosition={{ bottom: 10, left: 12 }}
         attributionPosition={{ bottom: 10, left: 106 }}
@@ -266,8 +265,7 @@ export default function MapScreen() {
       <MapChromeSchemeContext.Provider value={chromeScheme}>
         <StatusChip />
         <ControlStack is3D={is3D} onTogglePitch={onTogglePitch} />
-        <LocateButton onLocate={() => void onLocate()} />
-        <FollowBanner />
+        <BottomCluster onLocate={() => void onLocate()} />
         <BottomDock />
       </MapChromeSchemeContext.Provider>
 
