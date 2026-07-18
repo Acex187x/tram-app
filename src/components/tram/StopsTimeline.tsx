@@ -3,10 +3,12 @@
 // a rail of dots, delay-adjusted times, and a terminus flag. The NEXT row
 // carries the live ETA countdown (red, ticking each second) with the expected
 // wall-clock arrival beneath it. While the trip geometry is still streaming in
-// it shows a subtle pulsing skeleton.
+// it shows a subtle pulsing skeleton. With `collapsible`, long trips render
+// only the next 5 stops plus a "Show all N stops" expander — this is what keeps
+// the ticking NEXT countdown above the sheet's 0.38 peek fold.
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
 import { delayColor } from '@/components/ui/DelayPill';
 import { Colors, Tram } from '@/constants/theme';
@@ -26,7 +28,15 @@ export interface StopsTimelineProps {
   /** Engine's ETA to the next stop, seconds — shown as a live countdown on the
    *  NEXT row. Ticks locally each second between runtime updates. */
   nextStopEtaS?: number | null;
+  /** Collapse long trips to the next 5 stops + a "Show all N stops" expander.
+   *  Trips with ≤6 upcoming stops always render in full. */
+  collapsible?: boolean;
 }
+
+/** Stops shown while collapsed. */
+const COLLAPSED_COUNT = 5;
+/** At or below this many upcoming stops, collapsing isn't worth an extra tap. */
+const COLLAPSE_THRESHOLD = 6;
 
 // The timetable clocks are Prague wall-clock instants; format them in
 // Europe/Prague regardless of the device timezone (see formatPragueClock).
@@ -211,9 +221,17 @@ export function StopsTimeline({
   delaySeconds,
   phase,
   nextStopEtaS,
+  collapsible,
 }: StopsTimelineProps) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const etaS = useEtaCountdown(nextStopEtaS ?? null);
+
+  // Collapse state resets when the trip changes (new geometry = new journey).
+  const [expanded, setExpanded] = useState(false);
+  const tripId = geometry?.tripId;
+  useEffect(() => {
+    setExpanded(false);
+  }, [tripId]);
 
   const upcoming = useMemo(() => {
     if (!geometry) return [];
@@ -236,9 +254,13 @@ export function StopsTimeline({
   const dwelling = phase === 'dwell' && upcoming.length > 0;
   const nextIndex = dwelling ? 1 : 0;
 
+  const collapsed = collapsible === true && !expanded && upcoming.length > COLLAPSE_THRESHOLD;
+  const visible = collapsed ? upcoming.slice(0, COLLAPSED_COUNT) : upcoming;
+  const railColor = scheme === 'dark' ? 'rgba(176,42,38,0.55)' : Tram.redSoft;
+
   return (
     <View>
-      {upcoming.map((stop, i) => (
+      {visible.map((stop, i) => (
         <StopRow
           key={`${stop.stopId}-${stop.sequence}`}
           stop={stop}
@@ -246,10 +268,27 @@ export function StopsTimeline({
           isAtStop={dwelling && i === 0}
           isNext={i === nextIndex}
           isFirst={i === 0}
-          isLast={i === upcoming.length - 1}
+          // While collapsed the rail continues into the expander row.
+          isLast={!collapsed && i === visible.length - 1}
           etaS={i === nextIndex ? etaS : null}
         />
       ))}
+      {collapsed && (
+        <Pressable
+          onPress={() => setExpanded(true)}
+          style={({ pressed }) => [styles.expanderRow, pressed && styles.expanderPressed]}
+          accessibilityRole="button"
+          accessibilityLabel={`Show all ${upcoming.length} stops`}
+        >
+          <View style={styles.rail}>
+            <View style={[styles.railSegment, styles.railTop, { backgroundColor: railColor }]} />
+          </View>
+          <Text style={[styles.expanderText, { color: Colors[scheme].textSecondary }]}>
+            Show all {upcoming.length} stops
+          </Text>
+          <SymbolView name="chevron.down" size={11} tintColor={Colors[scheme].textSecondary} />
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -336,6 +375,15 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     textDecorationLine: 'line-through',
   },
+  expanderRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    minHeight: 32,
+    paddingVertical: 2,
+  },
+  expanderPressed: { opacity: 0.55 },
+  expanderText: { fontSize: 13, fontWeight: '500' },
   bone: { borderRadius: 5, height: 12 },
   loadingNote: {
     fontSize: 13,

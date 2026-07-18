@@ -1,75 +1,32 @@
 // Tram detail form sheet — floats over the live map (transparent formSheet,
-// detents [0.38, 0.95]). Live data via useTramState(key) at ~1 Hz with a local
-// 1 s ticker for the "Updated Ns ago" stat; the next-stop ETA countdown lives
-// in StopsTimeline (rendered on the NEXT row).
+// detents [0.38, 0.95]). The "portrait card": TramSheetHeader (line badge +
+// headsign, TramFace portrait → 3D viewer, one quiet freshness/delay/honesty
+// caption, segmented actions capsule), then the upcoming-stops timeline
+// (collapsed to the next 5 so the ticking NEXT countdown sits inside the 0.38
+// peek), the RideRecorder, and a compact About row → /model-info/[id].
+//
+// Opening this sheet ENGAGES FOLLOW on the tram (and keeps following after
+// close) — unfollow lives on the map's FollowChip ✕, so there is no in-sheet
+// follow button. Live data via useTramState(key) at ~1 Hz; the 1 s freshness
+// ticker lives inside TramSheetHeader.
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { SymbolView, type SFSymbol } from 'expo-symbols';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { SymbolView } from 'expo-symbols';
+import { useEffect, useMemo, useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
-import { AboutTramCard } from '@/components/tram/AboutTramCard';
+import { AboutTramRow } from '@/components/tram/AboutTramRow';
 import { RideRecorder } from '@/components/tram/RideRecorder';
 import { StopsTimeline } from '@/components/tram/StopsTimeline';
-import { AcSnowflake } from '@/components/tram/TramModelImage';
-import { DelayPill, delayLabel } from '@/components/ui/DelayPill';
+import { TramSheetHeader } from '@/components/tram/TramSheetHeader';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
 import { SheetContent } from '@/components/ui/SheetContent';
-import { Colors, Tram } from '@/constants/theme';
+import { Colors } from '@/constants/theme';
 import { getRuntime, useLoadedGeometries, useTramState } from '@/hooks/tramData';
 import type { TramPublicState } from '@/lib/types';
 import { useFavoritesStore } from '@/stores/favorites';
 import { useSelectionStore } from '@/stores/selection';
-import { useSettingsStore } from '@/stores/settings';
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-/** Now-ms ticking every second, for the "Updated Ns ago" stat. */
-function useNowTick(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-  return now;
-}
-
-/** '4s' / '2m' age label for the last real AVL observation. */
-function fmtAge(ageS: number): string {
-  if (ageS < 120) return `${ageS}s`;
-  return `${Math.floor(ageS / 60)}m`;
-}
-
-// ── small building blocks ────────────────────────────────────────────────────
-
-interface ActionButtonProps {
-  icon: SFSymbol;
-  label: string;
-  active?: boolean;
-  onPress: () => void;
-}
-
-function ActionButton({ icon, label, active, onPress }: ActionButtonProps) {
-  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const c = Colors[scheme];
-  const tint = active ? Tram.gold : c.text;
-  return (
-    <GlassPanel variant="clear" interactive style={styles.actionGlass}>
-      <Pressable
-        onPress={onPress}
-        style={({ pressed }) => [styles.actionPress, pressed && { opacity: 0.6 }]}
-        accessibilityRole="button"
-        accessibilityLabel={label}
-      >
-        <SymbolView name={icon} size={20} tintColor={tint} />
-        <Text style={[styles.actionLabel, { color: tint }]} allowFontScaling={false}>
-          {label}
-        </Text>
-      </Pressable>
-    </GlassPanel>
-  );
-}
 
 function SectionHeader({ title }: { title: string }) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
@@ -143,9 +100,15 @@ export default function TramDetailSheet() {
     };
   }, [key, setSelectedTramKey]);
 
+  // Opening the sheet engages follow on this tram — no cleanup: follow persists
+  // after close (unfollow is the FollowChip ✕'s job). setFollowTramKey clears
+  // followPaused, so this always lands as a live follow.
+  useEffect(() => {
+    if (key) setFollowTramKey(key);
+  }, [key, setFollowTramKey]);
+
   const isFavorite = useFavoritesStore((s) => s.favoriteTrams.includes(key));
   const toggleTram = useFavoritesStore((s) => s.toggleTram);
-  const positionMode = useSettingsStore((s) => s.positionMode);
 
   // If the followed tram leaves service, stop following it.
   useEffect(() => {
@@ -168,23 +131,6 @@ export default function TramDetailSheet() {
     [geometries, tripId],
   );
 
-  const nowMs = useNowTick();
-  // Age of the last REAL AVL observation (origin_timestamp), live-ticking.
-  const updatedAgoS = state
-    ? Math.max(0, Math.round((nowMs - state.snapshot.observedAtMs) / 1000))
-    : null;
-
-  const onFollow = () => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (isFollowing) {
-      setFollowTramKey(null);
-    } else {
-      setFollowTramKey(key);
-      // Close the sheet so the map (now following) is visible.
-      router.back();
-    }
-  };
-
   const onFavorite = () => {
     void Haptics.selectionAsync();
     toggleTram(key);
@@ -192,6 +138,10 @@ export default function TramDetailSheet() {
 
   const onShowLine = () => {
     if (state) router.push(`/line/${state.snapshot.line}`);
+  };
+
+  const onAbout = () => {
+    if (state) router.push(`/model-info/${state.model.id}`);
   };
 
   return (
@@ -212,100 +162,19 @@ export default function TramDetailSheet() {
 
         {state && (
           <>
-            {/* Header — only badge + headsign + subtitle; the delay pill lives
-                in the stats row and the 3D preview in the About card, so a long
-                terminus name gets the full width and never ellipsizes. */}
-            <View style={styles.header}>
-              <LineBadge line={state.snapshot.line} size="lg" />
-              <View style={styles.headerText}>
-                <Text style={[styles.headsign, { color: c.text }]} numberOfLines={2}>
-                  {state.snapshot.headsign}
-                </Text>
-                <View style={styles.subtitleRow}>
-                  {/* No numberOfLines: the subtitle wraps rather than ellipsize,
-                      so the full registration number is always visible. */}
-                  <Text style={[styles.subtitle, { color: c.textSecondary }]}>
-                    {state.model.name}
-                    {state.snapshot.registrationNumber != null &&
-                      ` · #${state.snapshot.registrationNumber}`}
-                  </Text>
-                  <AcSnowflake airConditioned={state.snapshot.airConditioned} size={11} />
-                </View>
-              </View>
-            </View>
+            {/* Portrait-card header: badge + headsign + caption line on the
+                left, TramFace glass squircle (→ 3D viewer) on the right, then
+                the Favorite | Line N | About capsule. */}
+            <TramSheetHeader
+              state={state}
+              isFavorite={isFavorite}
+              onFavorite={onFavorite}
+              onShowLine={onShowLine}
+              onAbout={onAbout}
+            />
 
-            {/* Live row: last-fix age | current delay */}
-            <View
-              style={[
-                styles.liveRow,
-                { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.55)' },
-              ]}
-            >
-              <View
-                style={styles.liveCell}
-                accessibilityLabel={
-                  updatedAgoS != null ? `Updated ${updatedAgoS} seconds ago` : 'Updating'
-                }
-              >
-                <SymbolView
-                  name="antenna.radiowaves.left.and.right"
-                  size={15}
-                  tintColor={updatedAgoS != null && updatedAgoS <= 15 ? Tram.onTime : c.textSecondary}
-                />
-                <Text style={[styles.liveBig, { color: c.text }]} allowFontScaling={false}>
-                  {updatedAgoS != null ? fmtAge(updatedAgoS) : '· ·'}
-                </Text>
-                <Text style={[styles.liveCaption, { color: c.textSecondary }]}>updated ago</Text>
-              </View>
-              <View
-                style={[
-                  styles.liveDivider,
-                  { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)' },
-                ]}
-              />
-              <View
-                style={styles.liveCell}
-                accessibilityLabel={`Delay: ${delayLabel(state.snapshot.delaySeconds)}`}
-              >
-                <DelayPill delaySeconds={state.snapshot.delaySeconds} style={styles.livePill} />
-                <Text style={[styles.liveCaption, { color: c.textSecondary }]}>delay</Text>
-              </View>
-            </View>
-
-            {/* Sim honesty: how far the interpolation drifts from the last
-                real AVL fix — or, in live mode, that raw fixes are shown. */}
-            {(positionMode === 'live' || state.deviationM != null) && (
-              <View style={styles.deviationRow}>
-                <SymbolView name="scope" size={12} tintColor={c.textSecondary} />
-                <Text style={[styles.deviationText, { color: c.textSecondary }]}>
-                  {positionMode === 'live'
-                    ? 'Showing raw reported position'
-                    : `Sim offset ±${Math.round(state.deviationM ?? 0)} m from last fix`}
-                </Text>
-              </View>
-            )}
-
-            {/* Actions */}
-            <View style={styles.actionsRow}>
-              <ActionButton
-                icon="location.viewfinder"
-                label={isFollowing ? 'Unfollow' : 'Follow'}
-                active={isFollowing}
-                onPress={onFollow}
-              />
-              <ActionButton
-                icon={isFavorite ? 'star.fill' : 'star'}
-                label={isFavorite ? 'Favorited' : 'Favorite'}
-                active={isFavorite}
-                onPress={onFavorite}
-              />
-              <ActionButton icon="map.fill" label="Show line" onPress={onShowLine} />
-            </View>
-
-            {/* Record ride — real-vs-sim telemetry (survives sheet close) */}
-            <RideRecorder tramKey={key} line={state.snapshot.line} />
-
-            {/* Upcoming stops */}
+            {/* Upcoming stops — collapsed to the next 5 so the NEXT row's
+                ticking ETA stays inside the 0.38 peek. */}
             <SectionHeader title="Upcoming stops" />
             <StopsTimeline
               geometry={geometry}
@@ -313,11 +182,15 @@ export default function TramDetailSheet() {
               delaySeconds={state.snapshot.delaySeconds}
               phase={state.phase}
               nextStopEtaS={state.nextStopEtaS}
+              collapsible
             />
 
-            {/* About */}
-            <SectionHeader title="About this tram" />
-            <AboutTramCard model={state.model} snapshot={state.snapshot} />
+            {/* Record ride — real-vs-sim telemetry (survives sheet close) */}
+            <RideRecorder tramKey={key} line={state.snapshot.line} />
+
+            {/* Second door to the model reference screen, carrying the
+                per-vehicle amenities the per-model screen can't know. */}
+            <AboutTramRow model={state.model} snapshot={state.snapshot} onPress={onAbout} />
           </>
         )}
         </SheetContent>
@@ -329,66 +202,11 @@ export default function TramDetailSheet() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   content: {
-    gap: 14,
+    gap: 12,
     paddingBottom: 48,
     paddingHorizontal: 18,
-    paddingTop: 26,
+    paddingTop: 14,
   },
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-  },
-  headerText: { flex: 1, gap: 2 },
-  headsign: { fontSize: 20, fontWeight: '700', letterSpacing: -0.3 },
-  subtitleRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 5,
-  },
-  subtitle: { flexShrink: 1, fontSize: 13, lineHeight: 17 },
-  liveRow: {
-    alignItems: 'stretch',
-    borderCurve: 'continuous',
-    borderRadius: 16,
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  liveCell: {
-    alignItems: 'center',
-    flex: 1,
-    gap: 2,
-    justifyContent: 'center',
-  },
-  liveDivider: {
-    alignSelf: 'stretch',
-    marginHorizontal: 8,
-    width: StyleSheet.hairlineWidth,
-  },
-  liveBig: { fontSize: 22, fontVariant: ['tabular-nums'], fontWeight: '700' },
-  liveCaption: { fontSize: 11 },
-  livePill: { alignSelf: 'center', marginBottom: 2 },
-  deviationRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    marginTop: -8,
-    paddingHorizontal: 12,
-  },
-  deviationText: { fontSize: 12, fontVariant: ['tabular-nums'] },
-  actionsRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  actionGlass: { flex: 1 },
-  actionPress: {
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 4,
-    paddingVertical: 10,
-  },
-  actionLabel: { fontSize: 12, fontWeight: '600' },
   sectionHeader: {
     fontSize: 12,
     fontWeight: '600',
