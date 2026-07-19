@@ -195,7 +195,9 @@ const PACK_PREVIEW_MODELS: TramModelId[] = ['t3', '15t', '52t'];
  * 'Tram icons' picker: one selectable card per icon pack, each with a LIVE
  * vector preview (TramFace pinned to that pack), name + description, and a
  * checkmark on the selected pack. Selecting re-skins the map badges and every
- * face portrait in the app.
+ * face portrait in the app. The magnifier on each row opens
+ * /icon-preview/[pack] — a large-scale preview of all 7 models with an
+ * in-sheet pack switcher for comparing styles before committing.
  */
 function IconPackSection() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
@@ -245,6 +247,30 @@ function IconPackSection() {
                     {meta.description}
                   </Text>
                 </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Preview ${meta.name} icons up close`}
+                  hitSlop={8}
+                  onPress={() => {
+                    void Haptics.selectionAsync();
+                    router.push(`/icon-preview/${packId}` as Href);
+                  }}
+                  style={({ pressed }) => [
+                    styles.previewButton,
+                    {
+                      backgroundColor:
+                        scheme === 'dark' ? 'rgba(118,118,128,0.24)' : 'rgba(118,118,128,0.16)',
+                    },
+                    pressed && { opacity: 0.5 },
+                  ]}
+                >
+                  <SymbolView
+                    name="magnifyingglass"
+                    size={14}
+                    weight="semibold"
+                    tintColor={palette.textSecondary}
+                  />
+                </Pressable>
                 <SymbolView
                   name={selected ? 'checkmark.circle.fill' : 'circle'}
                   size={22}
@@ -257,7 +283,7 @@ function IconPackSection() {
       </InsetGroup>
       <Text style={[styles.footnote, { color: palette.textSecondary }]}>
         Changes the tram faces on map badges and everywhere a tram portrait
-        appears.
+        appears. Tap the magnifier to see a pack up close.
       </Text>
     </View>
   );
@@ -622,6 +648,13 @@ const styles = StyleSheet.create({
   packDescription: {
     fontSize: 12,
     lineHeight: 16,
+  },
+  previewButton: {
+    alignItems: 'center',
+    borderRadius: 15,
+    height: 30,
+    justifyContent: 'center',
+    width: 30,
   },
   blurbCell: {
     gap: 6,
