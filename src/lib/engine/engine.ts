@@ -133,6 +133,84 @@ export const CROSS_BEARING_MAX_DEG = 12;
 export const CROSS_PAIR_STALE_ADVANCE_M = 30;
 /** Grid cell size for candidate discovery, m (≥ CROSS_CANDIDATE_RADIUS_M). */
 const CROSS_GRID_CELL_M = 150;
+
+// ── junction conflict yield (complex-junction collisions, 2026-07-19) ────────
+// The same-rail cross-pairs above deliberately couple only SAME-direction
+// trams (Δbearing ≤ 12°, lateral ≤ 2 m) — so at complex junctions, trams on
+// CROSSING shapes (different bearings) still drove visually through each
+// other's sides. Junction pairs fix exactly that, without ever stitching
+// crossing lines into a car-following queue: discovery (ingest only, same
+// grid buckets — invariant #8 keeps the tick allocation-free) samples one
+// tram's path forward and finds the point where it meets the other tram's
+// shape at a genuine crossing angle. Per tick the pair is O(1): whichever
+// tram is closer to (or already inside) the conflict zone proceeds; the other
+// YIELDS — braking-envelope speed cap toward a hold point just short of the
+// zone (tramSim.yieldHoldM). Speed-only: a yielder's sM is never rewritten,
+// so there is no teleport class here at all; once the crossing tram's tail
+// clears the zone the hold is dropped and the yielder accelerates through.
+// The two trams separate in TIME instead of overlapping in space.
+
+/** How far ahead along a tram's own shape a crossing conflict is searched, m. */
+export const JUNCTION_LOOKAHEAD_M = 80;
+/** Sampling step of the forward path during conflict-point discovery, m. */
+const JUNCTION_SAMPLE_STEP_M = 10;
+/**
+ * Max distance between a sampled path point and the other shape to count as
+ * a crossing of the same junction, m. With 10 m sampling a 90° crossing puts
+ * some sample within ~5 m of the true intersection; 6 m adds scatter head-
+ * room. Parallel adjacent tracks (~3 m apart) that never cross are rejected
+ * by the crossing-ANGLE gate below, not by this radius.
+ */
+const JUNCTION_LATERAL_M = 6;
+/**
+ * Genuine crossing angles at the conflict point, degrees. Below 25° the
+ * shapes are merging/diverging switches or parallel scatter (the same-rail
+ * cross-pair domain); above 155° they are opposite directions on a shared
+ * street — which must NEVER couple (decision record §9). Side-impact
+ * junction conflicts live between the two.
+ */
+export const JUNCTION_MIN_ANGLE_DEG = 25;
+export const JUNCTION_MAX_ANGLE_DEG = 155;
+/**
+ * Conflict-zone half-width, m: a yielder holds this far short of the
+ * crossing point — clear of the crossing tram's swept body plus margin.
+ */
+export const JUNCTION_ZONE_M = 12;
+/** A tram has cleared a conflict once its TAIL is this far past the point, m. */
+export const JUNCTION_CLEAR_M = 3;
+/**
+ * A priority tram standing still (below this speed) OUTSIDE the conflict
+ * zone blocks nobody — it is dwelling/stuck short of the junction, and the
+ * would-be yielder crosses first instead of waiting forever, m/s.
+ */
+const JUNCTION_STANDSTILL_V_MS = 0.3;
+/**
+ * Switch/junction slow-down (realism heuristic, 2026-07-19): real trams take
+ * switches and complex crossings noticeably slowly. Detecting switches from a
+ * single shape is not possible, so the PROXY is the junction conflict point
+ * discovered above — where two live trams' shapes genuinely cross. While a
+ * junction pair is active, BOTH trams (priority and yielder alike) pass the
+ * crossing at ≤ SWITCH_SLOW_V_MS within SWITCH_SLOW_RADIUS_M of the conflict
+ * point, approached on the smooth braking envelope (no instantaneous drop —
+ * composes with the no-speed-extremes contract). Deliberately CONSERVATIVE
+ * and only active when the crossing is actually contested (a lone tram at an
+ * empty junction keeps the curve caps only) — TUNABLE: calibrate both
+ * constants against real ride recordings (gpsSpeed over junctions) later.
+ */
+export const SWITCH_SLOW_V_MS = 6.0;
+export const SWITCH_SLOW_RADIUS_M = 25;
+
+/**
+ * A junction conflict pair: shape A crosses shape B at (sConfA on A) ≈
+ * (sConfB on B) — a fixed geometric property of the two shapes, so unlike a
+ * cross-pair's offset mapping it cannot go stale as the trams move.
+ */
+interface JunctionPair {
+  a: TramSim;
+  b: TramSim;
+  sConfA: number;
+  sConfB: number;
+}
 /** Ignore instantaneous AVL bearings; adopt a raw-position bearing only after this much movement, m. */
 const RAW_BEARING_MIN_MOVE_M = 10;
 /**
@@ -158,6 +236,32 @@ interface CrossPair {
 /** Forward neighbor-cell key deltas (key = ix·2²⁰ + iy) so each unordered
  *  cell pair is visited exactly once during cross-pair discovery. */
 const CROSS_NEIGHBOR_OFFSETS = [1, 1_048_576 - 1, 1_048_576, 1_048_576 + 1] as const;
+
+/** Null out both sims' junction-yield holds for every pair in the list. */
+function clearJunctionHolds(pairs: JunctionPair[]): void {
+  for (const p of pairs) {
+    p.a.yieldHoldM = null;
+    p.b.yieldHoldM = null;
+  }
+}
+
+/**
+ * Moderate pass-through cap over a contested junction (see SWITCH_SLOW_V_MS):
+ * inside SWITCH_SLOW_RADIUS_M of the conflict point (and until the tail
+ * clears it) speed is capped at SWITCH_SLOW_V_MS; the approach follows the
+ * braking envelope toward the zone edge, so deceleration is smooth. O(1),
+ * zero allocation, speed-only.
+ */
+function capSwitchSpeed(sim: TramSim, sConfM: number): void {
+  const d = sConfM - sim.sM;
+  const vCap =
+    d > SWITCH_SLOW_RADIUS_M
+      ? Math.sqrt(
+          SWITCH_SLOW_V_MS * SWITCH_SLOW_V_MS + 2 * A_BRK * (d - SWITCH_SLOW_RADIUS_M),
+        )
+      : SWITCH_SLOW_V_MS;
+  if (sim.vMs > vCap) sim.vMs = vCap;
+}
 
 export interface TramEngineOptions {
   /** Maps a snapshot to its fleet model spec (injected — keeps engine pure). */
@@ -248,6 +352,13 @@ export class TramEngine {
   private readonly crossPairs: CrossPair[] = [];
   /** Cross-shape pairs among the projection sims (live-mode rendering). */
   private readonly projCrossPairs: CrossPair[] = [];
+  /**
+   * Junction conflict pairs (crossing shapes — see JunctionPair). Rebuilt on
+   * every ingest; applied per tick with zero allocation (invariant #8).
+   */
+  private readonly junctionPairs: JunctionPair[] = [];
+  /** Junction conflict pairs among the projection sims. */
+  private readonly projJunctionPairs: JunctionPair[] = [];
   /**
    * key → last learned paceBias (+ when it was last refreshed). Outlives the
    * entry itself (STALE_AFTER_MS drops entries after 90 s without a fix, but
@@ -417,10 +528,15 @@ export class TramEngine {
         // The main sim's stuck-hold (repeated same-position fixes) carries
         // over: a stuck tram's projection stands AT the fix instead of
         // driving off at cruise pace and jumping back on the next repeat.
+        // Likewise the fix-pinned platform (at_stop / standing-on-platform
+        // fix): the projection spawns dwelling AT that stop instead of
+        // dead-reckoning forward past it — live mode must not drive off a
+        // stop the real tram is still standing at.
         entry.projSim = createSim(geometry, profile, snapshot, nowMs, lengthM, {
           projection: true,
           initialPaceBias: entry.sim.paceBias,
           stuckAtM: entry.sim.stuckAtM,
+          fixStopDistM: entry.sim.fixStopDistM,
         });
       }
     }
@@ -562,8 +678,16 @@ export class TramEngine {
    * the O(1) per-tick constraint.
    */
   private rebuildCrossPairs(): void {
+    // A sim whose pair vanishes in this rebuild must not keep braking toward
+    // a stale hold point — clear every hold the OLD pair set could have set
+    // before the arrays are emptied (applyJunctionPairs re-derives holds for
+    // the pairs that survive).
+    clearJunctionHolds(this.junctionPairs);
+    clearJunctionHolds(this.projJunctionPairs);
     this.crossPairs.length = 0;
     this.projCrossPairs.length = 0;
+    this.junctionPairs.length = 0;
+    this.projJunctionPairs.length = 0;
     const sims: TramSim[] = [];
     const projs: (TramSim | null)[] = [];
     for (const entry of this.entries.values()) {
@@ -629,7 +753,17 @@ export class TramEngine {
     const bearB = bearingAt(b.geometry.coordinates, b.geometry.cumDistM, b.sM);
     let dBear = Math.abs(bearA - bearB) % 360;
     if (dBear > 180) dBear = 360 - dBear;
-    if (dBear > CROSS_BEARING_MAX_DEG) return;
+    if (dBear > CROSS_BEARING_MAX_DEG) {
+      // Not travelling the same way — but their paths may CROSS at a nearby
+      // junction (side-impact class). Anti-parallel pairs (> 155°) are the
+      // opposite-direction shared street and never couple in any mechanism.
+      if (dBear <= JUNCTION_MAX_ANGLE_DEG) {
+        if (!this.findJunctionConflict(sims, projs, i, j)) {
+          this.findJunctionConflict(sims, projs, j, i);
+        }
+      }
+      return;
+    }
 
     // Shared physical track? Project A onto B's shape (and vice versa when A
     // is the follower) — the along-shape offset then maps s between shapes.
@@ -676,6 +810,112 @@ export class TramEngine {
   }
 
   /**
+   * Junction conflict discovery (ingest-time only): walk tram A's own shape
+   * forward — from just behind its tail (its body may already straddle the
+   * junction) to JUNCTION_LOOKAHEAD_M ahead — and find the first sample that
+   * lands on tram B's shape (within JUNCTION_LATERAL_M) at a genuine crossing
+   * angle. That sample is the conflict point (sConfA on A / sConfB on B): a
+   * fixed geometric property of the two shapes, so per-tick application needs
+   * no re-projection and cannot go stale. Pairs are pushed only while B is
+   * still relevant (not fully past the point, and near enough for a conflict
+   * within roughly one poll horizon). Returns true when a pair was pushed.
+   */
+  private findJunctionConflict(
+    sims: TramSim[],
+    projs: (TramSim | null)[],
+    ia: number,
+    ib: number,
+  ): boolean {
+    const a = sims[ia];
+    const b = sims[ib];
+    const ga = a.geometry;
+    const gb = b.geometry;
+    const from = Math.max(0, a.sM - a.lengthM);
+    const to = Math.min(ga.totalM, a.sM + JUNCTION_LOOKAHEAD_M);
+    for (let s = from; s <= to; s += JUNCTION_SAMPLE_STEP_M) {
+      const p = pointAt(ga.coordinates, ga.cumDistM, s);
+      const proj = projectPointToPolyline(p, gb.coordinates, gb.cumDistM);
+      if (proj.offsetM > JUNCTION_LATERAL_M) continue;
+      const sConfB = proj.distM;
+      // B already dragged its tail past this crossing, or is too far away to
+      // conflict before the next ingest re-discovers with fresh positions.
+      if (b.sM - b.lengthM > sConfB + JUNCTION_CLEAR_M) continue;
+      if (sConfB - b.sM > JUNCTION_LOOKAHEAD_M) continue;
+      // Genuine crossing angle AT the conflict point (current-position
+      // bearings can differ while the rails merge rather than cross).
+      const bearA = bearingAt(ga.coordinates, ga.cumDistM, s);
+      const bearB = bearingAt(gb.coordinates, gb.cumDistM, sConfB);
+      let ang = Math.abs(bearA - bearB) % 360;
+      if (ang > 180) ang = 360 - ang;
+      if (ang < JUNCTION_MIN_ANGLE_DEG || ang > JUNCTION_MAX_ANGLE_DEG) continue;
+      this.junctionPairs.push({ a, b, sConfA: s, sConfB });
+      const pa = projs[ia];
+      const pb = projs[ib];
+      // The conflict point is a shape property — it holds for the projection
+      // sims verbatim (they live on the same shapes at other positions).
+      if (pa && pb && pa.geometry.shapeId === ga.shapeId && pb.geometry.shapeId === gb.shapeId) {
+        this.projJunctionPairs.push({ a: pa, b: pb, sConfA: s, sConfB });
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Junction conflict yield: for each crossing-shape pair still short of the
+   * conflict, the tram closer to (or already inside) the conflict zone
+   * proceeds and the other YIELDS — a braking-envelope speed cap toward a
+   * hold point JUNCTION_ZONE_M short of the crossing, plus tramSim's
+   * yieldHoldM so the next tick's vTarget brakes toward the same point (no
+   * per-tick creep past the hold). Strictly speed-only — a yielder's sM is
+   * never rewritten, so this can never throw a tram off-route or backward;
+   * the trams separate in time. Holds are re-derived from scratch on every
+   * pass (first loop clears), so a cleared conflict releases within one tick.
+   * O(pairs), zero allocation (invariant #8).
+   */
+  private applyJunctionPairs(pairs: JunctionPair[]): void {
+    clearJunctionHolds(pairs);
+    for (const p of pairs) {
+      const { a, b } = p;
+      const clearedA = a.sM - a.lengthM > p.sConfA + JUNCTION_CLEAR_M;
+      const clearedB = b.sM - b.lengthM > p.sConfB + JUNCTION_CLEAR_M;
+      // Switch/junction slow-down: while a tram's body is still around the
+      // contested crossing, it passes at SWITCH_SLOW_V_MS — envelope-smooth
+      // on the approach. Applies to BOTH trams, independent of who yields.
+      if (!clearedA) capSwitchSpeed(a, p.sConfA);
+      if (!clearedB) capSwitchSpeed(b, p.sConfB);
+      if (clearedA || clearedB) continue;
+      const dA = p.sConfA - a.sM;
+      const dB = p.sConfB - b.sM;
+      const insideA = dA < JUNCTION_ZONE_M;
+      const insideB = dB < JUNCTION_ZONE_M;
+      // Both already inside the zone: braking either would freeze an overlap
+      // in place — let them roll apart (speed-only mechanism, no teleports).
+      if (insideA && insideB) continue;
+      let yielder: TramSim;
+      let other: TramSim;
+      let holdM: number;
+      if (insideA || (!insideB && (dA < dB || (dA === dB && a.snapshot.key < b.snapshot.key)))) {
+        yielder = b;
+        other = a;
+        holdM = p.sConfB - JUNCTION_ZONE_M;
+      } else {
+        yielder = a;
+        other = b;
+        holdM = p.sConfA - JUNCTION_ZONE_M;
+      }
+      // A priority tram standing OUTSIDE the zone (dwelling at a platform,
+      // stuck at a light) blocks nobody — the yielder crosses first.
+      if (!insideA && !insideB && other.vMs < JUNCTION_STANDSTILL_V_MS) continue;
+      if (yielder.yieldHoldM === null || holdM < yielder.yieldHoldM) {
+        yielder.yieldHoldM = holdM;
+      }
+      const vCap = Math.sqrt(2 * A_BRK * Math.max(0, holdM - yielder.sM));
+      if (yielder.vMs > vCap) yielder.vMs = vCap;
+    }
+  }
+
+  /**
    * Car-following/queueing: within one shapeId, a follower's nose may never
    * come closer than QUEUE_GAP_M to its leader's tail (leader.sM − leader
    * length incl. coupled trailer). Iterates each queue leader → follower so a
@@ -693,6 +933,8 @@ export class TramEngine {
     this.applyGroupConstraints(this.projQueueGroups, nowMs);
     this.applyCrossPairs(this.crossPairs);
     this.applyCrossPairs(this.projCrossPairs);
+    this.applyJunctionPairs(this.junctionPairs);
+    this.applyJunctionPairs(this.projJunctionPairs);
   }
 
   private applyGroupConstraints(groups: TramSim[][], nowMs: number): void {

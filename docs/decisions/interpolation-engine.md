@@ -44,9 +44,15 @@ for stops. Needs to be cheap enough to evaluate every frame for every tram.
 **Decision.** Precompute a per-vertex `vLimit[]` once per geometry (`buildSpeedProfile`,
 `speedProfile.ts:62`), `vLimit[i] = min(zoneCap, curveCap)`:
 
-- **Curve cap** `curveCap(κ) = clamp(sqrt(A_LAT/κ), 1.4, 13.9)` (`speedProfile.ts:55`).
-  `A_LAT = 0.98 m/s²` is the lateral comfort accel; κ (rad/m) from `curvatureProfile()`.
-  Physically: the fastest speed at which lateral accel in a curve of curvature κ stays ≤ A_LAT.
+- **Curve cap** `curveCap(κ) = clamp(CURVE_SLOW_FACTOR · sqrt(A_LAT/κ), 1.4, 13.9)`
+  (`speedProfile.ts`). `A_LAT = 0.98 m/s²` is the lateral comfort accel; κ (rad/m) from
+  `curvatureProfile()`. Physically: the fastest speed at which lateral accel in a curve of
+  curvature κ stays ≤ A_LAT, scaled down by **`CURVE_SLOW_FACTOR = 0.85`** (realism
+  heuristic, 2026-07-19: real trams brake for curves harder than pure lateral comfort —
+  switch frogs, worn rail). The factor applies **before** the clamp, so gentle arcs whose
+  raw cap exceeds `V_MAX_MS` (radius ≳ 270 m) are unaffected; tight junction curves get
+  ~15% slower. Deliberately conservative — **tunable, calibrate against real ride
+  recordings** (`fLagM`/`gpsSpeed` through curves).
 - **Zone cap** `zoneCapAt` (`:47`): `V_MAX_MS = 13.9` (50 km/h) network default;
   `V_CENTER_MS = 8.6` (31 km/h) inside `CENTER_BBOX` **only during daytime** (07:00–19:00
   Prague time). Rebuilt when the daytime flag flips (`engine.ts:150 refreshDaytime`, profiles
@@ -109,7 +115,7 @@ the TOD factor multiply it. Measured basis (`docs/calibration/analysis-2026-07-1
 real outside-center speeds are p50 23.0 / p90 42.9 km/h; only 4.6% of inter-fix intervals
 exceed 50 km/h. So 50 km/h is right as a **cap** and ~2× too fast as a cruise **target**.
 `V_MAX_MS = 13.9` keeps bounding the braking envelope (`vAllowedAt`) and zone/curve caps —
-caps stay caps — and catch-up regimes (factor ≤ 1.5) can still exceed the reference up to
+caps stay caps — and catch-up regimes (factor ≤ 1.4, smooth wave) can still exceed the reference up to
 that envelope. The pace calibration measures its real/expected ratio against the same
 reference (`meanCruiseCapOver(..., V_CRUISE_REF_MS)`), so converged `ref × bias` equals the
 tram's real motion pace by construction.
@@ -182,32 +188,54 @@ between fixes instead of sprint-and-crawl. Calibration round 1
 
 ---
 
-## 6. Asymmetric pace controller — gentle band, bold catch-up, hard-brake crawl
+## 6. Asymmetric pace controller — gentle band, bold catch-up, soft-yield ahead regime
 
 **Problem.** Convergence must be smooth when close, aggressive when far behind, and must
 **not overshoot** when the sim has run ahead of reality — all without ever reversing.
 
-**Decision.** Around `e = target(now) − s` (`tick` `:364`), three regimes:
+### The pedestrian-crawl extremes (smooth wave, 2026-07-19)
+
+**What was wrong (pre-fix).** The ahead regime crawled at a flat `1 m/s` the moment the sim
+overran the target by 40 m — the user-visible symptom: *"в smooth трамвай между остановками
+замедляется до скорости пешехода, потом внезапно едет быстро"*. Mid-street walking-pace
+dips followed by 1.5× sprints read as glitches, not traffic.
+
+**Decision.** Ahead-error is now repaid *where it is natural* — at stops (adaptive dwell,
+§13) — while mid-segment corrections stay inside a **narrow, never-pedestrian band**. The
+calibrated average pace (prior 0.62, `V_CRUISE_REF_MS`, paceBias learning) is untouched —
+the swing around it is redistributed, not the mean. Around `e = target(now) − s`:
 
 | regime | condition | behavior |
 |---|---|---|
-| **gentle** | `\|e\| ≤ 40 m` | `factor = clamp(1 + e/120, 0.55, 1.35)` on cruise cap |
-| **bold catch-up** | `e > 40 m` | same proportional factor, ceiling raised to `1.5` |
-| **hard-brake crawl** | `e < −40 m` (ran ahead) | `vTarget = min(vAllowed, 1.0 m/s)` |
+| **gentle** | `\|e\| ≤ 40 m` | `factor = clamp(1 + e/120, 0.7, 1.35)` on cruise cap |
+| **bold catch-up** | `e > 40 m` | same proportional factor, ceiling `1.4` |
+| **soft yield** | `e < −40 m` (ran ahead) | `vTarget = min(vAllowed, max(3.0, 0.5 · cruiseProduct))` |
+| **deep backstop** | soft yield AND `e < −120 m` | `vTarget = min(vAllowed, 1.0 m/s)` |
 
-Constants: `PACE_GAIN_M = 120`, `GENTLE_MAX_FACTOR = 1.35`, `CATCHUP_MAX_FACTOR = 1.5`,
-`MIN_PACE_FACTOR = 0.55`, `BOLD_CATCHUP_ERR_M = 40`, `CRAWL_V_MS = 1.0` (`:34-42`). *(The
-1.65 in old test comments / architecture.md is the superseded ceiling.)*
+`cruiseProduct = min(cruiseCap, V_CRUISE_REF_MS) · paceBias · todPaceFactor` — the yield is
+*half the tram's own pace*, floored at `AHEAD_SLOW_MIN_V_MS = 3.0 m/s` (~11 km/h — slow
+tram, not pedestrian). Constants: `PACE_GAIN_M = 120`, `GENTLE_MAX_FACTOR = 1.35`,
+`CATCHUP_MAX_FACTOR = 1.4` (was 1.5), `MIN_PACE_FACTOR = 0.7` (was 0.55),
+`BOLD_CATCHUP_ERR_M = 40`, `AHEAD_SLOW_FACTOR = 0.5`, `AHEAD_SLOW_MIN_V_MS = 3.0`,
+`CRAWL_V_MS = 1.0` (deep only).
 
-**Crawl regime + hysteresis.** When the sim overruns the target by > `HARD_BRAKE_ENTER_M =
-40 m`, it latches `crawling = true` and creeps at ≤ 1 m/s until the error recovers above
-`−HARD_BRAKE_EXIT_M = 12 m` (`:383-387`). The two thresholds give a hysteresis band that
-prevents brake/sprint oscillation at the boundary. Critically the sim **crawls forward, never
-reverses** — reality catches up *to* it rather than the sim snapping back. Covered by "hard-
-brake crawl when the sim ran ahead of reality" (`tram-sim.test.ts:289`).
+**Two hysteresis latches.** The ahead regime latches at `HARD_BRAKE_ENTER_M = 40` / releases
+at `−HARD_BRAKE_EXIT_M = 12` (`sim.crawling`, as before). Inside it, the walking backstop has
+its **own** band — enter `DEEP_AHEAD_ENTER_M = 120`, exit `DEEP_AHEAD_EXIT_M = 60`
+(`sim.deepCrawl`) — needed because a reality slower than the 3 m/s floor would otherwise let
+the ahead-error widen without bound (the backstop bounds runaway at ~120 m; the next stop's
+`DWELL_MAX_EXTEND_S = 75 s` extension absorbs what the yield doesn't). The sim **yields
+forward, never reverses**. Speed-of-change is bounded by the accel clamp `[−A_BRK, +A_ACC]`
+= `[−1.4, +1.3] m/s²`; `vMs ≥ 0`, `sM` never decreases.
 
-Final: acceleration clamped to `[−A_BRK, +A_ACC]` = `[−1.2, +1.0] m/s²` (`:402`), `vMs ≥ 0`,
-`sM` never decreases.
+**Why walking pace is still reachable at all.** Sub-3 m/s speeds remain legitimate exactly
+where the spec allows them: the braking envelope (stops/curves), stuck-holds (§14), dwells —
+and the deep backstop, which is genuinely broken tracking, not normal riding. Replay gate
+(2026-07-19, 60 MB extract of the newest sim session, 1292 fresh-fix events): S70 (soft
+yield + 0.7/1.4 clamps) vs R62 shipped — median |at-fix err| 142.8 → 141.7 m (−0.8%),
+signed p50 +30.4 → +25.7 (toward the logged device reality of −38), devM p50 flat 203.
+Tests: `tram-sim.test.ts` "soft-yield when the sim ran ahead of reality" (band, deep
+backstop, no-pedestrian-dips gate, phase='dwell'-only-at-platform).
 
 ---
 
@@ -355,6 +383,52 @@ poll). Tests: `engine-queue.test.ts` "cross-shape car-following (brake-only …)
 without overtaking or backward-teleport, (б) freed once the leader passes a divergence,
 (в) adjacent parallel track (>2 m) is not coupled, plus the same-direction/opposite-direction
 and live-projection cases.
+
+### Junction conflict yield — crossing shapes separate in TIME (2026-07-19)
+
+**Problem.** The cross-shape pairs above deliberately couple only *same-direction* trams
+(Δbearing ≤ 12°, lateral ≤ 2 m). At complex junctions, trams on **crossing** shapes
+(different bearings) therefore drove visually **through each other's sides** — and stitching
+crossing lines into a car-following queue would be wrong (they share a point, not a rail).
+
+**Decision** (`engine.ts findJunctionConflict/applyJunctionPairs`). A third, speed-only
+mechanism:
+
+- **Discovery (ingest only, invariant #8).** Candidate pairs come out of the same grid-bucket
+  sweep as cross-pairs; a pair whose current Δbearing is in `(12°, 155°]` is probed for a
+  **crossing point**: sample one tram's shape from `sM − lengthM` to `sM +
+  JUNCTION_LOOKAHEAD_M = 80` every 10 m, project each sample onto the other shape; a sample
+  within `JUNCTION_LATERAL_M = 6 m` whose **at-point** crossing angle is in
+  `[JUNCTION_MIN_ANGLE_DEG = 25°, JUNCTION_MAX_ANGLE_DEG = 155°]` is the conflict point
+  (`sConfA` on A / `sConfB` on B). Anti-parallel pairs (> 155° — the opposite-direction
+  shared street) never qualify; merges/diverges (< 25°) belong to the same-rail cross-pairs.
+  Unlike a cross-pair's offset mapping, the conflict point is a **fixed geometric property
+  of the two shapes** — it cannot go stale as the trams move, so no staleness guard needed.
+- **Per-tick application (O(1)/pair, zero alloc).** While neither tram's tail has cleared its
+  conflict point (+`JUNCTION_CLEAR_M = 3 m`): the tram **closer** to (or already inside) the
+  `JUNCTION_ZONE_M = 12 m` conflict zone proceeds; the other **yields** — a
+  braking-envelope speed cap toward a hold point `JUNCTION_ZONE_M` short of the crossing,
+  mirrored into `tramSim.yieldHoldM` so the next tick's `vTarget` brakes toward the same
+  point (no per-tick creep past the hold). **Strictly speed-only**: a yielder's `sM` is
+  never rewritten — there is no teleport class here at all; the trams cross **in sequence**.
+  Holds are re-derived from scratch every constraint pass, so a cleared crossing releases
+  within one tick. Escapes: a priority tram *standing* outside the zone (dwelling/stuck
+  short of the junction) blocks nobody; both-already-inside pairs are left to roll apart
+  (braking a frozen overlap in place would be worse).
+- **Projections too** — `projJunctionPairs`, same conflict points (shape properties).
+
+### Switch/junction slow-down — contested crossings are passed moderately (2026-07-19)
+
+Realism heuristic, deliberately conservative until measured: real trams take switches and
+complex crossings noticeably slowly. Detecting switches from a single shape is not possible,
+so the **proxy is the discovered junction conflict point** (above): while a junction pair is
+active, **both** trams (priority and yielder alike) are capped at `SWITCH_SLOW_V_MS = 6.0
+m/s` (~22 km/h) within `SWITCH_SLOW_RADIUS_M = 25 m` of the conflict point — approached on
+the smooth braking envelope (`capSwitchSpeed`, no instantaneous drop; composes with the
+no-speed-extremes contract of §6). A lone tram at an empty junction keeps only the curve
+caps (`CURVE_SLOW_FACTOR`, §2). **Tunable — calibrate both constants against real ride
+recordings** (`gpsSpeed` over junctions). Tests: `engine-junction.test.ts` (in-sequence
+crossing, zone hold, standstill escape, no false yields at distance, moderate pass speed).
 
 ### Same-shape back-clamp fade (`QUEUE_BACK_FADE_M = 5`)
 
@@ -518,6 +592,44 @@ an unseen departure is likelier than a record dwell — the bounded compromise, 
 eternal wait). Applies to **all** sims — main and projections (both render modes had the
 early-departure bug). Fresh at-stop fixes re-arm the hold indefinitely: that is reality.
 
+### Arrival-fix anchor (`updateFixStopPin`, tramSim.ts) — a fix AT a stop never overshoots it (2026-07-19)
+
+**Problem.** The stop-hold above only guards a dwell that already *started*. The arrival
+side was still broken: a fresh fix showed the tram **standing at a stop** while the sim was
+still approaching — and because the schedule ran slightly late, `observedDistAt` projected
+the at-stop fix *forward at schedule pace* and the target already lay **past** the platform.
+The sim then accelerated by the stop (adaptive dwell shortened or skipped it — `e > 0`)
+while the real tram stood boarding: "до апдейта ещё ехал к остановке, после апдейта уже
+уехал с неё".
+
+**Decision.** A fresh fix that pins the tram AT a stop is **authoritative** (`fixStopDistM`):
+
+- **Detection** (`detectFixStop`): explicit `statePosition === 'at_stop'` (feed-declared
+  stop via `lastStopSequence`, else nearest platform within `AT_STOP_MATCH_M = 50 m` of the
+  fix), **or** positional — the fix rests within `FIX_AT_STOP_TOL_M = 20 m` of a platform
+  *and* has advanced ≤ `STOP_HOLD_MOVE_EPS_M = 8 m` since the previous fix (standing
+  evidence; a tram sweeping past a platform shows a large inter-fix advance and is never
+  pinned). The positional branch closes the `STUCK_NEAR_STOP_M` hole where platform stands
+  were suppressed from stuck-holds but nothing else owned them.
+- **While pinned & fresh** (same `STOP_HOLD_MAX_FIX_AGE_S = 60 s` staleness bound as the
+  stop-hold): the observation is **not** projected forward at schedule pace
+  (`observedDistAt`), and `targetDistAt` is **capped at the platform** — a late timetable
+  can never drag the sim beyond a stop the fix holds it at; the adaptive shorten/skip paths
+  see `e ≤ 0` there and never trim the dwell.
+- **Snap-to-platform**: a sim caught still approaching (`stop.distM − sM > STOP_REACH_M`)
+  is snapped **onto** the platform into a dwell (dwell end = scheduled departure if still
+  ahead, else the default dwell; the stop-hold then keeps it standing until the fix moves or
+  goes stale). Forward-only — `sM` stays monotonic; jumps > `FIX_STOP_SNAP_FADE_M = 25 m`
+  render as a teleport fade. Sims already at/past the platform are left alone
+  (dwell/fix-hold/soft-yield own those).
+- **Both render modes**: `createSim` derives the pin from an explicit at_stop state (so new
+  sims and **projSim reseeds** spawn *dwelling at the platform* instead of dead-reckoning
+  past it at cruise pace); `TramEngine` passes the main sim's live pin into every projSim
+  reseed. Release is only by fix movement (> 8 m) or staleness — mirroring reality.
+
+Tests: `tram-sim.test.ts` "arrival-fix anchor" (at_stop snap + no overshoot + capped
+target, positional two-fix pin, live-projection stand).
+
 ### Stuck-hold (`updateStuckHold`, tramSim.ts) — jams are not schedule progress
 
 **Problem.** Two+ genuinely new fixes at the same mid-segment point mean the tram is
@@ -675,7 +787,15 @@ last-viewport fallback, per-poll re-assertion of the split).
 | constant | value | file | role |
 |---|---|---|---|
 | `A_LAT` | 0.98 m/s² | speedProfile.ts | curve cap lateral accel |
+| `CURVE_SLOW_FACTOR` | 0.85 | speedProfile.ts | curve-cap scaling (§2 heuristic 2026-07-19, tune vs ride data) |
 | `A_BRK` / `A_ACC` | 1.4 / 1.3 m/s² | speedProfile.ts | brake / accel clamps (realism wave 2026-07-13; were 1.2 / 1.0) |
+| `AHEAD_SLOW_FACTOR` / `AHEAD_SLOW_MIN_V_MS` | 0.5 / 3.0 m/s | tramSim.ts | soft-yield band while ahead (§6, smooth wave 2026-07-19) |
+| `DEEP_AHEAD_ENTER/EXIT_M` | 120 / 60 m | tramSim.ts | walking-backstop hysteresis (§6) |
+| `FIX_AT_STOP_TOL_M` / `FIX_STOP_SNAP_FADE_M` | 20 / 25 m | tramSim.ts | arrival-fix pin: positional tolerance / snap fade (§14) |
+| `JUNCTION_LOOKAHEAD_M` / `JUNCTION_LATERAL_M` | 80 / 6 m | engine.ts | junction conflict discovery (§9, 2026-07-19) |
+| `JUNCTION_MIN/MAX_ANGLE_DEG` | 25° / 155° | engine.ts | genuine crossing-angle gate (§9) |
+| `JUNCTION_ZONE_M` / `JUNCTION_CLEAR_M` | 12 / 3 m | engine.ts | conflict-zone hold point / tail-clear margin (§9) |
+| `SWITCH_SLOW_V_MS` / `SWITCH_SLOW_RADIUS_M` | 6.0 m/s / 25 m | engine.ts | contested-junction pass cap (§9 heuristic, tune vs ride data) |
 | `STOP_HOLD_MAX_FIX_AGE_S` | 60 s | tramSim.ts | fix-hold staleness release (§14) |
 | `STOP_HOLD_MOVE_EPS_M` | 8 m | tramSim.ts | fix advance past dwell-entry fix = departure evidence |
 | `STOP_HOLD_NEAR_BEHIND_M` / `STOP_HOLD_AHEAD_EPS_M` | 30 / 8 m | tramSim.ts | "fix pins this stop" window |
@@ -690,10 +810,10 @@ last-viewport fallback, per-poll re-assertion of the split).
 | `DEFAULT_LOOKAHEAD_M` | 400 m | speedProfile.ts | braking-envelope horizon |
 | `OBS_BLEND_WEIGHT` | 0.75 | tramSim.ts | observation vs timetable weight |
 | `TRAIL_M` | 10 m | tramSim.ts | ride-behind bias |
-| `HARD_BRAKE_ENTER/EXIT_M` | 40 / 12 m | tramSim.ts | crawl hysteresis band |
-| `CRAWL_V_MS` | 1.0 m/s | tramSim.ts | ran-ahead crawl speed |
-| `CATCHUP/GENTLE_MAX_FACTOR` | 1.5 / 1.35 | tramSim.ts | pace ceilings |
-| `MIN_PACE_FACTOR` / `PACE_GAIN_M` | 0.55 / 120 | tramSim.ts | pace floor / gain |
+| `HARD_BRAKE_ENTER/EXIT_M` | 40 / 12 m | tramSim.ts | ahead-regime hysteresis band |
+| `CRAWL_V_MS` | 1.0 m/s | tramSim.ts | DEEP-ahead walking backstop only (§6, smooth wave) |
+| `CATCHUP/GENTLE_MAX_FACTOR` | 1.4 / 1.35 | tramSim.ts | pace ceilings (catch-up 1.5→1.4, smooth wave) |
+| `MIN_PACE_FACTOR` / `PACE_GAIN_M` | 0.7 / 120 | tramSim.ts | pace floor (0.55→0.7, smooth wave) / gain |
 | `PACE_BIAS_PRIOR` | 0.62 | tramSim.ts | fresh-vehicle paceBias prior (fleet median, round 1 R1) |
 | `PACE_BIAS_HALF_LIFE_S` | 150 s | tramSim.ts | paceBias EWMA half-life |
 | `PACE_BIAS_MIN/MAX_RATIO` | 0.4 / 1.6 | tramSim.ts | per-sample ratio clamp (and seed clamp) |

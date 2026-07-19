@@ -9,6 +9,16 @@ import { curvatureProfile, segmentIndexAt } from '../geo/polyline';
 /** Lateral comfort acceleration used for curve caps, m/s². */
 export const A_LAT = 0.98;
 /**
+ * Curve slow-down factor (realism heuristic, 2026-07-19): real trams brake
+ * for curves noticeably harder than the pure lateral-comfort cap suggests
+ * (switch frogs, worn rail, standees). Multiplies sqrt(A_LAT/κ) BEFORE the
+ * [V_CURVE_MIN_MS, V_MAX_MS] clamp, so gentle arcs whose raw cap exceeds
+ * V_MAX_MS stay unaffected (radius ≳ 270 m) while tight junction curves get
+ * ~15% slower. Deliberately CONSERVATIVE until measured — TUNABLE: calibrate
+ * against real ride recordings (fLagM / gpsSpeed through curves) and adjust.
+ */
+export const CURVE_SLOW_FACTOR = 0.85;
+/**
  * Service braking deceleration, m/s². Raised 1.2 → 1.4 (field feedback
  * 2026-07-13, ride observations): real trams brake into stops later and
  * harder than the old envelope allowed — 1.4 is still comfortably inside
@@ -267,10 +277,11 @@ export function zoneCapAt(coord: [number, number], daytime: boolean): number {
   return inside ? V_CENTER_MS : V_MAX_MS;
 }
 
-/** Curve cap from curvature κ (rad/m): sqrt(A_LAT/κ), clamped to [1.4, 13.9] m/s. */
+/** Curve cap from curvature κ (rad/m): CURVE_SLOW_FACTOR · sqrt(A_LAT/κ),
+ *  clamped to [1.4, 13.9] m/s. */
 export function curveCap(kappa: number): number {
   if (kappa <= 1e-9) return V_MAX_MS;
-  const v = Math.sqrt(A_LAT / kappa);
+  const v = CURVE_SLOW_FACTOR * Math.sqrt(A_LAT / kappa);
   return Math.min(V_MAX_MS, Math.max(V_CURVE_MIN_MS, v));
 }
 

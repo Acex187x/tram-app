@@ -36,20 +36,55 @@ export const OBS_BLEND_WEIGHT = 0.75;
  * MINUS this, so the sim rides slightly BEHIND reality rather than ahead.
  */
 export const TRAIL_M = 10;
-/** Sim this far AHEAD of the target (e < −40) → enter the hard-brake crawl. */
+/** Sim this far AHEAD of the target (e < −40) → enter the soft-yield regime. */
 export const HARD_BRAKE_ENTER_M = 40;
-/** The crawl regime exits once the error recovers above −12 m. */
+/** The ahead regime exits once the error recovers above −12 m. */
 export const HARD_BRAKE_EXIT_M = 12;
-/** Crawl speed while waiting for reality to catch back up, m/s. */
+/**
+ * DEEP-ahead crawl speed, m/s — a walking-pace backstop used ONLY when the
+ * sim has run away beyond DEEP_AHEAD_ENTER_M (broken tracking, rare). The
+ * common ahead case (smooth wave, 2026-07-19) rides the soft-yield band
+ * (AHEAD_SLOW_*) instead: pedestrian-speed dips between stops read as a
+ * glitch to the user, so they are reserved for stuck fixes / envelope /
+ * genuinely deep desync.
+ */
 export const CRAWL_V_MS = 1.0;
+/**
+ * Soft-yield speed while moderately ahead of reality (crawl latch active,
+ * |e| below DEEP_AHEAD_ENTER_M): this fraction of the tram's own cruise
+ * product (cruise cap · paceBias · TOD) — a visible ease-off, not a stall.
+ */
+export const AHEAD_SLOW_FACTOR = 0.5;
+/** Floor of the soft-yield speed, m/s (~11 km/h — slow tram, not pedestrian). */
+export const AHEAD_SLOW_MIN_V_MS = 3.0;
+/**
+ * Ahead-error beyond which the soft yield escalates to the CRAWL_V_MS
+ * walking-pace backstop (with hysteresis: releases at DEEP_AHEAD_EXIT_M).
+ * Bounds runaway when reality moves slower than the soft-yield floor; the
+ * primary absorber for large ahead-error remains the adaptive dwell
+ * extension at the next stop (DWELL_MAX_EXTEND_S).
+ */
+export const DEEP_AHEAD_ENTER_M = 120;
+/** The deep-ahead crawl releases back to soft yield once e recovers above −this. */
+export const DEEP_AHEAD_EXIT_M = 60;
 /** Error beyond which the bold catch-up factor cap applies, meters. */
 export const BOLD_CATCHUP_ERR_M = 40;
-/** Pace factor cap in the bold catch-up regime (e > BOLD_CATCHUP_ERR_M). */
-export const CATCHUP_MAX_FACTOR = 1.5;
+/**
+ * Pace factor cap in the bold catch-up regime (e > BOLD_CATCHUP_ERR_M).
+ * 1.5 → 1.4 (smooth wave, 2026-07-19): catch-up stays bold but the swing
+ * between regimes narrows — big lateness is absorbed by dwell
+ * shortening/skipping, not by sprinting.
+ */
+export const CATCHUP_MAX_FACTOR = 1.4;
 /** Pace factor cap in the gentle proportional band (|e| ≤ 40). */
 export const GENTLE_MAX_FACTOR = 1.35;
-/** Pace factor floor (gentle band; the crawl regime undercuts it). */
-export const MIN_PACE_FACTOR = 0.55;
+/**
+ * Pace factor floor (gentle band; the ahead regimes undercut it).
+ * 0.55 → 0.7 (smooth wave, 2026-07-19): between stops the tram always rides
+ * at ≥ 70% of its own calibrated pace — mild ahead-error is repaid at the
+ * next stop (longer dwell), not by dawdling down an open street.
+ */
+export const MIN_PACE_FACTOR = 0.7;
 /** Proportional gain divisor: factor = 1 + e / PACE_GAIN_M. */
 export const PACE_GAIN_M = 120;
 /** Max |stop.distM − s| for trusting an at_stop feed state when seeding a dwell, m. */
@@ -82,6 +117,19 @@ export const STOP_HOLD_MOVE_EPS_M = 8;
 export const STOP_HOLD_NEAR_BEHIND_M = 30;
 /** A fix at most this far AHEAD of the dwell position still pins it (scatter), m. */
 export const STOP_HOLD_AHEAD_EPS_M = 8;
+/**
+ * A fix within this many meters of a platform counts as "standing AT that
+ * stop" for the POSITIONAL arrival-pin (no explicit at_stop feed state, but
+ * consecutive fixes rest on the platform) — platform-length scale plus AVL
+ * shape-projection scatter, meters.
+ */
+export const FIX_AT_STOP_TOL_M = 20;
+/**
+ * An arrival-fix snap onto the platform larger than this renders as a
+ * teleport (lastTeleportMs → feature-builder opacity fade) instead of an
+ * instant small nudge, meters (same class as STUCK_BACK_FADE_M).
+ */
+export const FIX_STOP_SNAP_FADE_M = 25;
 /**
  * Two genuinely new fixes within this many meters of each other mean the tram
  * is physically stuck (red light / jam / incident) — not moving at any
@@ -249,11 +297,29 @@ export interface TramSim {
    */
   paceBias: number;
   /**
-   * Hard-brake regime latch: the sim overran the target by more than
-   * HARD_BRAKE_ENTER_M and crawls (≤ CRAWL_V_MS) until the error recovers
-   * above −HARD_BRAKE_EXIT_M. Hysteresis avoids brake/sprint oscillation.
+   * Ahead-regime latch: the sim overran the target by more than
+   * HARD_BRAKE_ENTER_M and rides the soft-yield band (AHEAD_SLOW_*) until the
+   * error recovers above −HARD_BRAKE_EXIT_M. Hysteresis avoids
+   * brake/sprint oscillation.
    */
   crawling: boolean;
+  /**
+   * Deep-ahead escalation latch (only meaningful while crawling): e fell
+   * below −DEEP_AHEAD_ENTER_M, so the soft yield gives way to the
+   * CRAWL_V_MS walking-pace backstop until e recovers above
+   * −DEEP_AHEAD_EXIT_M. Own hysteresis band so the speed does not toggle at
+   * the deep boundary when reality is slower than the soft-yield floor.
+   */
+  deepCrawl: boolean;
+  /**
+   * Junction-yield hold point, m along shape (null = none): set by
+   * TramEngine's junction conflict pairs (crossing paths at a junction —
+   * different shapes, crossing bearings). While set, tick() caps vTarget by
+   * the braking envelope toward this point, so the yielder brakes to a stand
+   * just short of the conflict zone and proceeds when the engine clears the
+   * hold (the crossing tram has passed). Speed-only — never touches sM.
+   */
+  yieldHoldM: number | null;
   /**
    * Adaptive dwell synchronization enabled (MAIN smooth-mode sim only): stop
    * dwells extend while the sim is ahead of reality, shrink or are skipped
@@ -283,6 +349,19 @@ export interface TramSim {
    * holds until a fresh fix shows movement (soft catch-up resumes then).
    */
   stuckAtM: number | null;
+  /**
+   * Platform distM the LATEST fix pins the tram at (null = none): set when a
+   * fresh fix reports at_stop (or rests on a platform with no observed
+   * movement — see detectFixStop). While set and fresh, the fix is
+   * AUTHORITATIVE that the tram is standing AT this stop right now: the
+   * observation is not projected forward at schedule pace, the pace target is
+   * capped at the platform (a late schedule must never drag the sim past a
+   * stop the fix holds it at), and a sim caught still approaching is snapped
+   * onto the platform into a dwell (arrival-fix anchor, field bug
+   * 2026-07-19: the sim used to accelerate past the stop toward the
+   * schedule position while the real tram stood boarding).
+   */
+  fixStopDistM: number | null;
   /** Departure-burst end, m along shape (0 = none); main smooth sims only. */
   burstUntilM: number;
   /**
@@ -351,11 +430,25 @@ export function scheduleDistAt(sim: TramSim, nowMs: number): number {
 }
 
 /**
+ * Whether the fix-pinned platform (fixStopDistM) is still authoritative: the
+ * pinning fix must be younger than the same staleness bound the dwell
+ * fix-hold uses — past it, an unseen departure is likelier than a record
+ * stand and normal schedule projection resumes.
+ */
+function fixPinActive(sim: TramSim, nowMs: number): boolean {
+  return sim.fixStopDistM !== null && nowMs - sim.obsAtMs <= STOP_HOLD_MAX_FIX_AGE_S * 1000;
+}
+
+/**
  * The latest AVL observation projected forward from its timestamp to nowMs at
  * schedule pace (never backwards), clamped to the geometry. This — not the
- * timetable — is the primary anchor for a live sim.
+ * timetable — is the primary anchor for a live sim. A fix that pins the tram
+ * AT a stop is NOT projected forward: the tram is standing, and advancing it
+ * at schedule pace is exactly what used to drag sims past a platform the real
+ * tram had just arrived at.
  */
 export function observedDistAt(sim: TramSim, nowMs: number): number {
+  if (fixPinActive(sim, nowMs)) return clampS(sim.geometry, sim.obsDistM);
   const advance = Math.max(0, evalScheduleAnchor(sim.lastAnchor, nowMs) - sim.obsSchedDistM);
   return clampS(sim.geometry, sim.obsDistM + advance);
 }
@@ -365,11 +458,20 @@ export function observedDistAt(sim: TramSim, nowMs: number): number {
  * AVL observation with the timetable anchor (low-gain reference), minus the
  * systematic TRAIL_M bias — the sim aims slightly BEHIND projected reality so
  * it hurries less and never runs ahead of it under normal tracking.
+ *
+ * While a fresh fix pins the tram at a stop, the target is additionally
+ * capped at that platform: a late timetable (sSched already past the stop)
+ * must never pull the sim beyond a stop the fix says the tram is standing at
+ * — it would shorten/skip the dwell there and "overshoot" the platform.
  */
 export function targetDistAt(sim: TramSim, nowMs: number): number {
   const sSched = evalScheduleAnchor(sim.lastAnchor, nowMs);
-  const sObs = clampS(sim.geometry, sim.obsDistM + Math.max(0, sSched - sim.obsSchedDistM));
-  return Math.max(0, OBS_BLEND_WEIGHT * sObs + (1 - OBS_BLEND_WEIGHT) * sSched - TRAIL_M);
+  const pinned = fixPinActive(sim, nowMs);
+  const sObs = pinned
+    ? clampS(sim.geometry, sim.obsDistM)
+    : clampS(sim.geometry, sim.obsDistM + Math.max(0, sSched - sim.obsSchedDistM));
+  const t = Math.max(0, OBS_BLEND_WEIGHT * sObs + (1 - OBS_BLEND_WEIGHT) * sSched - TRAIL_M);
+  return pinned ? Math.min(t, sim.fixStopDistM as number) : t;
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -453,9 +555,14 @@ function seedStopState(sim: TramSim, nowMs: number): void {
 
   let min = 0;
   for (const stop of stops) {
-    // When at_stop, the feed's "last stop" is the stop the tram stands AT —
-    // it must stay unmarked so the dwell below can happen.
-    const seqBehind = hasSeq && (atStop ? stop.sequence < lastSeq : stop.sequence <= lastSeq);
+    // When at_stop — or when the fix PINS this platform (fixStopDistM, §14
+    // arrival anchor; e.g. a projSim reseed whose feed still reads on_track
+    // with lastStopSequence already pointing at the stop) — the stop the
+    // tram stands AT must stay unmarked so the dwell below can happen.
+    const pinnedStop =
+      sim.fixStopDistM !== null && Math.abs(stop.distM - sim.fixStopDistM) <= STOP_REACH_M;
+    const seqBehind =
+      !pinnedStop && hasSeq && (atStop ? stop.sequence < lastSeq : stop.sequence <= lastSeq);
     const distBehind = stop.distM < sim.sM - STOP_BEHIND_EPS_M;
     if (seqBehind || distBehind) {
       sim.dwelledStopSeqs.add(stop.sequence);
@@ -496,12 +603,17 @@ function seedStopState(sim: TramSim, nowMs: number): void {
     sim.phase = 'terminal';
     return;
   }
+  // A fix-pinned platform is as authoritative as an explicit at_stop state:
+  // the tram is STANDING here, so a passed scheduled departure must still
+  // begin a (default-length) dwell instead of cruising on.
+  const pinnedHere =
+    sim.fixStopDistM !== null && Math.abs(current.distM - sim.fixStopDistM) <= STOP_REACH_M;
   const departMs = current.departureMs + snap.delaySeconds * 1000;
   if (departMs > nowMs) {
     sim.phase = 'dwell';
     sim.dwellUntilMs = departMs;
     sim.dwellObsDistM = sim.obsDistM;
-  } else if (atStop) {
+  } else if (atStop || pinnedHere) {
     sim.phase = 'dwell';
     sim.dwellUntilMs =
       nowMs + dwellDurationMs(current, nowMs, zonalDwellTreatmentFactor(sim, current));
@@ -528,6 +640,98 @@ function fixPinsDwell(sim: TramSim, nowMs: number): boolean {
   // Further behind: only an explicit at_stop feed state within the at-stop
   // matching radius still counts as "standing at this stop".
   return sim.snapshot.statePosition === 'at_stop' && behind <= AT_STOP_MATCH_M;
+}
+
+/**
+ * Which stop (if any) the latest fix pins the tram AT — the arrival-side
+ * complement of fixPinsDwell (which only guards an already-running dwell):
+ *  - explicit `at_stop` feed state: the feed-declared stop (lastStopSequence)
+ *    when it matches the geometry near the fix, else the nearest platform
+ *    within AT_STOP_MATCH_M of the fix;
+ *  - positional: the fix rests within FIX_AT_STOP_TOL_M of a platform AND has
+ *    not moved more than STOP_HOLD_MOVE_EPS_M since the previous fix (standing
+ *    evidence — a tram sweeping past the platform shows a large inter-fix
+ *    advance and is never pinned). Requires a previous fix; callers without
+ *    one (createSim) pass null and get the explicit branch only.
+ */
+function detectFixStop(sim: TramSim, prevObsDistM: number | null): RouteStop | null {
+  const stops = sim.geometry.stops;
+  const obs = sim.obsDistM;
+  const snap = sim.snapshot;
+  if (snap.statePosition === 'at_stop') {
+    const seq = snap.lastStopSequence;
+    if (seq !== null) {
+      for (const st of stops) {
+        if (st.sequence === seq && Math.abs(st.distM - obs) <= AT_STOP_MATCH_M) return st;
+      }
+    }
+    return nearestStopWithin(stops, obs, AT_STOP_MATCH_M);
+  }
+  if (prevObsDistM === null || Math.abs(obs - prevObsDistM) > STOP_HOLD_MOVE_EPS_M) return null;
+  return nearestStopWithin(stops, obs, FIX_AT_STOP_TOL_M);
+}
+
+/** Nearest stop within `tolM` of the along-shape position, or null. */
+function nearestStopWithin(stops: RouteStop[], obs: number, tolM: number): RouteStop | null {
+  let best: RouteStop | null = null;
+  let bestD = tolM;
+  for (const st of stops) {
+    if (st.distM > obs + tolM) break; // stops are ordered by distM
+    const d = Math.abs(st.distM - obs);
+    if (d <= bestD) {
+      best = st;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+/**
+ * Arrival-fix anchor (field bug 2026-07-19): a fresh fix pinning the tram AT
+ * a stop is authoritative — the tram is standing there NOW. A sim caught
+ * still APPROACHING that platform is snapped onto it and put into a dwell,
+ * instead of accelerating toward the (possibly late) schedule position past
+ * the stop while the real tram stands boarding. Composes with:
+ *  - targetDistAt's platform cap (the schedule can't drag the sim onward);
+ *  - fixPinsDwell (the dwell then holds until the fix moves or goes stale);
+ *  - the adaptive-dwell shorten/skip paths, which see e ≤ 0 at the platform
+ *    while the pin is active and therefore never trim this dwell.
+ * The snap is FORWARD-only (sM stays monotonic); a jump beyond
+ * FIX_STOP_SNAP_FADE_M renders as a teleport fade. Sims at/past the platform
+ * are left alone — dwell/fix-hold/soft-yield own those cases.
+ */
+function updateFixStopPin(sim: TramSim, prevObsDistM: number, nowMs: number): void {
+  const stop = detectFixStop(sim, prevObsDistM);
+  sim.fixStopDistM = stop ? stop.distM : null;
+  if (!stop || sim.phase === 'terminal') return;
+  const behindM = stop.distM - sim.sM;
+  if (behindM <= STOP_REACH_M) return; // at/past the platform already
+  if (behindM > FIX_STOP_SNAP_FADE_M) sim.lastTeleportMs = nowMs;
+  sim.sM = stop.distM;
+  sim.vMs = 0;
+  sim.crawling = false;
+  sim.deepCrawl = false;
+  sim.skipRollUntilM = 0;
+  sim.burstUntilM = 0;
+  // Every stop up to (and incl.) the platform is behind the sim now — served.
+  let min = sim.minStopDist;
+  for (const st of sim.geometry.stops) {
+    if (st.distM > stop.distM) break;
+    sim.dwelledStopSeqs.add(st.sequence);
+    if (st.distM + 0.01 > min) min = st.distM + 0.01;
+  }
+  sim.minStopDist = min;
+  sim.dwellObsDistM = sim.obsDistM;
+  if (isTerminalStop(sim.geometry, stop)) {
+    sim.phase = 'terminal';
+    return;
+  }
+  sim.phase = 'dwell';
+  const departMs = stop.departureMs + sim.snapshot.delaySeconds * 1000;
+  sim.dwellUntilMs =
+    departMs > nowMs
+      ? departMs
+      : nowMs + dwellDurationMs(stop, nowMs, zonalDwellTreatmentFactor(sim, stop));
 }
 
 /**
@@ -596,6 +800,15 @@ export interface CreateSimOptions {
    * the raw fix, standing, and holds there. Defaults to null (not stuck).
    */
   stuckAtM?: number | null;
+  /**
+   * Seed the fix-pinned platform (TramEngine passes the main sim's
+   * fixStopDistM when re-seeding a projSim): the sim spawns standing AT this
+   * stop, in a dwell — never dead-reckoned forward past it. When omitted,
+   * createSim derives the pin itself from an explicit at_stop feed state
+   * (the positional pin needs a previous fix and only arises in
+   * applySnapshot). Pass null to force no pin.
+   */
+  fixStopDistM?: number | null;
 }
 
 /**
@@ -637,14 +850,28 @@ export function createSim(
       Math.max(PACE_BIAS_MIN_RATIO, opts.initialPaceBias ?? PACE_BIAS_PRIOR),
     ),
     crawling: false,
+    deepCrawl: false,
+    yieldHoldM: null,
     adaptiveDwell: opts.adaptiveDwell === true,
     skipRollUntilM: 0,
     projection: opts.projection === true,
     stuckAtM,
+    fixStopDistM: null,
     burstUntilM: 0,
     dwellObsDistM: obsDistM,
     nextStopIdx: 0,
   };
+  // Fix-pinned platform: caller-provided (projSim reseeds inherit the main
+  // sim's pin), else derived from an explicit at_stop feed state. A pinned
+  // sim spawns standing AT the platform — never projected forward past it at
+  // schedule pace (that projection is how live mode used to drive off a stop
+  // the real tram had just arrived at).
+  const pinnedDistM =
+    opts.fixStopDistM !== undefined
+      ? opts.fixStopDistM
+      : (detectFixStop(sim, null)?.distM ?? null);
+  sim.fixStopDistM = pinnedDistM;
+  if (pinnedDistM !== null) sim.sM = clampS(geometry, pinnedDistM);
   seedStopState(sim, nowMs);
   seedCruiseSpeed(sim, nowMs);
   return sim;
@@ -656,6 +883,9 @@ export function reanchorSim(sim: TramSim, sM: number, nowMs: number): void {
   sim.phase = 'cruise';
   sim.dwellUntilMs = 0;
   sim.crawling = false;
+  sim.deepCrawl = false;
+  sim.yieldHoldM = null; // new shape — old hold point is meaningless
+  sim.fixStopDistM = null; // new shape — old platform pin is meaningless
   sim.skipRollUntilM = 0;
   sim.burstUntilM = 0;
   sim.stuckAtM = null; // new shape — old along-shape anchor is meaningless
@@ -729,6 +959,9 @@ function snapTo(sim: TramSim, sM: number, nowMs: number): void {
   sim.phase = 'cruise';
   sim.dwellUntilMs = 0;
   sim.crawling = false;
+  sim.deepCrawl = false;
+  sim.yieldHoldM = null; // re-anchored — the engine re-derives holds on ingest
+  sim.fixStopDistM = null; // re-derived from the fresh fix by the caller
   sim.skipRollUntilM = 0;
   sim.burstUntilM = 0;
   sim.stuckAtM = null; // a >500 m re-anchor is movement evidence in itself
@@ -776,6 +1009,11 @@ export function applySnapshot(sim: TramSim, snapshot: TramSnapshot, nowMs: numbe
   if (Math.abs(sObs - sim.sM) > TELEPORT_THRESHOLD_M) {
     // Hard teleport: no pace sample (the jump is not motion), bias inherited.
     snapTo(sim, sObs, nowMs);
+    // The teleporting fix may itself pin a platform (at_stop across a trip
+    // re-anchor): land the sim standing there, not projected past it. The
+    // positional pin cannot false-trigger here (the >500 m inter-fix jump
+    // fails its movement gate).
+    updateFixStopPin(sim, prevObsDistM, nowMs);
     return;
   }
   updatePaceBias(sim, prevObsDistM, prevObsAtMs, snapshot);
@@ -784,6 +1022,10 @@ export function applySnapshot(sim: TramSim, snapshot: TramSnapshot, nowMs: numbe
   if (sim.phase === 'terminal' && freshFix && sim.sM - sObs > TERMINAL_UNLATCH_BEHIND_M) {
     snapTo(sim, sObs, nowMs);
   }
+  // Arrival-fix anchor: a fresh fix standing AT a stop snaps a still-
+  // approaching sim onto the platform and into a dwell (runs after the
+  // terminal un-latch so a just-un-latched sim can land at its platform too).
+  if (freshFix) updateFixStopPin(sim, prevObsDistM, nowMs);
 }
 
 /**
@@ -844,6 +1086,7 @@ function rewindToStuckFix(sim: TramSim, nowMs: number): void {
   sim.phase = 'cruise'; // stuckAtM keeps it standing; no dwell/terminal latch
   sim.dwellUntilMs = 0;
   sim.crawling = false;
+  sim.deepCrawl = false;
   sim.skipRollUntilM = 0;
   sim.burstUntilM = 0;
   // Re-open stops now ahead of the corrected position and rebuild minStopDist
@@ -866,15 +1109,18 @@ function rewindToStuckFix(sim: TramSim, nowMs: number): void {
 /**
  * Advance the sim by dtS seconds. Asymmetric pace controller around
  * e = target(now) − s (target = observation-primary blend − TRAIL_M):
- *  - e < −HARD_BRAKE_ENTER_M (sim ran ahead): hard-brake crawl regime —
- *    vTarget ≤ CRAWL_V_MS until e recovers above −HARD_BRAKE_EXIT_M
- *    (hysteresis latch on sim.crawling). The sim NEVER moves backwards.
- *  - e > BOLD_CATCHUP_ERR_M (behind): bold catch-up, pace factor up to 1.5.
- *  - between: gentle proportional control, factor clamp(1 + e/120, 0.55, 1.35).
+ *  - e < −HARD_BRAKE_ENTER_M (sim ran ahead): soft-yield regime — ease off to
+ *    max(AHEAD_SLOW_MIN_V_MS, AHEAD_SLOW_FACTOR · cruise product) until e
+ *    recovers above −HARD_BRAKE_EXIT_M (hysteresis latch on sim.crawling).
+ *    Only a deep runaway (e < −DEEP_AHEAD_ENTER_M, own hysteresis on
+ *    sim.deepCrawl) drops to the CRAWL_V_MS walking-pace backstop. The sim
+ *    NEVER moves backwards.
+ *  - e > BOLD_CATCHUP_ERR_M (behind): bold catch-up, pace factor up to 1.4.
+ *  - between: gentle proportional control, factor clamp(1 + e/120, 0.7, 1.35).
  * The cruise target is additionally scaled by the learned per-tram paceBias.
  * All regimes stay clamped by the braking envelope (vTarget ≤ vAllowed) —
  * catch-up can never defeat curve/stop limits. Acceleration is clamped to
- * [−1.2, +1.0] m/s². s never decreases.
+ * [−A_BRK, +A_ACC] m/s². s never decreases.
  *
  * Adaptive dwell synchronization (sim.adaptiveDwell — main smooth-mode sims
  * only) handles the error AT STOPS, composing with the mid-segment regimes:
@@ -958,16 +1204,41 @@ export function tick(sim: TramSim, nowMs: number, dtS: number): void {
         todPaceFactor(nowMs),
     );
   } else {
-    // Hard-brake latch with hysteresis (enter at −40 m, exit at −12 m).
+    // Ahead-regime latch with hysteresis (enter at −40 m, exit at −12 m).
     if (sim.crawling) {
-      if (e > -HARD_BRAKE_EXIT_M) sim.crawling = false;
+      if (e > -HARD_BRAKE_EXIT_M) {
+        sim.crawling = false;
+        sim.deepCrawl = false;
+      }
     } else if (e < -HARD_BRAKE_ENTER_M) {
       sim.crawling = true;
     }
 
     if (sim.crawling) {
-      // Ran ahead of reality: crawl until the projected observation catches up.
-      vTarget = Math.min(vAllowed, CRAWL_V_MS);
+      // Ran ahead of reality: soft yield — ease off to a fraction of the
+      // tram's OWN pace (never a pedestrian stall) and let the projected
+      // observation catch up; the remainder is absorbed at the next stop by
+      // the adaptive-dwell extension. Only a genuinely deep runaway
+      // (e < −DEEP_AHEAD_ENTER_M, its own hysteresis band) escalates to the
+      // walking-pace CRAWL_V_MS backstop — without it a reality slower than
+      // the soft-yield floor could keep widening the error unboundedly.
+      if (sim.deepCrawl) {
+        if (e > -DEEP_AHEAD_EXIT_M) sim.deepCrawl = false;
+      } else if (e < -DEEP_AHEAD_ENTER_M) {
+        sim.deepCrawl = true;
+      }
+      if (sim.deepCrawl) {
+        vTarget = Math.min(vAllowed, CRAWL_V_MS);
+      } else {
+        const cruiseProduct =
+          Math.min(cruiseCapAt(sim.profile, sim.geometry, sim.sM), V_CRUISE_REF_MS) *
+          sim.paceBias *
+          todPaceFactor(nowMs);
+        vTarget = Math.min(
+          vAllowed,
+          Math.max(AHEAD_SLOW_MIN_V_MS, AHEAD_SLOW_FACTOR * cruiseProduct),
+        );
+      }
     } else {
       const maxFactor = e > BOLD_CATCHUP_ERR_M ? CATCHUP_MAX_FACTOR : GENTLE_MAX_FACTOR;
       const factor = Math.min(maxFactor, Math.max(MIN_PACE_FACTOR, 1 + e / PACE_GAIN_M));
@@ -978,7 +1249,7 @@ export function tick(sim: TramSim, nowMs: number, dtS: number): void {
       // is a hard limit — a late tram may hold cruise speed but never overrun a
       // stop. The reference is the zone/curve cap bounded by V_CRUISE_REF_MS
       // (42 km/h — real p90 pace; the 50 km/h V_MAX_MS stays the envelope/hard
-      // cap, calibration round 1 R3), so catch-up regimes (factor ≤ 1.5) can
+      // cap, calibration round 1 R3), so catch-up regimes (factor ≤ 1.4) can
       // still exceed the reference up to the envelope. The learned per-tram
       // paceBias scales the target too, so a tram that really runs at 70% of
       // reference pace cruises at ~70% between fixes instead of sprinting to
@@ -1001,6 +1272,15 @@ export function tick(sim: TramSim, nowMs: number, dtS: number): void {
   // of it) and hold until a moving fix clears stuckAtM. Never reverses.
   if (sim.stuckAtM !== null) {
     const dHold = sim.stuckAtM - sim.sM;
+    vTarget = Math.min(vTarget, dHold > 0 ? Math.sqrt(2 * A_BRK * dHold) : 0);
+  }
+
+  // Junction yield (all sims): TramEngine flagged a crossing-path conflict
+  // ahead — brake on the envelope toward the hold point just short of the
+  // conflict zone and stand until the engine clears the hold (the crossing
+  // tram has passed). Speed-only: sM is never rewritten, no teleports.
+  if (sim.yieldHoldM !== null) {
+    const dHold = sim.yieldHoldM - sim.sM;
     vTarget = Math.min(vTarget, dHold > 0 ? Math.sqrt(2 * A_BRK * dHold) : 0);
   }
 

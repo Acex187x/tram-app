@@ -5,6 +5,7 @@ import {
   buildSpeedProfile,
   cruiseCapAt,
   curveCap,
+  CURVE_SLOW_FACTOR,
   V_CENTER_MS,
   V_CURVE_MIN_MS,
   V_MAX_MS,
@@ -30,8 +31,8 @@ describe('curveCap', () => {
   it('is unbounded (vmax) on straights', () => {
     expect(curveCap(0)).toBe(V_MAX_MS);
   });
-  it('follows sqrt(A_LAT/κ) in the mid range', () => {
-    expect(curveCap(0.0785)).toBeCloseTo(Math.sqrt(0.98 / 0.0785), 3);
+  it('follows CURVE_SLOW_FACTOR · sqrt(A_LAT/κ) in the mid range', () => {
+    expect(curveCap(0.0785)).toBeCloseTo(CURVE_SLOW_FACTOR * Math.sqrt(0.98 / 0.0785), 3);
   });
   it('clamps to [1.4, 13.9]', () => {
     expect(curveCap(100)).toBe(V_CURVE_MIN_MS);
@@ -80,7 +81,7 @@ describe('buildSpeedProfile', () => {
       [],
     );
     const profile = buildSpeedProfile(geo, { daytime: false });
-    expect(profile.vLimit[1]).toBeGreaterThan(3);
+    expect(profile.vLimit[1]).toBeGreaterThan(2.5);
     expect(profile.vLimit[1]).toBeLessThan(4.2); // < 30% of vmax
     expect(profile.vLimit[0]).toBeCloseTo(V_MAX_MS, 1);
     expect(profile.vLimit[2]).toBeCloseTo(V_MAX_MS, 1);

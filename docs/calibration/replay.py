@@ -150,6 +150,14 @@ def replay(cfg):
                       (min(cap, hard_cap) × bias) instead of 0 — models the
                       mid-segment cruise seeding (fix #2; teleports reseed
                       the same way).
+    Smooth-wave extensions (2026-07-19, speed-extremes redesign):
+      ahead_slow    — True = the ahead regime (crawl latch, enter -40/exit
+                      -12) rides a SOFT-YIELD band instead of the flat 1 m/s
+                      crawl: vt = max(3.0, 0.5*cap*bias*tod), escalating to
+                      the 1 m/s walking backstop only while e < -120 (deep
+                      latch, hysteresis exit at -60). Ship set also narrows
+                      min_factor 0.55->0.7 and catchup_max 1.5->1.4 (passed
+                      as the existing cfg keys).
       stuck_hold    — True = a repeated-position fresh fix (|Δs| ≤ 8 m with
                       time advancing — only extractable via v2 obsAt) freezes
                       the target AT the fix and brakes the sim to a stand
@@ -174,6 +182,7 @@ def replay(cfg):
     a_brk = cfg.get("a_brk", A_BRK)
     seed_speed = cfg.get("seed_speed", False)
     stuck_hold = cfg.get("stuck_hold", False)
+    ahead_slow = cfg.get("ahead_slow", False)
 
     def cruise_at(s, bias, t):
         cap = cfg["v_center"] if in_center_at_loc[0](s) else cfg["v_max"]
@@ -198,6 +207,7 @@ def replay(cfg):
             bias = carried if (inherit and carried is not None) else cfg["prior"]
             v = cruise_at(s, bias, t) if seed_speed else 0.0
             crawling = False
+            deep = False
             stuck = False
             fi = 0                      # last applied fix index
             v_proj = 5.9                # global median real speed, m/s
@@ -221,9 +231,21 @@ def replay(cfg):
                         if crawling:
                             if e > -12:
                                 crawling = False
+                                deep = False
                         elif e < -40:
                             crawling = True
-                        if crawling:
+                        if crawling and ahead_slow:
+                            # Soft-yield band; walking backstop only when deep.
+                            if deep:
+                                if e > -60:
+                                    deep = False
+                            elif e < -120:
+                                deep = True
+                            if deep:
+                                vt = min(cap, 1.0)
+                            else:
+                                vt = min(cap, max(3.0, 0.5 * cap * bias * tod_factor(tod, t)))
+                        elif crawling:
                             vt = min(cap, 1.0)
                         else:
                             mf = cfg["catchup_max"] if e > 40 else cfg["gentle_max"]
@@ -263,6 +285,7 @@ def replay(cfg):
                     s = float(of)
                     v = cruise_at(s, bias, tf) if seed_speed else 0.0
                     crawling = False
+                    deep = False
                     if not inherit:
                         bias = cfg["prior"]
             carried = bias
@@ -470,6 +493,22 @@ CONFIGS = [
     ("R61 stuck-hold (#3)", {**NEW, "stuck_hold": True}),
     ("R62 REALISM shipped (#2+#3+#4a)",
      {**NEW, "seed_speed": True, "stuck_hold": True, "a_acc": 1.3, "a_brk": 1.4}),
+    # Smooth wave (2026-07-19, speed-extremes redesign): the ahead regime
+    # rides a soft-yield band (max(3.0, 0.5×cruise) m/s) with a deep-only
+    # 1 m/s backstop (enter -120 / exit -60), gentle floor 0.55→0.7, bold
+    # catch-up ceiling 1.5→1.4. S70 = R62 + the smooth set (the ship
+    # candidate); S71/S72 isolate the components. GATE: S70 vs R62 — median
+    # |at-fix err| must not grow. (The junction yield, the arrival-fix stop
+    # pin and the curve/switch slow-downs have no replay counterpart — no
+    # geometry/stop table here; they are gated by the jest invariants.)
+    ("S71 soft-yield only", {**NEW, "seed_speed": True, "stuck_hold": True,
+                             "a_acc": 1.3, "a_brk": 1.4, "ahead_slow": True}),
+    ("S72 clamps only (0.7/1.4)", {**NEW, "seed_speed": True, "stuck_hold": True,
+                                   "a_acc": 1.3, "a_brk": 1.4,
+                                   "min_factor": 0.7, "catchup_max": 1.4}),
+    ("S70 SMOOTH shipped (yield+clamps)", {**NEW, "seed_speed": True, "stuck_hold": True,
+                                           "a_acc": 1.3, "a_brk": 1.4, "ahead_slow": True,
+                                           "min_factor": 0.7, "catchup_max": 1.4}),
 ]
 
 print(f"trams replayed: {len(trams)}")
@@ -510,6 +549,15 @@ if r is not None:
           f"%ahead NEW {n['ahead']:.1f} -> R62 {r['ahead']:.1f}")
     print(f"  fresh-sim |err|    p50 NEW {n['fresh_p50']:.1f} -> R62 {r['fresh_p50']:.1f}; "
           f"p90 NEW {n['fresh_p90']:.1f} -> R62 {r['fresh_p90']:.1f}  [n={r['n_fresh']}]")
+s70 = results.get("S70 SMOOTH shipped (yield+clamps)")
+if r is not None and s70 is not None:
+    print(f"\nSMOOTH GATE (S70 vs R62, {PATH}):")
+    print(f"  median |fix err|   R62 {r['p50']:.1f} -> S70 {s70['p50']:.1f} m "
+          f"({100 * (s70['p50'] - r['p50']) / r['p50']:+.1f}%)")
+    print(f"  signed p50         R62 {r['sp50']:+.1f} -> S70 {s70['sp50']:+.1f}; "
+          f"%ahead R62 {r['ahead']:.1f} -> S70 {s70['ahead']:.1f}")
+    print(f"  fresh-sim |err|    p50 R62 {r['fresh_p50']:.1f} -> S70 {s70['fresh_p50']:.1f}; "
+          f"p90 R62 {r['fresh_p90']:.1f} -> S70 {s70['fresh_p90']:.1f}  [n={s70['n_fresh']}]")
 
 print("\nlogged reality for comparison (device session): at-fix |err| p50=86 p90=260, "
       "signed p50=-38, %ahead=27.1, devM p50=130 p90=413")
