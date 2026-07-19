@@ -204,40 +204,70 @@ opacity crossfades, and render 3D only near the top. Band edges
   minimal fallback `CircleLayer` dot keeps the whole fleet visible and
   tappable — a sprite load failure degrades, never blanks the map.
 
-**Band-2 badge declutter — badges ADAPT (displace), never hide** (2026-07-18;
-supersedes both the brief native-collision pass of `1408cdf`, which HID
-overlapping badges, and the capsule anatomy above — badges are now per-model
-FACE plates with the line number beside them). Overlapping plates are pushed
-apart by a screen-space separation solve in `buildFrame`
-(`featureBuilder.declutterBadges`), not by Mapbox collision:
+**Band-2 badge layout — variable ANCHOR SLOTS, hugging the marker**
+(2026-07-19; supersedes the 2026-07-18 displacement+leader solve of `006dce3`
+— user feedback: plates drifted far from their trams on red leader lines —
+and the brief native-collision pass of `1408cdf`, which HID overlapping
+badges). Overlapping plates now pick DIFFERENT SIDES of their own marker
+(`featureBuilder.declutterBadges`, greedy variable-anchor placement):
 
-- The solve runs at the points-push cadence over the **viewport-culled**
-  band-2 trams only (O(n²) Gauss-Seidel over a handful of plates —
-  microseconds; payload ∝ visible; no per-frame React, no new timers). It
-  emits a dedicated `badges` FC → `trams-badges` ShapeSource: plate anchors at
-  their DISPLACED positions + thin leader `LineString`s from a displaced plate
-  back to its true marker (POI-label / flight-tracker style).
+- **12 fixed slots per marker**, nearest-first: above (default), below,
+  right, left, four diagonals, then second/third stacked rows above/below
+  (co-located pileups fan into a tidy vertical stack). A plate takes the
+  nearest slot whose box collides with nothing placed so far; if every slot
+  is taken, the least-overlapping slot wins and the residual overlap is
+  accepted. **No leader lines** — a plate is never far enough from its arrow
+  to need one.
+- **Slots ship as data-driven SCREEN offsets, never as moved geometry.**
+  Every badge feature sits exactly at its marker; the chosen slot is encoded
+  in per-feature `off` (icon-offset units) and `toff` (text em) props that
+  the bulk badge layer reads via `['get', …]`. Converting the slot into
+  world lng/lat (the first implementation) baked the solver's cos-55° pitch
+  estimate into the geometry — at any other camera pitch the plate visibly
+  detached from its arrow (2D was worst, ×1.74 vertical error). Screen
+  offsets are pixel-exact at every pitch/zoom. The pinned layer renders from
+  the points FC (no such props) with the static default-slot offsets.
+- Runs at the points-push cadence over the **viewport-culled** band-2 trams
+  only (greedy O(n²) over a handful of plates — microseconds; payload ∝
+  visible; no per-frame React, no new timers). Emits the `badges` FC →
+  `trams-badges` ShapeSource.
 - The heading **teardrop marker always stays at the TRUE position** on the
-  points source; displacement never lies about where the tram is. EVERY
-  marker is also an immovable obstacle box in the solve
-  (`MARKER_OBSTACLE_HALF_PX`) and the plate floats `FACE_GAP_PX` above its
-  anchor, so **no plate ever covers any direction arrow** — its own or a
-  neighbour's (the arrows-over-plates mess this replaced).
+  points source. EVERY marker is an immovable obstacle box in the solve
+  (`MARKER_OBSTACLE_HALF_PX`), and each slot clears it by construction, so
+  **no plate ever covers any direction arrow** — its own or a neighbour's.
 - **Selected/followed/favorite plates are immovable** (pinned): they render
-  from the points FC on `tram-badges-pinned` at the exact tram position,
-  never hidden, drawn over the crowd; neighbours displace around them.
-- **Temporal coherence:** each solve is SEEDED from the previous push's
-  offsets (`BadgeDisplacementMemory`, a ref owned by `TramLayers`) with a
-  gentle pull home — stacks keep their arrangement as trams crawl instead of
-  re-shuffling every push, and glide back once the crowd dissolves.
+  from the points FC on `tram-badges-pinned` on the default above-slot,
+  never hidden, drawn over the crowd; neighbours pick other sides.
+- **Temporal coherence:** each badge REMEMBERS its slot (`BadgeAnchorMemory`,
+  a ref owned by `TramLayers`); placement always prefers the nearest free
+  slot, and moving to a slot CLOSER than last push's requires
+  `BADGE_HOME_HYST_PX` extra clearance — stacks hold their arrangement as
+  trams crawl (no threshold flicker), while a lone plate is always back on
+  the default above-slot within one push of having room (never parked aside).
 - **Pitch foreshortening:** anchors are projected with a conservative
   `BADGE_PITCH_Y_SCALE = cos 55°` on the y axis — billboard plates keep full
   screen height while ground distances compress under the default 45°/55°
   camera; solving in raw map-plane px visibly re-overlapped the stacks.
 - Badge box metrics (`FACE_*` consts) live in `featureBuilder` as the single
   source of truth: the symbol style in `TramLayers` and the solver's boxes are
-  built from the SAME numbers. Behaviour pinned in
-  `__tests__/feature-builder-declutter.test.ts`.
+  built from the SAME numbers. (2026-07-19: a `FACE_MAX_ICON_SIZE` 0.5 → 0.72
+  enlargement was tried and REVERTED the same day — user: "все иконки стали
+  больше, это проблема"; 0.5 / 32 pt faces are the normal size.) Behaviour
+  pinned in `__tests__/feature-builder-declutter.test.ts`.
+
+**Render safety (2026-07-19).** `buildFrame` guards every rendered position:
+a single non-finite coordinate (NaN → `null` after stringify) makes the
+native `updateShape` reject the ENTIRE FeatureCollection ("data isn't in the
+correct format") and the whole source silently freezes at its last good frame
+— observed live as far-zoom arrows standing in the wrong place / vanishing
+while the sections source kept moving. A tram with a broken sim position
+falls back to its raw fix (no 3D body that frame); broken beyond that, it is
+dropped for the frame — never the fleet. Doors: sections render their
+`openModelKey` variants only while the tram is STANDING AT A PLATFORM
+(`doorsOpen`: dwell phase AND v≈0 AND rendered head within
+`DOOR_NEAR_STOP_M` of a stop) — keyed off the RENDERED head, so live mode
+(projected observation) can't show open doors mid-segment while the smooth
+sim dwells.
 
 **The comic scale curve.** `modelScale` follows an `exponential(1.6)` interpolate
 on zoom (`TramLayers.tsx:326`):

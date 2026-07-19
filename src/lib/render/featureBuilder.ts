@@ -2,16 +2,22 @@
 //  - points FC: ALL trams (circle/badge layers + hit testing)
 //  - sections FC: articulated body sections, only for trams inside the viewport
 //    (+300 m margin) at zoom >= 14.8 — drives the ModelLayer. While a tram
-//    dwells at a stop its sections render their doors-open GLB variants
-//    (TramSection.openModelKey, when authored).
-//  - badges FC (band 2 only): DECLUTTERED face-badge anchors + leader lines.
-//    Overlapping badges are pushed apart (never hidden) by a small screen-space
-//    separation solve over the visible trams; a displaced badge gets a thin
-//    leader LineString back to its true marker. Selected/followed/favorite
-//    badges are immovable obstacles (they stay put; neighbours move around
-//    them) and are NOT emitted here — the map draws them from the points FC on
-//    the pinned layer. Runs only on points-push frames inside the badge zoom
-//    band, over viewport-culled trams (payload ∝ visible).
+//    STANDS AT A PLATFORM (dwell phase + v≈0 + rendered head near a stop — see
+//    doorsOpen) its sections render their doors-open GLB variants
+//    (TramSection.openModelKey, when authored); doors stay closed in motion
+//    and between stops.
+//  - badges FC (band 2 only): face badges placed by a VARIABLE-ANCHOR solve —
+//    each badge hugs its marker on one of a few fixed slots around it
+//    (above/below/beside/diagonal + stacked rows), choosing the nearest free
+//    side instead of being displaced far away on a leader line (leaders are
+//    gone). Every feature sits AT its marker; the chosen slot ships as
+//    data-driven icon/text offsets (`off`/`toff` props, pure screen units) so
+//    the plate stays glued to its arrow at any camera pitch. Selected/
+//    followed/favorite badges are immovable obstacles (they stay put on the
+//    default slot; neighbours pick other sides) and are NOT emitted here — the
+//    map draws them from the points FC on the pinned layer. Runs only on
+//    points-push frames inside the badge zoom band, over viewport-culled trams
+//    (payload ∝ visible).
 //  - fixOverlay FC: for the followed/selected tram only — the raw last AVL fix
 //    as a Point plus a connector LineString to the rendered position.
 //
@@ -53,7 +59,11 @@ export const CULL_MARGIN_M = 300;
 
 /** Face sprite natural size, pt (192 px PNG @ scale 3). */
 export const FACE_NATURAL_PT = 64;
-/** iconSize at the top of the badge band (face renders 32 pt tall). */
+/**
+ * iconSize at the top of the badge band (face renders 32 pt tall). This IS
+ * the size users called "normal" — a 2026-07-19 experiment at 0.72 (~46 pt)
+ * made every icon on the map feel bloated and was reverted the same day.
+ */
 export const FACE_MAX_ICON_SIZE = 0.5;
 /** iconSize ramps down to this fraction of max at band entry. */
 export const FACE_MIN_RATIO = 0.78;
@@ -61,12 +71,24 @@ export const FACE_MIN_RATIO = 0.78;
  * Gap between the marker point and the face bottom (iconOffset units ×
  * iconSize). Sized so the floating plate NEVER touches its own heading
  * teardrop: gap × min iconSize (32 × 0.39 ≈ 12.5 pt) clears the teardrop's
- * rotation reach (24 pt sprite × 0.6 → ≤ ~10 pt from the anchor) — see
- * MARKER_OBSTACLE_HALF_PX below.
+ * rotation reach plus the solve's pad (MARKER_OBSTACLE_HALF_PX 10 +
+ * BADGE_PAD_PX 2 = 12) — the plate hugs its arrow, slot 0 of the anchor
+ * solve reproduces exactly this geometry.
  */
 export const FACE_GAP_PX = 32;
 /** Line-number text size at the top of the band (lockstep with iconSize). */
 export const FACE_TEXT_MAX_SIZE = 15;
+/**
+ * Default line-number text offset, em (lockstep with textSize so the number
+ * stays seated across the band's size ramp): left-anchored 3 pt right of the
+ * face edge, vertically centered on the face. Shared by the badge symbol
+ * styles in TramLayers AND the anchor solve's data-driven text offsets.
+ */
+export const FACE_TEXT_OFFSET_X_EM =
+  ((FACE_NATURAL_PT * FACE_MAX_ICON_SIZE) / 2 + 3) / FACE_TEXT_MAX_SIZE;
+export const FACE_TEXT_OFFSET_Y_EM =
+  -(FACE_GAP_PX * FACE_MAX_ICON_SIZE + (FACE_NATURAL_PT * FACE_MAX_ICON_SIZE) / 2) /
+  FACE_TEXT_MAX_SIZE;
 
 /** Badge band edges for the declutter pass (band 2 incl. crossfade skirts). */
 export const BADGE_MIN_ZOOM = 12.9; // BAND_DOTS_TO_BADGES - BAND_FADE
@@ -79,12 +101,6 @@ export const BADGE_MAX_ZOOM = 15.2; // BAND_BADGES_TO_MODELS + BAND_FADE + 0.1
 export const BADGE_CULL_MARGIN_M = 600;
 /** Extra breathing room between badge boxes, px. */
 export const BADGE_PAD_PX = 2;
-/** A badge never moves further than this from its marker, px (extreme pileups). */
-export const BADGE_MAX_DISPLACE_PX = 100;
-/** Displacements below this snap back to zero (no leader, no visual noise). */
-export const BADGE_SNAP_PX = 1;
-/** A leader line is drawn once the badge moved at least this far, px. */
-export const BADGE_LEADER_MIN_PX = 6;
 /**
  * Half-size of the immovable obstacle box centered on EVERY tram's heading
  * teardrop marker (24 pt sprite × iconSize 0.6 rotates within ~±10 pt of its
@@ -103,13 +119,6 @@ export const MARKER_OBSTACLE_HALF_PX = 10;
  * — a fixed conservative factor keeps this pure and cheap.)
  */
 export const BADGE_PITCH_Y_SCALE = Math.cos((55 * Math.PI) / 180);
-/**
- * Gauss-Seidel sweeps. Worst realistic case (several co-located trams at a
- * terminal, plates cascading over marker obstacles) settles well within this;
- * cost is O(n² · iters) over the handful of visible band-2 trams per points
- * push — microseconds.
- */
-const BADGE_SOLVER_ITERS = 16;
 /** Approx digit advance as a fraction of textSize (DIN Pro Bold digits). */
 const BADGE_TEXT_CHAR_EM = 0.6;
 /** Second unit of a coupled T3 pair trails this far behind the first, meters. */
@@ -119,6 +128,71 @@ export const TRACK_OFFSET_M = 1.35;
 
 const M_PER_DEG_LAT = 111_320;
 const DEG2RAD = Math.PI / 180;
+
+// ── Doors (sections band) ────────────────────────────────────────────────────
+/**
+ * Doors render open only while the tram is STANDING AT A PLATFORM: phase
+ * 'dwell' alone is not trusted (in live mode the rendered head is the
+ * PROJECTED observation, which can be mid-segment while the smooth sim
+ * dwells — the old phase-only condition opened doors between stops), so the
+ * rendered head must also be within DOOR_NEAR_STOP_M of a stop and the sim
+ * standing. All three signals are stable for whole seconds, so the doors
+ * can't flicker.
+ */
+export const DOOR_NEAR_STOP_M = 25;
+/** Doors render open only at/below this sim speed (standing), km/h. */
+export const DOOR_MAX_SPEED_KMH = 1;
+
+/** True when a stop's along-shape distM lies within tolM of sHead. */
+export function nearStopWithin(
+  stops: RouteGeometry['stops'],
+  sHead: number,
+  tolM: number,
+): boolean {
+  // stops are ordered along the trip (distM monotonic) — binary search.
+  let lo = 0;
+  let hi = stops.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (stops[mid].distM < sHead) lo = mid + 1;
+    else hi = mid;
+  }
+  const after = lo < stops.length ? stops[lo].distM - sHead : Number.POSITIVE_INFINITY;
+  const before = lo > 0 ? sHead - stops[lo - 1].distM : Number.POSITIVE_INFINITY;
+  return Math.min(after, before) <= tolM;
+}
+
+/** Doors-open decision for the rendered head position (see DOOR_NEAR_STOP_M). */
+export function doorsOpen(state: TramPublicState, geometry: RouteGeometry, sHead: number): boolean {
+  return (
+    state.phase === 'dwell' &&
+    state.simSpeedKmh <= DOOR_MAX_SPEED_KMH &&
+    nearStopWithin(geometry.stops, sHead, DOOR_NEAR_STOP_M)
+  );
+}
+
+// ── Render safety ────────────────────────────────────────────────────────────
+// One non-finite coordinate (NaN stringifies to null) makes the NATIVE side
+// reject the ENTIRE FeatureCollection push ("updateShape: data isn't in the
+// correct format") — the whole layer then freezes at its last good frame.
+// Observed live as the far-zoom arrows standing still / vanishing while the
+// sections source kept moving. Every rendered position is guarded; a broken
+// tram degrades (raw fix, then dropped for the frame), never the fleet.
+
+const isFinitePos = (p: [number, number]): boolean =>
+  Number.isFinite(p[0]) && Number.isFinite(p[1]);
+
+/** Dev-only: report each tram whose state produced non-finite render coords once. */
+const invalidWarned = new Set<string>();
+function warnInvalidOnce(key: string, anchor: [number, number], bearing: number): void {
+   
+  if (typeof __DEV__ === 'undefined' || !__DEV__ || invalidWarned.has(key)) return;
+  invalidWarned.add(key);
+  console.warn(
+    `[render] tram ${key} produced a non-finite render position ` +
+      `(anchor=[${anchor[0]}, ${anchor[1]}], bearing=${bearing}) — falling back to the raw fix`,
+  );
+}
 
 export interface BuildFrameOptions {
   selectedKey: string | null;
@@ -150,11 +224,11 @@ export interface BuildFrameOptions {
    */
   skipPoints?: boolean;
   /**
-   * Badge-declutter displacement memory (see BadgeDisplacementMemory): pass a
-   * persistent per-source Map so badge arrangements stay stable from push to
-   * push. Omitted (tests / one-shot builds) → each solve is cold and pure.
+   * Badge anchor-slot memory (see BadgeAnchorMemory): pass a persistent
+   * per-source Map so badge arrangements stay stable from push to push.
+   * Omitted (tests / one-shot builds) → each solve is cold and pure.
    */
-  badgeMemory?: BadgeDisplacementMemory;
+  badgeMemory?: BadgeAnchorMemory;
   /**
    * 'smooth' (default): render at the simulated/interpolated position.
    * 'live': render at the engine's projected observation — the last AVL fix
@@ -269,20 +343,25 @@ function sectionsAlongShape(
     const modelKey = sectionModelKey(section, dwelling);
     const centerDist = sHead - (precedingLengths + i * spec.jointGapM) - section.lengthM / 2;
     const placed = placeAt(coordinates, cumDistM, centerDist);
-    out.push(
-      sectionFeature(`${state.key}#${i}`, state.key, modelKey, placed.position, placed.bearing),
-    );
+    // Render safety: a poisoned shape vertex must not sink the sections push.
+    if (isFinitePos(placed.position) && Number.isFinite(placed.bearing)) {
+      out.push(
+        sectionFeature(`${state.key}#${i}`, state.key, modelKey, placed.position, placed.bearing),
+      );
+    }
     if (coupled) {
       const trailed = placeAt(coordinates, cumDistM, centerDist - COUPLED_OFFSET_M);
-      out.push(
-        sectionFeature(
-          `${state.key}#c${i}`,
-          state.key,
-          modelKey,
-          trailed.position,
-          trailed.bearing,
-        ),
-      );
+      if (isFinitePos(trailed.position) && Number.isFinite(trailed.bearing)) {
+        out.push(
+          sectionFeature(
+            `${state.key}#c${i}`,
+            state.key,
+            modelKey,
+            trailed.position,
+            trailed.bearing,
+          ),
+        );
+      }
     }
     precedingLengths += section.lengthM;
   }
@@ -349,21 +428,34 @@ function buildFixOverlay(
   };
 }
 
-// ── Badge declutter (band 2): push overlapping badges apart, never hide ─────
+// ── Badge layout (band 2): variable-anchor placement hugging the marker ─────
 
 /**
- * Frame-to-frame displacement memory (tram key → last solved offset, px).
- * Owned by the CALLER (a ref on the map layer, one per points source) and
- * passed back in on every push: the solver SEEDS from it, so a stack keeps
- * its arrangement as trams crawl instead of re-deriving (and visibly
- * re-shuffling) from scratch on every push, and writes the new offsets back.
- * Each push the seed is pulled toward home by BADGE_HOME_PULL first — badges
- * whose crowd dissolved glide back to their marker over a few pushes, while
- * still-colliding ones are pushed right back out BEFORE output, so the
- * equilibrium output is exactly stable (no breathing).
+ * Frame-to-frame anchor memory (tram key → last chosen anchor slot). Owned by
+ * the CALLER (a ref on the map layer, one per points source) and passed back
+ * in on every push. Placement always prefers the nearest free slot, so a lone
+ * badge always sits home (slot 0, above its arrow); the memory adds
+ * HYSTERESIS on the way back — a slot CLOSER than the previous choice is
+ * taken only when it is free with BADGE_HOME_HYST_PX of extra air, so a pair
+ * of trams crawling apart can't flicker a plate between two sides at the
+ * exact overlap threshold, while dissolved crowds still re-settle to the
+ * default look within one push of having room.
  */
-export type BadgeDisplacementMemory = Map<string, { dx: number; dy: number }>;
-const BADGE_HOME_PULL = 0.75;
+export type BadgeAnchorMemory = Map<string, number>;
+
+/** Extra clearance required to move to a CLOSER slot than last push's. */
+export const BADGE_HOME_HYST_PX = 6;
+
+/**
+ * Anchor slots around the marker, ordered nearest-first: above (default),
+ * below, right, left, the four diagonals, then second/third stacked rows
+ * above/below for pileups (co-located trams fan into a tidy vertical stack —
+ * side slots can't help there because the wide plates overlap laterally). The
+ * badge is never sent far away on a leader line — if every slot is occupied
+ * it takes the least-overlapping one and accepts the overlap (everything
+ * stays visible, everything stays AT its tram).
+ */
+export const BADGE_ANCHOR_SLOTS = 12;
 
 /** One tram's badge in the declutter solve. */
 export interface BadgeCandidate {
@@ -415,189 +507,214 @@ export function badgeBoxPx(
 }
 
 /**
- * The declutter solve: deterministic pairwise separation in screen space.
+ * Box center of an anchor slot relative to the marker, style px (y-down).
+ * Slot 0 reproduces the layer style's default geometry exactly (plate floats
+ * FACE_GAP_PX×s above the arrow, face centered on it): its center IS
+ * badgeBoxPx's (centerOffX, centerOffY). All other slots keep the same
+ * clearances — vertical slots reuse the slot-0 air gap, side slots clear the
+ * marker obstacle box plus pad — so a chosen slot is always arrow-safe by
+ * construction.
+ */
+export function badgeAnchorCenterPx(
+  box: { halfW: number; halfH: number; centerOffX: number; centerOffY: number },
+  zoom: number,
+  slot: number,
+): { x: number; y: number } {
+  const gapY = FACE_GAP_PX * badgeIconSize(zoom);
+  const vy = gapY + box.halfH; // vertical ring distance (slot-0 geometry)
+  const sx = box.halfW + MARKER_OBSTACLE_HALF_PX + BADGE_PAD_PX; // side ring
+  switch (slot) {
+    case 0:
+      return { x: box.centerOffX, y: -vy }; // above (default home)
+    case 1:
+      return { x: box.centerOffX, y: vy }; // below
+    case 2:
+      return { x: sx, y: 0 }; // right
+    case 3:
+      return { x: -sx, y: 0 }; // left
+    case 4:
+      return { x: sx, y: -vy }; // top-right
+    case 5:
+      return { x: -sx, y: -vy }; // top-left
+    case 6:
+      return { x: sx, y: vy }; // bottom-right
+    case 7:
+      return { x: -sx, y: vy }; // bottom-left
+    case 8:
+      return { x: box.centerOffX, y: -(vy + 2 * box.halfH + BADGE_PAD_PX) }; // row 2 above
+    case 9:
+      return { x: box.centerOffX, y: vy + 2 * box.halfH + BADGE_PAD_PX }; // row 2 below
+    case 10:
+      return { x: box.centerOffX, y: -(vy + 2 * (2 * box.halfH + BADGE_PAD_PX)) }; // row 3 above
+    default:
+      return { x: box.centerOffX, y: vy + 2 * (2 * box.halfH + BADGE_PAD_PX) }; // row 3 below
+  }
+}
+
+/**
+ * The variable-anchor badge solve: every badge is glued to its own marker on
+ * one of BADGE_ANCHOR_SLOTS fixed slots around it — the layout question is
+ * only WHICH SIDE, never "how far away".
  *
- * Each candidate's badge box starts glued to its marker; overlapping pairs are
- * pushed apart along the axis of least overlap (Gauss-Seidel, a few sweeps —
- * n is the handful of visible band-2 trams, so O(n²) is trivial at the points
- * cadence). Pinned badges have infinite mass. EVERY tram's heading-teardrop
- * marker is additionally an immovable obstacle box (MARKER_OBSTACLE_HALF_PX),
- * so no plate ever covers any direction arrow. Ties (identical positions,
- * e.g. a depot) break by input order after a key sort, so the result is
- * stable frame to frame. Displacement is capped; leftovers may still overlap
- * at extreme pileups — accepted, everything stays visible.
+ * Greedy, deterministic: pinned badges (immovable, drawn by the map from the
+ * points FC) claim their default slot first, then candidates in key order
+ * take the nearest slot whose box collides with nothing placed so far —
+ * placed plates AND every tram's heading-teardrop obstacle box
+ * (MARKER_OBSTACLE_HALF_PX), so no plate ever covers any direction arrow.
+ * The anchor memory adds return-home hysteresis (see BadgeAnchorMemory): a
+ * slot closer than last push's needs BADGE_HOME_HYST_PX of extra air, so
+ * arrangements are stable push to push and plates glide home the moment a
+ * dissolved crowd leaves room — never parked on a side slot forever.
+ * If every slot is taken (extreme pileup) the least-overlapping slot wins and
+ * the residual overlap is accepted — everything stays visible, at its tram.
  *
- * Returns badge Point features at the DISPLACED anchors plus leader
- * LineStrings (marker → displaced anchor) for badges that moved; pinned
- * candidates emit nothing (see BadgeCandidate.pinned).
+ * Returns badge Point features AT their markers, with the chosen slot encoded
+ * as data-driven screen offsets (`off` icon units / `toff` text em); pinned
+ * candidates emit nothing (see BadgeCandidate.pinned). No leader lines — a
+ * badge is never far enough from its marker to need one.
  */
 export function declutterBadges(
   cands: BadgeCandidate[],
   zoom: number,
   midLatDeg: number,
-  memory?: BadgeDisplacementMemory,
+  memory?: BadgeAnchorMemory,
 ): GeoJSON.Feature[] {
   const features: GeoJSON.Feature[] = [];
   if (cands.length === 0) {
     memory?.clear();
     return features;
   }
-  const sorted = [...cands].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  // Pinned first (they claim their default slot as obstacles), then key order
+  // — deterministic, so identical input gives identical output every push.
+  const sorted = [...cands].sort((a, b) =>
+    a.pinned !== b.pinned ? (a.pinned ? -1 : 1) : a.key < b.key ? -1 : a.key > b.key ? 1 : 0,
+  );
 
   const mpp = metersPerStylePx(midLatDeg, zoom);
   const mPerDegLng = M_PER_DEG_LAT * Math.max(Math.cos(midLatDeg * DEG2RAD), 0.01);
   const n = sorted.length;
-  // Marker anchors projected to style px (y-down), box metrics, displacement.
+  // Marker anchors projected to style px (y-down, pitched-camera y scale).
   const ax = new Float64Array(n);
   const ay = new Float64Array(n);
-  const hw = new Float64Array(n);
-  const hh = new Float64Array(n);
-  const cx = new Float64Array(n); // current box center = anchor + offset + displacement
-  const cy = new Float64Array(n);
-  const dx = new Float64Array(n);
-  const dy = new Float64Array(n);
+  // Obstacle boxes accumulated as plates are placed: seeded with every tram's
+  // marker box, grown by each placed plate. Small n — plain arrays are fine.
+  const obCx: number[] = [];
+  const obCy: number[] = [];
+  const obHw: number[] = [];
+  const obHh: number[] = [];
   for (let i = 0; i < n; i++) {
     const c = sorted[i];
     ax[i] = (c.pos[0] * mPerDegLng) / mpp;
     // Screen-space estimate: north–south ground distances foreshorten under
     // the app's pitched camera while billboard badges keep their height.
     ay[i] = ((-c.pos[1] * M_PER_DEG_LAT) / mpp) * BADGE_PITCH_Y_SCALE;
-    const box = badgeBoxPx(c.line, zoom);
-    hw[i] = box.halfW;
-    hh[i] = box.halfH;
-    // Seed from the previous push's solution (pulled slightly toward home) so
-    // arrangements stay put frame to frame instead of re-deriving cold.
-    const prev = c.pinned ? undefined : memory?.get(c.key);
-    if (prev) {
-      dx[i] = prev.dx * BADGE_HOME_PULL;
-      dy[i] = prev.dy * BADGE_HOME_PULL;
-    }
-    cx[i] = ax[i] + box.centerOffX + dx[i];
-    cy[i] = ay[i] + box.centerOffY + dy[i];
+    obCx.push(ax[i]);
+    obCy.push(ay[i]);
+    obHw.push(MARKER_OBSTACLE_HALF_PX);
+    obHh.push(MARKER_OBSTACLE_HALF_PX);
   }
 
-  for (let iter = 0; iter < BADGE_SOLVER_ITERS; iter++) {
-    let moved = false;
-    for (let i = 0; i < n; i++) {
-      for (let j = i + 1; j < n; j++) {
-        const pinnedI = sorted[i].pinned;
-        const pinnedJ = sorted[j].pinned;
-        if (pinnedI && pinnedJ) continue;
-        const sepX = cx[j] - cx[i];
-        const sepY = cy[j] - cy[i];
-        const overX = hw[i] + hw[j] + BADGE_PAD_PX - Math.abs(sepX);
-        const overY = hh[i] + hh[j] + BADGE_PAD_PX - Math.abs(sepY);
-        if (overX <= 0 || overY <= 0) continue;
-        // Separate along the axis needing the smaller push. Exact ties (badges
-        // at the same point) resolve vertically by sort order — deterministic.
-        if (overX < overY) {
-          const sign = sepX > 0 ? 1 : sepX < 0 ? -1 : 1;
-          if (pinnedI) {
-            cx[j] += sign * overX;
-            dx[j] += sign * overX;
-          } else if (pinnedJ) {
-            cx[i] -= sign * overX;
-            dx[i] -= sign * overX;
-          } else {
-            const half = overX / 2;
-            cx[i] -= sign * half;
-            dx[i] -= sign * half;
-            cx[j] += sign * half;
-            dx[j] += sign * half;
-          }
-        } else {
-          const sign = sepY > 0 ? 1 : sepY < 0 ? -1 : 1;
-          if (pinnedI) {
-            cy[j] += sign * overY;
-            dy[j] += sign * overY;
-          } else if (pinnedJ) {
-            cy[i] -= sign * overY;
-            dy[i] -= sign * overY;
-          } else {
-            const half = overY / 2;
-            cy[i] -= sign * half;
-            dy[i] -= sign * half;
-            cy[j] += sign * half;
-            dy[j] += sign * half;
-          }
-        }
-        moved = true;
-      }
+  /**
+   * Total overlap area of a box against everything placed so far (0 = free).
+   * platePad applies to PLATE obstacles only (indices ≥ n — placed after the
+   * marker seeds): the return-home hysteresis must not test against marker
+   * boxes, whose clearance is fixed by slot geometry (slot 0 clears its own
+   * marker by construction but with less air than the hysteresis margin).
+   */
+  const overlapAt = (cx: number, cy: number, hw: number, hh: number, platePad: number): number => {
+    let total = 0;
+    for (let k = 0; k < obCx.length; k++) {
+      const pad = k < n ? BADGE_PAD_PX : platePad;
+      const ox = hw + obHw[k] + pad - Math.abs(cx - obCx[k]);
+      if (ox <= 0) continue;
+      const oy = hh + obHh[k] + pad - Math.abs(cy - obCy[k]);
+      if (oy <= 0) continue;
+      total += ox * oy;
     }
-    // Marker obstacles: no plate may cover ANY tram's direction arrow. The
-    // obstacle is static (it IS the tram's position) — the badge takes the
-    // whole push. Pinned plates stay put by definition (their geometry
-    // already clears their own marker; a neighbour's marker under a pinned
-    // plate is resolved by that neighbour's badge moving, not this one).
-    for (let i = 0; i < n; i++) {
-      if (sorted[i].pinned) continue;
-      for (let j = 0; j < n; j++) {
-        const sepX = cx[i] - ax[j];
-        const sepY = cy[i] - ay[j];
-        const overX = hw[i] + MARKER_OBSTACLE_HALF_PX + BADGE_PAD_PX - Math.abs(sepX);
-        const overY = hh[i] + MARKER_OBSTACLE_HALF_PX + BADGE_PAD_PX - Math.abs(sepY);
-        if (overX <= 0 || overY <= 0) continue;
-        if (overX < overY) {
-          const sign = sepX > 0 ? 1 : sepX < 0 ? -1 : 1;
-          cx[i] += sign * overX;
-          dx[i] += sign * overX;
-        } else {
-          // Vertical tie (plate pushed straight onto a marker): resolve UP —
-          // above the arrow is the plate's natural home.
-          const sign = sepY > 0 ? 1 : -1;
-          cy[i] += sign * overY;
-          dy[i] += sign * overY;
-        }
-        moved = true;
-      }
-    }
-    // Cap runaway displacement (extreme pileups) each sweep.
-    for (let i = 0; i < n; i++) {
-      const mag = Math.hypot(dx[i], dy[i]);
-      if (mag > BADGE_MAX_DISPLACE_PX) {
-        const k = BADGE_MAX_DISPLACE_PX / mag;
-        cx[i] -= dx[i] * (1 - k);
-        cy[i] -= dy[i] * (1 - k);
-        dx[i] *= k;
-        dy[i] *= k;
-      }
-    }
-    if (!moved) break;
-  }
+    return total;
+  };
 
-  memory?.clear();
+  /** New slot choices, written back to the memory at the end of the solve
+   *  (reads above happen against the PREVIOUS push's map). */
+  const nextMemory: [string, number][] = [];
   for (let i = 0; i < n; i++) {
     const c = sorted[i];
-    if (c.pinned) continue; // drawn by the points-source pinned layer
-    let mag = Math.hypot(dx[i], dy[i]);
-    if (mag < BADGE_SNAP_PX) {
-      dx[i] = 0;
-      dy[i] = 0;
-      mag = 0;
+    const box = badgeBoxPx(c.line, zoom);
+    if (c.pinned) {
+      // Drawn by the points-source pinned layer at the default slot; occupy
+      // its box so neighbours pick other sides.
+      const p = badgeAnchorCenterPx(box, zoom, 0);
+      obCx.push(ax[i] + p.x);
+      obCy.push(ay[i] + p.y);
+      obHw.push(box.halfW);
+      obHh.push(box.halfH);
+      continue;
     }
-    if (mag > 0) memory?.set(c.key, { dx: dx[i], dy: dy[i] });
-    const anchor: [number, number] =
-      mag === 0
-        ? c.pos
-        : [
-            c.pos[0] + (dx[i] * mpp) / mPerDegLng,
-            // Screen-y displacement back to latitude: undo the pitch scale.
-            c.pos[1] - (dy[i] * mpp) / (M_PER_DEG_LAT * BADGE_PITCH_Y_SCALE),
-          ];
+    // Nearest free slot wins, with return-home hysteresis: moving to a slot
+    // CLOSER than last push's requires extra clearance (BADGE_HOME_HYST_PX),
+    // so plates can't flicker between sides at the exact overlap threshold —
+    // but a lone badge always ends up back on the default slot above its
+    // arrow within one push of having room.
+    const prevSlot = memory?.get(c.key);
+    let pick = -1;
+    let best = 0;
+    let bestOverlap = Number.POSITIVE_INFINITY;
+    for (let slot = 0; slot < BADGE_ANCHOR_SLOTS; slot++) {
+      const p = badgeAnchorCenterPx(box, zoom, slot);
+      const pad =
+        prevSlot !== undefined && slot < prevSlot
+          ? BADGE_PAD_PX + BADGE_HOME_HYST_PX
+          : BADGE_PAD_PX;
+      const over = overlapAt(ax[i] + p.x, ay[i] + p.y, box.halfW, box.halfH, pad);
+      if (over === 0) {
+        pick = slot;
+        break;
+      }
+      if (over < bestOverlap) {
+        bestOverlap = over;
+        best = slot;
+      }
+    }
+    if (pick < 0) pick = best; // pileup: least overlap, accepted
+    const center = badgeAnchorCenterPx(box, zoom, pick);
+    obCx.push(ax[i] + center.x);
+    obCy.push(ay[i] + center.y);
+    obHw.push(box.halfW);
+    obHh.push(box.halfH);
+    nextMemory.push([c.key, pick]);
+
+    // Feature geometry stays AT THE MARKER; the slot is expressed as
+    // data-driven icon/text offsets in PURE SCREEN px (`off` in icon-offset
+    // units ×iconSize, `toff` in text em). Converting the slot displacement
+    // into world lng/lat (the old approach) baked the cos-55° pitch estimate
+    // into the geometry — at any other camera pitch the plate visibly
+    // detached from its arrow (2D was worst, ×1.74). Screen offsets are
+    // pixel-exact at every pitch: the plate is glued to its marker.
+    const s = badgeIconSize(zoom);
+    const dxPx = center.x - box.centerOffX;
+    const dyPx = center.y - box.centerOffY;
+    const textSize = (FACE_TEXT_MAX_SIZE / FACE_MAX_ICON_SIZE) * s;
+    const r2 = (v: number): number => Math.round(v * 100) / 100;
     features.push({
       type: 'Feature',
       id: `${c.key}#b`,
-      geometry: { type: 'Point', coordinates: anchor },
-      properties: { key: c.key, line: c.line, modelId: c.modelId, displaced: mag > 0 ? 1 : 0 },
+      geometry: { type: 'Point', coordinates: c.pos },
+      properties: {
+        key: c.key,
+        line: c.line,
+        modelId: c.modelId,
+        displaced: pick === 0 ? 0 : 1,
+        off: [r2(dxPx / s), r2(-FACE_GAP_PX + dyPx / s)],
+        toff: [
+          r2(FACE_TEXT_OFFSET_X_EM + dxPx / textSize),
+          r2(FACE_TEXT_OFFSET_Y_EM + dyPx / textSize),
+        ],
+      },
     });
-    if (mag >= BADGE_LEADER_MIN_PX) {
-      features.push({
-        type: 'Feature',
-        id: `${c.key}#l`,
-        geometry: { type: 'LineString', coordinates: [c.pos, anchor] },
-        properties: { key: c.key, line: c.line, kind: 'leader' },
-      });
-    }
+  }
+  if (memory) {
+    memory.clear();
+    for (const [key, slot] of nextMemory) memory.set(key, slot);
   }
   return features;
 }
@@ -655,6 +772,16 @@ export function buildFrame(
       }
     }
 
+    // Render safety: never let a non-finite position/bearing reach a push —
+    // it would poison the whole ShapeSource (see the guard block above).
+    if (!isFinitePos(anchor) || !Number.isFinite(bearing)) {
+      warnInvalidOnce(state.key, anchor, bearing);
+      anchor = state.observedPosition;
+      bearing = Number.isFinite(state.observedBearing) ? state.observedBearing : 0;
+      sHead = Number.NaN; // no trustworthy along-shape head → no 3D body this frame
+      if (!isFinitePos(anchor)) continue; // beyond saving — drop for this frame
+    }
+
     // A tram without a loaded shape renders as a plain dot at its RAW GPS
     // position: no perpendicular track offset (there is no reliable bearing to
     // offset by) and no 3D body below. Offsetting/rotating a geometry-less tram
@@ -699,9 +826,15 @@ export function buildFrame(
     }
 
     // Raw-fix overlay for the followed/selected tram — independent of the
-    // section zoom band and viewport cull.
-    if (isOverlayTarget) {
-      fixOverlay = buildFixOverlay(state, geometry, sHead, anchor);
+    // section zoom band and viewport cull. Skipped when the raw fix itself is
+    // broken (render safety: never push non-finite coordinates).
+    if (isOverlayTarget && isFinitePos(state.observedPosition)) {
+      fixOverlay = buildFixOverlay(
+        state,
+        Number.isFinite(sHead) ? geometry : undefined,
+        sHead,
+        anchor,
+      );
     }
 
     // A geometry-less tram draws NO 3D sections — only the dot above. Rendering
@@ -715,13 +848,17 @@ export function buildFrame(
     if (!sectionsEnabled || !inBbox(anchor, cullBbox)) continue;
 
     // geometry is defined here: geometryless was skipped above, and hasGeometry
-    // implies a live sim whose shape getGeometry() returns.
-    if (!geometry) continue;
+    // implies a live sim whose shape getGeometry() returns. A NaN sHead means
+    // the along-shape head was unusable this frame (render safety above).
+    if (!geometry || !Number.isFinite(sHead)) continue;
     const spec = opts.getSpec?.(state.key) ?? state.model;
     const coupled = opts.coupledPairFn(state.key);
-    // Doors open while dwelling at a stop (sections band only — this loop):
-    // sections with an authored openModelKey render it, closing on departure.
-    const dwelling = state.phase === 'dwell';
+    // Doors open ONLY while standing at a platform (dwell phase AND v≈0 AND
+    // the rendered head near a stop — see doorsOpen): sections with an
+    // authored openModelKey render it, closing on departure. The near-stop
+    // check keys off the RENDERED head, so live mode (projected observation)
+    // can't show open doors mid-segment while the smooth sim dwells.
+    const dwelling = doorsOpen(state, geometry, sHead);
     sectionsAlongShape(state, spec, geometry, sHead, coupled, dwelling, sections);
   }
 

@@ -596,13 +596,17 @@ describe("'live' projected-observation anchoring", () => {
   });
 });
 
-describe('doors open while dwelling (openModelKey)', () => {
+describe('doors open only while STANDING AT A PLATFORM (openModelKey)', () => {
+  // A stop at 300 m — the dwell position of the tests below.
   const geo = makeGeometry(
     [
       [0, 0],
       [1000, 0],
     ],
-    [],
+    [
+      { atM: 300, arrivalMs: 0 },
+      { atM: 1000, arrivalMs: 0, isTerminal: true },
+    ],
   );
   /** 3-section spec with doors-open variants authored for sections 0 and 2. */
   function specWithDoors() {
@@ -611,9 +615,11 @@ describe('doors open while dwelling (openModelKey)', () => {
     spec.sections[2] = { ...spec.sections[2], openModelKey: '15t-c-open' };
     return spec;
   }
+  /** Standing at the 300 m stop, dwelling — the doors-open condition. */
+  const atStop = { model: specWithDoors(), phase: 'dwell' as const, simSpeedKmh: 0 };
 
-  it('a dwelling tram emits open keys where authored, normal keys otherwise', () => {
-    const state = makeState('9201', geo, 300, { model: specWithDoors(), phase: 'dwell' });
+  it('a tram dwelling at the platform emits open keys where authored, normal keys otherwise', () => {
+    const state = makeState('9201', geo, 300, atStop);
     const frame = buildFrame([state], WIDE, opts(geo));
     expect(frame.sections.features.map((f) => f.properties.modelKey)).toEqual([
       '15t-a-open',
@@ -624,7 +630,11 @@ describe('doors open while dwelling (openModelKey)', () => {
 
   it('doors close (normal keys) outside the dwell phase', () => {
     for (const phase of ['cruise', 'terminal', 'unknown'] as const) {
-      const state = makeState('9201', geo, 300, { model: specWithDoors(), phase });
+      const state = makeState('9201', geo, 300, {
+        model: specWithDoors(),
+        phase,
+        simSpeedKmh: 0,
+      });
       const frame = buildFrame([state], WIDE, opts(geo));
       expect(frame.sections.features.map((f) => f.properties.modelKey)).toEqual([
         '15t-a',
@@ -634,10 +644,64 @@ describe('doors open while dwelling (openModelKey)', () => {
     }
   });
 
+  it('doors stay CLOSED between stops even if the phase claims dwell', () => {
+    // Rendered head 150 m from the nearest stop: a dwell phase mid-segment
+    // (engine glitch / live-mode divergence) must not open doors on the move.
+    const state = makeState('9201', geo, 450, { ...atStop });
+    const frame = buildFrame([state], WIDE, opts(geo));
+    expect(frame.sections.features.map((f) => f.properties.modelKey)).toEqual([
+      '15t-a',
+      '15t-b',
+      '15t-c',
+    ]);
+  });
+
+  it('doors stay CLOSED while moving, even in the dwell phase at a stop', () => {
+    const state = makeState('9201', geo, 300, { ...atStop, simSpeedKmh: 15 });
+    const frame = buildFrame([state], WIDE, opts(geo));
+    expect(frame.sections.features.map((f) => f.properties.modelKey)).toEqual([
+      '15t-a',
+      '15t-b',
+      '15t-c',
+    ]);
+  });
+
+  it('live mode: doors follow the RENDERED (projected) head, not the smooth sim', () => {
+    // Smooth sim dwells at the 300 m stop, but the projected observation (what
+    // live mode RENDERS) is still 120 m short of it → doors must stay closed.
+    const enRoute = makeState('9201', geo, 300, {
+      ...atStop,
+      projectedObservedDistM: 180,
+      snapshot: makeSnapshot({ key: '9201', shapeDistM: 180 }),
+    });
+    const closed = buildFrame([enRoute], WIDE, opts(geo, { positionMode: 'live' }));
+    expect(closed.sections.features.map((f) => f.properties.modelKey)).toEqual([
+      '15t-a',
+      '15t-b',
+      '15t-c',
+    ]);
+    // Projection reached the platform while the sim still dwells → doors open.
+    const arrived = makeState('9201', geo, 300, {
+      ...atStop,
+      projectedObservedDistM: 300,
+      snapshot: makeSnapshot({ key: '9201', shapeDistM: 300 }),
+    });
+    const open = buildFrame([arrived], WIDE, opts(geo, { positionMode: 'live' }));
+    expect(open.sections.features.map((f) => f.properties.modelKey)).toEqual([
+      '15t-a-open',
+      '15t-b',
+      '15t-c-open',
+    ]);
+  });
+
   it('the coupled trailer opens its doors too', () => {
     const spec = makeSpec1();
     spec.sections[0] = { ...spec.sections[0], openModelKey: 't3rp-open' };
-    const state = makeState('8123', geo, 300, { model: spec, phase: 'dwell' });
+    const state = makeState('8123', geo, 300, {
+      model: spec,
+      phase: 'dwell',
+      simSpeedKmh: 0,
+    });
     const frame = buildFrame([state], WIDE, opts(geo, { coupledPairFn: () => true }));
     expect(frame.sections.features.map((f) => f.properties.modelKey)).toEqual([
       't3rp-open',
@@ -792,5 +856,120 @@ describe('skipPoints (low-cadence points push)', () => {
     const frame = buildFrame([makeState('9201', geo, 300)], WIDE, opts(geo, { skipPoints: true }));
     expect(frame.points.features).toHaveLength(0);
     expect(frame.sections.features.length).toBeGreaterThan(0);
+  });
+});
+describe('all bands share ONE rendered anchor (dots = badges = sections)', () => {
+  const geo = makeGeometry(
+    [
+      [0, 0],
+      [1000, 0],
+    ],
+    [],
+  );
+
+  /** Head position implied by the head section's center (center + halfLength). */
+  function headFromSections(frame: ReturnType<typeof buildFrame>, key: string): LngLat {
+    const head = frame.sections.features.find((f) => f.id === `${key}#0`)!;
+    const pos = head.geometry.coordinates as LngLat;
+    const bearing = head.properties.bearing as number;
+    // Section center sits halfLength behind the head along the bearing.
+    return destinationPoint(pos, bearing, 5); // makeSpec3 sections are 10 m
+  }
+
+  it('smooth mode: the point marker, badge candidate and section head all derive from the sim position', () => {
+    // z15.0 is inside BOTH the sections band (>=14.8) and the badge skirt
+    // (<=15.2) — every band renders, so their anchors are directly comparable.
+    const vp = viewportM(-2000, -2000, 2000, 2000, 15.0);
+    const frame = buildFrame([makeState('9201', geo, 300)], vp, opts(geo));
+    const marker = frame.points.features[0].geometry.coordinates as LngLat;
+    const badge = frame.badges!.features[0].geometry as GeoJSON.Point;
+    // Lone badge: exactly on the marker.
+    expect(haversineM(badge.coordinates as LngLat, marker)).toBeLessThan(1e-6);
+    // Section head reconstructs to the SAME rendered anchor (± section math).
+    expect(haversineM(headFromSections(frame, '9201'), marker)).toBeLessThan(1);
+  });
+
+  it('live mode: every band anchors to the PROJECTED observation, not the sim', () => {
+    const vp = viewportM(-2000, -2000, 2000, 2000, 15.0);
+    // Sim at 300 m; projection (what live mode renders) at 500 m.
+    const state = makeState('9201', geo, 300, { projectedObservedDistM: 500 });
+    const frame = buildFrame([state], vp, opts(geo, { positionMode: 'live' }));
+    const marker = frame.points.features[0].geometry.coordinates as LngLat;
+    const projected = rightOf(metersToCoord(ORIGIN, 500, 0), 90);
+    expect(haversineM(marker, projected)).toBeLessThan(0.5);
+    // Badge glued to the same projected marker.
+    const badge = frame.badges!.features[0].geometry as GeoJSON.Point;
+    expect(haversineM(badge.coordinates as LngLat, marker)).toBeLessThan(1e-6);
+    // Section head at the same projected anchor.
+    expect(haversineM(headFromSections(frame, '9201'), marker)).toBeLessThan(1);
+  });
+});
+
+describe('render safety: non-finite positions never poison a push', () => {
+  const geo = makeGeometry(
+    [
+      [0, 0],
+      [1000, 0],
+    ],
+    [],
+  );
+
+  function expectAllFinite(frame: ReturnType<typeof buildFrame>) {
+    const fcs = [frame.points, frame.sections, frame.badges!, frame.fixOverlay];
+    for (const fc of fcs) {
+      for (const f of fc.features) {
+        const coords =
+          f.geometry.type === 'Point'
+            ? [(f.geometry as GeoJSON.Point).coordinates]
+            : ((f.geometry as GeoJSON.LineString).coordinates as [number, number][]);
+        for (const c of coords) {
+          expect(Number.isFinite(c[0])).toBe(true);
+          expect(Number.isFinite(c[1])).toBe(true);
+        }
+      }
+    }
+  }
+
+  it('a NaN sim position falls back to the raw fix; the healthy fleet is untouched', () => {
+    // One NaN coordinate stringifies to null and makes the NATIVE updateShape
+    // reject the WHOLE FeatureCollection — the far-zoom "frozen arrow" bug.
+    const vp = viewportM(-2000, -2000, 2000, 2000, 15.0);
+    const broken = makeState('6666', geo, 300, {
+      position: [Number.NaN, Number.NaN],
+      bearing: Number.NaN,
+      snapshot: makeSnapshot({ key: '6666', shapeDistM: 300 }),
+    });
+    const healthy = makeState('9201', geo, 500, {
+      snapshot: makeSnapshot({ key: '9201', shapeDistM: 500 }),
+    });
+    const frame = buildFrame([broken, healthy], vp, opts(geo, { selectedKey: '6666' }));
+    // The broken tram degrades to its (finite) raw fix instead of vanishing…
+    const brokenPt = frame.points.features.find((f) => f.id === '6666')!;
+    // (rendered with the usual right-hand track offset off its observed bearing)
+    expect(haversineM(brokenPt.geometry.coordinates as LngLat, metersToCoord(ORIGIN, 300, 0))).toBeLessThan(
+      2,
+    );
+    // …draws no 3D body this frame (its along-shape head is untrusted)…
+    expect(frame.sections.features.some((f) => f.properties.key === '6666')).toBe(false);
+    // …and the healthy tram still renders fully.
+    expect(frame.points.features.some((f) => f.id === '9201')).toBe(true);
+    expect(frame.sections.features.some((f) => f.properties.key === '9201')).toBe(true);
+    expectAllFinite(frame);
+  });
+
+  it('a tram broken beyond saving (raw fix NaN too) is dropped, not pushed', () => {
+    const vp = viewportM(-2000, -2000, 2000, 2000, 15.0);
+    const broken = makeState('6666', geo, 300, {
+      position: [Number.NaN, Number.NaN],
+      bearing: Number.NaN,
+      observedPosition: [Number.NaN, Number.NaN],
+      snapshot: makeSnapshot({ key: '6666', shapeDistM: 300 }),
+    });
+    const healthy = makeState('9201', geo, 500, {
+      snapshot: makeSnapshot({ key: '9201', shapeDistM: 500 }),
+    });
+    const frame = buildFrame([broken, healthy], vp, opts(geo));
+    expect(frame.points.features.map((f) => f.id)).toEqual(['9201']);
+    expectAllFinite(frame);
   });
 });

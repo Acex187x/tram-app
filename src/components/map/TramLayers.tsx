@@ -6,19 +6,19 @@
 // plus transparent hit-test circles on BOTH sources (tap anywhere on a tram
 // body) and a gold selection halo.
 //
-// Badge declutter (band 2): overlapping badges are PUSHED APART, never hidden.
-// buildFrame runs a screen-space separation solve over the visible band-2
-// trams (featureBuilder.declutterBadges, at the points cadence — no extra
-// timers, no per-frame React) and emits a dedicated badges FC: face-badge
-// anchors at their DISPLACED positions plus thin leader LineStrings from each
-// displaced badge back to its true marker (POI-label / flight-tracker style).
-// The heading teardrop marker always stays at the TRUE position on the points
-// source, so displacement never lies about where the tram is. That FC feeds
-// the separate `trams-badges` ShapeSource here (leader LineLayer under the
-// badge SymbolLayer, allowOverlap — the solve already resolved collisions).
-// Selected/followed/favorite trams are immovable in the solve and are NOT in
-// the badges FC — they render from the points FC on the pinned layer, always
-// visible, always exactly at their tram, drawn on top.
+// Badge layout (band 2): overlapping badges pick DIFFERENT SIDES of their
+// marker, never hide and never fly away on a leader line. buildFrame runs a
+// variable-anchor solve over the visible band-2 trams
+// (featureBuilder.declutterBadges, at the points cadence — no extra timers,
+// no per-frame React): each plate takes the nearest free slot around its own
+// arrow (above/below/beside/diagonals, plus a second row for pileups) and
+// remembers its side push to push. The heading teardrop marker always stays
+// at the TRUE position on the points source. The badges FC feeds the separate
+// `trams-badges` ShapeSource here (allowOverlap — the solve already resolved
+// collisions). Selected/followed/favorite trams hold the default above-slot
+// as immovable obstacles and are NOT in the badges FC — they render from the
+// points FC on the pinned layer, always visible, exactly at their tram, on
+// top.
 //
 // Sprites (teardrops + fav star from MAP_ICON_ASSETS, one face PNG per icon
 // pack × model from ICON_PACKS[..].sprites) are loaded through expo-asset
@@ -83,9 +83,10 @@ import {
   FACE_GAP_PX,
   FACE_MAX_ICON_SIZE,
   FACE_MIN_RATIO,
-  FACE_NATURAL_PT,
   FACE_TEXT_MAX_SIZE,
-  type BadgeDisplacementMemory,
+  FACE_TEXT_OFFSET_X_EM,
+  FACE_TEXT_OFFSET_Y_EM,
+  type BadgeAnchorMemory,
 } from '@/lib/render/featureBuilder';
 import type { PlannerItinerary, Viewport } from '@/lib/types';
 import { useFavoritesStore } from '@/stores/favorites';
@@ -199,12 +200,9 @@ function faceIcon(pack: IconPackId): string {
  * because the declutter solve models each badge's screen box from the SAME
  * numbers this style renders with.
  */
-/** Line number: left-anchored 3 pt right of the face edge, centered on it. */
-const FACE_TEXT_OFFSET_X_EM =
-  ((FACE_NATURAL_PT * FACE_MAX_ICON_SIZE) / 2 + 3) / FACE_TEXT_MAX_SIZE;
-const FACE_TEXT_OFFSET_Y_EM =
-  -(FACE_GAP_PX * FACE_MAX_ICON_SIZE + (FACE_NATURAL_PT * FACE_MAX_ICON_SIZE) / 2) /
-  FACE_TEXT_MAX_SIZE;
+// Default line-number text offsets (FACE_TEXT_OFFSET_*_EM) live in
+// featureBuilder next to the other FACE_* metrics: the anchor solve emits
+// data-driven offsets built from the SAME constants.
 
 /** Shared crossfade for every band-2 (badge) layer. */
 const BADGE_BAND_OPACITY = [
@@ -224,18 +222,25 @@ const BADGE_BAND_OPACITY = [
 type BadgeSymbolStyle = NonNullable<ComponentProps<typeof SymbolLayer>['style']>;
 
 /**
- * Shared face-badge style for both band-2 badge layers (the decluttered bulk
- * on the `trams-badges` source and the pinned selected/followed/favorite
+ * Shared face-badge style for both band-2 badge layers (the anchor-solved
+ * bulk on the `trams-badges` source and the pinned selected/followed/favorite
  * layer on the points source). Overlap is ALWAYS allowed: the bulk layer's
- * anchors were already pushed apart by the declutter solve in buildFrame
- * (badges adapt, they never hide), and pinned badges must never be hidden by
- * anything. Everything else is style expressions over props both FCs carry.
+ * plates already sit on collision-free anchor slots picked by the solve in
+ * buildFrame (badges adapt, they never hide), and pinned badges must never be
+ * hidden by anything.
+ *
+ * The BULK layer takes its icon/text offsets from the per-feature `off` /
+ * `toff` props (the anchor slot, in pure screen units — pixel-exact at any
+ * camera pitch); the PINNED layer renders from the points FC (no such props)
+ * with the static default-slot offsets built from the same constants.
  */
-function faceBadgeStyle(pack: IconPackId): BadgeSymbolStyle {
+function faceBadgeStyle(pack: IconPackId, dataDrivenOffsets: boolean): BadgeSymbolStyle {
   return {
     iconImage: faceIcon(pack),
     iconAnchor: 'bottom',
-    iconOffset: [0, -FACE_GAP_PX],
+    iconOffset: dataDrivenOffsets
+      ? (['get', 'off'] as unknown as number[])
+      : [0, -FACE_GAP_PX],
     iconSize: [
       'interpolate',
       ['linear'],
@@ -263,7 +268,9 @@ function faceBadgeStyle(pack: IconPackId): BadgeSymbolStyle {
     textHaloColor: '#FFFFFF',
     textHaloWidth: 1.6,
     textAnchor: 'left',
-    textOffset: [FACE_TEXT_OFFSET_X_EM, FACE_TEXT_OFFSET_Y_EM],
+    textOffset: dataDrivenOffsets
+      ? (['get', 'toff'] as unknown as number[])
+      : [FACE_TEXT_OFFSET_X_EM, FACE_TEXT_OFFSET_Y_EM],
     textOpacity: BADGE_BAND_OPACITY,
     iconAllowOverlap: true,
     iconIgnorePlacement: true,
@@ -271,28 +278,6 @@ function faceBadgeStyle(pack: IconPackId): BadgeSymbolStyle {
     textIgnorePlacement: true,
   };
 }
-
-/**
- * Leader lines: thin line-colored connector from a DISPLACED badge's anchor
- * back to its tram's true marker (drawn under the badge). Same band crossfade
- * as the badges, at reduced peak opacity so leaders read as annotation, not
- * route. (Stops are pre-multiplied — a zoom interpolate may not be nested
- * inside an arithmetic expression.)
- */
-const LEADER_PEAK_OPACITY = 0.55;
-const LEADER_OPACITY = [
-  'interpolate',
-  ['linear'],
-  ['zoom'],
-  BAND_DOTS_TO_BADGES - BAND_FADE,
-  0,
-  BAND_DOTS_TO_BADGES + BAND_FADE,
-  LEADER_PEAK_OPACITY,
-  BAND_BADGES_TO_MODELS,
-  LEADER_PEAK_OPACITY,
-  BAND_BADGES_TO_MODELS + BAND_FADE,
-  0,
-] as unknown as number;
 
 /**
  * Map icon sprites resolved through expo-asset (same Fabric-safe localUri
@@ -372,8 +357,8 @@ export function TramLayers({
   const sectionsFedRef = useRef(false);
   const sectionsEmptyRef = useRef(true);
   const badgesEmptyRef = useRef(true);
-  /** Push-to-push badge displacement memory — keeps stacks from re-shuffling. */
-  const badgeMemoryRef = useRef<BadgeDisplacementMemory>(new Map());
+  /** Push-to-push badge anchor-slot memory — keeps stacks from re-shuffling. */
+  const badgeMemoryRef = useRef<BadgeAnchorMemory>(new Map());
   const fixEmptyRef = useRef(true);
   const lastPointsPushMsRef = useRef(0);
   /** Next follow-camera evaluation is skipped until this timestamp. */
@@ -838,6 +823,7 @@ export function TramLayers({
           iconPitchAlignment: 'map',
           iconAllowOverlap: true,
           iconIgnorePlacement: true,
+          // MARKER_OBSTACLE_HALF_PX models this size — change both together.
           iconSize: 0.6,
           iconOpacity: BADGE_BAND_OPACITY,
         }}
@@ -858,7 +844,7 @@ export function TramLayers({
         ]}
         minZoomLevel={BAND_DOTS_TO_BADGES - BAND_FADE}
         maxZoomLevel={BAND_BADGES_TO_MODELS + BAND_FADE + 0.1}
-        style={faceBadgeStyle(iconPack)}
+        style={faceBadgeStyle(iconPack, false)}
       />,
       // Band 2: gold star pinned to favorite trams' face badges (top-right).
       <SymbolLayer
@@ -917,42 +903,25 @@ export function TramLayers({
     />,
   );
 
-  // Declutter source layers (band 2, bulk fleet): leader lines under the
-  // displaced face badges. Mounted BEFORE the points source, so the true-
-  // position markers, the pinned badges and the fav star all draw over the
-  // decluttered crowd. Plain element array, no holes (spike rule); the badge
-  // symbol layer joins only once the face sprites are registered.
-  const badgeLayers: ReactElement[] = [
-    <LineLayer
-      key="tram-badge-leaders"
-      id="tram-badge-leaders"
-      slot="top"
-      filter={['==', ['get', 'kind'], 'leader']}
-      minZoomLevel={BAND_DOTS_TO_BADGES - BAND_FADE}
-      maxZoomLevel={BAND_BADGES_TO_MODELS + BAND_FADE + 0.1}
-      style={{
-        lineColor: LINE_COLOR,
-        lineWidth: 1.2,
-        lineOpacity: LEADER_OPACITY,
-        lineCap: 'round',
-      }}
-    />,
-  ];
+  // Badge source layers (band 2, bulk fleet). Mounted BEFORE the points
+  // source, so the true-position markers, the pinned badges and the fav star
+  // all draw over the crowd. Plain element array, no holes (spike rule); the
+  // badge symbol layer joins only once the face sprites are registered. No
+  // leader lines — the anchor solve keeps every plate hugging its own arrow.
+  const badgeLayers: ReactElement[] = [];
   if (iconImages != null) {
     badgeLayers.push(
-      // Band 2: the DECLUTTERED bulk-fleet face badges, at anchors the solve
-      // in buildFrame pushed apart — overlap is allowed because it no longer
-      // happens; a badge is never hidden. Its tram's true position stays
-      // marked by the teardrop on the points source (leader connects the two
-      // when displaced).
+      // Band 2: the bulk-fleet face badges at the anchor slots the solve in
+      // buildFrame picked (each plate on a free side of its own arrow) —
+      // overlap is allowed because it no longer happens; a badge is never
+      // hidden and never far from the teardrop that marks its true position.
       <SymbolLayer
         key="tram-badges"
         id="tram-badges"
         slot="top"
-        filter={['==', ['geometry-type'], 'Point']}
         minZoomLevel={BAND_DOTS_TO_BADGES - BAND_FADE}
         maxZoomLevel={BAND_BADGES_TO_MODELS + BAND_FADE + 0.1}
-        style={faceBadgeStyle(iconPack)}
+        style={faceBadgeStyle(iconPack, true)}
       />,
     );
   }

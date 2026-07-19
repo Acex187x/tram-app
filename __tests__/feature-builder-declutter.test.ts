@@ -1,9 +1,12 @@
 /// <reference types="jest" />
 
-// Band-2 badge declutter: overlapping face badges are pushed APART (never
-// hidden) by a screen-space separation solve in buildFrame, with leader lines
-// from a displaced badge back to its true marker. Pinned (selected/followed/
-// favorite) badges are immovable obstacles and are never emitted/displaced.
+// Band-2 badge layout: overlapping face badges pick DIFFERENT ANCHOR SLOTS
+// around their own marker (above/below/beside/diagonals + stacked rows for
+// pileups) — never hidden, never displaced far away, and NO leader lines.
+// Every badge feature sits AT its marker; the chosen slot ships as data-driven
+// screen offsets (`off` icon units / `toff` text em), so the plate stays glued
+// to its arrow at any camera pitch. Pinned (selected/followed/favorite) badges
+// hold the default above-slot as immovable obstacles and are never emitted.
 // The tram MARKER (points FC) always stays at the true position.
 
 import {
@@ -13,11 +16,12 @@ import {
 } from '@/components/map/mapStyle';
 import { bearingAt, haversineM, pointAt } from '@/lib/geo/polyline';
 import {
-  BADGE_LEADER_MIN_PX,
-  BADGE_MAX_DISPLACE_PX,
+  BADGE_ANCHOR_SLOTS,
   BADGE_MAX_ZOOM,
   BADGE_MIN_ZOOM,
+  BADGE_PAD_PX,
   BADGE_PITCH_Y_SCALE,
+  badgeAnchorCenterPx,
   badgeBoxPx,
   badgeIconSize,
   buildFrame,
@@ -27,8 +31,8 @@ import {
   FACE_MIN_RATIO,
   MARKER_OBSTACLE_HALF_PX,
   metersPerStylePx,
+  type BadgeAnchorMemory,
   type BadgeCandidate,
-  type BadgeDisplacementMemory,
   type BuildFrameOptions,
 } from '@/lib/render/featureBuilder';
 import type { RouteGeometry, TramPublicState, Viewport } from '@/lib/types';
@@ -95,12 +99,14 @@ const geo = makeGeometry(
 );
 
 type Pt = [number, number];
+type BadgeFeature = GeoJSON.Feature<GeoJSON.Point>;
 
-function badgePoints(frame: ReturnType<typeof buildFrame>) {
-  return (frame.badges?.features ?? []).filter((f) => f.geometry.type === 'Point');
-}
-function leaders(frame: ReturnType<typeof buildFrame>) {
-  return (frame.badges?.features ?? []).filter((f) => f.geometry.type === 'LineString');
+const DEFAULT_OFF: Pt = [0, -FACE_GAP_PX];
+
+function badgePoints(frame: ReturnType<typeof buildFrame>): BadgeFeature[] {
+  return (frame.badges?.features ?? []).filter(
+    (f) => f.geometry.type === 'Point',
+  ) as BadgeFeature[];
 }
 
 /**
@@ -115,29 +121,55 @@ function toPx(p: Pt, zoom: number): Pt {
   ];
 }
 
-/** Assert a badge box (at its displaced anchor) clears a marker's obstacle box. */
-function expectClearsMarker(badgeAnchor: Pt, line: string, marker: Pt) {
-  const a = toPx(badgeAnchor, ZOOM);
+/**
+ * Rendered plate BOX center in solver screen px, reconstructed exactly the way
+ * the symbol style renders it: icon bottom-center at marker + off×iconSize,
+ * box center shifted by the seated line number (centerOffX) and half the face.
+ */
+function plateCenterPx(f: BadgeFeature): Pt {
+  const m = toPx(f.geometry.coordinates as Pt, ZOOM);
+  const s = badgeIconSize(ZOOM);
+  const off = (f.properties?.off ?? DEFAULT_OFF) as Pt;
+  const box = badgeBoxPx(f.properties?.line as string, ZOOM);
+  return [m[0] + off[0] * s + box.centerOffX, m[1] + off[1] * s - box.halfH];
+}
+
+/** Assert a badge's plate box clears a marker's obstacle box. */
+function expectClearsMarker(badge: BadgeFeature, marker: Pt) {
+  const c = plateCenterPx(badge);
   const m = toPx(marker, ZOOM);
-  const box = badgeBoxPx(line, ZOOM);
-  const dx = Math.abs(a[0] + box.centerOffX - m[0]);
-  const dy = Math.abs(a[1] + box.centerOffY - m[1]);
+  const box = badgeBoxPx(badge.properties?.line as string, ZOOM);
+  const dx = Math.abs(c[0] - m[0]);
+  const dy = Math.abs(c[1] - m[1]);
   const clearX = dx >= box.halfW + MARKER_OBSTACLE_HALF_PX - 0.5;
   const clearY = dy >= box.halfH + MARKER_OBSTACLE_HALF_PX - 0.5;
   expect(clearX || clearY).toBe(true);
 }
 
-/** Assert two badge boxes (anchored at displaced anchors) do not overlap. */
-function expectBoxesDisjoint(aAnchor: Pt, aLine: string, bAnchor: Pt, bLine: string) {
-  const a = toPx(aAnchor, ZOOM);
-  const b = toPx(bAnchor, ZOOM);
-  const boxA = badgeBoxPx(aLine, ZOOM);
-  const boxB = badgeBoxPx(bLine, ZOOM);
-  const dx = Math.abs(a[0] + boxA.centerOffX - (b[0] + boxB.centerOffX));
-  const dy = Math.abs(a[1] + boxA.centerOffY - (b[1] + boxB.centerOffY));
+/** Assert two badges' plate boxes do not overlap. */
+function expectBoxesDisjoint(a: BadgeFeature, b: BadgeFeature) {
+  const ca = plateCenterPx(a);
+  const cb = plateCenterPx(b);
+  const boxA = badgeBoxPx(a.properties?.line as string, ZOOM);
+  const boxB = badgeBoxPx(b.properties?.line as string, ZOOM);
+  const dx = Math.abs(ca[0] - cb[0]);
+  const dy = Math.abs(ca[1] - cb[1]);
   const clearX = dx >= boxA.halfW + boxB.halfW - 0.5;
   const clearY = dy >= boxA.halfH + boxB.halfH - 0.5;
   expect(clearX || clearY).toBe(true);
+}
+
+/**
+ * Max distance a plate box center may sit from its own marker: the farthest
+ * slot (third stacked row) plus rounding air. Keeps the "badge hugs its tram"
+ * promise pinned — no badge is ever sent away on a long tether.
+ */
+function maxPlateDistPx(line: string): number {
+  const box = badgeBoxPx(line, ZOOM);
+  const gapY = FACE_GAP_PX * badgeIconSize(ZOOM);
+  const row3 = gapY + 5 * box.halfH + 2 * BADGE_PAD_PX; // plate |y| of slots 10/11
+  const sx = box.halfW + MARKER_OBSTACLE_HALF_PX + BADGE_PAD_PX;
+  return Math.hypot(sx + Math.abs(box.centerOffX), row3) + 1;
 }
 
 describe('badge band gating', () => {
@@ -199,21 +231,49 @@ describe('badge band gating', () => {
   });
 });
 
-describe('declutter displacement (badges adapt, never hide)', () => {
-  it('an isolated badge stays exactly at its marker, no leader', () => {
+describe('variable-anchor badge layout (hug the marker, never hide)', () => {
+  it('every badge feature sits EXACTLY at its marker (slots ship as screen offsets)', () => {
+    // The old solve displaced feature geometry in world coordinates, baking a
+    // fixed cos-55° pitch estimate into lng/lat — at other camera pitches the
+    // plate visibly detached from its arrow. Geometry now never moves.
+    const states = [0, 4, 8, 12].map((d, i) =>
+      makeState(`92${i}1`, geo, 300 + d, {
+        snapshot: makeSnapshot({ key: `92${i}1`, shapeDistM: 300 + d }),
+      }),
+    );
+    const frame = buildFrame(states, WIDE, opts(geo));
+    for (const b of badgePoints(frame)) {
+      const marker = frame.points.features.find((f) => f.id === b.properties?.key)!.geometry
+        .coordinates as Pt;
+      expect(haversineM(b.geometry.coordinates as Pt, marker)).toBeLessThan(1e-6);
+      expect(Array.isArray(b.properties?.off)).toBe(true);
+      expect(Array.isArray(b.properties?.toff)).toBe(true);
+    }
+  });
+
+  it('an isolated badge takes the default slot (default offsets, displaced 0)', () => {
     const frame = buildFrame([makeState('9201', geo, 300)], WIDE, opts(geo));
     const badges = badgePoints(frame);
     expect(badges).toHaveLength(1);
     expect(badges[0].properties?.displaced).toBe(0);
-    const marker = frame.points.features[0].geometry.coordinates as Pt;
-    expect(
-      haversineM((badges[0].geometry as GeoJSON.Point).coordinates as Pt, marker),
-    ).toBeLessThan(1e-6);
-    expect(leaders(frame)).toHaveLength(0);
+    expect(badges[0].properties?.off).toEqual(DEFAULT_OFF);
   });
 
-  it('two overlapping trams: BOTH badges emitted, boxes separated, markers untouched', () => {
-    // 10 m apart at z13.8 ≈ 3 px — total badge overlap before the solve.
+  it('never emits leader LineStrings (badges hug their marker instead)', () => {
+    // A crowd dense enough that the old system would have drawn leaders.
+    const states = [0, 4, 8, 12, 16].map((d, i) =>
+      makeState(`92${i}1`, geo, 300 + d, {
+        snapshot: makeSnapshot({ key: `92${i}1`, shapeDistM: 300 + d }),
+      }),
+    );
+    const frame = buildFrame(states, WIDE, opts(geo));
+    expect(
+      (frame.badges?.features ?? []).filter((f) => f.geometry.type !== 'Point'),
+    ).toHaveLength(0);
+  });
+
+  it('two overlapping trams: BOTH badges emitted on different sides, boxes separated', () => {
+    // 10 m apart at z13.8 ≈ 3 px — total badge overlap on the default slot.
     const a = makeState('9201', geo, 300);
     const b = makeState('9301', geo, 310, {
       snapshot: makeSnapshot({ key: '9301', shapeDistM: 310 }),
@@ -222,56 +282,36 @@ describe('declutter displacement (badges adapt, never hide)', () => {
 
     const badges = badgePoints(frame);
     expect(badges.map((f) => f.properties?.key).sort()).toEqual(['9201', '9301']);
-    expect(badges.every((f) => f.properties?.displaced === 1)).toBe(true);
-
-    const [bA, bB] = badges;
-    expectBoxesDisjoint(
-      (bA.geometry as GeoJSON.Point).coordinates as Pt,
-      bA.properties?.line as string,
-      (bB.geometry as GeoJSON.Point).coordinates as Pt,
-      bB.properties?.line as string,
-    );
-
-    // Markers stay at the true rendered positions: identical to a frame built
-    // for each tram alone (declutter moves ONLY badge anchors).
-    const soloA = buildFrame([a], WIDE, opts(geo)).points.features[0].geometry.coordinates;
-    const soloB = buildFrame([b], WIDE, opts(geo)).points.features[0].geometry.coordinates;
-    expect(frame.points.features.find((f) => f.id === '9201')!.geometry.coordinates).toEqual(
-      soloA,
-    );
-    expect(frame.points.features.find((f) => f.id === '9301')!.geometry.coordinates).toEqual(
-      soloB,
-    );
+    // The first (key order) keeps the default slot; the second moved aside.
+    const byKey = new Map(badges.map((f) => [f.properties?.key as string, f]));
+    expect(byKey.get('9201')!.properties?.displaced).toBe(0);
+    expect(byKey.get('9301')!.properties?.displaced).toBe(1);
+    expectBoxesDisjoint(badges[0], badges[1]);
   });
 
-  it('a displaced badge gets a leader line from its marker to the displaced anchor', () => {
-    const a = makeState('9201', geo, 300);
-    const b = makeState('9301', geo, 310, {
-      snapshot: makeSnapshot({ key: '9301', shapeDistM: 310 }),
-    });
-    const frame = buildFrame([a, b], WIDE, opts(geo));
-    const lead = leaders(frame);
-    expect(lead.length).toBeGreaterThan(0);
-    for (const l of lead) {
-      const line = (l.geometry as GeoJSON.LineString).coordinates as Pt[];
-      expect(line).toHaveLength(2);
-      const key = l.properties?.key as string;
-      const marker = frame.points.features.find((f) => f.id === key)!.geometry
+  it('every plate stays within the anchor ring of its own marker', () => {
+    // Even in a pileup no badge is sent away on a long tether — the farthest
+    // legal slot is the third stacked row.
+    const states = [0, 4, 8, 12, 16, 20].map((d, i) =>
+      makeState(`92${i}1`, geo, 300 + d, {
+        snapshot: makeSnapshot({ key: `92${i}1`, shapeDistM: 300 + d }),
+      }),
+    );
+    const frame = buildFrame(states, WIDE, opts(geo));
+    const badges = badgePoints(frame);
+    expect(badges).toHaveLength(6); // nobody hidden
+    for (const b of badges) {
+      const marker = frame.points.features.find((f) => f.id === b.properties?.key)!.geometry
         .coordinates as Pt;
-      const badge = badgePoints(frame).find((f) => f.properties?.key === key)!;
-      expect(haversineM(line[0], marker)).toBeLessThan(1e-6);
-      expect(haversineM(line[1], (badge.geometry as GeoJSON.Point).coordinates as Pt)).toBeLessThan(
-        1e-6,
-      );
-      // Leaders only appear for real displacements.
-      const mpp = metersPerStylePx(ORIGIN[1], ZOOM);
-      expect(haversineM(line[0], line[1]) / mpp).toBeGreaterThanOrEqual(
-        BADGE_LEADER_MIN_PX - 0.5,
+      const m = toPx(marker, ZOOM);
+      const c = plateCenterPx(b);
+      expect(Math.hypot(c[0] - m[0], c[1] - m[1])).toBeLessThanOrEqual(
+        maxPlateDistPx(b.properties?.line as string),
       );
     }
   });
 
-  it('pinned (selected/followed/favorite) badges are absent from the FC and never move; neighbours move around them', () => {
+  it('pinned (selected/followed/favorite) badges are absent from the FC and never move; neighbours pick other sides', () => {
     const sel = makeState('9201', geo, 300);
     const other = makeState('9301', geo, 306, {
       snapshot: makeSnapshot({ key: '9301', shapeDistM: 306 }),
@@ -282,17 +322,18 @@ describe('declutter displacement (badges adapt, never hide)', () => {
     // The selected tram renders from the points FC on the pinned layer — no
     // badge feature here.
     expect(badges.map((f) => f.properties?.key)).toEqual(['9301']);
-    // Its neighbour took the WHOLE displacement (the pinned badge is an
-    // immovable obstacle) — separated from the pinned badge at the marker.
+    // Its neighbour moved to a side slot (the pinned badge owns the default
+    // slot as an immovable obstacle) — separated from the pinned plate.
     expect(badges[0].properties?.displaced).toBe(1);
     const selMarker = frame.points.features.find((f) => f.id === '9201')!.geometry
       .coordinates as Pt;
-    expectBoxesDisjoint(
-      selMarker,
-      '9',
-      (badges[0].geometry as GeoJSON.Point).coordinates as Pt,
-      badges[0].properties?.line as string,
-    );
+    // The pinned plate renders at the default slot on its marker.
+    const pinnedPlate: BadgeFeature = {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: selMarker },
+      properties: { line: '9', off: DEFAULT_OFF },
+    };
+    expectBoxesDisjoint(pinnedPlate, badges[0]);
     // followedKey pins the same way.
     const followed = buildFrame([sel, other], WIDE, opts(geo, { followedKey: '9201' }));
     expect(badgePoints(followed).map((f) => f.properties?.key)).toEqual(['9301']);
@@ -301,7 +342,7 @@ describe('declutter displacement (badges adapt, never hide)', () => {
     expect(badgePoints(fav).map((f) => f.properties?.key)).toEqual(['9301']);
   });
 
-  it('a pileup separates into disjoint boxes, capped displacement, deterministic', () => {
+  it('a pileup separates into disjoint boxes, deterministic', () => {
     // Five trams within 20 m — a stop cluster.
     const states = [0, 5, 10, 15, 20].map((d, i) =>
       makeState(`92${i}1`, geo, 300 + d, {
@@ -315,24 +356,8 @@ describe('declutter displacement (badges adapt, never hide)', () => {
     // Pairwise disjoint.
     for (let i = 0; i < badges.length; i++) {
       for (let j = i + 1; j < badges.length; j++) {
-        expectBoxesDisjoint(
-          (badges[i].geometry as GeoJSON.Point).coordinates as Pt,
-          badges[i].properties?.line as string,
-          (badges[j].geometry as GeoJSON.Point).coordinates as Pt,
-          badges[j].properties?.line as string,
-        );
+        expectBoxesDisjoint(badges[i], badges[j]);
       }
-    }
-    // Displacement never exceeds the cap (readability tether) — measured in
-    // the solver's screen space, where the cap is defined.
-    for (const b of badges) {
-      const marker = frame.points.features.find((f) => f.id === b.properties?.key)!.geometry
-        .coordinates as Pt;
-      const m = toPx(marker, ZOOM);
-      const a = toPx((b.geometry as GeoJSON.Point).coordinates as Pt, ZOOM);
-      expect(Math.hypot(a[0] - m[0], a[1] - m[1])).toBeLessThanOrEqual(
-        BADGE_MAX_DISPLACE_PX + 1,
-      );
     }
     // Deterministic: identical input → identical output (stable frame to frame).
     const again = buildFrame(states, WIDE, opts(geo));
@@ -340,7 +365,7 @@ describe('declutter displacement (badges adapt, never hide)', () => {
   });
 
   it('no plate ever covers ANY direction arrow (marker obstacle boxes)', () => {
-    // Dense cluster: 6 trams within 25 m. Every solved badge box must clear
+    // Dense cluster: 6 trams within 25 m. Every solved plate box must clear
     // every tram's heading-teardrop obstacle — its own AND every neighbour's.
     const states = [0, 5, 10, 15, 20, 25].map((d, i) =>
       makeState(`93${i}1`, geo, 500 + d, {
@@ -353,20 +378,16 @@ describe('declutter displacement (badges adapt, never hide)', () => {
     const markers = frame.points.features.map((f) => f.geometry.coordinates as Pt);
     for (const b of badges) {
       for (const m of markers) {
-        expectClearsMarker(
-          (b.geometry as GeoJSON.Point).coordinates as Pt,
-          b.properties?.line as string,
-          m,
-        );
+        expectClearsMarker(b, m);
       }
     }
   });
 
-  it('badgeMemory keeps arrangements stable push to push (no re-shuffling)', () => {
+  it('badgeMemory keeps each badge on its side push to push (no jumps)', () => {
     // Two overlapping trams crawling forward: with a shared memory the second
-    // push must keep each badge on the SAME side with only a small delta —
-    // arrangements never re-derive cold and visibly jump.
-    const memory: BadgeDisplacementMemory = new Map();
+    // push must keep each badge on the SAME anchor slot — identical offsets,
+    // so plates track their trams smoothly.
+    const memory: BadgeAnchorMemory = new Map();
     const mk = (d: number) => [
       makeState('9201', geo, 300 + d, {
         snapshot: makeSnapshot({ key: '9201', shapeDistM: 300 + d }),
@@ -376,21 +397,19 @@ describe('declutter displacement (badges adapt, never hide)', () => {
       }),
     ];
     const first = buildFrame(mk(0), WIDE, opts(geo, { badgeMemory: memory }));
+    const slots = new Map(memory);
     const second = buildFrame(mk(2), WIDE, opts(geo, { badgeMemory: memory }));
-    const mpp = metersPerStylePx(ORIGIN[1], ZOOM);
+    expect(new Map(memory)).toEqual(slots); // same sides kept
     for (const key of ['9201', '9301']) {
       const a = badgePoints(first).find((f) => f.properties?.key === key)!;
       const b = badgePoints(second).find((f) => f.properties?.key === key)!;
-      const pa = toPx((a.geometry as GeoJSON.Point).coordinates as Pt, ZOOM);
-      const pb = toPx((b.geometry as GeoJSON.Point).coordinates as Pt, ZOOM);
-      // The badge tracked its tram (2 m ≈ under a px) — no jump.
-      const movedPx = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]);
-      expect(movedPx).toBeLessThan(2 / mpp + 3);
+      expect(b.properties?.off).toEqual(a.properties?.off);
+      expect(b.properties?.toff).toEqual(a.properties?.toff);
     }
   });
 
-  it('a badge glides home over a few pushes once its crowd disappears', () => {
-    const memory: BadgeDisplacementMemory = new Map();
+  it('a badge returns HOME (default slot) once its crowd disappears — never stranded aside', () => {
+    const memory: BadgeAnchorMemory = new Map();
     const pair = [
       makeState('9201', geo, 300),
       makeState('9301', geo, 308, {
@@ -398,30 +417,56 @@ describe('declutter displacement (badges adapt, never hide)', () => {
       }),
     ];
     buildFrame(pair, WIDE, opts(geo, { badgeMemory: memory }));
-    expect(memory.size).toBeGreaterThan(0);
+    expect(memory.size).toBe(2);
 
-    // Crowd gone: repeated pushes decay the displacement smoothly to zero.
-    const solo = [makeState('9201', geo, 300)];
-    let last = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 20; i++) {
-      const frame = buildFrame(solo, WIDE, opts(geo, { badgeMemory: memory }));
+    // Crowd gone: the survivor snaps back onto the default slot (return-home
+    // hysteresis only delays the move while space is marginal, it never parks
+    // a lone plate on a side slot forever).
+    const solo = [
+      makeState('9301', geo, 308, {
+        snapshot: makeSnapshot({ key: '9301', shapeDistM: 308 }),
+      }),
+    ];
+    const frame = buildFrame(solo, WIDE, opts(geo, { badgeMemory: memory }));
+    const b = badgePoints(frame)[0];
+    expect(b.properties?.displaced).toBe(0);
+    expect(b.properties?.off).toEqual(DEFAULT_OFF);
+    expect(memory.get('9301')).toBe(0);
+    expect(memory.has('9201')).toBe(false); // departed trams are forgotten
+  });
+
+  it('any remembered side slot re-homes for a lone badge (no sticky parking)', () => {
+    for (const slot of [1, 3, 8, 11]) {
+      const memory: BadgeAnchorMemory = new Map();
+      memory.set('9201', slot); // pretend last push parked it there
+      const frame = buildFrame(
+        [makeState('9201', geo, 300)],
+        WIDE,
+        opts(geo, { badgeMemory: memory }),
+      );
       const b = badgePoints(frame)[0];
-      const marker = frame.points.features[0].geometry.coordinates as Pt;
-      const dist = haversineM((b.geometry as GeoJSON.Point).coordinates as Pt, marker);
-      expect(dist).toBeLessThanOrEqual(last + 1e-9); // monotonically home
-      last = dist;
+      expect(b.properties?.displaced).toBe(0); // re-evaluated → default slot
+      expect(memory.get('9201')).toBe(0);
     }
-    expect(last).toBe(0); // snapped exactly onto the marker
-    expect(memory.get('9201')).toBeUndefined();
   });
 
   it('the base plate gap clears its own arrow even at band entry (smallest iconSize)', () => {
     // Geometry guarantee, no solve needed: gap × min iconSize must exceed the
-    // marker obstacle half-size, so an undisturbed plate never touches its
-    // own teardrop.
+    // marker obstacle half-size + pad, so an undisturbed plate never touches
+    // its own teardrop.
     expect(FACE_GAP_PX * badgeIconSize(BADGE_MIN_ZOOM)).toBeGreaterThan(
-      MARKER_OBSTACLE_HALF_PX,
+      MARKER_OBSTACLE_HALF_PX + BADGE_PAD_PX,
     );
+  });
+
+  it('every anchor slot clears the marker obstacle box by construction', () => {
+    const box = badgeBoxPx('22', ZOOM);
+    for (let slot = 0; slot < BADGE_ANCHOR_SLOTS; slot++) {
+      const c = badgeAnchorCenterPx(box, ZOOM, slot);
+      const clearX = Math.abs(c.x) >= box.halfW + MARKER_OBSTACLE_HALF_PX + BADGE_PAD_PX - 1e-6;
+      const clearY = Math.abs(c.y) >= box.halfH + MARKER_OBSTACLE_HALF_PX + BADGE_PAD_PX - 1e-6;
+      expect(clearX || clearY).toBe(true);
+    }
   });
 
   it('exactly co-located badges (depot case) still separate deterministically', () => {
@@ -432,13 +477,11 @@ describe('declutter displacement (badges adapt, never hide)', () => {
       pos: [ORIGIN[0], ORIGIN[1]],
       pinned: false,
     }));
-    const feats = declutterBadges(cands, ZOOM, ORIGIN[1]);
-    const pts = feats.filter((f) => f.geometry.type === 'Point');
-    expect(pts).toHaveLength(3);
-    const anchors = pts.map((f) => (f.geometry as GeoJSON.Point).coordinates as Pt);
-    for (let i = 0; i < anchors.length; i++) {
-      for (let j = i + 1; j < anchors.length; j++) {
-        expectBoxesDisjoint(anchors[i], '9', anchors[j], '9');
+    const feats = declutterBadges(cands, ZOOM, ORIGIN[1]) as BadgeFeature[];
+    expect(feats).toHaveLength(3);
+    for (let i = 0; i < feats.length; i++) {
+      for (let j = i + 1; j < feats.length; j++) {
+        expectBoxesDisjoint(feats[i], feats[j]);
       }
     }
     expect(declutterBadges(cands, ZOOM, ORIGIN[1])).toEqual(feats);
