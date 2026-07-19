@@ -5,6 +5,8 @@
 import {
   DEPARTED_PAST_M,
   MISSING_TIMEOUT_MS,
+  PREEMPT_HOLDOFF_MS,
+  PREEMPT_MARGIN_S,
   REEVAL_INTERVAL_MS,
   stepSpotter,
   type SpotterTracking,
@@ -54,6 +56,29 @@ function geoB(tripId: string, betaArrS: number, betaDepS: number, deltaArrS: num
   };
 }
 
+/**
+ * Line 9 APPROACHING Beta: Delta(0m, dep BASE) → Beta(800m, arr BASE+100s).
+ * A tram at simDistM d has a position ETA to Beta of (100 − d/8) seconds,
+ * so rival ETAs can be dialed in precisely for the preemption tests.
+ */
+function geoC(tripId = 'trip-c'): RouteGeometry {
+  return {
+    ...makeGeometry(
+      [
+        [0, 800],
+        [0, 0],
+      ],
+      [
+        { atM: 0, name: 'Delta', arrivalMs: BASE, departureMs: BASE },
+        { atM: 800, name: 'Beta', arrivalMs: BASE + 100 * S },
+      ],
+    ),
+    tripId,
+    line: '9',
+    headsign: 'Beta',
+  };
+}
+
 function makeState(opts: {
   key: string;
   tripId: string;
@@ -97,6 +122,7 @@ function betaTracking(overrides: Partial<SpotterTracking> = {}): SpotterTracking
     tripId: 'trip-a',
     stopDistM: 500,
     stopArrivalMs: BASE + 120 * S,
+    acquiredMs: BASE,
     lastSeenMs: BASE,
     lastReevalMs: BASE,
     ...overrides,
@@ -120,10 +146,28 @@ describe('stepSpotter — acquisition', () => {
       tripId: 'trip-b',
       stopDistM: 0,
       stopArrivalMs: BASE + 60 * S,
+      acquiredMs: BASE,
       lastSeenMs: BASE,
       lastReevalMs: BASE,
     });
-    expect(res.target).toEqual({ tramKey: '8001', line: '9', etaS: 60 });
+    // Position-based chip ETA: the 9 is physically AT the platform → 0.
+    expect(res.target).toEqual({ tramKey: '8001', line: '9', etaS: 0 });
+  });
+
+  it('acquires the PHYSICALLY closest tram, not the stalest-delay schedule ETA', () => {
+    // The 22 is late: its delay-shifted schedule ETA clamped to 0 (schedule
+    // time long past, feed delay lagging), but it is physically 300 m short
+    // of Beta. The 9 is 80 m out (position ETA 10 s). The board's schedule
+    // ranking would put the 22 first; the spotter must pick the 9.
+    const geos = [geoA(), geoC()];
+    const states = [
+      makeState({ key: '9201', tripId: 'trip-a', line: '22', simDistM: 200 }),
+      makeState({ key: '8001', tripId: 'trip-c', line: '9', simDistM: 720 }),
+    ];
+    const res = stepSpotter(null, 'beta', states, geos, BASE + 300 * S);
+    expect(res.event).toBe('acquired');
+    expect(res.tracking?.targetKey).toBe('8001');
+    expect(res.target?.etaS).toBe(10);
   });
 
   it('stays waiting (event none) when nobody has the station ahead', () => {
@@ -166,12 +210,13 @@ describe('stepSpotter — hysteresis & preemption', () => {
   });
 
   it('does NOT preempt when the rival is within the margin (no churn)', () => {
-    // Held 22 → Beta @ +120s; the 9 → Beta @ +110s (only 10 s sooner < margin).
-    const geos = [geoA(), geoB('trip-b', 110, 120, 300)];
+    // Held 22 at 200 m → position ETA 72 s; the 9 at 248 m of geoC → 69 s.
+    // Only 3 s sooner (< PREEMPT_MARGIN_S) — held through the re-rank.
+    const geos = [geoA(), geoC()];
     const prev = betaTracking();
     const states = [
       makeState({ key: '9201', tripId: 'trip-a', line: '22', simDistM: 200 }),
-      makeState({ key: '8001', tripId: 'trip-b', line: '9', simDistM: 0 }),
+      makeState({ key: '8001', tripId: 'trip-c', line: '9', simDistM: 248 }),
     ];
     const res = stepSpotter(prev, 'beta', states, geos, BASE + 10 * S);
     expect(res.event).toBe('none');
@@ -179,13 +224,79 @@ describe('stepSpotter — hysteresis & preemption', () => {
     expect(res.tracking?.lastReevalMs).toBe(BASE + 10 * S); // re-ranked, held
   });
 
-  it('applies the live delay to the held target ETA', () => {
+  it('preempts a tram arriving just over the margin sooner (old 20 s margin missed these)', () => {
+    // Held 22 → position ETA 72 s; the 9 at 320 m of geoC → 60 s: 12 s sooner.
+    // Past PREEMPT_MARGIN_S (6 s) but inside the old 20 s blind window.
+    const geos = [geoA(), geoC()];
     const states = [
-      makeState({ key: '9201', tripId: 'trip-a', line: '22', simDistM: 200, delaySeconds: 30 }),
+      makeState({ key: '9201', tripId: 'trip-a', line: '22', simDistM: 200 }),
+      makeState({ key: '8001', tripId: 'trip-c', line: '9', simDistM: 320 }),
+    ];
+    const res = stepSpotter(betaTracking(), 'beta', states, geos, BASE + 10 * S);
+    expect(res.event).toBe('switched');
+    expect(res.tracking?.targetKey).toBe('8001');
+    expect(res.target?.etaS).toBe(60);
+  });
+
+  it('still preempts when the held schedule ETA is clamped to 0 (late tram, laggy delay)', () => {
+    // now = BASE+300s: the held 22's delay-shifted schedule time is long past
+    // (schedule ETA 0) while it is physically 300 m short of Beta (72 s).
+    // Under schedule ETAs no rival could EVER beat 0 + margin — the original
+    // "another tram arrives first" bug. Position ETAs keep preemption alive:
+    // the 9 is 40 m out (5 s) and takes over.
+    const geos = [geoA(), geoC()];
+    const states = [
+      makeState({ key: '9201', tripId: 'trip-a', line: '22', simDistM: 200 }),
+      makeState({ key: '8001', tripId: 'trip-c', line: '9', simDistM: 760 }),
+    ];
+    const res = stepSpotter(betaTracking(), 'beta', states, geos, BASE + 300 * S);
+    expect(res.event).toBe('switched');
+    expect(res.tracking?.targetKey).toBe('8001');
+    expect(res.target?.etaS).toBe(5);
+  });
+
+  it('holds through the post-acquisition holdoff even against a much sooner rival', () => {
+    // 2 s after acquiring (≥ re-eval interval, < PREEMPT_HOLDOFF_MS) a rival
+    // physically at the platform does not yet steal the camera.
+    const geos = [geoA(), geoC()];
+    const states = [
+      makeState({ key: '9201', tripId: 'trip-a', line: '22', simDistM: 200 }),
+      makeState({ key: '8001', tripId: 'trip-c', line: '9', simDistM: 800 }),
+    ];
+    const res = stepSpotter(betaTracking(), 'beta', states, geos, BASE + 2 * S);
+    expect(BASE + 2 * S - BASE).toBeLessThan(PREEMPT_HOLDOFF_MS);
+    expect(res.event).toBe('none');
+    expect(res.tracking?.targetKey).toBe('9201');
+    expect(res.tracking?.lastReevalMs).toBe(BASE + 2 * S); // clock still resets
+  });
+
+  it('does not churn between two near-equal trams across repeated re-ranks', () => {
+    // Held 72 s; the rival's position ETA jitters 67–69 s (1–5 s sooner, all
+    // within the 6 s margin) — the spotter must hold the 22 every step.
+    const geos = [geoA(), geoC()];
+    let tracking: SpotterTracking | null = betaTracking();
+    const rivalDistM = [264, 248, 256, 260]; // ETAs 67, 69, 68, 67.5→68 s
+    rivalDistM.forEach((d, i) => {
+      const states = [
+        makeState({ key: '9201', tripId: 'trip-a', line: '22', simDistM: 200 }),
+        makeState({ key: '8001', tripId: 'trip-c', line: '9', simDistM: d }),
+      ];
+      const res = stepSpotter(tracking, 'beta', states, geos, BASE + (10 + i) * S);
+      expect(res.event).toBe('none');
+      expect(res.tracking?.targetKey).toBe('9201');
+      tracking = res.tracking;
+    });
+    expect(PREEMPT_MARGIN_S).toBeGreaterThanOrEqual(5); // guard: margin stays sane
+  });
+
+  it('held ETA follows the tram’s physical position, not the laggy feed delay', () => {
+    // Feed claims 300 s of delay, but the tram is physically 300 m from Beta:
+    // position ETA 72 s. The old schedule+delay ETA would have read 360 s.
+    const states = [
+      makeState({ key: '9201', tripId: 'trip-a', line: '22', simDistM: 200, delaySeconds: 300 }),
     ];
     const res = stepSpotter(betaTracking(), 'beta', states, [geoA()], BASE + 60 * S);
-    // Beta @ BASE+120s, +30s delay, now BASE+60s → 90s.
-    expect(res.target).toEqual({ tramKey: '9201', line: '22', etaS: 90 });
+    expect(res.target).toEqual({ tramKey: '9201', line: '22', etaS: 72 });
   });
 
   it('keeps a tram dwelling at the stop with ETA floored to 0', () => {

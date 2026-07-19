@@ -8,6 +8,7 @@ import {
   formatEtaMinutes,
   MAX_ARRIVALS,
   nearestStation,
+  positionEtaS,
   scheduleTravelS,
   stationStops,
 } from '@/lib/arrivals';
@@ -192,6 +193,40 @@ describe('computeArrivals', () => {
     expect(arrivals[0].tramKey).toBe('8001');
     const etas = arrivals.map((a) => a.etaS);
     expect([...etas].sort((a, b) => a - b)).toEqual(etas);
+  });
+});
+
+// ── positionEtaS / liveEtaS ──────────────────────────────────────────────────
+
+describe('positionEtaS', () => {
+  // geoA: Alpha(0m, dep BASE) → Beta(500m, arr BASE+120s): ETA(d) = 120 − 0.24·d.
+  it('interpolates the remaining scheduled run time from the physical position', () => {
+    const geo = geoA();
+    const beta = geo.stops[1];
+    expect(positionEtaS(geo, beta.distM, beta.arrivalMs, 0)).toBe(120);
+    expect(positionEtaS(geo, beta.distM, beta.arrivalMs, 200)).toBe(72);
+    expect(positionEtaS(geo, beta.distM, beta.arrivalMs, 450)).toBe(12);
+  });
+
+  it('reads 0 at/past the platform and includes intermediate scheduled dwells', () => {
+    const geo = geoA();
+    const beta = geo.stops[1];
+    const gamma = geo.stops[2];
+    expect(positionEtaS(geo, beta.distM, beta.arrivalMs, 500)).toBe(0);
+    expect(positionEtaS(geo, beta.distM, beta.arrivalMs, 600)).toBe(0);
+    // 250 m → Beta leg midpoint: t = BASE+60s → Gamma (BASE+240s) in 180 s,
+    // which spans Beta's scheduled 10 s dwell (arr +120s / dep +130s).
+    expect(positionEtaS(geo, gamma.distM, gamma.arrivalMs, 250)).toBe(180);
+  });
+
+  it('does not clamp with wall time: liveEtaS stays position-true when the schedule ETA hits 0', () => {
+    // Late tram: schedule time long past (etaS clamps to 0) but physically
+    // 300 m short of Beta — liveEtaS keeps ranking it 72 s out.
+    const states = [makeState({ key: '9201', tripId: 'trip-a', line: '22', simDistM: 200 })];
+    const arrivals = computeArrivals('beta', states, [geoA()], BASE + 600 * S);
+    expect(arrivals).toHaveLength(1);
+    expect(arrivals[0].etaS).toBe(0);
+    expect(arrivals[0].liveEtaS).toBe(72);
   });
 });
 

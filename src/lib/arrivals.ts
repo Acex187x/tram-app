@@ -191,6 +191,14 @@ export interface StopArrival {
   headsign: string;
   /** Seconds until the tram reaches this station (schedule + delay − now, ≥ 0). */
   etaS: number;
+  /**
+   * Position-based ETA (s): remaining SCHEDULED run time from the tram's live
+   * simulated position to the platform (see positionEtaS). Unlike `etaS` it
+   * cannot go stale with the feed delay and never clamps to 0 while the tram
+   * is still physically short of the stop. Falls back to `etaS` when the trip
+   * has no usable stop list. The spotter ranks by this; the board keeps `etaS`.
+   */
+  liveEtaS: number;
   model: TramModelSpec;
   airConditioned: boolean | null;
   regNumber: number | null;
@@ -221,11 +229,13 @@ export function computeArrivals(
     if (!stop) continue;
 
     const arrivalMs = stop.arrivalMs + state.snapshot.delaySeconds * 1000;
+    const etaS = Math.max(0, Math.floor((arrivalMs - nowMs) / 1000));
     out.push({
       tramKey: state.key,
       line: state.snapshot.line,
       headsign: state.snapshot.headsign,
-      etaS: Math.max(0, Math.floor((arrivalMs - nowMs) / 1000)),
+      etaS,
+      liveEtaS: positionEtaS(geo, stop.distM, stop.arrivalMs, state.simDistM) ?? etaS,
       model: state.model,
       airConditioned: state.snapshot.airConditioned,
       regNumber: state.snapshot.registrationNumber,
@@ -253,6 +263,52 @@ export function nextStationStop(geo: RouteGeometry, key: string, simDistM: numbe
     if (normalizeName(stop.name) === key) return stop;
   }
   return null;
+}
+
+/**
+ * Position-based ETA in whole seconds to a platform ahead: the remaining
+ * SCHEDULED run time from the tram's live simulated shape distance to the
+ * platform (scheduled clock at the platform minus the interpolated scheduled
+ * clock at `simDistM`, including scheduled dwells at intermediate stops).
+ *
+ * The feed delay is deliberately NOT used: it is already baked into where the
+ * tram physically is, and the raw `delaySeconds` lags (per-fix / per-stop
+ * updates), which lets the schedule ETA clamp to 0 while the tram is still
+ * hundreds of meters short of the stop. A tram at/past the platform (within
+ * the board's STOP_SLACK_M) reads 0. Returns null only when the trip has no
+ * stop list to interpolate against.
+ */
+export function positionEtaS(
+  geo: RouteGeometry,
+  stopDistM: number,
+  stopArrivalMs: number,
+  simDistM: number,
+): number | null {
+  if (simDistM >= stopDistM - STOP_SLACK_M) return 0;
+  const nowSchedMs = scheduleTimeAtDistMs(geo, simDistM);
+  if (nowSchedMs === null) return null;
+  return Math.max(0, Math.round((stopArrivalMs - nowSchedMs) / 1000));
+}
+
+/**
+ * Interpolated scheduled clock (ms epoch) for a shape distance along a trip:
+ * piecewise-linear between each stop's departure and the next stop's arrival.
+ * Clamped to the first stop's departure / last stop's arrival outside the
+ * stop span. Null when the trip has no stops.
+ */
+function scheduleTimeAtDistMs(geo: RouteGeometry, distM: number): number | null {
+  const stops = geo.stops;
+  if (stops.length === 0) return null;
+  if (distM <= stops[0].distM) return stops[0].departureMs;
+  for (let i = 0; i + 1 < stops.length; i++) {
+    const a = stops[i];
+    const b = stops[i + 1];
+    if (distM > b.distM) continue;
+    const span = b.distM - a.distM;
+    const f = span > 0 ? (distM - a.distM) / span : 1;
+    return a.departureMs + f * (b.arrivalMs - a.departureMs);
+  }
+  return stops[stops.length - 1].arrivalMs;
 }
 
 // ── Itinerary timing (planner) ───────────────────────────────────────────────

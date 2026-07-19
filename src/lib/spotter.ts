@@ -4,29 +4,41 @@
 // unit-testable with synthetic fixtures.
 //
 // Selection: among all live trams that still have the spotted station AHEAD
-// on their own trip (computeArrivals — soonest ETA first), pick the first.
-// While a target is held the spotter keeps it through jitter, but every
-// REEVAL_INTERVAL_MS it re-ranks the arrivals and PREEMPTS to a different tram
-// that will now reach the platform at least PREEMPT_MARGIN_S sooner — near a
-// terminal a just-departed car often becomes the true soonest arrival. The
-// margin stops it flip-flopping between two trams with near-equal ETAs. The
-// spotter still moves on unconditionally when the target DEPARTS (passed the
-// platform by > DEPARTED_PAST_M of shape distance, rolled onto a new trip, or
-// got canceled) or DISAPPEARS from the states list for longer than
-// MISSING_TIMEOUT_MS.
+// on their own trip (computeArrivals), pick the one with the smallest
+// POSITION-BASED ETA (liveEtaS — remaining scheduled run time from the tram's
+// live simulated position; the schedule+feed-delay etaS lags reality and
+// clamps to 0 for late trams, which used to let a physically-closer tram slip
+// past unnoticed). While a target is held the spotter re-ranks the arrivals
+// every REEVAL_INTERVAL_MS and PREEMPTS to a different tram that will now
+// reach the platform at least PREEMPT_MARGIN_S sooner — near a terminal a
+// just-departed car often becomes the true soonest arrival. The margin plus a
+// short post-acquisition PREEMPT_HOLDOFF_MS stop it flip-flopping between two
+// trams with near-equal ETAs. The spotter still moves on unconditionally when
+// the target DEPARTS (passed the platform by > DEPARTED_PAST_M of shape
+// distance, rolled onto a new trip, or got canceled) or DISAPPEARS from the
+// states list for longer than MISSING_TIMEOUT_MS.
 
-import { computeArrivals, nextStationStop } from '@/lib/arrivals';
+import { computeArrivals, nextStationStop, positionEtaS } from '@/lib/arrivals';
 import type { RouteGeometry, TramPublicState } from '@/lib/types';
 
 /** A target that passed the platform by more than this has departed (m). */
 export const DEPARTED_PAST_M = 80;
 /** A target missing from the feed for longer than this is treated as gone. */
 export const MISSING_TIMEOUT_MS = 15_000;
-/** How often a held target is re-ranked against the live arrivals list (ms). */
-export const REEVAL_INTERVAL_MS = 3_000;
+/** How often a held target is re-ranked against the live arrivals list (ms) —
+ *  every 1 Hz controller step, so a genuinely-sooner tram is caught within a
+ *  second instead of a 3 s window. */
+export const REEVAL_INTERVAL_MS = 1_000;
 /** A different tram preempts the held one only if it arrives ≥ this much
- *  sooner — the hysteresis that stops churn between near-equal ETAs (s). */
-export const PREEMPT_MARGIN_S = 20;
+ *  sooner (s). Small on purpose: position-based ETAs move smoothly with the
+ *  physics sim, so 6 s absorbs fix-snap jitter while still catching a tram
+ *  that is genuinely ~10 s earlier (the old 20 s margin let 5–19 s-earlier
+ *  trams reach the platform first). */
+export const PREEMPT_MARGIN_S = 6;
+/** No preemption within this long of acquiring the current target (ms) —
+ *  temporal damping so even a pathological ETA oscillation can't flip the
+ *  camera more than once per window. Departure/missing switching ignores it. */
+export const PREEMPT_HOLDOFF_MS = 8_000;
 
 /** What the spotter remembers about its current target between 1 Hz steps. */
 export interface SpotterTracking {
@@ -38,6 +50,8 @@ export interface SpotterTracking {
   stopDistM: number;
   /** Scheduled arrival at that platform (ms epoch) — the ETA base. */
   stopArrivalMs: number;
+  /** Wall-clock ms this target was acquired — anchors the preemption holdoff. */
+  acquiredMs: number;
   /** Last wall-clock ms the target was present in the states list. */
   lastSeenMs: number;
   /** Last wall-clock ms the arrivals list was re-ranked for preemption. */
@@ -108,15 +122,26 @@ export function stepSpotter(
     ) {
       // Still inbound / dwelling / just past within the window — keep it,
       // but periodically re-rank the arrivals and hand off to a genuinely
-      // sooner tram (a just-departed car near a terminal), with a margin so
-      // near-equal ETAs don't cause churn.
-      const heldEtaS = etaSeconds(prev.stopArrivalMs, st.snapshot.delaySeconds, nowMs);
+      // sooner tram (a just-departed car near a terminal), with a margin +
+      // post-acquisition holdoff so near-equal ETAs don't cause churn.
+      // Both sides of the comparison use the POSITION-based ETA: the
+      // schedule+delay ETA clamps to 0 for a late tram still far from the
+      // platform, which made preemption impossible from that moment on.
+      const geo = geometryForTrip(geometries, prev.tripId);
+      const heldEtaS =
+        (geo ? positionEtaS(geo, prev.stopDistM, prev.stopArrivalMs, st.simDistM) : null) ??
+        etaSeconds(prev.stopArrivalMs, st.snapshot.delaySeconds, nowMs);
       if (nowMs - prev.lastReevalMs >= REEVAL_INTERVAL_MS) {
-        const arrivals = computeArrivals(stationKey, states, geometries, nowMs);
-        const rival = arrivals.find((a) => a.tramKey !== prev.targetKey) ?? null;
-        if (rival && rival.etaS + PREEMPT_MARGIN_S < heldEtaS) {
-          const acquired = acquireTarget(rival, stationKey, states, geometries, nowMs);
-          if (acquired) return { tracking: acquired, event: 'switched', target: targetOf(rival) };
+        if (nowMs - prev.acquiredMs >= PREEMPT_HOLDOFF_MS) {
+          let rival: Arrival | null = null;
+          for (const a of computeArrivals(stationKey, states, geometries, nowMs)) {
+            if (a.tramKey === prev.targetKey) continue;
+            if (rival === null || a.liveEtaS < rival.liveEtaS) rival = a;
+          }
+          if (rival && rival.liveEtaS + PREEMPT_MARGIN_S < heldEtaS) {
+            const acquired = acquireTarget(rival, stationKey, states, geometries, nowMs);
+            if (acquired) return { tracking: acquired, event: 'switched', target: targetOf(rival) };
+          }
         }
         // No preemption this cycle — reset the re-rank clock.
         return {
@@ -136,9 +161,13 @@ export function stepSpotter(
   }
 
   // (Re)acquire: the soonest arrival that isn't the tram we just dropped.
-  // computeArrivals already filters to trams with the station ahead and
-  // sorts by delay-shifted ETA.
-  for (const a of computeArrivals(stationKey, states, geometries, nowMs)) {
+  // computeArrivals filters to trams with the station ahead; re-rank its
+  // board order (delay-shifted schedule) by the position-based liveEtaS so
+  // the physically-closest tram wins, not the one with the stalest delay.
+  const ranked = [...computeArrivals(stationKey, states, geometries, nowMs)].sort(
+    (a, b) => a.liveEtaS - b.liveEtaS || a.etaS - b.etaS || a.tramKey.localeCompare(b.tramKey),
+  );
+  for (const a of ranked) {
     if (a.tramKey === excludeKey) continue;
     const acquired = acquireTarget(a, stationKey, states, geometries, nowMs);
     if (acquired) {
@@ -157,9 +186,9 @@ export function stepSpotter(
 
 type Arrival = ReturnType<typeof computeArrivals>[number];
 
-/** Chip payload for an arrival (line + soonest ETA at the spotted stop). */
+/** Chip payload for an arrival (line + position-based ETA at the stop). */
 function targetOf(a: Arrival): SpotterTargetInfo {
-  return { tramKey: a.tramKey, line: a.line, etaS: a.etaS };
+  return { tramKey: a.tramKey, line: a.line, etaS: a.liveEtaS };
 }
 
 /** Build the tracking record for an arrival, or null if its live state /
@@ -183,6 +212,7 @@ function acquireTarget(
     tripId: st.snapshot.tripId,
     stopDistM: stop.distM,
     stopArrivalMs: stop.arrivalMs,
+    acquiredMs: nowMs,
     lastSeenMs: nowMs,
     lastReevalMs: nowMs,
   };
