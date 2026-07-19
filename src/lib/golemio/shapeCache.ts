@@ -1,7 +1,21 @@
 // Two-level cache for RouteGeometry keyed by tripId:
 //   • in-memory Map (synchronous has()/getLoaded() for the render loop)
-//   • disk via expo-file-system (survives app restarts, TTL 24h)
+//   • disk via expo-file-system (survives app restarts, TTL 3 days)
 // getTripGeometry single-flights concurrent requests for the same tripId.
+//
+// FAILURE MEMORY (2026-07-19, "roundel-forever" fix): a trip whose fetch FAILS
+// (404 — trip absent from the GTFS static dataset, transient network/5xx after
+// the client's own retries, or a degenerate payload with no usable shape) used
+// to be re-requested by EVERY 5 s poll — each attempt burning a rate-limit
+// slot in the visible lane, so a handful of doomed trips could eat most of the
+// 16-starts/8 s window and starve the fetches that COULD succeed, while the
+// doomed trams themselves sat as roundels with no diagnosis. Failures are now
+// remembered per trip with an exponential re-check backoff (short for
+// transient errors, long for "not in dataset"/degenerate — the daily GTFS
+// refresh can legitimately make those appear later), surfaced via
+// getGeometryFailure(), and NEVER cached as success. An urgent (priority 0,
+// tapped-tram) request bypasses the backoff — a user poke is always allowed to
+// try again right now.
 
 import { Directory, File, Paths } from 'expo-file-system';
 
@@ -11,7 +25,13 @@ import {
   geometryServiceMidnight,
   serviceDayShiftMs,
 } from './gtfs';
-import { GolemioAbortError, demoteTag, promoteTag, type GolemioPriority } from './client';
+import {
+  GolemioAbortError,
+  GolemioHttpError,
+  demoteTag,
+  promoteTag,
+  type GolemioPriority,
+} from './client';
 
 const CACHE_DIR_NAME = 'tripgeo';
 /**
@@ -48,6 +68,122 @@ interface DiskEntry {
 // dedicated long-running app would need periodic memCache invalidation.
 const memCache = new Map<string, RouteGeometry>();
 const inFlight = new Map<string, Promise<RouteGeometry>>();
+
+// ── Failure memory (negative cache with re-check backoff) ────────────────────
+
+/**
+ * Why a fetch could not produce a usable geometry:
+ *   • 'missing'    — non-retryable HTTP 4xx, dominated by 404: the trip_id the
+ *                    vehicle feed reports is not (yet) in the GTFS static
+ *                    dataset. Happens around the daily dataset refresh and for
+ *                    diverted/extra services. May legitimately resolve later.
+ *   • 'degenerate' — the endpoint answered 200 but the payload has no usable
+ *                    shape (< 2 polyline points or zero total length). Caching
+ *                    that as success would freeze the tram as a geometry-less
+ *                    dot for the 3-day disk TTL.
+ *   • 'transient'  — network/timeout/5xx/429 after the client's own retries.
+ */
+export type GeometryFailureKind = 'missing' | 'degenerate' | 'transient';
+
+export interface GeometryFailure {
+  kind: GeometryFailureKind;
+  /** Consecutive failed fetch attempts (client-level retries count as one). */
+  attempts: number;
+  lastError: string;
+  /** Wall-clock ms before which non-urgent requests are not re-issued. */
+  nextRetryAtMs: number;
+}
+
+/** Transient failures re-check quickly — the next poll after the window. */
+export const TRANSIENT_RETRY_BASE_MS = 10_000;
+export const TRANSIENT_RETRY_CAP_MS = 120_000;
+/** 'missing'/'degenerate' re-check slowly — only a dataset refresh can fix them. */
+export const MISSING_RETRY_BASE_MS = 60_000;
+export const MISSING_RETRY_CAP_MS = 15 * 60_000;
+
+/** Prune trigger/floor so a long session's turned-over trips don't accumulate. */
+const FAIL_CACHE_SWEEP_SIZE = 1024;
+const FAIL_CACHE_STALE_MS = 30 * 60_000;
+
+const failCache = new Map<string, GeometryFailure>();
+
+/** Thrown (fast, no network) for a non-urgent request during a failure backoff,
+ *  and by the fetch task itself when the payload is degenerate. */
+export class GeometryUnavailableError extends Error {
+  readonly tripId: string;
+  readonly kind: GeometryFailureKind;
+  readonly retryAtMs: number;
+  constructor(tripId: string, kind: GeometryFailureKind, retryAtMs: number, detail?: string) {
+    super(
+      `Geometry unavailable for trip ${tripId} (${kind})${detail ? `: ${detail}` : ''}`,
+    );
+    this.name = 'GeometryUnavailableError';
+    this.tripId = tripId;
+    this.kind = kind;
+    this.retryAtMs = retryAtMs;
+  }
+}
+
+/** Diagnostics: why (and until when) a trip's geometry is known-unavailable. */
+export function getGeometryFailure(tripId: string): GeometryFailure | undefined {
+  const f = failCache.get(tripId);
+  return f ? { ...f } : undefined;
+}
+
+/** A geometry the engine/renderer can actually place a tram on. */
+function isUsableGeometry(g: RouteGeometry): boolean {
+  return g.coordinates.length >= 2 && g.totalM > 0;
+}
+
+function classifyFailure(err: unknown): GeometryFailureKind {
+  if (err instanceof GeometryUnavailableError) return err.kind;
+  if (
+    err instanceof GolemioHttpError &&
+    err.status >= 400 &&
+    err.status < 500 &&
+    err.status !== 408 &&
+    err.status !== 429
+  ) {
+    return 'missing';
+  }
+  return 'transient';
+}
+
+/** True while the trip is inside its failure backoff for a non-urgent request. */
+function inFailureBackoff(tripId: string, priority: GolemioPriority): boolean {
+  if (priority === 0) return false; // taps always get a fresh attempt
+  const f = failCache.get(tripId);
+  return f !== undefined && Date.now() < f.nextRetryAtMs;
+}
+
+function recordFailure(tripId: string, err: unknown): void {
+  const kind = classifyFailure(err);
+  const attempts = (failCache.get(tripId)?.attempts ?? 0) + 1;
+  const base = kind === 'transient' ? TRANSIENT_RETRY_BASE_MS : MISSING_RETRY_BASE_MS;
+  const cap = kind === 'transient' ? TRANSIENT_RETRY_CAP_MS : MISSING_RETRY_CAP_MS;
+  const delay = Math.min(base * 2 ** (attempts - 1), cap);
+  const now = Date.now();
+  const message = err instanceof Error ? err.message : String(err);
+  failCache.set(tripId, {
+    kind,
+    attempts,
+    lastError: message,
+    nextRetryAtMs: now + delay,
+  });
+  // Bound the map on long sessions: trips turn over at every terminus, so
+  // entries long past their retry window are dead weight.
+  if (failCache.size > FAIL_CACHE_SWEEP_SIZE) {
+    for (const [id, f] of failCache) {
+      if (now - f.nextRetryAtMs > FAIL_CACHE_STALE_MS) failCache.delete(id);
+    }
+  }
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.log(
+      `[shape-cache] trip ${tripId}: geometry ${kind} (attempt ${attempts}) — ${message}; ` +
+        `re-check in ${Math.round(delay / 1000)} s`,
+    );
+  }
+}
 
 /**
  * Geometry-landed listeners (LocalGolemioFeed.subscribeGeometry → the
@@ -102,7 +238,12 @@ async function readDisk(tripId: string): Promise<RouteGeometry | null> {
     if (
       !entry ||
       typeof entry.savedAt !== 'number' ||
-      Date.now() - entry.savedAt > TTL_MS
+      Date.now() - entry.savedAt > TTL_MS ||
+      // Degenerate entries written before the usable-geometry gate existed
+      // (no polyline / zero length) must not resurrect as "loaded": evict and
+      // let the network path re-fetch (and fail into the failure memory).
+      !entry.geometry ||
+      !isUsableGeometry(entry.geometry)
     ) {
       try {
         file.delete();
@@ -170,6 +311,12 @@ function writeDisk(tripId: string, geometry: RouteGeometry): void {
  * — a stale session's late result never pollutes a fresh session's cache.
  * A joiner whose own signal is still live retries once when the shared
  * in-flight task turns out to belong to an aborted session.
+ *
+ * Failure policy: a request landing inside the trip's failure backoff (see the
+ * failure memory above) rejects IMMEDIATELY with GeometryUnavailableError — no
+ * scheduler slot, no network. Priority 0 (tapped tram) bypasses the backoff.
+ * A fetch that fails (or returns a degenerate payload) records/extends the
+ * backoff; success clears it. Lifecycle aborts are never recorded as failures.
  */
 export async function getTripGeometry(
   tripId: string,
@@ -194,6 +341,16 @@ export async function getTripGeometry(
     }
   }
 
+  const knownFail = failCache.get(tripId);
+  if (knownFail && priority > 0 && Date.now() < knownFail.nextRetryAtMs) {
+    throw new GeometryUnavailableError(
+      tripId,
+      knownFail.kind,
+      knownFail.nextRetryAtMs,
+      knownFail.lastError,
+    );
+  }
+
   const task = (async (): Promise<RouteGeometry> => {
     const disk = await readDisk(tripId);
     if (signal?.aborted) throw new GolemioAbortError(); // no cache writes after abort
@@ -206,6 +363,17 @@ export async function getTripGeometry(
     // Late-completion guard: even if the underlying fetch ignored the signal,
     // an aborted session must not write cache/disk.
     if (signal?.aborted) throw new GolemioAbortError();
+    if (!isUsableGeometry(geometry)) {
+      // 200 with no usable shape: MUST NOT be cached as success (has() would
+      // stay true while nothing can render — a silent forever-dot). Treated as
+      // a failure with the slow re-check schedule.
+      throw new GeometryUnavailableError(
+        tripId,
+        'degenerate',
+        Date.now(),
+        `unusable payload: ${geometry.coordinates.length} shape points, totalM=${geometry.totalM}`,
+      );
+    }
     memCache.set(tripId, geometry);
     writeDisk(tripId, geometry);
     notifyLoaded();
@@ -214,7 +382,14 @@ export async function getTripGeometry(
 
   inFlight.set(tripId, task);
   try {
-    return await task;
+    const geometry = await task;
+    failCache.delete(tripId);
+    return geometry;
+  } catch (err) {
+    // Session aborts are lifecycle, not data: they must not open a backoff
+    // window that outlives the abort and blocks the NEXT session's warm-up.
+    if (!(err instanceof GolemioAbortError)) recordFailure(tripId, err);
+    throw err;
   } finally {
     inFlight.delete(tripId);
   }
@@ -247,8 +422,14 @@ export function requestPrefetch(
       else demoteTag(tripId, priority);
       continue;
     }
+    // Failure backoff: a trip that just failed (404 / degenerate / transient)
+    // is NOT re-issued by every 5 s poll — that burned a rate-limit slot per
+    // poll per doomed trip and starved the fetches that could succeed. The
+    // per-poll warm-up simply skips it until its re-check is due; priority 0
+    // (tap) bypasses via inFailureBackoff.
+    if (inFailureBackoff(tripId, priority)) continue;
     void getTripGeometry(tripId, priority, signal).catch(() => {
-      // ignore: prefetch failures are non-fatal
+      // ignore: prefetch failures are non-fatal (recorded in the failure memory)
     });
   }
 }
@@ -268,8 +449,9 @@ export function getAllLoaded(): RouteGeometry[] {
   return [...memCache.values()];
 }
 
-/** Drop the in-memory cache (does not touch disk). Mainly for tests. */
+/** Drop the in-memory cache + failure memory (does not touch disk). Mainly for tests. */
 export function clearMemoryCache(): void {
   memCache.clear();
   inFlight.clear();
+  failCache.clear();
 }

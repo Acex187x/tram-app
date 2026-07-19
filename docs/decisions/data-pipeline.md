@@ -236,6 +236,54 @@ dedicated long-running app would need periodic `memCache` invalidation.
 Covered by `serviceDayShiftMs` tests in
 `__tests__/gtfs-time.test.ts:204-261` ("TIME-2 re-anchoring").
 
+**Failure memory (2026-07-19, "roundel-forever" fix).** A trip whose geometry
+fetch FAILS was previously re-issued by EVERY 5 s poll: the per-poll warm-up
+found it neither cached nor in flight and started a fresh request. Three trip
+classes never converged and each burned a visible-lane rate-limit slot per poll
+— a handful of doomed trips could eat most of the 16-starts/8 s window and
+starve the fetches that COULD succeed (so *other* trams stalled as roundels
+too):
+
+1. **`missing`** — non-retryable 4xx, dominated by 404: the vehicle feed
+   reports a `trip_id` that is not (yet) in the GTFS static dataset (daily
+   dataset changeover, diverted/extra services). Can legitimately appear after
+   the next dataset refresh.
+2. **`degenerate`** — HTTP 200 whose payload has no usable shape (< 2 polyline
+   points or `totalM == 0`). Worse than a failure: `buildRouteGeometry`
+   happily built it and the cache stored it as SUCCESS in memory **and on disk
+   (3-day TTL)** — `has()` true, nothing renderable, a silent forever-dot.
+3. **`transient`** — timeout/network/5xx/429 after the client's own retries.
+
+Fixes, all in `shapeCache.ts`:
+
+- **Never cache non-usable geometry.** `isUsableGeometry` gates both the fetch
+  path (degenerate 200 → throws `GeometryUnavailableError`, nothing cached) and
+  `readDisk` (old degenerate disk entries are evicted, not resurrected).
+- **Per-trip failure memory with re-check backoff** (`failCache`): a recorded
+  failure makes non-urgent requests reject fast (no scheduler slot, no
+  network) until `nextRetryAtMs`. Exponential per class: transient
+  10 s → cap 2 min; missing/degenerate 60 s → cap 15 min (only a dataset
+  refresh can fix those). The 5 s poll's warm-up remains the retry driver —
+  `requestPrefetch` simply skips trips inside their window, so a failed fetch
+  IS retried (first due poll after the backoff) and a visible tram cannot
+  stay a roundel forever because of one bad response. Success clears the entry;
+  lifecycle aborts are never recorded (a backgrounded session must not open a
+  backoff window against the next one).
+- **Taps bypass** — priority 0 requests ignore the backoff: a user poke always
+  gets a fresh attempt (`promoteGeometry` → `requestPrefetch([id], 0)`).
+- **Diagnosis** — `getGeometryFailure(tripId)` exposes `{kind, attempts,
+  lastError, nextRetryAtMs}`; `__DEV__` logs every recorded failure with its
+  re-check delay.
+- Related fix in `client.ts`: `promoteTag`/`demoteTag` path matching now
+  requires the id to be a complete trailing path segment — the old substring
+  `includes` let a tap on trip `…_104` "match" a queued `…_1040…` waiter, so
+  the urgent fetch for the actually-tapped tram was silently skipped.
+
+Covered by `__tests__/shape-cache-failure.test.ts` (backoff + retry-resolves,
+missing vs transient schedules, degenerate-not-cached, tap bypass, abort not
+recorded), `golemio-client.test.ts` (segment-boundary matching) and
+`tram-feed.test.ts` (per-poll re-request of a still-missing visible trip).
+
 ---
 
 ## 7. Prague-local time resolution — hand-rolled DST resolver

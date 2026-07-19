@@ -250,8 +250,12 @@ function waiterMatchesTag(w: Waiter, tag: string): boolean {
   if (w.tag !== undefined && w.tag === tag) return true;
   // Fall back to a URL-path match so callers can promote by an id embedded in
   // the request path (e.g. a trip id) without threading a tag through every
-  // intermediate module.
-  return w.path.includes(tag) || w.path.includes(encodeURIComponent(tag));
+  // intermediate module. The id must be a COMPLETE trailing path segment
+  // (paths reach the scheduler without a query string): the old substring
+  // `includes` matched the WRONG waiter when one trip id is a prefix of
+  // another (…_104 vs …_1040…) — a tap then "promoted" a different trip and
+  // promoteGeometry skipped issuing the urgent fetch for the tapped tram.
+  return w.path.endsWith(`/${tag}`) || w.path.endsWith(`/${encodeURIComponent(tag)}`);
 }
 
 /**

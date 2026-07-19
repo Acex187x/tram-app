@@ -128,6 +128,20 @@ describe('promoteTag', () => {
     // Path does not contain "trip-42", but the explicit tag does.
     expect(promoteTag('trip-42', 0)).toBe(true);
   });
+
+  it('a trip id that is a PREFIX of a queued trip never matches its waiter', async () => {
+    for (let i = 0; i < 4; i++) issue(`/v2/block/${i}`, 1);
+    // Only 991_1040 is queued; a tap on 991_104 must NOT "match" it — the old
+    // substring match returned true here, so promoteGeometry skipped issuing
+    // the urgent fetch for the actually-tapped tram (it stayed a roundel until
+    // the next poll re-requested it).
+    issue('/v2/gtfs/trips/991_1040_250101', 2);
+    await flush();
+
+    expect(promoteTag('991_104', 0)).toBe(false);
+    expect(promoteTag('991_1040_250101', 0)).toBe(true);
+    expect(demoteTag('991_104', 2)).toBe(false);
+  });
 });
 
 describe('starvation aging', () => {

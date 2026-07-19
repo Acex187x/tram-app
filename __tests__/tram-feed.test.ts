@@ -320,6 +320,28 @@ describe('TramRuntime driven by an injected TramFeed', () => {
     rt.release();
   });
 
+  it('a VISIBLE trip whose fetch failed is re-requested on EVERY poll until it lands, then comes alive', () => {
+    // The runtime is the retry driver for the cache layer's failure backoff:
+    // as long as a snapshot's geometry stays unresolved, each poll re-requests
+    // it (shapeCache decides whether the re-request actually hits the network).
+    const { feed, rt } = setup();
+    rt.setViewportProvider(() => ({ bbox: [14.5, 50.0, 14.7, 50.1], zoom: 14 }));
+
+    for (let poll = 0; poll < 3; poll++) {
+      feed.push([makeSnapshot({ tripId: 'trip-test', observedAtMs: T0 + poll * 5_000 })], T0 + poll * 5_000);
+    }
+    const forTrip = feed.requested.filter((r) => r.tripIds.includes('trip-test'));
+    expect(forTrip).toHaveLength(3); // one re-request per poll, none dropped
+    expect(forTrip.every((r) => r.priority === 1)).toBe(true); // visible lane
+    expect(rt.engine.getState('9201', Date.now())!.hasGeometry).toBe(false);
+
+    // The retry finally succeeds → the debounced adopt revives the tram, no tap.
+    feed.loadGeometry('trip-test', makeGeo());
+    jest.advanceTimersByTime(400);
+    expect(rt.engine.getState('9201', Date.now())!.hasGeometry).toBe(true);
+    rt.release();
+  });
+
   it('a geometry landing (feed event) re-ingests within the debounce — the sim appears with NO tap', () => {
     const { feed, rt } = setup();
     feed.push([makeSnapshot({ shapeDistM: 300, observedAtMs: T0 })], T0);
