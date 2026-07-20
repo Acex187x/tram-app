@@ -1,13 +1,16 @@
-// Model reference-screen content: history, fun facts, spec tables and Prague
-// service notes per tram model, rendered by src/app/model-info/[id].tsx.
+// Model reference-screen content: history, fun facts, a UNIFIED spec table and
+// Prague service notes per tram model, rendered by src/app/model-info/[id].tsx.
 //
-// Facts researched 2026-07 from: docs/research/prague-fleet.md (DPP official
-// spec sheets, snapshot 2026-07), en/cs.wikipedia.org (Tatra T3, Tatra KT8D5,
-// Škoda 14T / 15T / 52T), english.radio.cz (T3 60-year and 14T 20-year
-// retrospectives), skodagroup.com press releases (52T), and
-// urban-transport-magazine.com (52T). Figures prefixed with ≈ are approximate
-// or vary between sources/rebuild batches; unprefixed numbers follow the DPP
-// or manufacturer spec sheets. Fleet counts are DPP figures as of 1 Jan 2026.
+// The spec table is deliberately UNIFORM across every model — the same 17 fields
+// in the same order (see SPEC_ROWS + UnifiedSpecs) so two models can be compared
+// row-for-row. Where a figure is unknown it is an honest 'n/a'; figures prefixed
+// with ≈ are approximate or vary between sources / rebuild batches.
+//
+// Facts + figures researched 2026-07 from: docs/research/prague-fleet.md (DPP
+// official spec sheets, snapshot 2026-07), en.wikipedia.org (Tatra T3, Škoda
+// 14T / 15T / 52T) and cs.wikipedia.org (Tatra T3R.P, T3R.PLF, KT8D5R.N2P) spec
+// infoboxes, skodagroup.com press releases (52T) and english.radio.cz
+// retrospectives. Fleet counts are DPP figures as of 1 Jan 2026.
 
 import type { TramModelId } from '@/lib/types';
 
@@ -21,10 +24,55 @@ export interface ModelHistory {
   /** 2–3 paragraph history, joined with blank lines. */
   summary: string;
   funFacts: string[];
-  specs: { label: string; value: string }[];
   /** The model's story in Prague specifically. */
   pragueService: string;
 }
+
+/**
+ * One comparable characteristic, shared by every model. Values are display
+ * strings ('n/a' when unknown, '≈' prefix when approximate) so the reference
+ * screen renders an identical label→value grid for all seven types.
+ */
+export interface UnifiedSpecs {
+  manufacturer: string;
+  built: string;
+  pragueService: string;
+  length: string;
+  width: string;
+  height: string;
+  weight: string;
+  sections: string;
+  doors: string;
+  bogies: string;
+  floor: string;
+  seated: string;
+  standing: string;
+  capacity: string;
+  power: string;
+  topSpeed: string;
+  fleet: string;
+}
+
+/** Ordered label map — the reference screen renders one native row per entry. */
+export const SPEC_ROWS: { key: keyof UnifiedSpecs; label: string }[] = [
+  { key: 'manufacturer', label: 'Manufacturer' },
+  { key: 'built', label: 'Built' },
+  { key: 'pragueService', label: 'Prague service' },
+  { key: 'length', label: 'Length' },
+  { key: 'width', label: 'Width' },
+  { key: 'height', label: 'Height' },
+  { key: 'weight', label: 'Empty weight' },
+  { key: 'sections', label: 'Sections' },
+  { key: 'doors', label: 'Doors' },
+  { key: 'bogies', label: 'Bogies' },
+  { key: 'floor', label: 'Floor' },
+  { key: 'seated', label: 'Seats' },
+  { key: 'standing', label: 'Standing' },
+  { key: 'capacity', label: 'Total capacity' },
+  { key: 'power', label: 'Power' },
+  { key: 'topSpeed', label: 'Top speed' },
+  { key: 'fleet', label: 'In Prague' },
+];
 
 export const MODEL_HISTORY: Record<TramModelId, ModelHistory> = {
   t3: {
@@ -53,16 +101,6 @@ export const MODEL_HISTORY: Record<TramModelId, ModelHistory> = {
       'The rounded fibreglass-laminate face was styled by František Kardaus in the late 1950s and barely changed for 40 years of production.',
       'A Prague fleet study measured 98.9% reliability — the best of any type in the system.',
       'Classic red-and-cream T3s still run Prague’s heritage line 42 through the city centre.',
-    ],
-    specs: [
-      { label: 'Length', value: '14.1 m (single body)' },
-      { label: 'Width / height', value: '2.50 m / 3.06 m' },
-      { label: 'Sections · doors', value: '1 section · 3 doors per side' },
-      { label: 'Floor', value: 'High floor (≈900 mm)' },
-      { label: 'Power', value: '4 × 40 kW (≈160 kW)' },
-      { label: 'Top speed', value: '65 km/h' },
-      { label: 'Capacity', value: '≈110 passengers' },
-      { label: 'Built', value: '13,991 cars + 122 trailers (all variants)' },
     ],
     pragueService:
       'The T3 entered regular Prague service on 21 November 1962 and carried the city ' +
@@ -98,16 +136,6 @@ export const MODEL_HISTORY: Record<TramModelId, ModelHistory> = {
       'Some shells are over 60 years old — older than the parents of many of their drivers.',
       'As cars are retired, their fleet numbers are often reborn on freshly rebuilt T3R.PLF low-floor cars.',
     ],
-    specs: [
-      { label: 'Length', value: '15.1 m over couplers (14.1 m body)' },
-      { label: 'Width / height', value: '2.50 m / 3.06 m' },
-      { label: 'Sections · doors', value: '1 section · 3 doors per side' },
-      { label: 'Floor', value: 'High floor (≈900 mm)' },
-      { label: 'Drive', value: 'TV Progress IGBT, regenerative braking' },
-      { label: 'Top speed', value: '65 km/h' },
-      { label: 'Capacity', value: '≈91 passengers per car' },
-      { label: 'In Prague service', value: '298 cars (1 Jan 2026)' },
-    ],
     pragueService:
       'With 298 cars in service, the T3R.P is still the backbone of Prague’s ' +
       'classic-tram operation, typically running coupled pairs on outer and ' +
@@ -138,16 +166,6 @@ export const MODEL_HISTORY: Record<TramModelId, ModelHistory> = {
       'Mixed coupled pairs are common: a high-floor T3R.P leading a low-floor PLF, or vice versa.',
       'The low-floor centre door is wider than the originals and sits just 350 mm above the rails.',
       '76 cars were in service as of 1 January 2026, and the count grows as T3R.Ps are converted.',
-    ],
-    specs: [
-      { label: 'Length', value: '≈15.1 m over couplers' },
-      { label: 'Width / height', value: '2.48 m / 3.19 m' },
-      { label: 'Sections · doors', value: '1 section · 3 doors (wide low-floor centre door)' },
-      { label: 'Floor', value: 'Partial low floor — 350 mm centre “vana”' },
-      { label: 'Drive', value: 'TV Progress IGBT, regenerative braking' },
-      { label: 'Top speed', value: '65 km/h' },
-      { label: 'Capacity', value: '≈95 passengers per car' },
-      { label: 'In Prague service', value: '76 cars (1 Jan 2026), growing' },
     ],
     pragueService:
       'The PLF is DPP’s bridge between heritage and accessibility: it keeps classic ' +
@@ -180,17 +198,6 @@ export const MODEL_HISTORY: Record<TramModelId, ModelHistory> = {
       'Around 15 of the fleet are returnees from Miskolc, Hungary — sold abroad in the 1990s–2000s and bought back decades later.',
       'A rebuilt car’s fleet number is its Miskolc-import number plus 50.',
       'At over 30 metres and eight axles, it was the longest and heaviest tram ČKD ever built in series.',
-    ],
-    specs: [
-      { label: 'Length', value: '30.3 m (3 sections, 2 joints)' },
-      { label: 'Width / height', value: '2.48 m / 3.15 m' },
-      { label: 'Axles', value: '8, all powered' },
-      { label: 'Power', value: '≈360 kW (8 × 45 kW)' },
-      { label: 'Floor', value: 'Low-floor middle section (350 mm), high-floor ends' },
-      { label: 'Layout', value: 'Bidirectional — cab at each end' },
-      { label: 'Top speed', value: '65 km/h' },
-      { label: 'Capacity', value: '≈200+ passengers' },
-      { label: 'In Prague service', value: '≈60 cars (1 Jan 2026)' },
     ],
     pragueService:
       'Delivered 1986–1990 as cars 9001–9048 for the busiest corridors, the KT8D5 ' +
@@ -229,16 +236,6 @@ export const MODEL_HISTORY: Record<TramModelId, ModelHistory> = {
       'Its fixed bogies disliked Prague’s tight curves so much that the successor 15T was designed around pivoting bogies as a direct fix.',
       'After interior rebuilds, 55 of the 60 cars survive — rostered mostly onto lines with gentler curves.',
     ],
-    specs: [
-      { label: 'Length', value: '30.25 m (5 sections, 4 joints)' },
-      { label: 'Width / height', value: '2.46 m / 3.37 m' },
-      { label: 'Low floor', value: '≈50% of the interior' },
-      { label: 'Doors', value: '5 per side' },
-      { label: 'Bogies', value: 'Fixed (non-pivoting)' },
-      { label: 'Top speed', value: '60 km/h' },
-      { label: 'Capacity', value: '≈270 passengers' },
-      { label: 'Built for Prague', value: '60 cars · 55 in service (1 Jan 2026)' },
-    ],
     pragueService:
       'Prague is the only city that ever ran the 14T. The fleet is concentrated on ' +
       'Kobylisy-depot workings across northern Prague, deliberately assigned to ' +
@@ -260,8 +257,8 @@ export const MODEL_HISTORY: Record<TramModelId, ModelHistory> = {
       'sweep through tight curves that punished its predecessor.\n\n' +
       'Its drivetrain is just as radical: there are no gearboxes at all. Every one ' +
       'of the 16 wheels is driven by its own gearless permanent-magnet motor, ' +
-      'totalling 740 kW — enough for 80 km/h, though Prague service caps it lower. ' +
-      'The completely flat 350–450 mm floor runs the full length of the car.\n\n' +
+      'totalling around 745 kW — enough for 80 km/h, though Prague service caps it ' +
+      'lower. The completely flat 350–450 mm floor runs the full length of the car.\n\n' +
       'Prague ordered 250 of them, delivered between 2011 and 2019, making the 15T ' +
       'the undisputed backbone of the fleet — the default silhouette of the modern ' +
       'Prague tram, and the launch vehicle of Škoda’s successful ForCity family.',
@@ -271,17 +268,6 @@ export const MODEL_HISTORY: Record<TramModelId, ModelHistory> = {
       'With 250 cars, it is the largest single tram fleet Prague has ever bought.',
       'Designed for 80 km/h, faster than any Prague predecessor — though city service never uses it all.',
       'It exists because of the 14T: its pivoting bogies are the engineered fix for the fixed-bogie problems of the “Porsche”.',
-    ],
-    specs: [
-      { label: 'Length', value: '31.4 m (3 sections, 2 joints)' },
-      { label: 'Width / height', value: '2.46 m / 3.45 m' },
-      { label: 'Low floor', value: '100% — floor 350–450 mm' },
-      { label: 'Bogies', value: '4 pivoting (2 end + 2 Jacobs), all axles driven' },
-      { label: 'Power', value: '740 kW (16 × 46 kW wheel motors)' },
-      { label: 'Doors', value: '6 per side' },
-      { label: 'Top speed', value: '80 km/h design (60 km/h in service)' },
-      { label: 'Capacity', value: '≈300 (61 seated)' },
-      { label: 'In Prague service', value: '250 cars (1 Jan 2026)' },
     ],
     pragueService:
       'Deliveries ran from 2011 to February 2019, and the 250-strong fleet now works ' +
@@ -317,17 +303,6 @@ export const MODEL_HISTORY: Record<TramModelId, ModelHistory> = {
       'Of its 70 padded seats, 26 face backwards — a deliberate crowd-flow choice.',
       'The framework contract allows up to 200 cars, enough to reshape the whole fleet through the 2030s.',
     ],
-    specs: [
-      { label: 'Length', value: '≈31.8 m (5 sections, 4 joints)' },
-      { label: 'Width', value: '2.50 m' },
-      { label: 'Low floor', value: '100% — floor 350 mm' },
-      { label: 'Weight', value: '48 t' },
-      { label: 'Bogies', value: '4 (2 full-swivel + 2 semi-swivel)' },
-      { label: 'Top speed', value: '70 km/h' },
-      { label: 'Capacity', value: '243 passengers (70 seated)' },
-      { label: 'Ordered', value: '40 firm · framework up to 200' },
-      { label: 'In Prague service', value: 'Deliveries ongoing through 2026' },
-    ],
     pragueService:
       'The first 52T carried Prague passengers on 20 June 2025, and the type earned ' +
       'full type-approval that October. The fleet is based at Hloubětín depot, so ' +
@@ -335,5 +310,146 @@ export const MODEL_HISTORY: Record<TramModelId, ModelHistory> = {
       'city-wide rollout completes. Forty cars are due by the end of 2026, with the ' +
       'framework contract leaving room for up to 200 — spotting one today means ' +
       'spotting the future of the network.',
+  },
+};
+
+/**
+ * The comparable spec grid. Every model carries the SAME 17 fields (SPEC_ROWS)
+ * so the reference screen renders identical rows and two types line up
+ * row-for-row. 'n/a' = genuinely unknown; '≈' = approximate / batch-dependent.
+ */
+export const MODEL_UNIFIED_SPECS: Record<TramModelId, UnifiedSpecs> = {
+  t3: {
+    manufacturer: 'ČKD Tatra',
+    built: '1960–1999',
+    pragueService: '1962–2011 (heritage since)',
+    length: '14.0 m',
+    width: '2.50 m',
+    height: '3.06 m',
+    weight: '≈16 t',
+    sections: '1 (single body)',
+    doors: '3 per side',
+    bogies: '2 (fixed)',
+    floor: 'High (≈900 mm)',
+    seated: '≈40',
+    standing: '≈70',
+    capacity: '≈110',
+    power: '4 × 40 kW (160 kW)',
+    topSpeed: '65 km/h',
+    fleet: 'Retired 2011; heritage line 42',
+  },
+  t3rp: {
+    manufacturer: 'ČKD Tatra · rebuilt DPP / Pars Nova',
+    built: '1963–1973 · rebuilt 1999–2014',
+    pragueService: '2000s–present',
+    length: '15.1 m (14.0 m body)',
+    width: '2.50 m',
+    height: '3.05 m',
+    weight: '16.25 t',
+    sections: '1 (single body)',
+    doors: '3 per side',
+    bogies: '2 (fixed)',
+    floor: 'High (≈900 mm)',
+    seated: '24',
+    standing: '86',
+    capacity: '110 per car',
+    power: '4 × 40 kW (160 kW)',
+    topSpeed: '65 km/h',
+    fleet: '298 cars (1 Jan 2026)',
+  },
+  t3rplf: {
+    manufacturer: 'ČKD Tatra · rebuilt DPP / KOS Krnov',
+    built: '1960s–70s shells · rebuilt 2005–present',
+    pragueService: '2007–present',
+    length: '15.1 m',
+    width: '2.48 m',
+    height: '3.19 m',
+    weight: '20.5 t',
+    sections: '1 (partial low-floor “vana”)',
+    doors: '3 per side (wide centre)',
+    bogies: '2 (fixed)',
+    floor: 'Partial low — 350 mm centre',
+    seated: '22',
+    standing: '105',
+    capacity: '127 per car',
+    power: '4 × 44 kW (176 kW)',
+    topSpeed: '65 km/h',
+    fleet: '76 cars (1 Jan 2026), growing',
+  },
+  kt8d5: {
+    manufacturer: 'ČKD Tatra · rebuilt DPP / KOS Krnov',
+    built: '1986–1990 · rebuilt 2004–present',
+    pragueService: '1986–present',
+    length: '30.3 m',
+    width: '2.48 m',
+    height: '3.15 m',
+    weight: '38.5 t',
+    sections: '3 (2 joints)',
+    doors: '≈5 per side (10 total)',
+    bogies: '4 (8 axles, all powered)',
+    floor: 'Low centre (350 mm), high ends',
+    seated: '56',
+    standing: '171',
+    capacity: '227',
+    power: '8 × 45 kW (360 kW)',
+    topSpeed: '65 km/h',
+    fleet: '≈60 cars (1 Jan 2026)',
+  },
+  '14t': {
+    manufacturer: 'Škoda Transportation',
+    built: '2006–2010',
+    pragueService: '2006–present',
+    length: '≈30.3 m',
+    width: '2.46 m',
+    height: '3.37 m',
+    weight: '38.3 t',
+    sections: '5 (4 joints)',
+    doors: '5 per side',
+    bogies: '3 (fixed; 12 wheels driven)',
+    floor: '50% low (350 / 780 mm)',
+    seated: '69',
+    standing: '210',
+    capacity: '≈279',
+    power: '6 × 90 kW (540 kW)',
+    topSpeed: '60 km/h',
+    fleet: '55 of 60 (1 Jan 2026)',
+  },
+  '15t': {
+    manufacturer: 'Škoda Transportation',
+    built: '2009–2017 (to 2019)',
+    pragueService: '2011–present',
+    length: '31.4 m',
+    width: '2.46 m',
+    height: '3.45 m',
+    weight: '42 t',
+    sections: '3 (2 joints)',
+    doors: '3 per side (6 total)',
+    bogies: '4 (2 end + 2 Jacobs; 16 driven)',
+    floor: '100% low (350 / 450 mm)',
+    seated: '61',
+    standing: '239',
+    capacity: '300',
+    power: '16 × 46.6 kW (≈745 kW)',
+    topSpeed: '60 km/h (80 design)',
+    fleet: '250 cars (1 Jan 2026)',
+  },
+  '52t': {
+    manufacturer: 'Škoda Transportation',
+    built: '2024–present (service 2025)',
+    pragueService: '2025–present',
+    length: '≈31.8 m',
+    width: '2.50 m',
+    height: '≈3.35 m',
+    weight: '48 t',
+    sections: '5 (4 joints)',
+    doors: 'n/a',
+    bogies: '4 (2 full + 2 semi-swivel)',
+    floor: '100% low (350 mm)',
+    seated: '70',
+    standing: '173',
+    capacity: '243',
+    power: 'n/a',
+    topSpeed: '70 km/h',
+    fleet: '40 firm (up to 200); ongoing',
   },
 };
