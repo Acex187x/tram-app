@@ -137,6 +137,61 @@ export interface TramPublicState {
   paceBias?: number;
 }
 
+/**
+ * Additive, on-demand debug view of one tram's INTERNAL sim state
+ * (engine.getDebugInfo — debug overlay only, ~1 Hz, never the frame path).
+ * Diagnostics only; nothing here feeds rendering. All distances are
+ * along-shape meters; speeds km/h.
+ */
+export interface SimDebugInfo {
+  /** False when the tram has no geometry sim yet (renders as a raw dot). */
+  hasSim: boolean;
+  phase: 'cruise' | 'dwell' | 'terminal' | 'unknown';
+  simDistM: number;
+  simSpeedKmh: number;
+  /** Pace-controller target (obs-primary blend − trail bias), m. null w/o sim. */
+  targetDistM: number | null;
+  /** e = target − simDist, m. POSITIVE = sim BEHIND target (catching up),
+   *  NEGATIVE = sim AHEAD of reality (easing off). null w/o sim. */
+  errorM: number | null;
+  /** Learned per-tram pace multiplier (1 = profile pace). null w/o sim. */
+  paceBias: number | null;
+  /** Braking-envelope/curve/stop speed cap at the current position, km/h
+   *  (the hard limit; can reach the network V_MAX on open track). */
+  vAllowedKmh: number | null;
+  /** Zone/curve cruise cap at the current position, km/h (what open-track
+   *  cruising aims at). vAllowed < cruiseCap ⇒ braking for a curve/stop. */
+  cruiseCapKmh: number | null;
+  /** Ahead-regime soft-yield latch active (sim ran ahead of reality). */
+  crawling: boolean;
+  /** Deep-ahead walking-pace backstop latch active. */
+  deepCrawl: boolean;
+  /** Stuck-hold anchor (jam/light), m along shape, or null. */
+  stuckAtM: number | null;
+  /** Junction-yield hold point, m along shape, or null. */
+  yieldHoldM: number | null;
+  /** Platform the latest fix pins the tram at, m along shape, or null. */
+  fixStopDistM: number | null;
+  /** Whether that fix-pin is still fresh enough to be authoritative. */
+  fixPinActive: boolean;
+  /** Inside a post-dwell departure burst. */
+  burstActive: boolean;
+  /** Rolling through a skipped stop's zone. */
+  skipRollActive: boolean;
+  /** Wall-clock ms the current dwell ends (0 outside 'dwell'). */
+  dwellUntilMs: number;
+  /** Latest raw AVL fix distance along shape, m. */
+  obsDistM: number;
+  /** ms epoch of that fix. */
+  obsAtMs: number;
+  /** Age of the last fix, ms (now − obsAt). */
+  fixAgeMs: number;
+  /** Last hard-teleport wall-clock ms (0 = never). */
+  lastTeleportMs: number;
+  /** Live-projection (dead-reckoned raw fix) distance, m, or null. */
+  projDistM: number | null;
+}
+
 export interface PointFeatureProps {
   key: string;
   line: string;

@@ -25,6 +25,7 @@ import {
   MapChromeSchemeContext,
   MapStatusTile,
 } from '@/components/map/MapChrome';
+import { DebugOverlay } from '@/components/debug/DebugOverlay';
 import { HomeSheetNative } from '@/components/maps-kit/HomeSheetNative';
 import { HomeSheetContent, HomeSheetHeader } from '@/components/home/HomeSheetContent';
 import { PlannerOverlay } from '@/components/map/PlannerOverlay';
@@ -74,6 +75,8 @@ export default function MapScreen() {
 
   // ── Light preset: settings override or Prague time-of-day, refreshed 5-min ─
   const lightPresetSetting = useSettingsStore((s) => s.lightPreset);
+  // Debug overlay: mounted ONLY while debug mode is on (zero cost otherwise).
+  const debugMode = useSettingsStore((s) => s.debugMode);
   const [lightClock, setLightClock] = useState(() => Date.now());
   useEffect(() => {
     const iv = setInterval(() => setLightClock(Date.now()), LIGHT_REFRESH_MS);
@@ -298,6 +301,10 @@ export default function MapScreen() {
           through the trams arriving at the spotted stop (1 Hz; renders null
           and costs nothing when inactive). */}
       <SpotterController />
+
+      {/* Live physics/GPS debug readout for the followed tram (utilitarian).
+          Mounted only in debug mode — see Settings ▸ Developer ▸ Debug mode. */}
+      {debugMode && <DebugOverlay />}
     </View>
   );
 }

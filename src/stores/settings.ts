@@ -28,12 +28,19 @@ export interface SettingsState {
   passiveFleetLogging: boolean;
   /** Selected tram icon pack (face art on badges, sheets, settings). */
   iconPack: IconPackId;
+  /**
+   * Developer debug mode: mounts the live physics/GPS debug overlay over the
+   * map (utilitarian, ~1 Hz, followed-tram only). Off by default; when off the
+   * overlay is never mounted and costs nothing.
+   */
+  debugMode: boolean;
   setLightPreset: (preset: LightPreset) => void;
   setPositionMode: (mode: PositionMode) => void;
   setShowRouteLines: (show: boolean) => void;
   setFollowHeadingLock: (lock: boolean) => void;
   setPassiveFleetLogging: (on: boolean) => void;
   setIconPack: (pack: IconPackId) => void;
+  setDebugMode: (on: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -45,12 +52,14 @@ export const useSettingsStore = create<SettingsState>()(
       followHeadingLock: false,
       passiveFleetLogging: true,
       iconPack: DEFAULT_ICON_PACK,
+      debugMode: false,
       setLightPreset: (lightPreset) => set({ lightPreset }),
       setPositionMode: (positionMode) => set({ positionMode }),
       setShowRouteLines: (showRouteLines) => set({ showRouteLines }),
       setFollowHeadingLock: (followHeadingLock) => set({ followHeadingLock }),
       setPassiveFleetLogging: (passiveFleetLogging) => set({ passiveFleetLogging }),
       setIconPack: (iconPack) => set({ iconPack }),
+      setDebugMode: (debugMode) => set({ debugMode }),
     }),
     {
       name: 'settings',

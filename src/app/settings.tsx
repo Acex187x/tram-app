@@ -416,6 +416,30 @@ function MotionDataSection() {
   );
 }
 
+// ── Developer ────────────────────────────────────────────────────────────────
+
+function DeveloperSection() {
+  const debugMode = useSettingsStore((s) => s.debugMode);
+  const setDebugMode = useSettingsStore((s) => s.setDebugMode);
+  return (
+    <View style={styles.section}>
+      <SectionLabel>Developer</SectionLabel>
+      <InsetGroup>
+        <InsetRow
+          icon="ladybug.fill"
+          iconTint={Tram.veryLate}
+          title="Debug mode"
+          trailing={<ThemedSwitch value={debugMode} onValueChange={setDebugMode} />}
+        />
+      </InsetGroup>
+      <Footnote>
+        Overlays a live technical readout of the simulation (physics phase, speeds, holds, and the
+        real vs. simulated position) on the followed tram — for evaluating the physics while riding.
+      </Footnote>
+    </View>
+  );
+}
+
 // ── About & attribution ──────────────────────────────────────────────────────
 
 function AboutSection() {

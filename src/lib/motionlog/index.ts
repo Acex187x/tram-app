@@ -7,14 +7,15 @@
 // getMotionLog().onCalibration(...). The feed owns WHEN records are produced;
 // this module owns HOW/WHERE they are stored (buffering, flush, disk caps,
 // export UX — all unchanged).
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 
 import { getRuntime } from '@/hooks/tramData';
 import { useSettingsStore } from '@/stores/settings';
 
 import { MotionLog } from './core';
 import { createExpoFS } from './fs';
-import { createExpoLocationWatcher } from './location';
+import { createExpoLocationWatcher, createForegroundLocationWatcher } from './location';
+import { OnlineLocator } from './onlinePosition';
 import { createExpoDeviceMotionWatcher } from './sensors';
 
 export type {
@@ -40,6 +41,12 @@ export {
   type GpsFilterStats,
   type GpsRejectReason,
 } from './gpsFilter';
+export {
+  OnlineLocator,
+  projectOnlineFix,
+  type OnlineFix,
+  type OnlineProjection,
+} from './onlinePosition';
 
 let instance: MotionLog | null = null;
 
@@ -86,4 +93,38 @@ export function useMotionLog(): MotionLog {
     () => log.getVersion(),
   );
   return log;
+}
+
+let onlineLocator: OnlineLocator | null = null;
+
+/**
+ * App-wide OnlineLocator singleton (created lazily) — the debug overlay's live
+ * on-line GPS source. Foreground-only watch, separate from ride recording.
+ */
+export function getOnlineLocator(): OnlineLocator {
+  if (!onlineLocator) {
+    onlineLocator = new OnlineLocator({
+      location: createForegroundLocationWatcher(),
+      now: () => Date.now(),
+    });
+  }
+  return onlineLocator;
+}
+
+/**
+ * Keep the OnlineLocator watching while the calling component (the debug
+ * overlay) is mounted, and re-render it on each fix. Nothing watches while no
+ * component holds it — zero cost when the debug overlay is unmounted.
+ */
+export function useOnlineLocator(): OnlineLocator {
+  const locator = getOnlineLocator();
+  useEffect(() => {
+    locator.retain();
+    return () => locator.release();
+  }, [locator]);
+  useSyncExternalStore(
+    (cb) => locator.subscribe(cb),
+    () => locator.getVersion(),
+  );
+  return locator;
 }

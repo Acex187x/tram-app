@@ -5,6 +5,7 @@
 
 import type {
   RouteGeometry,
+  SimDebugInfo,
   TramModelSpec,
   TramPublicState,
   TramSnapshot,
@@ -19,7 +20,9 @@ import {
 import {
   A_BRK,
   buildSpeedProfile,
+  cruiseCapAt,
   pragueHour,
+  vAllowedAt,
   ZONAL_DWELL_AB,
   ZONAL_DWELL_CENTRE,
   ZONAL_DWELL_OUT,
@@ -28,9 +31,11 @@ import {
 import {
   applySnapshot,
   createSim,
+  FEED_LATENCY_S,
   nextUndwelledStop,
   observedDistAt,
   reanchorSim,
+  STOP_HOLD_MAX_FIX_AGE_S,
   targetDistAt,
   tick as tickSim,
   TELEPORT_THRESHOLD_M,
@@ -1016,6 +1021,80 @@ export class TramEngine {
   /** Geometry currently driving a tram's sim (featureBuilder callback). */
   getGeometry(key: string): RouteGeometry | undefined {
     return this.entries.get(key)?.sim?.geometry;
+  }
+
+  /**
+   * Additive, ON-DEMAND debug view of one tram's INTERNAL sim state for the
+   * debug overlay (~1 Hz — NEVER the frame path). Cheap: a handful of pure
+   * field reads plus two speed-cap evaluations at the current position. Returns
+   * undefined for an unknown key; hasSim=false when the tram has no geometry
+   * sim yet (raw-dot). Nothing here influences rendering or the simulation.
+   */
+  getDebugInfo(
+    key: string,
+    nowMs: number = this.lastTickMs ?? Date.now(),
+  ): SimDebugInfo | undefined {
+    const entry = this.entries.get(key);
+    if (!entry) return undefined;
+    const { snapshot, sim } = entry;
+    if (!sim) {
+      return {
+        hasSim: false,
+        phase: 'unknown',
+        simDistM: snapshot.shapeDistM,
+        simSpeedKmh: 0,
+        targetDistM: null,
+        errorM: null,
+        paceBias: null,
+        vAllowedKmh: null,
+        cruiseCapKmh: null,
+        crawling: false,
+        deepCrawl: false,
+        stuckAtM: null,
+        yieldHoldM: null,
+        fixStopDistM: null,
+        fixPinActive: false,
+        burstActive: false,
+        skipRollActive: false,
+        dwellUntilMs: 0,
+        obsDistM: snapshot.shapeDistM,
+        obsAtMs: snapshot.observedAtMs,
+        fixAgeMs: Math.max(0, nowMs - snapshot.observedAtMs),
+        lastTeleportMs: 0,
+        projDistM: null,
+      };
+    }
+    const target = targetDistAt(sim, nowMs);
+    // Mirrors tramSim.fixPinActive (not exported): the fix-pin is authoritative
+    // only while the latency-adjusted fix age is within the staleness bound.
+    const fixPinActive =
+      sim.fixStopDistM !== null &&
+      nowMs - sim.obsAtMs + FEED_LATENCY_S * 1000 <= STOP_HOLD_MAX_FIX_AGE_S * 1000;
+    return {
+      hasSim: true,
+      phase: sim.phase,
+      simDistM: sim.sM,
+      simSpeedKmh: sim.vMs * 3.6,
+      targetDistM: target,
+      errorM: target - sim.sM,
+      paceBias: sim.paceBias,
+      vAllowedKmh: vAllowedAt(sim.profile, sim.geometry, sim.sM, sim.minStopDist) * 3.6,
+      cruiseCapKmh: cruiseCapAt(sim.profile, sim.geometry, sim.sM) * 3.6,
+      crawling: sim.crawling,
+      deepCrawl: sim.deepCrawl,
+      stuckAtM: sim.stuckAtM,
+      yieldHoldM: sim.yieldHoldM,
+      fixStopDistM: sim.fixStopDistM,
+      fixPinActive,
+      burstActive: sim.sM < sim.burstUntilM,
+      skipRollActive: sim.sM < sim.skipRollUntilM,
+      dwellUntilMs: sim.phase === 'dwell' ? sim.dwellUntilMs : 0,
+      obsDistM: sim.obsDistM,
+      obsAtMs: sim.obsAtMs,
+      fixAgeMs: Math.max(0, nowMs - sim.obsAtMs),
+      lastTeleportMs: sim.lastTeleportMs,
+      projDistM: entry.projSim ? entry.projSim.sM : null,
+    };
   }
 
   private toPublicState(entry: Entry, nowMs: number): TramPublicState {

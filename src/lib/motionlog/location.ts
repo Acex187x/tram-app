@@ -53,6 +53,39 @@ TaskManager.defineTask(RIDE_LOCATION_TASK, async ({ data, error }) => {
   for (const loc of locations) handler(toSample(loc));
 });
 
+/**
+ * Plain FOREGROUND location watcher (expo-location watchPositionAsync) for the
+ * debug overlay's on-line position — separate from the ride background task so
+ * it can never clobber a live ride's RIDE_LOCATION_TASK handler. Dies on
+ * suspend (a debug tool only needs to work while on-screen). Reuses an already
+ * granted foreground permission; requests it if missing. Always mode
+ * 'foreground'.
+ */
+export function createForegroundLocationWatcher(): LocationWatcher {
+  return {
+    mode: () => 'foreground',
+
+    async start(onSample) {
+      let status = (await Location.getForegroundPermissionsAsync()).status;
+      if (status !== Location.PermissionStatus.GRANTED) {
+        status = (await Location.requestForegroundPermissionsAsync()).status;
+      }
+      if (status !== Location.PermissionStatus.GRANTED) {
+        throw new Error('Location permission denied');
+      }
+      const sub = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.BestForNavigation,
+          timeInterval: 1_000,
+          distanceInterval: 0,
+        },
+        (loc) => onSample(toSample(loc)),
+      );
+      return () => sub.remove();
+    },
+  };
+}
+
 export function createExpoLocationWatcher(): LocationWatcher {
   let mode: LocationWatchMode | null = null;
   return {

@@ -16,15 +16,20 @@
 //     stream. See docs/decisions/ride-recording.md.
 //   • iOS requires NSMotionUsageDescription (expo-sensors config plugin,
 //     app.json `motionPermission`) — requestPermissionsAsync() surfaces it.
-//   • 25 Hz is the deliberate rate: enough bandwidth for tram dynamics
-//     (accel/brake transients are < 2 Hz; track vibration analysis is not a
-//     goal), ~1.4 KB/s on disk, negligible battery vs. the GPS already running.
+//   • 10 Hz is the deliberate rate (lowered from 25 Hz — data-volume audit,
+//     docs/decisions/ride-recording.md "Data-volume audit …", v5-min): tram
+//     accel/brake transients are < 2 Hz and the analysis works on ~2 s windows,
+//     so 10 Hz is a 5× margin while the IMU (77% of a ride file at 25 Hz) drops
+//     to ~half the file. All 10 channels are kept — attitude is needed to
+//     rotate user acceleration into the world frame offline. This is a
+//     frequency change only; the on-disk schema/parsers are unaffected (rate is
+//     encoded per-sample as t0/dt, never fixed by the format).
 import { DeviceMotion, type DeviceMotionMeasurement } from 'expo-sensors';
 
 import type { MotionSample, MotionWatcher } from './core';
 
-/** 25 Hz — see the rate rationale above. */
-export const MOTION_UPDATE_INTERVAL_MS = 40;
+/** 10 Hz — see the rate rationale above. */
+export const MOTION_UPDATE_INTERVAL_MS = 100;
 
 /**
  * Map a DeviceMotionMeasurement to the compact ride MotionSample. `t` is the
