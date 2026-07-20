@@ -143,6 +143,19 @@ const ROW_INSET = 16 + 29 + 12;
  */
 const SEARCH_H = 46;
 
+/**
+ * Max width of the sheet's inner column (header search row + grouped body),
+ * centered inside the sheet. On a compact iPhone the sheet is narrower than this,
+ * so it has no effect (width:100% wins) and the layout is edge-to-edge as before.
+ * On a regular-width iPad, @expo/ui's native `.sheet` presents as a WIDE centered
+ * card (there is no presentationCompactAdaptation / sizing hook in the package),
+ * so without a cap the search field stretched the full card width and read as a
+ * broken, half-empty bar. Capping + centering makes the content an intentional
+ * column that looks assembled at both widths. (Apple Maps' iPad panel is a
+ * similarly narrow docked column.)
+ */
+const CONTENT_MAX_WIDTH = 500;
+
 const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
@@ -151,6 +164,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 6,
     paddingBottom: 12,
+    // Center the search row and cap it so it never stretches across a wide
+    // (iPad) sheet card — see CONTENT_MAX_WIDTH. No-op on compact iPhone widths.
+    width: '100%',
+    maxWidth: CONTENT_MAX_WIDTH,
+    alignSelf: 'center',
   },
   // iOS 26 "Liquid Glass" Apple-Maps search bar: a full PILL (not a rounded
   // rect — that boxy 12 pt radius clashed with the app's own pill chips + circle
@@ -183,6 +201,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  body: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8 },
+  body: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 8,
+    // Match the header: one centered, width-capped column so the grouped list
+    // aligns with the search field on a wide iPad sheet. No-op on iPhone.
+    width: '100%',
+    maxWidth: CONTENT_MAX_WIDTH,
+    alignSelf: 'center',
+  },
   recentsSection: { marginTop: 22 },
 });

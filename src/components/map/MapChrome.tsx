@@ -333,12 +333,13 @@ function LayersMenu({
 
 // ── Bottom chips — follow / spotter / ride / planner riding above the sheet ──
 //
-// All are full-width glass chips inside one container anchored `CHIP_GAP` above
-// the home sheet's top edge. The container translates on the UI thread from the
-// sheet's heightSV: effective bottom = heightSV + gap, so the chips always sit
-// just above whatever detent the sheet has settled/dragged to (zero per-frame
-// React — docs/performance.md invariant #1). The planner chip owns the base
-// row, ride stacks above it, spotter above that, and follow floats on top.
+// All are glass chips inside one container anchored just above the home sheet's
+// peek edge — the SAME low band as the bottom-right control column, inset to its
+// left so they never overlap it. The container translates up per detent on the
+// UI thread (zero per-frame React — docs/performance.md invariant #1), so the
+// chips always sit just above whatever detent the sheet has settled on. Within
+// the container the planner chip owns the base row, ride stacks above it,
+// spotter above that, and follow floats on top.
 
 export interface MapChipsProps {
   /** Peek-sheet height in px — the chip cluster's static base rests above it. */
@@ -350,12 +351,16 @@ export interface MapChipsProps {
 }
 
 export function MapChips({ peekPx, chromeShift, chromeOpacity }: MapChipsProps) {
-  // Contextual chips (follow / spotter / ride / planner) float above the
-  // bottom-right control column and ride UP with the home sheet as it opens
-  // (translateY per detent), fading out once it reaches the large detent. The
-  // cluster is also inset from the right edge (CHIPS_RIGHT_INSET) so the
-  // full-width follow pill never sits over the 2D/layers/locate column.
-  const bottom = peekPx + CHROME_BOTTOM_GAP + STACK_H + CONTROL_GAP;
+  // Contextual chips (follow / spotter / ride / planner) rest on the SAME low
+  // band as the bottom-right control column — just above the peek search bar
+  // (Apple Maps) — and ride UP with the home sheet as it opens (translateY per
+  // detent), fading out once it reaches the large detent. They do NOT stack
+  // above the control column: the cluster is horizontally inset from the right
+  // edge (CHIPS_RIGHT_INSET reserves the column's width + a gap), so the
+  // full-width follow pill sits to the LEFT of the 2D/layers/locate column with
+  // no overlap. Anchoring it above the column instead (the old +STACK_H) floated
+  // a lone chip at mid-screen while the sheet was at peek — the reported bug.
+  const bottom = peekPx + CHROME_BOTTOM_GAP;
   const rideStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: -chromeShift.value }],
     opacity: chromeOpacity.value,
