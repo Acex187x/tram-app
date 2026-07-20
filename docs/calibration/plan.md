@@ -141,6 +141,11 @@ The existing daytime center-zone cap (07:00–19:00) folds into this table event
 - Scripts + reports: `docs/calibration/`
 - Engine knobs: `src/lib/engine/speedProfile.ts` (caps), `tramSim.ts` (pace/dwell/bias),
   future `TOD_PACE_TABLE` in `speedProfile.ts`.
+- **Ride ground-truth pipeline**: `docs/calibration/ride_replay.py <ride.jsonl>
+  [--sweep]` — replays the smooth-sim controller over a ride's AVL fixes and
+  scores vs the RIDER's GPS (`fDist`); the gate for every ride-evidenced
+  constant (methodology + shrinkage rules: analysis-2026-07-20-ride.md §5;
+  double gate = ride-replay improvement + no `replay.py` fleet regression).
 
 ## Runbook for agents ("собирай данные и вноси изменения")
 

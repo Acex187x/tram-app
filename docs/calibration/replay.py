@@ -218,7 +218,11 @@ def replay(cfg):
                 while t < tf:
                     tprev, oprev = seg[fi]
                     cap = cfg["v_center"] if in_center_at(loc, s) else cfg["v_max"]
-                    if stuck and t - tprev <= 60_000:
+                    # 45 s mirrors STOP_HOLD_MAX_FIX_AGE_S (60 → 45, ride
+                    # calibration 2026-07-20 — see analysis-2026-07-20-ride.md;
+                    # fleet metrics verified identical at 60 vs 40/45 s on
+                    # session-2026-07-11: the bound rarely binds here).
+                    if stuck and t - tprev <= 45_000:
                         # Stuck-hold: target frozen AT the fix; brake to a
                         # stand there (envelope approach when still short).
                         # Releases when the pinning fix turns 60 s old (the

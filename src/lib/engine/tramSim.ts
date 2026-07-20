@@ -105,8 +105,20 @@ const AT_STOP_MATCH_M = 50;
  * still standing keeps refreshing its at-stop fix inside this budget, while a
  * tram that departed right after its last fix shows a moving fix within
  * roughly one cadence. Beyond this age an unseen departure is the better bet.
+ *
+ * 60 → 45 (first ground-truth ride calibration, 2026-07-20 — docs/calibration/
+ * analysis-2026-07-20-ride.md): the rider recording shows the feed keeps
+ * reporting at_stop for 50–75 s while the real platform dwell is 15–20 s, so a
+ * 60 s hold pinned the sim at stops long after the real departure (worst
+ * observed −374 m, sim dwell 95 s vs real 15 s). 45 s = one fix cadence p50 —
+ * a standing tram usually refreshes its fix inside the hold, a departed one is
+ * released a cadence earlier. Ride replay (ride_replay.py): mean |err| vs the
+ * rider −25% (180 → 135 m), both ride halves agree; fleet replay unchanged.
+ * Likely to drop further (35–40 s read −33…−42% on this ride) — needs ≥2 more
+ * rides before going below one cadence. Also bounds fixPinActive (the
+ * projection freeze at a pinned platform) — same staleness story.
  */
-export const STOP_HOLD_MAX_FIX_AGE_S = 60;
+export const STOP_HOLD_MAX_FIX_AGE_S = 45;
 /**
  * A fix that has advanced more than this past the fix seen at dwell entry is
  * movement evidence (releases the fix-hold); smaller deltas are AVL
