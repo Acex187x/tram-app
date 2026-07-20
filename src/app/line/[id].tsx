@@ -1,7 +1,12 @@
 // Line sheet — /line/[id]. Floats over the live map as a formSheet.
-// Shows the line header (badge, live tram count), a direction picker built
-// from the two most common trip headsigns, and a stop timeline with live tram
-// positions inserted between the stops each tram is currently between.
+// Shows the line header (badge, live tram count, NIGHT pill, favorite star), a
+// direction picker built from the two most common trip headsigns, and a dotted
+// transit stop-timeline with live tram positions inserted between the stops
+// each tram is currently between.
+//
+// Apple-Maps re-skin: SheetHeader-style large title + CloseCircle, SegmentedPills
+// direction selector, and an Apple dotted transit timeline. The headsign-STRING
+// direction tracking and the shapeId interleaving rule are unchanged.
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
@@ -18,11 +23,13 @@ import {
 } from 'react-native';
 
 import { AcSnowflake } from '@/components/tram/TramModelImage';
+import { CloseCircle } from '@/components/ui/CloseCircle';
 import { DelayPill } from '@/components/ui/DelayPill';
 import { GlassPanel } from '@/components/ui/GlassPanel';
-import { SHEET_CONTENT_MAX_WIDTH } from '@/components/ui/SheetContent';
 import { isNightLine, LineBadge } from '@/components/ui/LineBadge';
-import { Colors, Fonts, Spacing, Tram } from '@/constants/theme';
+import { SegmentedPills } from '@/components/ui/SegmentedPills';
+import { SHEET_CONTENT_MAX_WIDTH } from '@/components/ui/SheetContent';
+import { appleScheme, Fonts, Spacing, Tram, Type } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
 import { useFavoritesStore } from '@/stores/favorites';
 import { useSelectionStore } from '@/stores/selection';
@@ -43,8 +50,8 @@ export default function LineSheet() {
   const params = useLocalSearchParams<{ id?: string }>();
   const lineId = typeof params.id === 'string' ? params.id : '';
   const router = useRouter();
-  const scheme = useColorScheme();
-  const c = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const c = appleScheme(scheme);
   // iPad: the sheet's glass is full-width; cap + center the list content.
   const { width } = useWindowDimensions();
   const wide = width > SHEET_CONTENT_MAX_WIDTH;
@@ -164,12 +171,12 @@ export default function LineSheet() {
       <View style={styles.titleRow}>
         <LineBadge line={lineId} size="lg" />
         <View style={styles.titleText}>
-          <Text style={[styles.title, { color: c.text }]} allowFontScaling={false}>
+          <Text style={[Type.largeTitle, styles.title, { color: c.text }]} allowFontScaling={false}>
             Line {lineId}
           </Text>
           <View style={styles.subtitleRow}>
             <View style={styles.liveDot} />
-            <Text style={[styles.subtitle, { color: c.textSecondary }]}>
+            <Text style={[styles.subtitle, { color: c.secondary }]}>
               {lineStates.length === 1 ? '1 tram active' : `${lineStates.length} trams active`}
             </Text>
             {isNightLine(lineId) && (
@@ -188,70 +195,29 @@ export default function LineSheet() {
           accessibilityRole="button"
           accessibilityLabel={isFavorite ? `Unfavorite line ${lineId}` : `Favorite line ${lineId}`}
           accessibilityState={{ selected: isFavorite }}
-          style={({ pressed }) => pressed && styles.pressed}
+          style={({ pressed }) => [styles.starButton, pressed && styles.pressed]}
         >
           <SymbolView
             name={isFavorite ? 'star.fill' : 'star'}
-            size={26}
+            size={22}
             type="hierarchical"
-            tintColor={isFavorite ? Tram.gold : c.textSecondary}
+            tintColor={isFavorite ? Tram.gold : c.secondary}
           />
         </Pressable>
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={8}
-          accessibilityLabel="Close"
-          style={({ pressed }) => pressed && styles.pressed}
-        >
-          <SymbolView
-            name="xmark.circle.fill"
-            size={28}
-            type="hierarchical"
-            tintColor={c.textSecondary}
-          />
-        </Pressable>
+        <CloseCircle onPress={() => router.back()} />
       </View>
 
-      {headsigns.length > 1 && (
-        <View style={[styles.segmented, { backgroundColor: c.backgroundElement }]}>
-          {headsigns.map((h) => {
-            const selected = h === headsign;
-            return (
-              <Pressable
-                key={h}
-                onPress={() => {
-                  if (h !== headsign) {
-                    void Haptics.selectionAsync();
-                    setSelectedHeadsign(h);
-                  }
-                }}
-                style={[
-                  styles.segment,
-                  selected && {
-                    backgroundColor: scheme === 'dark' ? '#48484A' : '#FFFFFF',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
-                  },
-                ]}
-              >
-                <SymbolView
-                  name="arrow.right"
-                  size={11}
-                  tintColor={selected ? Tram.pidRed : (c.textSecondary as string)}
-                />
-                <Text
-                  numberOfLines={1}
-                  style={[
-                    styles.segmentText,
-                    { color: selected ? c.text : c.textSecondary },
-                    selected && styles.segmentTextSelected,
-                  ]}
-                >
-                  {h}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+      {headsigns.length > 1 && headsign != null && (
+        <SegmentedPills
+          segments={headsigns.map((h) => ({ key: h, label: h }))}
+          selectedKey={headsign}
+          onChange={(h) => {
+            if (h !== headsign) {
+              void Haptics.selectionAsync();
+              setSelectedHeadsign(h);
+            }
+          }}
+        />
       )}
     </View>
   );
@@ -259,8 +225,8 @@ export default function LineSheet() {
   const footer =
     offShapeCount > 0 ? (
       <View style={styles.footerNote}>
-        <SymbolView name="arrow.triangle.branch" size={12} tintColor={c.textSecondary} />
-        <Text style={[styles.footerNoteText, { color: c.textSecondary }]}>
+        <SymbolView name="arrow.triangle.branch" size={12} tintColor={c.secondary} />
+        <Text style={[styles.footerNoteText, { color: c.secondary }]}>
           {offShapeCount === 1
             ? '1 more tram this direction on a different route variant'
             : `${offShapeCount} more trams this direction on different route variants`}
@@ -272,7 +238,7 @@ export default function LineSheet() {
     <View style={styles.empty}>
       <ActivityIndicator color={Tram.pidRed} />
       <Text style={[styles.emptyTitle, { color: c.text }]}>Loading route…</Text>
-      <Text style={[styles.emptyBody, { color: c.textSecondary }]}>
+      <Text style={[styles.emptyBody, { color: c.secondary }]}>
         Stops appear as soon as this line&apos;s geometry streams in.
       </Text>
     </View>
@@ -294,7 +260,7 @@ export default function LineSheet() {
               isFirst={index === 0}
               isLast={index === rows.length - 1}
               textColor={c.text as string}
-              secondaryColor={c.textSecondary as string}
+              secondaryColor={c.secondary as string}
               onPress={() => onStopPress(item.stop)}
             />
           ) : (
@@ -302,7 +268,7 @@ export default function LineSheet() {
               state={item.state}
               isFirst={index === 0}
               isLast={index === rows.length - 1}
-              scheme={scheme === 'dark' ? 'dark' : 'light'}
+              scheme={scheme}
               onPress={() => onTramPress(item.state)}
             />
           )
@@ -328,7 +294,7 @@ interface RailProps {
   isLast: boolean;
 }
 
-/** The continuous PID-red line down the left edge, with an optional gap-free marker slot. */
+/** The dotted PID-red transit line down the left edge, with a gap-free marker slot. */
 function Rail({ isFirst, isLast, children }: RailProps & { children?: React.ReactNode }) {
   return (
     <View style={styles.rail}>
@@ -398,7 +364,7 @@ function TramRow({
   scheme: 'light' | 'dark';
   onPress: () => void;
 }) {
-  const c = Colors[scheme];
+  const c = appleScheme(scheme);
   return (
     <View style={styles.row}>
       <Rail isFirst={isFirst} isLast={isLast}>
@@ -419,12 +385,12 @@ function TramRow({
         <Text style={[styles.tramReg, { color: c.text }]} allowFontScaling={false}>
           {state.key}
         </Text>
-        <Text numberOfLines={1} style={[styles.tramModel, { color: c.textSecondary }]}>
+        <Text numberOfLines={1} style={[styles.tramModel, { color: c.secondary }]}>
           {shortModelName(state.model.name)}
         </Text>
         <AcSnowflake airConditioned={state.snapshot.airConditioned} />
         <DelayPill delaySeconds={state.snapshot.delaySeconds} />
-        <SymbolView name="chevron.right" size={11} tintColor={c.textSecondary} />
+        <SymbolView name="chevron.right" size={11} tintColor={c.secondary} />
       </Pressable>
     </View>
   );
@@ -448,8 +414,6 @@ const styles = StyleSheet.create({
   },
   titleText: { flex: 1, gap: Spacing.half },
   title: {
-    fontSize: 26,
-    fontWeight: '700',
     fontFamily: Fonts?.rounded,
     letterSpacing: -0.4,
   },
@@ -480,26 +444,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.6,
   },
-  segmented: {
-    flexDirection: 'row',
-    borderRadius: 12,
-    borderCurve: 'continuous',
-    padding: 3,
-    gap: 3,
-  },
-  segment: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    borderRadius: 9,
-    borderCurve: 'continuous',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-  },
-  segmentText: { fontSize: 13, fontWeight: '500', flexShrink: 1 },
-  segmentTextSelected: { fontWeight: '600' },
+  starButton: { padding: 2 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -517,28 +462,32 @@ const styles = StyleSheet.create({
     left: (RAIL_W - 3) / 2,
     top: 0,
     bottom: 0,
-    width: 3,
-    backgroundColor: Tram.pidRed,
+    width: 0,
+    borderLeftWidth: 3,
+    borderColor: Tram.pidRed,
+    borderStyle: 'dashed',
   },
   railLineFirst: { top: '50%' },
   railLineLast: { bottom: '50%' },
   stopDot: {
-    width: 11,
-    height: 11,
+    width: 12,
+    height: 12,
     borderRadius: 6,
     backgroundColor: Tram.cream,
-    borderWidth: 2.5,
+    borderWidth: 3,
     borderColor: Tram.pidRed,
   },
   terminalDot: {
-    width: 15,
-    height: 15,
+    width: 16,
+    height: 16,
     borderRadius: 8,
-    borderWidth: 4,
+    backgroundColor: Tram.pidRed,
+    borderWidth: 3,
+    borderColor: Tram.cream,
   },
   stopBody: { flex: 1, paddingVertical: 10, gap: 1 },
-  stopName: { fontSize: 15, fontWeight: '500' },
-  terminalName: { fontSize: 16, fontWeight: '700' },
+  stopName: { fontSize: 16, fontWeight: '500' },
+  terminalName: { fontSize: 17, fontWeight: '700' },
   terminusLabel: { fontSize: 12 },
   stopGo: { opacity: 0.55 },
   tramMarker: {

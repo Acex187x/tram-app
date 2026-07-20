@@ -1,16 +1,13 @@
 // /favorites form sheet — starred trams (with live in-service status) and
 // starred lines (with live active-tram counts), floating over the live map.
 // On iPad the content column is capped and the lines become a 2-up grid.
+//
+// Apple-Maps re-skin: a SheetSurface scaffold with a large-title SheetHeader and
+// home-sheet-style grouped inset sections (uppercase section labels + rounded
+// inset cards with hairline separators). Live-status data flows are unchanged.
 import { SymbolView } from 'expo-symbols';
 import { Fragment, useMemo } from 'react';
-import {
-  ScrollView,
-  StyleSheet,
-  Text,
-  useColorScheme,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { StyleSheet, Text, useColorScheme, useWindowDimensions, View } from 'react-native';
 
 import {
   FavoriteLineRow,
@@ -25,17 +22,17 @@ import {
   InsetGroup,
   RowSeparator,
   SectionLabel,
-} from '@/components/favorites/InsetGroup';
-import { SheetHeader } from '@/components/favorites/SheetHeader';
-import { GlassPanel } from '@/components/ui/GlassPanel';
-import { SheetContent, SHEET_CONTENT_MAX_WIDTH } from '@/components/ui/SheetContent';
-import { Colors, Tram } from '@/constants/theme';
+} from '@/components/ui/Inset';
+import { SheetHeader } from '@/components/ui/SheetHeader';
+import { SheetSurface } from '@/components/ui/SheetSurface';
+import { SHEET_CONTENT_MAX_WIDTH } from '@/components/ui/SheetContent';
+import { appleScheme, Tram } from '@/constants/theme';
 import { useAllTramStates } from '@/hooks/tramData';
 import { useFavoritesStore } from '@/stores/favorites';
 
 export default function FavoritesScreen() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const palette = Colors[scheme];
+  const c = appleScheme(scheme);
   const favoriteTrams = useFavoritesStore((s) => s.favoriteTrams);
   const favoriteLines = useFavoritesStore((s) => s.favoriteLines);
   const states = useAllTramStates();
@@ -63,90 +60,68 @@ export default function FavoritesScreen() {
   const nothingStarred = trams.length === 0 && lines.length === 0;
 
   return (
-    <GlassPanel style={styles.sheet}>
-      <SheetContent>
-        <SheetHeader title="Favorites" />
-      </SheetContent>
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={styles.scrollBottom}
-        showsVerticalScrollIndicator={false}
-      >
-        <SheetContent style={styles.content}>
-        {nothingStarred ? (
-          <View style={styles.empty}>
-            <SymbolView name="star" size={46} weight="light" tintColor={Tram.gold} />
-            <Text style={[styles.emptyTitle, { color: palette.text }]}>
-              No favorites yet
-            </Text>
-            <Text style={[styles.emptyHint, { color: palette.textSecondary }]}>
-              Spot a tram on the map and star it — your trams and lines will keep
-              their place here, live status included.
-            </Text>
+    <SheetSurface header={<SheetHeader title="Favorites" />}>
+      {nothingStarred ? (
+        <View style={styles.empty}>
+          <SymbolView name="star" size={46} weight="light" tintColor={Tram.gold} />
+          <Text style={[styles.emptyTitle, { color: c.text }]}>No favorites yet</Text>
+          <Text style={[styles.emptyHint, { color: c.secondary }]}>
+            Spot a tram on the map and star it — your trams and lines will keep
+            their place here, live status included.
+          </Text>
+        </View>
+      ) : (
+        <>
+          <View style={styles.section}>
+            <SectionLabel>Trams</SectionLabel>
+            <InsetGroup>
+              {trams.length === 0 ? (
+                <InlineHint icon="star" text="Spot a tram on the map and star it." />
+              ) : (
+                trams.map((reg, i) => (
+                  <Fragment key={reg}>
+                    {i > 0 ? <RowSeparator inset={TRAM_ROW_SEPARATOR_INSET} /> : null}
+                    <FavoriteTramRow regKey={reg} />
+                  </Fragment>
+                ))
+              )}
+            </InsetGroup>
           </View>
-        ) : (
-          <>
-            <View>
-              <SectionLabel>Trams</SectionLabel>
-              <InsetGroup>
-                {trams.length === 0 ? (
-                  <InlineHint icon="star" text="Spot a tram on the map and star it." />
-                ) : (
-                  trams.map((reg, i) => (
-                    <Fragment key={reg}>
-                      {i > 0 ? <RowSeparator inset={TRAM_ROW_SEPARATOR_INSET} /> : null}
-                      <FavoriteTramRow regKey={reg} />
-                    </Fragment>
-                  ))
-                )}
-              </InsetGroup>
-            </View>
 
-            <View>
-              <SectionLabel>Lines</SectionLabel>
-              <InsetGroup>
-                {lines.length === 0 ? (
-                  <InlineHint
-                    icon="star"
-                    text="Open a line from any tram and star it to track it here."
-                  />
-                ) : gridLines ? (
-                  <View style={styles.lineGrid}>
-                    {lines.map((line) => (
-                      <View key={line} style={styles.lineGridCell}>
-                        <FavoriteLineRow line={line} activeCount={lineCounts.get(line) ?? 0} />
-                      </View>
-                    ))}
-                  </View>
-                ) : (
-                  lines.map((line, i) => (
-                    <Fragment key={line}>
-                      {i > 0 ? <RowSeparator inset={LINE_ROW_SEPARATOR_INSET} /> : null}
+          <View style={styles.section}>
+            <SectionLabel>Lines</SectionLabel>
+            <InsetGroup>
+              {lines.length === 0 ? (
+                <InlineHint
+                  icon="star"
+                  text="Open a line from any tram and star it to track it here."
+                />
+              ) : gridLines ? (
+                <View style={styles.lineGrid}>
+                  {lines.map((line) => (
+                    <View key={line} style={styles.lineGridCell}>
                       <FavoriteLineRow line={line} activeCount={lineCounts.get(line) ?? 0} />
-                    </Fragment>
-                  ))
-                )}
-              </InsetGroup>
-            </View>
-          </>
-        )}
-        </SheetContent>
-      </ScrollView>
-    </GlassPanel>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                lines.map((line, i) => (
+                  <Fragment key={line}>
+                    {i > 0 ? <RowSeparator inset={LINE_ROW_SEPARATOR_INSET} /> : null}
+                    <FavoriteLineRow line={line} activeCount={lineCounts.get(line) ?? 0} />
+                  </Fragment>
+                ))
+              )}
+            </InsetGroup>
+          </View>
+        </>
+      )}
+    </SheetSurface>
   );
 }
 
 const styles = StyleSheet.create({
-  sheet: {
-    flex: 1,
-  },
-  scrollBottom: {
-    paddingBottom: 48,
-  },
-  content: {
-    gap: 24,
-    padding: 16,
-  },
+  section: { gap: 8 },
   lineGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

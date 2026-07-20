@@ -10,7 +10,7 @@ import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native'
 import { AcSnowflake } from '@/components/tram/TramModelImage';
 import { DelayPill } from '@/components/ui/DelayPill';
 import { LineBadge } from '@/components/ui/LineBadge';
-import { Colors, Tram } from '@/constants/theme';
+import { appleScheme, Tram } from '@/constants/theme';
 import { getRuntime, useTramState } from '@/hooks/tramData';
 import { getModelSpec, regNumberToModelId } from '@/lib/fleet/registry';
 import { useFavoritesStore } from '@/stores/favorites';
@@ -22,7 +22,7 @@ export const TRAM_ROW_SEPARATOR_INSET = 16 + 44 + 12;
 export function FavoriteTramRow({ regKey }: { regKey: string }) {
   const router = useRouter();
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const palette = Colors[scheme];
+  const palette = appleScheme(scheme);
   const state = useTramState(regKey);
   const toggleTram = useFavoritesStore((s) => s.toggleTram);
   const setSelectedTramKey = useSelectionStore((s) => s.setSelectedTramKey);
@@ -74,7 +74,7 @@ export function FavoriteTramRow({ regKey }: { regKey: string }) {
               },
             ]}
           >
-            <SymbolView name="tram.fill" size={15} tintColor={palette.textSecondary} />
+            <SymbolView name="tram.fill" size={15} tintColor={palette.secondary} />
           </View>
         )}
       </View>
@@ -85,7 +85,7 @@ export function FavoriteTramRow({ regKey }: { regKey: string }) {
             {regKey}
           </Text>
           <Text
-            style={[styles.model, { color: palette.textSecondary }]}
+            style={[styles.model, { color: palette.secondary }]}
             numberOfLines={1}
           >
             {spec.name}
@@ -93,7 +93,7 @@ export function FavoriteTramRow({ regKey }: { regKey: string }) {
           {state ? <AcSnowflake airConditioned={state.snapshot.airConditioned} size={11} /> : null}
         </View>
         <Text
-          style={[styles.subtitle, { color: palette.textSecondary }]}
+          style={[styles.subtitle, { color: palette.secondary }]}
           numberOfLines={1}
         >
           {state ? `→ ${state.snapshot.headsign}` : 'Not in service'}
@@ -117,7 +117,7 @@ export function FavoriteTramRow({ regKey }: { regKey: string }) {
           name="chevron.right"
           size={13}
           weight="semibold"
-          tintColor={palette.textSecondary}
+          tintColor={palette.secondary}
         />
       ) : null}
     </Pressable>

@@ -2,16 +2,22 @@
 // (normalizeName of the stop name, same grouping as the planner network).
 // Live arrivals board over the runtime states + loaded geometries, refreshed
 // ~1 Hz by the tramData hooks; tap an arrival → that tram's sheet.
+//
+// Apple-Maps re-skin: SheetHeader ("Tram stop · lines …" subtitle) + an
+// ActionPillRow (Route Here prominent / Spot / Show on Map) + a served-lines
+// badge row + the live arrivals as a grouped inset list (LineBadge circle,
+// headsign+model subtitle, right-aligned green ETA countdown, chevron). All
+// data flows — computeArrivals recompute-on-tick, the Route-Here prefill
+// handoff, spotter start/stop — are unchanged.
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   useColorScheme,
@@ -19,10 +25,12 @@ import {
 } from 'react-native';
 
 import { AcSnowflake } from '@/components/tram/TramModelImage';
-import { GlassPanel } from '@/components/ui/GlassPanel';
+import { ActionPillRow, type PillAction } from '@/components/ui/ActionPillRow';
+import { InsetGroup, InsetRow, RowSeparator, SectionLabel } from '@/components/ui/Inset';
 import { LineBadge } from '@/components/ui/LineBadge';
-import { SheetContent } from '@/components/ui/SheetContent';
-import { Colors, Fonts, Spacing, Tram } from '@/constants/theme';
+import { SheetHeader } from '@/components/ui/SheetHeader';
+import { SheetSurface } from '@/components/ui/SheetSurface';
+import { Apple, appleScheme, Fonts, Tram } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
 import {
   computeArrivals,
@@ -40,12 +48,15 @@ function shortModelName(name: string): string {
   return name.replace(/^(Tatra|Škoda|ČKD)\s+/u, '');
 }
 
+/** Left inset aligning arrival-row separators with the row text (16 + 30 badge + 12 gap). */
+const ARRIVAL_SEPARATOR_INSET = 58;
+
 export default function StopSheet() {
   const params = useLocalSearchParams<{ key?: string }>();
   const stationKey = typeof params.key === 'string' ? params.key : '';
   const router = useRouter();
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const c = Colors[scheme];
+  const c = appleScheme(scheme);
 
   const states = useAllTramStates();
   const geometries = useLoadedGeometries();
@@ -76,6 +87,11 @@ export default function StopSheet() {
   const onOpenTram = (arrival: StopArrival): void => {
     void Haptics.selectionAsync();
     router.push(('/tram/' + encodeURIComponent(arrival.tramKey)) as Href);
+  };
+
+  const onOpenLine = (line: string): void => {
+    void Haptics.selectionAsync();
+    router.push(('/line/' + line) as Href);
   };
 
   // Spotter mode: sit at a window overlooking this stop and watch how well
@@ -139,317 +155,180 @@ export default function StopSheet() {
     }
   };
 
+  const lines = station?.lines ?? [];
+  const subtitle =
+    lines.length > 0
+      ? `Tram stop · line${lines.length > 1 ? 's' : ''} ${lines.join(', ')}`
+      : 'Tram stop';
+
+  const actions: PillAction[] = station
+    ? [
+        {
+          key: 'route',
+          symbol: 'location.fill',
+          label: 'Route Here',
+          onPress: () => void onRouteHere(),
+          prominent: true,
+          disabled: routing,
+        },
+        {
+          key: 'spot',
+          symbol: 'binoculars.fill',
+          label: isSpottingHere ? 'Stop' : 'Spot',
+          onPress: onSpot,
+          tint: isSpottingHere ? Apple.red : Apple.blue,
+        },
+        {
+          key: 'map',
+          symbol: 'map.fill',
+          label: 'Show Map',
+          onPress: onShowOnMap,
+        },
+      ]
+    : [];
+
   return (
-    <GlassPanel style={styles.root}>
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <SheetContent style={styles.content}>
-          {/* Header */}
-          <View style={styles.headerRow}>
-            <View style={styles.stopIcon}>
-              <SymbolView name="tram.fill" size={17} tintColor={Tram.cream} />
+    <SheetSurface header={<SheetHeader title={station?.name ?? 'Stop'} subtitle={subtitle} />}>
+      {station && (
+        <View style={styles.pillWrap}>
+          {routing ? (
+            <View style={styles.routingOverlay} pointerEvents="none">
+              <ActivityIndicator color={Apple.blue} />
             </View>
-            <Text style={[styles.title, { color: c.text }]} numberOfLines={2}>
-              {station?.name ?? 'Stop'}
-            </Text>
-            <Pressable
-              onPress={() => router.back()}
-              hitSlop={8}
-              accessibilityLabel="Close"
-              style={({ pressed }) => pressed && styles.pressed}
-            >
-              <SymbolView
-                name="xmark.circle.fill"
-                size={28}
-                type="hierarchical"
-                tintColor={c.textSecondary}
-              />
-            </Pressable>
-          </View>
+          ) : null}
+          <ActionPillRow actions={actions} />
+        </View>
+      )}
 
-          {station && station.lines.length > 0 && (
-            <View style={styles.linesRow}>
-              {station.lines.map((line) => (
-                <Pressable
-                  key={line}
-                  onPress={() => {
-                    void Haptics.selectionAsync();
-                    router.push(('/line/' + line) as Href);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Line ${line}`}
-                  style={({ pressed }) => pressed && styles.pressed}
-                >
-                  <LineBadge line={line} size="sm" />
-                </Pressable>
-              ))}
+      {station && lines.length > 0 && (
+        <View style={styles.section}>
+          <SectionLabel>Lines</SectionLabel>
+          <View style={styles.lineRow}>
+            {lines.map((line) => (
               <Pressable
-                onPress={onShowOnMap}
+                key={line}
+                onPress={() => onOpenLine(line)}
                 accessibilityRole="button"
-                accessibilityLabel="Show stop on map"
-                style={({ pressed }) => [
-                  styles.mapButton,
-                  { backgroundColor: c.backgroundElement },
-                  pressed && styles.pressed,
-                ]}
+                accessibilityLabel={`Line ${line}`}
+                hitSlop={6}
+                style={({ pressed }) => pressed && styles.pressed}
               >
-                <SymbolView name="map.fill" size={12} tintColor={Tram.pidRed} />
-                <Text style={[styles.mapButtonText, { color: c.text }]} allowFontScaling={false}>
-                  Show on map
-                </Text>
+                <LineBadge line={line} size="md" />
               </Pressable>
-            </View>
-          )}
+            ))}
+          </View>
+        </View>
+      )}
 
-          {station && (
-            <Pressable
-              onPress={() => void onRouteHere()}
-              disabled={routing}
-              accessibilityRole="button"
-              accessibilityLabel="Route here from my nearest stop"
-              style={({ pressed }) => [styles.routeButton, { opacity: pressed || routing ? 0.75 : 1 }]}
-            >
-              {routing ? (
-                <ActivityIndicator color={Tram.cream} />
-              ) : (
-                <>
-                  <SymbolView name="location.fill" size={16} tintColor={Tram.cream} />
-                  <Text style={styles.routeButtonText} allowFontScaling={false}>
-                    Route here
-                  </Text>
-                </>
-              )}
-            </Pressable>
-          )}
-
-          {station && (
-            <Pressable
-              onPress={onSpot}
-              accessibilityRole="button"
-              accessibilityLabel={isSpottingHere ? 'Stop spotting this stop' : 'Spot this stop'}
-              accessibilityHint="Follows each tram arriving at this stop, switching as they depart"
-              style={({ pressed }) => [
-                styles.spotButton,
-                { backgroundColor: c.backgroundElement, opacity: pressed ? 0.75 : 1 },
-              ]}
-            >
-              <SymbolView
-                name="binoculars.fill"
-                size={16}
-                tintColor={isSpottingHere ? Tram.veryLate : Tram.pidRed}
-              />
-              <Text style={[styles.spotButtonText, { color: c.text }]} allowFontScaling={false}>
-                {isSpottingHere ? 'Stop spotting' : 'Spot this stop'}
-              </Text>
-            </Pressable>
-          )}
-
-          {/* Arrivals */}
-          {loading ? (
-            <View style={styles.stateBlock}>
-              <ActivityIndicator color={Tram.pidRed} />
-              <Text style={[styles.stateBody, { color: c.textSecondary }]}>
-                Loading the tram network — arrivals appear as routes stream in.
-              </Text>
-            </View>
-          ) : !station ? (
-            <View style={styles.stateBlock}>
-              <SymbolView name="mappin.slash" size={32} tintColor={c.textSecondary} />
-              <Text style={[styles.stateTitle, { color: c.text }]}>Stop not found</Text>
-              <Text style={[styles.stateBody, { color: c.textSecondary }]}>
-                No loaded route serves this stop yet. It appears as soon as a tram
-                on a serving line reports in.
-              </Text>
-            </View>
-          ) : arrivals.length === 0 ? (
-            <View style={styles.stateBlock}>
-              <SymbolView name="moon.zzz.fill" size={32} tintColor={c.textSecondary} />
-              <Text style={[styles.stateTitle, { color: c.text }]}>No trams approaching</Text>
-              <Text style={[styles.stateBody, { color: c.textSecondary }]}>
-                No live tram is currently heading for this stop. Check back in a
-                moment.
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.board}>
-              <Text style={[styles.sectionHeader, { color: c.textSecondary }]}>
-                UPCOMING ARRIVALS
-              </Text>
-              {arrivals.map((a) => (
-                <ArrivalRow key={a.tramKey} arrival={a} scheme={scheme} onPress={() => onOpenTram(a)} />
-              ))}
-            </View>
-          )}
-        </SheetContent>
-      </ScrollView>
-    </GlassPanel>
+      {/* Arrivals */}
+      {loading ? (
+        <View style={styles.stateBlock}>
+          <ActivityIndicator color={Tram.pidRed} />
+          <Text style={[styles.stateBody, { color: c.secondary }]}>
+            Loading the tram network — arrivals appear as routes stream in.
+          </Text>
+        </View>
+      ) : !station ? (
+        <View style={styles.stateBlock}>
+          <SymbolView name="mappin.slash" size={32} tintColor={c.secondary} />
+          <Text style={[styles.stateTitle, { color: c.text }]}>Stop not found</Text>
+          <Text style={[styles.stateBody, { color: c.secondary }]}>
+            No loaded route serves this stop yet. It appears as soon as a tram on
+            a serving line reports in.
+          </Text>
+        </View>
+      ) : arrivals.length === 0 ? (
+        <View style={styles.stateBlock}>
+          <SymbolView name="moon.zzz.fill" size={32} tintColor={c.secondary} />
+          <Text style={[styles.stateTitle, { color: c.text }]}>No trams approaching</Text>
+          <Text style={[styles.stateBody, { color: c.secondary }]}>
+            No live tram is currently heading for this stop. Check back in a
+            moment.
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.section}>
+          <SectionLabel>Upcoming arrivals</SectionLabel>
+          <InsetGroup>
+            {arrivals.map((a, i) => (
+              <Fragment key={a.tramKey}>
+                {i > 0 ? <RowSeparator inset={ARRIVAL_SEPARATOR_INSET} /> : null}
+                <ArrivalRow arrival={a} onPress={() => onOpenTram(a)} />
+              </Fragment>
+            ))}
+          </InsetGroup>
+        </View>
+      )}
+    </SheetSurface>
   );
 }
 
 function ArrivalRow({
   arrival,
-  scheme,
   onPress,
 }: {
   arrival: StopArrival;
-  scheme: 'light' | 'dark';
   onPress: () => void;
 }) {
-  const c = Colors[scheme];
   const etaLabel = formatEtaMinutes(arrival.etaS);
+  const soon = etaLabel === 'now';
   return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`Line ${arrival.line} to ${arrival.headsign}, ${
-        etaLabel === 'now' ? 'arriving now' : `in ${etaLabel}`
+    <InsetRow
+      iconNode={<LineBadge line={arrival.line} size="md" />}
+      title={arrival.headsign}
+      subtitle={`${shortModelName(arrival.model.name)}${
+        arrival.regNumber != null ? ` · #${arrival.regNumber}` : ''
       }`}
-      style={({ pressed }) => [
-        styles.arrivalRow,
-        pressed && {
-          backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
-        },
-      ]}
-    >
-      <LineBadge line={arrival.line} size="md" />
-      <View style={styles.arrivalBody}>
-        <Text numberOfLines={1} style={[styles.headsign, { color: c.text }]}>
-          {arrival.headsign}
-        </Text>
-        <View style={styles.modelRow}>
-          <Text numberOfLines={1} style={[styles.modelName, { color: c.textSecondary }]}>
-            {shortModelName(arrival.model.name)}
-            {arrival.regNumber != null && ` · #${arrival.regNumber}`}
-          </Text>
+      onPress={onPress}
+      chevron
+      trailing={
+        <View style={styles.etaWrap}>
           <AcSnowflake airConditioned={arrival.airConditioned} />
+          <Text
+            style={[styles.eta, soon && styles.etaNow, { color: Apple.green }]}
+            allowFontScaling={false}
+          >
+            {etaLabel}
+          </Text>
         </View>
-      </View>
-      <Text
-        style={[
-          styles.eta,
-          { color: scheme === 'dark' ? Tram.liveryRed : Tram.pidRed },
-          etaLabel === 'now' && styles.etaNow,
-        ]}
-        allowFontScaling={false}
-      >
-        {etaLabel}
-      </Text>
-      <SymbolView name="chevron.right" size={11} tintColor={c.textSecondary} />
-    </Pressable>
+      }
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  scrollContent: {
-    paddingBottom: Spacing.six,
-  },
-  content: {
-    gap: Spacing.three,
-    paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.four,
-  },
-  headerRow: {
+  pillWrap: { justifyContent: 'center' },
+  routingOverlay: {
     alignItems: 'center',
-    flexDirection: 'row',
-    gap: Spacing.two + 4,
-  },
-  stopIcon: {
-    alignItems: 'center',
-    backgroundColor: Tram.pidRed,
-    borderCurve: 'continuous',
-    borderRadius: 10,
-    height: 34,
+    bottom: 0,
     justifyContent: 'center',
-    width: 34,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 1,
   },
-  title: {
-    flex: 1,
-    fontSize: 22,
-    fontWeight: '700',
-    letterSpacing: -0.3,
-  },
-  linesRow: {
+  section: { gap: 8 },
+  lineRow: {
     alignItems: 'center',
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: Spacing.two,
+    gap: 8,
+    paddingHorizontal: 4,
   },
-  mapButton: {
-    alignItems: 'center',
-    borderCurve: 'continuous',
-    borderRadius: 999,
-    flexDirection: 'row',
-    gap: 5,
-    marginLeft: 'auto',
-    paddingHorizontal: Spacing.two + 4,
-    paddingVertical: 6,
-  },
-  mapButtonText: { fontSize: 12, fontWeight: '600' },
-  routeButton: {
-    alignItems: 'center',
-    backgroundColor: Tram.pidRed,
-    borderCurve: 'continuous',
-    borderRadius: 14,
-    flexDirection: 'row',
-    gap: Spacing.two,
-    justifyContent: 'center',
-    minHeight: 50,
-  },
-  routeButtonText: {
-    color: Tram.cream,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  spotButton: {
-    alignItems: 'center',
-    borderCurve: 'continuous',
-    borderRadius: 14,
-    flexDirection: 'row',
-    gap: Spacing.two,
-    justifyContent: 'center',
-    minHeight: 50,
-  },
-  spotButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  sectionHeader: {
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.7,
-    marginBottom: Spacing.one,
-  },
-  board: { gap: 2 },
-  arrivalRow: {
-    alignItems: 'center',
-    borderCurve: 'continuous',
-    borderRadius: 12,
-    flexDirection: 'row',
-    gap: Spacing.two + 4,
-    minHeight: 56,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: 6,
-  },
-  arrivalBody: { flex: 1, gap: 2 },
-  headsign: { fontSize: 16, fontWeight: '600' },
-  modelRow: { alignItems: 'center', flexDirection: 'row', gap: 5 },
-  modelName: { flexShrink: 1, fontSize: 13 },
+  etaWrap: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   eta: {
     fontFamily: Fonts?.rounded,
-    fontSize: 20,
+    fontSize: 19,
     fontVariant: ['tabular-nums'],
     fontWeight: '700',
   },
-  etaNow: { fontSize: 17 },
+  etaNow: { fontSize: 16 },
   stateBlock: {
     alignItems: 'center',
-    gap: Spacing.two + 2,
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.five,
+    gap: 10,
+    paddingHorizontal: 24,
+    paddingVertical: 32,
   },
   stateTitle: { fontSize: 17, fontWeight: '600' },
   stateBody: { fontSize: 14, lineHeight: 20, textAlign: 'center' },

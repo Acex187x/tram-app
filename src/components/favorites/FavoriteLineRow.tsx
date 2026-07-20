@@ -6,7 +6,7 @@ import { SymbolView } from 'expo-symbols';
 import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
 import { isNightLine, LineBadge } from '@/components/ui/LineBadge';
-import { Colors, Tram } from '@/constants/theme';
+import { Apple, appleScheme, Tram } from '@/constants/theme';
 import { useFavoritesStore } from '@/stores/favorites';
 import { useSelectionStore } from '@/stores/selection';
 
@@ -23,7 +23,7 @@ export function FavoriteLineRow({
 }) {
   const router = useRouter();
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const palette = Colors[scheme];
+  const palette = appleScheme(scheme);
   const toggleLine = useFavoritesStore((s) => s.toggleLine);
   const setSelectedLineId = useSelectionStore((s) => s.setSelectedLineId);
 
@@ -65,10 +65,10 @@ export function FavoriteLineRow({
           <View
             style={[
               styles.dot,
-              { backgroundColor: activeCount > 0 ? Tram.onTime : palette.textSecondary },
+              { backgroundColor: activeCount > 0 ? Apple.green : palette.secondary },
             ]}
           />
-          <Text style={[styles.subtitle, { color: palette.textSecondary }]}>
+          <Text style={[styles.subtitle, { color: palette.secondary }]}>
             {activeCount > 0
               ? `${activeCount} tram${activeCount === 1 ? '' : 's'} on the move`
               : 'No trams right now'}
@@ -90,7 +90,7 @@ export function FavoriteLineRow({
         name="chevron.right"
         size={13}
         weight="semibold"
-        tintColor={palette.textSecondary}
+        tintColor={palette.secondary}
       />
     </Pressable>
   );
