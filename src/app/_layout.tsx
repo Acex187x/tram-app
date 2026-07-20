@@ -39,10 +39,12 @@ export default function RootLayout() {
               (the collapsed native header), 0.42 the card, 0.95 the full sheet.
               Both the minimized and card detents keep the followed tram visible
               (undimmed). Opens on the CARD detent (index 1) like Apple's place
-              card. It runs a REAL native large-title header (headsign collapses
-              to a compact bar on scroll) — headerTransparent so the sheet's own
-              glass shows through, and NO sheetCornerRadius override so the system
-              presentation supplies the device-matched corners. */}
+              card. The headsign is a REAL native stack-header title that sits on
+              the SAME row as the toolbar star/⋯ (a large title would always drop a
+              full band below them — the "title fell down" look) — headerTransparent
+              so the sheet's own glass shows through, and NO sheetCornerRadius
+              override so the system presentation supplies the device-matched
+              corners. */}
           <Stack.Screen
             name="tram/[key]"
             options={{
@@ -51,9 +53,23 @@ export default function RootLayout() {
               sheetLargestUndimmedDetentIndex: 1,
               sheetInitialDetentIndex: 1,
               sheetGrabberVisible: true,
+              // Native iOS sheet behavior: dragging the body up on a half-open
+              // detent expands the sheet to the next/full detent FIRST, and only
+              // scrolls the content once fully expanded
+              // (UISheetPresentationController.prefersScrollingExpandsWhenScrolledToEdge).
+              // Defaults to true, but only takes effect because the screen's
+              // ScrollView is a direct child (see tram/[key].tsx) so the sheet
+              // controller can track it.
+              sheetExpandsWhenScrolledToEdge: true,
               headerShown: true,
               headerTransparent: true,
-              headerLargeTitle: true,
+              // Regular (not large) title: the headsign sits on the SAME row as
+              // the toolbar star/⋯. A large title always drops a full band below
+              // them, which read as the title having "fallen down" on the card.
+              // NOTE: must be `headerLargeTitleEnabled` — the deprecated
+              // `headerLargeTitle` alias is NOT honored here (native reads the
+              // new prop), so `headerLargeTitle: false` silently stayed large.
+              headerLargeTitleEnabled: false,
               headerBlurEffect: 'none',
               contentStyle: { backgroundColor: 'transparent' },
             }}

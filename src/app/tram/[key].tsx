@@ -1,22 +1,32 @@
 // Tram detail sheet — a native iOS place card floating over the live map. The
 // route is a transparent formSheet (detents [0.15, 0.42, 0.95], opens on the
 // card detent, index 1) whose corners come from the system presentation, not a
-// hand-rolled radius. The header is a REAL native large-title stack header
-// (react-native-screens): the headsign is the large title that collapses to a
-// compact inline bar as the body scrolls, and it doubles as the minimized bar
+// hand-rolled radius. The header is a REAL native stack header
+// (react-native-screens): the headsign is the header title, sitting on the same
+// row as the toolbar star/⋯ (place-card style) and doubling as the minimized bar
 // when the sheet is dragged down to the 0.15 detent. Favorite lives as a native
 // header star; secondary actions (model info, photos, record ride) live in a
 // native header ⋯ menu — no floating bar, no share button.
+//
+// The body ScrollView is a DIRECT child of the screen (NOT wrapped in a
+// GlassView) so the native sheet controller can track it: that is what wires
+// UISheetPresentationController.prefersScrollingExpandsWhenScrolledToEdge —
+// dragging the body up on a half-open detent raises the sheet to the next detent
+// before the content scrolls. The glass sheet background comes from the system
+// formSheet (iOS 26) or SheetBackground below, never a container around the scroll.
 //
 // Opening this sheet ENGAGES FOLLOW on the tram (and keeps following after
 // close). The card's Follow pill toggles it; the map's FollowChip ✕ also ends
 // it. Live data via useTramState(key) at ~1 Hz; the 1 s freshness / ETA tickers
 // anchor on each runtime value and tick locally so countdowns never freeze.
+import { BlurView } from 'expo-blur';
+import { isGlassEffectAPIAvailable, isLiquidGlassAvailable } from 'expo-glass-effect';
 import * as Haptics from 'expo-haptics';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -43,6 +53,63 @@ import type { TramPublicState } from '@/lib/types';
 import { useFavoritesStore } from '@/stores/favorites';
 import { useSelectionStore } from '@/stores/selection';
 import { useSettingsStore } from '@/stores/settings';
+
+// Whether the system paints Liquid Glass behind a transparent formSheet (iOS 26+).
+// When it does, the sheet background is the system's — we must NOT wrap the body
+// in our own GlassView, because doing so buries the ScrollView where
+// react-native-screens can't find it (it walks the content wrapper's direct /
+// first-descendant subviews). That broke the native sheet's
+// scroll-expands-to-edge gesture (the ScrollView must be a tracked descendant).
+const SYSTEM_SHEET_GLASS = isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
+
+/**
+ * Sheet background for the tram card. The ScrollView must be a DIRECT child of
+ * the screen (so the native sheet controller can track it for the
+ * scroll-expands-to-edge gesture), so the glass can't be a container around it.
+ * On iOS 26 the system formSheet
+ * already renders Liquid Glass behind our transparent content — we render
+ * nothing. On older iOS (or Reduce Transparency) we drop a blur / solid
+ * absoluteFill *behind* the scroll — a plain BlurView/View composites correctly
+ * as an earlier sibling (only real GlassView has to be a container).
+ */
+function SheetBackground() {
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const [reduceTransparency, setReduceTransparency] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceTransparencyEnabled()
+      .then((v) => mounted && setReduceTransparency(v))
+      .catch(() => {});
+    const sub = AccessibilityInfo.addEventListener(
+      'reduceTransparencyChanged',
+      setReduceTransparency,
+    );
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
+  }, []);
+
+  if (SYSTEM_SHEET_GLASS && !reduceTransparency) return null;
+  if (!reduceTransparency) {
+    return (
+      <BlurView
+        intensity={60}
+        tint={scheme === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
+        style={StyleSheet.absoluteFill}
+      />
+    );
+  }
+  return (
+    <View
+      style={[
+        StyleSheet.absoluteFill,
+        { backgroundColor: scheme === 'dark' ? 'rgba(28,28,30,0.94)' : 'rgba(248,248,250,0.96)' },
+      ]}
+    />
+  );
+}
 
 // ── live tickers ─────────────────────────────────────────────────────────────
 
@@ -334,11 +401,10 @@ export default function TramDetailSheet() {
   // ── loading / gone ──
   if (!state) {
     return (
-      // Glass IS the sheet background: the scroll body renders inside it (a
-      // GlassView composites above later siblings, so it must be the container,
-      // not an absoluteFill behind the content).
-      <GlassPanel style={styles.root}>
-        <Stack.Title>{gone ? 'Left service' : 'Locating tram'}</Stack.Title>
+      // The ScrollView is a DIRECT child of the screen so react-native-screens
+      // can track it; the glass background sits behind it (see SheetBackground).
+      <>
+        <SheetBackground />
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.centerContent}
@@ -358,7 +424,8 @@ export default function TramDetailSheet() {
             </View>
           )}
         </ScrollView>
-      </GlassPanel>
+        <Stack.Title>{gone ? 'Left service' : 'Locating tram'}</Stack.Title>
+      </>
     );
   }
 
@@ -378,44 +445,13 @@ export default function TramDetailSheet() {
   ];
 
   return (
-    // Glass IS the sheet background (fills the transparent formSheet, including
-    // behind the transparent native header, so the large title and its collapsed
-    // bar sit over a legible material with no seam). Content renders inside it —
-    // a GlassView composites above later siblings, so it must be the container.
-    <GlassPanel style={styles.root}>
-      {/* Native large-title header: headsign collapses to a compact inline bar
-          on scroll and when the sheet is dragged to the minimized detent. */}
-      <Stack.Title large style={{ color: c.text }}>
-        {state.snapshot.headsign}
-      </Stack.Title>
-      <Stack.Toolbar placement="right">
-        <Stack.Toolbar.Button
-          icon={isFavorite ? 'star.fill' : 'star'}
-          tintColor={isFavorite ? Tram.gold : undefined}
-          onPress={onFavorite}
-          accessibilityLabel={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-        />
-        <Stack.Toolbar.Menu icon="ellipsis.circle" accessibilityLabel="More actions">
-          <Stack.Toolbar.MenuAction icon="info.circle" onPress={onModelInfo}>
-            Model info & history
-          </Stack.Toolbar.MenuAction>
-          {reg != null && (
-            <Stack.Toolbar.MenuAction
-              icon="camera"
-              onPress={() => router.push(`/tram-photos/${reg}`)}
-            >
-              Photos of this car
-            </Stack.Toolbar.MenuAction>
-          )}
-          <Stack.Toolbar.MenuAction
-            icon={ride.recordingThis ? 'stop.fill' : 'record.circle'}
-            destructive={ride.recordingThis}
-            onPress={ride.toggle}
-          >
-            {ride.recordingThis ? 'Stop ride recording' : 'Record ride'}
-          </Stack.Toolbar.MenuAction>
-        </Stack.Toolbar.Menu>
-      </Stack.Toolbar>
+    // The ScrollView is a DIRECT child of the screen (not wrapped in a GlassView)
+    // so the native sheet controller can track it: this is what wires the
+    // scroll-expands-to-edge gesture (drag the body up on a half-open sheet → the
+    // sheet rises to the next detent, then the content scrolls). The glass sheet
+    // background comes from the system formSheet (iOS 26) or SheetBackground.
+    <>
+      <SheetBackground />
 
       {/* Scroll spans the whole sheet; automatic inset accounts for the header. */}
       <ScrollView
@@ -451,14 +487,44 @@ export default function TramDetailSheet() {
           </View>
         </SheetContent>
       </ScrollView>
-    </GlassPanel>
+
+      {/* Native header title on the SAME row as the toolbar star/⋯ (place-card
+          style); it stays the minimized bar at the 0.15 detent too. Regular (not
+          large) is enforced by the route's headerLargeTitleEnabled:false. */}
+      <Stack.Title style={{ color: c.text }}>{state.snapshot.headsign}</Stack.Title>
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Button
+          icon={isFavorite ? 'star.fill' : 'star'}
+          tintColor={isFavorite ? Tram.gold : undefined}
+          onPress={onFavorite}
+          accessibilityLabel={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+        />
+        <Stack.Toolbar.Menu icon="ellipsis.circle" accessibilityLabel="More actions">
+          <Stack.Toolbar.MenuAction icon="info.circle" onPress={onModelInfo}>
+            Model info & history
+          </Stack.Toolbar.MenuAction>
+          {reg != null && (
+            <Stack.Toolbar.MenuAction
+              icon="camera"
+              onPress={() => router.push(`/tram-photos/${reg}`)}
+            >
+              Photos of this car
+            </Stack.Toolbar.MenuAction>
+          )}
+          <Stack.Toolbar.MenuAction
+            icon={ride.recordingThis ? 'stop.fill' : 'record.circle'}
+            destructive={ride.recordingThis}
+            onPress={ride.toggle}
+          >
+            {ride.recordingThis ? 'Stop ride recording' : 'Record ride'}
+          </Stack.Toolbar.MenuAction>
+        </Stack.Toolbar.Menu>
+      </Stack.Toolbar>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  // Glass fills the sheet with square corners; the native formSheet presentation
-  // clips to the device-matched system corner radius.
-  root: { flex: 1, borderRadius: 0 },
   scroll: { flex: 1 },
   body: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 40 },
   // No flex here — inside a ScrollView's content container a flex:1 child
