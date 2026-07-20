@@ -58,13 +58,26 @@ export function HomeSheetNative({ peekPx, header, children }: HomeSheetNativePro
       selection: { height: peekPx },
     }),
     presentationDragIndicator('visible'),
-    presentationBackgroundInteraction({ type: 'enabledUpThrough', detent: { fraction: 0.5 } }),
+    // The live map MUST stay pannable/tappable behind the sheet at every resting
+    // detent (Apple Maps). `enabledUpThrough` a `height` detent proved unreliable
+    // on-device — SwiftUI kept the modal scrim up at the peek/medium detents, so
+    // the whole map was untappable. Unconditional `.enabled` keeps background
+    // interaction on at all detents; the sheet can never be swiped away
+    // (interactiveDismissDisabled) so there is no "modal" state to protect.
+    presentationBackgroundInteraction('enabled'),
     interactiveDismissDisabled(true),
     presentationBackground(sheetBg),
   ];
 
   return (
-    <Host style={StyleSheet.absoluteFill} pointerEvents="box-none">
+    // CRITICAL: the Host must NOT cover the map. A full-screen (`absoluteFill`)
+    // SwiftUI hosting view swallows every touch in the sheet's backdrop area —
+    // `pointerEvents="box-none"` is not honored through to the ExpoUI hosting
+    // view, so the whole map became untappable. The `.sheet` is presented
+    // modally and sizes itself from its detents, independent of this Host's own
+    // frame, so a zero-height bottom anchor presents the exact same sheet while
+    // leaving the entire map above it free for pan / zoom / tram taps.
+    <Host style={styles.hostAnchor} pointerEvents="box-none">
       <BottomSheet isPresented onIsPresentedChange={noop} fitToContents={false}>
         <Group modifiers={modifiers}>
           <RNHostView>
@@ -94,6 +107,9 @@ export function HomeSheetNative({ peekPx, header, children }: HomeSheetNativePro
 function noop() {}
 
 const styles = StyleSheet.create({
+  // Zero-height bottom anchor: enough to host the SwiftUI `.sheet` trigger
+  // without the hosting view covering (and eating touches over) the map.
+  hostAnchor: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 0 },
   // Clears the native drag indicator that overlays the very top of the sheet.
   root: { flex: 1, paddingTop: 10 },
   scroll: { flex: 1 },

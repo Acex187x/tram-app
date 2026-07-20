@@ -14,7 +14,7 @@ import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
 import * as SplashScreen from 'expo-splash-screen';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { resolveLightPreset, STANDARD_CONFIG } from '@/components/map/mapStyle';
 import {
@@ -51,9 +51,15 @@ const INITIAL_VIEWPORT: Viewport = {
 };
 /** Re-evaluate the 'auto' light preset this often. */
 const LIGHT_REFRESH_MS = 5 * 60 * 1000;
-/** Peek height of the home sheet as a window-height fraction (search bar only).
- *  Medium + large detents are owned natively by the sheet itself. */
-const PEEK_FRACTION = 0.12;
+/**
+ * Peek height (px) of the home sheet — trimmed to reveal ONLY the search bar +
+ * grabber (Apple Maps). The header block is grabber/top-pad (10) + row pad (6) +
+ * search field (46) + row pad (12) ≈ 74; +12 lets the field clear the home
+ * indicator without leaving a tall empty gap of sheet below it (the old
+ * window-fraction peek was ~header + full safe-area = too tall, so the grouped
+ * body edge peeked under the bar). Medium + large detents are owned natively.
+ */
+const PEEK_HEIGHT = 86;
 /** Never leave the user stuck on the splash if the map fails to load. */
 const SPLASH_FAILSAFE_MS = 8_000;
 
@@ -66,8 +72,7 @@ export default function MapScreen() {
   // Peek height (px) of the native home sheet. The map chrome (bottom-right
   // control column + contextual chips) is pinned just above this so the whole
   // cluster rides over the sheet's resting edge.
-  const windowH = useWindowDimensions().height;
-  const peekPx = Math.round(PEEK_FRACTION * windowH);
+  const peekPx = PEEK_HEIGHT;
   const [is3D, setIs3D] = useState(true);
   const [styleLoaded, setStyleLoaded] = useState(false);
   const [locationGranted, setLocationGranted] = useState(false);
