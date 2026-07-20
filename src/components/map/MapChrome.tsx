@@ -16,12 +16,6 @@ import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { createContext, useContext, useState } from 'react';
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, {
-  Extrapolation,
-  interpolate,
-  useAnimatedStyle,
-  type SharedValue,
-} from 'react-native-reanimated';
 
 import { PollRing, usePollModel } from '@/components/map/PollIndicator';
 import {
@@ -73,16 +67,24 @@ const CONTROL_RIGHT = Spacing.two + 4;
  * Height of the right control stack: a 2D/3D circle (46) + gap + the fused
  * layers/locate capsule (two 46 buttons ≈ 92).
  */
-const STACK_H = CONTROL_SIZE + CONTROL_GAP + 2 * CONTROL_SIZE;
+export const STACK_H = CONTROL_SIZE + CONTROL_GAP + 2 * CONTROL_SIZE;
 /**
- * Mapbox compass ornament slot: directly below the top-right control stack,
- * on the same right axis. NOTE: rnmapbox ornament offsets are already
- * safe-area-relative on iOS — do NOT add insets.top here (adding it double
- * counted the inset and stranded the compass mid-screen).
+ * Gap between the home sheet's peek top edge and the bottom-right control
+ * column. Apple Maps pins its map controls bottom-right, just above the search
+ * sheet — closer to the thumb than a top-right stack.
  */
-export const COMPASS_TOP = Spacing.two + STACK_H + 12;
+export const CHROME_BOTTOM_GAP = 12;
 /** The native compass is ~44 pt wide; +1 centers it on the 46 pt button axis. */
 export const COMPASS_RIGHT = CONTROL_RIGHT + 1;
+/**
+ * Bottom offset (px, from the window bottom) of the Mapbox compass ornament:
+ * it floats just above the bottom-right control column, on the same right axis.
+ * The caller adds the peek-sheet height so the whole cluster rides above the
+ * sheet.
+ */
+export function compassBottom(peekPx: number): number {
+  return peekPx + CHROME_BOTTOM_GAP + STACK_H + 12;
+}
 
 /** Vertical footprint of one stacked bottom chip (chip height + gap). */
 const CHIP_STACK_H = CONTROL_SIZE + 10;
@@ -94,8 +96,6 @@ const MAX_STACKED_CHIPS = 4;
  * single consistent set instead of four differently-sized controls.
  */
 const CHIP_ELEMENT_H = 30;
-/** Gap between the sheet's top edge and the base chip row. */
-const CHIP_GAP = 10;
 
 // ── Status tile (top-left): weather/AQI-style live-data glass square ─────────
 
@@ -177,16 +177,17 @@ export interface ControlStackProps {
   is3D: boolean;
   onTogglePitch: () => void;
   onLocate: () => void;
+  /** Peek-sheet height in px — the control column is pinned just above it. */
+  peekPx: number;
 }
 
-export function MapControlStack({ is3D, onTogglePitch, onLocate }: ControlStackProps) {
-  const insets = useSafeAreaInsets();
+export function MapControlStack({ is3D, onTogglePitch, onLocate, peekPx }: ControlStackProps) {
   const { scheme } = useTextColors();
   const [layersOpen, setLayersOpen] = useState(false);
 
   return (
     <>
-      <KitControlStack topInset={insets.top + Spacing.two} right={CONTROL_RIGHT}>
+      <KitControlStack bottom={peekPx + CHROME_BOTTOM_GAP} right={CONTROL_RIGHT}>
         <CircleControl
           symbol={is3D ? 'view.2d' : 'view.3d'}
           label={is3D ? 'Switch to 2D map' : 'Switch to 3D map'}
@@ -218,7 +219,9 @@ export function MapControlStack({ is3D, onTogglePitch, onLocate }: ControlStackP
           />
         </ControlCapsule>
       </KitControlStack>
-      {layersOpen && <LayersMenu scheme={scheme} onClose={() => setLayersOpen(false)} />}
+      {layersOpen && (
+        <LayersMenu scheme={scheme} peekPx={peekPx} onClose={() => setLayersOpen(false)} />
+      )}
     </>
   );
 }
@@ -232,8 +235,15 @@ const LIGHT_PRESETS: { key: LightPreset; label: string; symbol: SFSymbol }[] = [
   { key: 'night', label: 'Night', symbol: 'moon.stars.fill' },
 ];
 
-function LayersMenu({ scheme, onClose }: { scheme: ChromeScheme; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
+function LayersMenu({
+  scheme,
+  peekPx,
+  onClose,
+}: {
+  scheme: ChromeScheme;
+  peekPx: number;
+  onClose: () => void;
+}) {
   const palette = Colors[scheme];
   const preset = useSettingsStore((s) => s.lightPreset);
   const setPreset = useSettingsStore((s) => s.setLightPreset);
@@ -249,7 +259,7 @@ function LayersMenu({ scheme, onClose }: { scheme: ChromeScheme; onClose: () => 
         style={StyleSheet.absoluteFill}
         onPress={onClose}
       />
-      <View style={[styles.layersAnchor, { top: insets.top + Spacing.two + STACK_H + 10 }]}>
+      <View style={[styles.layersAnchor, { bottom: peekPx + CHROME_BOTTOM_GAP + STACK_H + 10 }]}>
         <GlassPanel variant="regular" appearance={scheme} style={styles.layersPanel}>
           <Text style={[styles.layersLabel, { color: palette.textSecondary }]}>MAP LIGHTING</Text>
           {LIGHT_PRESETS.map((p) => (
@@ -303,42 +313,26 @@ function LayersMenu({ scheme, onClose }: { scheme: ChromeScheme; onClose: () => 
 // row, ride stacks above it, spotter above that, and follow floats on top.
 
 export interface MapChipsProps {
-  /** Sheet height in px, UI-thread updated every frame — the reflow driver. */
-  heightSV: SharedValue<number>;
-  /** Peek-detent height in px — the container's resting anchor. */
+  /** Peek-sheet height in px — the chip cluster rests above it. */
   peekPx: number;
-  /** Medium-detent height in px — the chips stop climbing here. */
-  mediumPx: number;
-  /** Large-detent height in px — the chips have fully faded out by here. */
-  largePx: number;
 }
 
-export function MapChips({ heightSV, peekPx, mediumPx, largePx }: MapChipsProps) {
-  // Chips ride the sheet up on the UI thread (invariant #1: no per-frame React),
-  // but Apple never lifts chrome over a raised sheet into the status bar. So:
-  // (1) clamp the upward climb at the medium detent, and (2) fade the chips out
-  // as the sheet grows from medium → large. Both are pure worklet reads of the
-  // sheet's heightSV — zero React work per frame.
-  const reflow = useAnimatedStyle(() => {
-    const raised = Math.max(0, heightSV.value - peekPx);
-    const maxRaise = Math.max(0, mediumPx - peekPx);
-    return {
-      transform: [{ translateY: -Math.min(raised, maxRaise) }],
-      opacity: interpolate(heightSV.value, [mediumPx, largePx], [1, 0], Extrapolation.CLAMP),
-    };
-  });
+export function MapChips({ peekPx }: MapChipsProps) {
+  // Contextual chips (follow / spotter / ride / planner) float above the
+  // bottom-right control column, just over the peek sheet. When the user opens
+  // the home sheet it slides up and covers the whole cluster — Apple-style, the
+  // map chrome is simply hidden behind the raised sheet, so there is nothing to
+  // reflow and zero per-frame React (docs/performance.md invariant #1).
+  const bottom = peekPx + CHROME_BOTTOM_GAP + STACK_H + CONTROL_GAP;
   return (
-    <Animated.View
-      pointerEvents="box-none"
-      style={[styles.chipsWrap, { bottom: peekPx + CHIP_GAP }, reflow]}
-    >
+    <View pointerEvents="box-none" style={[styles.chipsWrap, { bottom }]}>
       <View pointerEvents="box-none" style={styles.chipsRow}>
         <FollowChip />
         <SpotterChip />
         <RideChip />
         <PlannerChip />
       </View>
-    </Animated.View>
+    </View>
   );
 }
 

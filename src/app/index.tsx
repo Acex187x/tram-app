@@ -15,18 +15,17 @@ import * as Location from 'expo-location';
 import * as SplashScreen from 'expo-splash-screen';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
-import { useSharedValue } from 'react-native-reanimated';
 
 import { resolveLightPreset, STANDARD_CONFIG } from '@/components/map/mapStyle';
 import {
   COMPASS_RIGHT,
-  COMPASS_TOP,
+  compassBottom,
   MapChips,
   MapControlStack,
   MapChromeSchemeContext,
   MapStatusTile,
 } from '@/components/map/MapChrome';
-import { AppleSheet } from '@/components/maps-kit/AppleSheet';
+import { HomeSheetNative } from '@/components/maps-kit/HomeSheetNative';
 import { HomeSheetContent, HomeSheetHeader } from '@/components/home/HomeSheetContent';
 import { PlannerOverlay } from '@/components/map/PlannerOverlay';
 import { RideOverlay } from '@/components/map/RideOverlay';
@@ -51,8 +50,9 @@ const INITIAL_VIEWPORT: Viewport = {
 };
 /** Re-evaluate the 'auto' light preset this often. */
 const LIGHT_REFRESH_MS = 5 * 60 * 1000;
-/** Home sheet detents as window-height fractions: peek · medium · large. */
-const HOME_DETENTS = [0.135, 0.46, 0.92];
+/** Peek height of the home sheet as a window-height fraction (search bar only).
+ *  Medium + large detents are owned natively by the sheet itself. */
+const PEEK_FRACTION = 0.12;
 /** Never leave the user stuck on the splash if the map fails to load. */
 const SPLASH_FAILSAFE_MS = 8_000;
 
@@ -62,16 +62,11 @@ export default function MapScreen() {
   const cameraRef = useRef<Camera>(null);
   const viewportRef = useRef<Viewport>({ ...INITIAL_VIEWPORT });
   const splashHiddenRef = useRef(false);
-  // Home-sheet height (px), UI-thread updated every frame by AppleSheet; the map
-  // chips read it to ride above the sheet with zero per-frame React.
+  // Peek height (px) of the native home sheet. The map chrome (bottom-right
+  // control column + contextual chips) is pinned just above this so the whole
+  // cluster rides over the sheet's resting edge.
   const windowH = useWindowDimensions().height;
-  const sheetHeightSV = useSharedValue(0);
-  const peekPx = Math.round(HOME_DETENTS[0] * windowH);
-  // Chip reflow breakpoints (px): clamp the chip climb at the medium detent and
-  // fade the chips out between medium and large so raised-sheet chrome never
-  // overlaps the status bar (P0-2). Computed here, applied on the worklet below.
-  const mediumPx = Math.round(HOME_DETENTS[1] * windowH);
-  const largePx = Math.round(HOME_DETENTS[2] * windowH);
+  const peekPx = Math.round(PEEK_FRACTION * windowH);
   const [is3D, setIs3D] = useState(true);
   const [styleLoaded, setStyleLoaded] = useState(false);
   const [locationGranted, setLocationGranted] = useState(false);
@@ -238,10 +233,10 @@ export default function MapScreen() {
         // Apple shows the compass only once the map is rotated off north; at
         // north-up it fades away instead of sitting there permanently.
         compassFadeWhenNorth
-        // Ornament offsets are safe-area-relative on iOS (adding insets.top
-        // here double-counted it and stranded the compass mid-screen). The
-        // slot sits right below the top-right control stack, same right axis.
-        compassPosition={{ top: COMPASS_TOP, right: COMPASS_RIGHT }}
+        // Apple pins the compass bottom-right, floating just above the map
+        // control column (which sits over the home sheet's peek edge). Ornament
+        // offsets are safe-area-relative on iOS.
+        compassPosition={{ bottom: compassBottom(peekPx), right: COMPASS_RIGHT }}
         pitchEnabled
         onDidFinishLoadingMap={hideSplash}
         onDidFinishLoadingStyle={() => setStyleLoaded(true)}
@@ -285,28 +280,19 @@ export default function MapScreen() {
           is3D={is3D}
           onTogglePitch={onTogglePitch}
           onLocate={() => void onLocate()}
-        />
-        <MapChips
-          heightSV={sheetHeightSV}
           peekPx={peekPx}
-          mediumPx={mediumPx}
-          largePx={largePx}
         />
+        <MapChips peekPx={peekPx} />
       </MapChromeSchemeContext.Provider>
 
-      {/* The persistent Apple-Maps home surface — pinned search + settings
-          avatar (header), Places / Recents / Your-Fleet body. Mounted over the
-          map; its heightSV drives the chip reflow above on the UI thread. Only
-          the sheet-body follows the system scheme (chrome follows the map). */}
-      <AppleSheet
-        detents={HOME_DETENTS}
-        initialIndex={0}
-        heightSV={sheetHeightSV}
-        scrimAtLargest
-        pinnedHeader={<HomeSheetHeader />}
-      >
+      {/* The persistent home surface — a REAL native iOS sheet (device-matched
+          corners, native grabber/detents, map interactive behind it). Pinned
+          search + account header; our own grouped-list body (favorites, planner,
+          fleet, rides, recents) revealed on drag. Follows the system scheme;
+          the map chrome above follows the map light preset. */}
+      <HomeSheetNative peekPx={peekPx} header={<HomeSheetHeader />}>
         <HomeSheetContent />
-      </AppleSheet>
+      </HomeSheetNative>
 
       {/* Invisible: while stop-spotting is active, drives the follow camera
           through the trams arriving at the spotted stop (1 Hz; renders null

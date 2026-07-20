@@ -124,15 +124,21 @@ export function ControlCapsule({ children, appearance, size = CONTROL_SIZE }: Co
 
 export interface ControlStackProps {
   children: ReactNode;
-  /** Absolute top offset (caller adds safe-area inset). */
-  topInset: number;
+  /** Absolute top offset (caller adds safe-area inset). Mutually exclusive with `bottom`. */
+  topInset?: number;
+  /** Absolute bottom offset — anchors the column bottom-right (Apple Maps). */
+  bottom?: number;
   /** Right inset — defaults to 12. */
   right?: number;
 }
 
-export function ControlStack({ children, topInset, right = 12 }: ControlStackProps) {
+export function ControlStack({ children, topInset, bottom, right = 12 }: ControlStackProps) {
+  // Bottom-anchored (Apple Maps, bottom-right) or top-anchored. Children keep
+  // their source order top-to-bottom either way (normal column); when pinned to
+  // `bottom` the last child sits nearest the sheet.
+  const anchor = bottom != null ? { bottom } : { top: topInset };
   return (
-    <View pointerEvents="box-none" style={[styles.stack, { top: topInset, right, gap: CONTROL_GAP }]}>
+    <View pointerEvents="box-none" style={[styles.stack, { right, gap: CONTROL_GAP }, anchor]}>
       {children}
     </View>
   );
