@@ -1,13 +1,15 @@
-// Search sheet — /search. Glass search field + live sections as you type:
-// lines (badge grid), trams (reg-number match), stops (diacritics-insensitive,
-// opening the live arrivals board). While the query is EMPTY the sheet is a
-// fleet browser instead: every live tram, filterable by model and line,
-// client-side paginated (src/components/search/FleetBrowser.tsx). Filter state
-// lives here so it survives typing and clearing the query (sheet-lifetime only).
+// Search sheet — /search. Apple-Maps expanded search: a pinned rounded search
+// field with a blue Cancel button, and live sections as you type — lines (badge
+// grid), trams (reg-number match), stops (diacritics-insensitive, opening the
+// live arrivals board) — rendered as iOS grouped inset cards with leading
+// colored circle icons. While the query is EMPTY the sheet is a fleet browser
+// instead: every live tram, filterable by model and line, client-side paginated
+// (src/components/search/FleetBrowser.tsx). Filter state lives here so it
+// survives typing and clearing the query (sheet-lifetime only).
 import * as Haptics from 'expo-haptics';
 import { useRouter, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import {
   Keyboard,
   Pressable,
@@ -23,22 +25,25 @@ import { FleetBrowser } from '@/components/search/FleetBrowser';
 import { EMPTY_FLEET_FILTERS, type FleetFilters } from '@/components/search/fleetFilter';
 import { AcSnowflake } from '@/components/tram/TramModelImage';
 import { GlassPanel } from '@/components/ui/GlassPanel';
+import { InsetGroup, InsetRow, RowSeparator, SectionLabel } from '@/components/ui/Inset';
 import { LineBadge } from '@/components/ui/LineBadge';
 import { SheetContent } from '@/components/ui/SheetContent';
-import { Colors, Fonts, Spacing, Tram } from '@/constants/theme';
+import { appleScheme, Apple, Radii, Spacing, Tram } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
 import { normalizeName } from '@/lib/planner/network';
 import { searchStops } from '@/lib/planner/planner';
 import { useSelectionStore } from '@/stores/selection';
 import type { TramPublicState } from '@/lib/types';
 
+/** Leading-icon inset for result-row separators: 16 pad + 30 badge + 12 gap. */
+const ROW_SEPARATOR_INSET = 58;
+
 // ── Screen ───────────────────────────────────────────────────────────────────
 
 export default function SearchSheet() {
   const router = useRouter();
-  const scheme = useColorScheme();
-  const dark = scheme === 'dark';
-  const c = Colors[dark ? 'dark' : 'light'];
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const c = appleScheme(scheme);
 
   const [query, setQuery] = useState('');
   const q = query.trim();
@@ -131,37 +136,35 @@ export default function SearchSheet() {
   return (
     <GlassPanel style={styles.root}>
       <SheetContent>
-      <View style={styles.fieldWrap}>
-        <GlassPanel variant="clear" style={styles.field}>
-          <SymbolView name="magnifyingglass" size={17} tintColor={c.textSecondary} />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            autoFocus
-            placeholder="Lines, tram numbers, stops"
-            placeholderTextColor={c.textSecondary}
-            style={[styles.input, { color: c.text }]}
-            autoCorrect={false}
-            autoCapitalize="none"
-            returnKeyType="search"
-            clearButtonMode="while-editing"
-            accessibilityLabel="Search"
-          />
-        </GlassPanel>
-        <Pressable
-          onPress={closeSheet}
-          hitSlop={8}
-          accessibilityLabel="Close"
-          style={({ pressed }) => pressed && styles.pressed}
-        >
-          <SymbolView
-            name="xmark.circle.fill"
-            size={28}
-            type="hierarchical"
-            tintColor={c.textSecondary}
-          />
-        </Pressable>
-      </View>
+        <View style={styles.fieldWrap}>
+          <View style={[styles.field, { backgroundColor: c.fillSecondary }]}>
+            <SymbolView name="magnifyingglass" size={17} weight="semibold" tintColor={c.secondary} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              autoFocus
+              placeholder="Lines, tram numbers, stops"
+              placeholderTextColor={c.secondary}
+              style={[styles.input, { color: c.text }]}
+              autoCorrect={false}
+              autoCapitalize="none"
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+              accessibilityLabel="Search"
+            />
+          </View>
+          <Pressable
+            onPress={closeSheet}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+            style={({ pressed }) => pressed && styles.pressed}
+          >
+            <Text style={[styles.cancel, { color: Apple.blue }]} allowFontScaling={false}>
+              Cancel
+            </Text>
+          </Pressable>
+        </View>
       </SheetContent>
 
       {q.length === 0 ? (
@@ -174,161 +177,97 @@ export default function SearchSheet() {
           onOpenTram={openTram}
         />
       ) : (
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        contentContainerStyle={styles.scrollBottom}
-        showsVerticalScrollIndicator={false}
-      >
-        <SheetContent style={styles.listContent}>
-        {hasResults ? (
-          <>
-            {lineMatches.length > 0 && (
-              <View style={styles.section}>
-                <SectionHeader label="Lines" color={c.textSecondary as string} />
-                <View style={styles.lineGrid}>
-                  {lineMatches.map((l) => (
-                    <Pressable
-                      key={l}
-                      onPress={() => openLine(l)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Line ${l}`}
-                      style={({ pressed }) => pressed && styles.pressed}
-                    >
-                      <LineBadge line={l} size="lg" />
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            )}
-
-            {tramMatches.length > 0 && (
-              <View style={styles.section}>
-                <SectionHeader label={tramSectionLabel} color={c.textSecondary as string} />
-                {tramMatches.map((s) => (
-                  <ResultRow
-                    key={s.key}
-                    onPress={() => openTram(s)}
-                    dark={dark}
-                    leading={<LineBadge line={s.snapshot.line} size="sm" />}
-                    title={s.key}
-                    titleTabular
-                    subtitle={s.model.name}
-                    trailing={<AcSnowflake airConditioned={s.snapshot.airConditioned} />}
-                    textColor={c.text as string}
-                    secondaryColor={c.textSecondary as string}
-                  />
-                ))}
-              </View>
-            )}
-
-            {stopMatches.length > 0 && (
-              <View style={styles.section}>
-                <SectionHeader label="Stops" color={c.textSecondary as string} />
-                {stopMatches.map((name) => (
-                  <ResultRow
-                    key={name}
-                    onPress={() => openStop(name)}
-                    dark={dark}
-                    leading={
-                      <View style={styles.stopIcon}>
-                        <SymbolView name="tram.fill" size={13} tintColor={Tram.cream} />
+        <ScrollView
+          contentInsetAdjustmentBehavior="automatic"
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          contentContainerStyle={styles.scrollBottom}
+          showsVerticalScrollIndicator={false}
+        >
+          <SheetContent style={styles.listContent}>
+            {hasResults ? (
+              <>
+                {lineMatches.length > 0 && (
+                  <View>
+                    <SectionLabel>Lines</SectionLabel>
+                    <InsetGroup style={styles.linesCard}>
+                      <View style={styles.lineGrid}>
+                        {lineMatches.map((l) => (
+                          <Pressable
+                            key={l}
+                            onPress={() => openLine(l)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Line ${l}`}
+                            style={({ pressed }) => pressed && styles.pressed}
+                          >
+                            <LineBadge line={l} size="lg" />
+                          </Pressable>
+                        ))}
                       </View>
-                    }
-                    title={name}
-                    textColor={c.text as string}
-                    secondaryColor={c.textSecondary as string}
-                  />
-                ))}
+                    </InsetGroup>
+                  </View>
+                )}
+
+                {tramMatches.length > 0 && (
+                  <View>
+                    <SectionLabel>{tramSectionLabel}</SectionLabel>
+                    <InsetGroup>
+                      {tramMatches.map((s, i) => (
+                        <Fragment key={s.key}>
+                          {i > 0 && <RowSeparator inset={ROW_SEPARATOR_INSET} />}
+                          <InsetRow
+                            onPress={() => openTram(s)}
+                            iconNode={<LineBadge line={s.snapshot.line} size="md" />}
+                            title={s.key}
+                            subtitle={s.model.name}
+                            trailing={<AcSnowflake airConditioned={s.snapshot.airConditioned} />}
+                            chevron
+                          />
+                        </Fragment>
+                      ))}
+                    </InsetGroup>
+                  </View>
+                )}
+
+                {stopMatches.length > 0 && (
+                  <View>
+                    <SectionLabel>Stops</SectionLabel>
+                    <InsetGroup>
+                      {stopMatches.map((name, i) => (
+                        <Fragment key={name}>
+                          {i > 0 && <RowSeparator inset={ROW_SEPARATOR_INSET} />}
+                          <InsetRow
+                            onPress={() => openStop(name)}
+                            icon="tram.fill"
+                            iconTint={Tram.pidRed}
+                            title={name}
+                            chevron
+                          />
+                        </Fragment>
+                      ))}
+                    </InsetGroup>
+                  </View>
+                )}
+              </>
+            ) : (
+              <View style={styles.empty}>
+                <SymbolView
+                  name="magnifyingglass"
+                  size={30}
+                  tintColor={c.secondary}
+                  style={styles.emptyIcon}
+                />
+                <Text style={[styles.emptyTitle, { color: c.text }]}>No matches for “{q}”</Text>
+                <Text style={[styles.emptyBody, { color: c.secondary }]}>
+                  Try a line number, a tram registration number, or a stop name. Stops appear as
+                  routes load.
+                </Text>
               </View>
             )}
-          </>
-        ) : (
-          <View style={styles.empty}>
-            <SymbolView
-              name="magnifyingglass"
-              size={30}
-              tintColor={c.textSecondary}
-              style={styles.emptyIcon}
-            />
-            <Text style={[styles.emptyTitle, { color: c.text }]}>
-              No matches for “{q}”
-            </Text>
-            <Text style={[styles.emptyBody, { color: c.textSecondary }]}>
-              Try a line number, a tram registration number, or a stop name. Stops appear as
-              routes load.
-            </Text>
-          </View>
-        )}
-        </SheetContent>
-      </ScrollView>
+          </SheetContent>
+        </ScrollView>
       )}
     </GlassPanel>
-  );
-}
-
-// ── Pieces ───────────────────────────────────────────────────────────────────
-
-function SectionHeader({ label, color }: { label: string; color: string }) {
-  return (
-    <Text style={[styles.sectionHeader, { color }]} allowFontScaling={false}>
-      {label.toUpperCase()}
-    </Text>
-  );
-}
-
-function ResultRow({
-  onPress,
-  leading,
-  title,
-  subtitle,
-  titleTabular,
-  trailing,
-  textColor,
-  secondaryColor,
-  dark,
-}: {
-  onPress: () => void;
-  leading: React.ReactNode;
-  title: string;
-  subtitle?: string;
-  titleTabular?: boolean;
-  trailing?: React.ReactNode;
-  textColor: string;
-  secondaryColor: string;
-  dark: boolean;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      style={({ pressed }) => [
-        styles.resultRow,
-        pressed && { backgroundColor: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' },
-      ]}
-    >
-      {leading}
-      <View style={styles.resultBody}>
-        <Text
-          numberOfLines={1}
-          style={[
-            styles.resultTitle,
-            { color: textColor },
-            titleTabular && styles.tabular,
-          ]}
-        >
-          {title}
-        </Text>
-        {subtitle != null && (
-          <Text numberOfLines={1} style={[styles.resultSubtitle, { color: secondaryColor }]}>
-            {subtitle}
-          </Text>
-        )}
-      </View>
-      {trailing}
-      <SymbolView name="chevron.right" size={11} tintColor={secondaryColor} />
-    </Pressable>
   );
 }
 
@@ -347,56 +286,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
-    borderRadius: 14,
+    borderRadius: Radii.field,
+    borderCurve: 'continuous',
     paddingHorizontal: Spacing.two + 4,
-    paddingVertical: 10,
+    paddingVertical: 9,
   },
   input: {
     flex: 1,
     fontSize: 17,
     padding: 0,
   },
+  cancel: { fontSize: 17, fontWeight: '400' },
   scrollBottom: {
     paddingBottom: Spacing.six,
   },
   listContent: {
-    paddingHorizontal: Spacing.three,
+    padding: Spacing.three,
     gap: Spacing.four,
   },
-  section: { gap: Spacing.one },
-  sectionHeader: {
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.8,
-    marginBottom: Spacing.one,
+  linesCard: {
+    padding: Spacing.three,
   },
   lineGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.two + 2,
-    paddingVertical: Spacing.one,
-  },
-  resultRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two + 4,
-    minHeight: 48,
-    borderRadius: 12,
-    borderCurve: 'continuous',
-    paddingHorizontal: Spacing.two,
-  },
-  resultBody: { flex: 1, gap: 1 },
-  resultTitle: { fontSize: 16, fontWeight: '600' },
-  tabular: { fontFamily: Fonts?.rounded, fontVariant: ['tabular-nums'] },
-  resultSubtitle: { fontSize: 13 },
-  stopIcon: {
-    width: 26,
-    height: 26,
-    borderRadius: 8,
-    borderCurve: 'continuous',
-    backgroundColor: Tram.pidRed,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   pressed: { opacity: 0.55 },
   empty: {
@@ -406,6 +320,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.four,
   },
   emptyIcon: { marginBottom: Spacing.one },
-  emptyTitle: { fontSize: 16, fontWeight: '600', textAlign: 'center' },
+  emptyTitle: { fontSize: 17, fontWeight: '600', textAlign: 'center' },
   emptyBody: { fontSize: 13, textAlign: 'center', lineHeight: 18 },
 });

@@ -1,5 +1,8 @@
 // Fleet browser — the search sheet's idle (empty-query) state: every live
-// tram, filterable by model and by line, client-side paginated.
+// tram, filterable by model and by line, client-side paginated. Restyled to
+// Apple Maps' long-list grammar: a count caption, Apple pill filter toggles
+// (models) + a line-badge toggle row, and inset rows split by hairline
+// separators.
 //
 // Perf contract: the parent re-renders at the 1 Hz useAllTramStates cadence.
 // Rows are memoized FleetRow components fed primitive FleetRowData, the press
@@ -18,9 +21,10 @@ import {
 } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 
+import { RowSeparator } from '@/components/ui/Inset';
 import { LineBadge } from '@/components/ui/LineBadge';
 import { SHEET_CONTENT_MAX_WIDTH } from '@/components/ui/SheetContent';
-import { Colors, Spacing, Tram } from '@/constants/theme';
+import { appleScheme, Apple, Radii } from '@/constants/theme';
 import type { RouteGeometry, TramModelId, TramPublicState } from '@/lib/types';
 
 import { FleetRow } from './FleetRow';
@@ -37,6 +41,9 @@ import {
 } from './fleetFilter';
 
 const PAGE_SIZE = 30;
+
+/** Leading-icon inset for fleet-row separators: 16 pad + 30 badge + 12 gap. */
+const ROW_SEPARATOR_INSET = 58;
 
 /** Now-ms ticking every second — drives the rows' updated-age labels (same
  * pattern as the tram sheet's useNowTick). */
@@ -65,9 +72,9 @@ export function FleetBrowser({
   onChangeFilters,
   onOpenTram,
 }: FleetBrowserProps) {
-  const scheme = useColorScheme();
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const dark = scheme === 'dark';
-  const c = Colors[dark ? 'dark' : 'light'];
+  const c = appleScheme(scheme);
   // iPad: the sheet's glass is full-width; cap + center the list content
   // (same pattern as the line sheet's FlatList).
   const { width } = useWindowDimensions();
@@ -124,6 +131,11 @@ export function FleetBrowser({
     [stopsByTrip, nowMs, dark, onPressRow],
   );
 
+  const separator = useCallback(
+    () => <RowSeparator inset={ROW_SEPARATOR_INSET} />,
+    [],
+  );
+
   const filtersActive = hasActiveFilters(filters);
   const headerText = filtersActive
     ? `${filtered.length} of ${live.length} trams live`
@@ -136,7 +148,7 @@ export function FleetBrowser({
 
   const header = (
     <View style={styles.header}>
-      <Text style={[styles.headerTitle, { color: c.text }]} accessibilityRole="header">
+      <Text style={[styles.headerTitle, { color: c.secondary }]} accessibilityRole="header">
         {headerText}
       </Text>
 
@@ -145,7 +157,7 @@ export function FleetBrowser({
         <FilterChip
           label="All"
           selected={filters.models.length === 0}
-          dark={dark}
+          scheme={scheme}
           onPress={() => onChangeFilters({ ...filters, models: [] })}
         />
         {models.map((m) => (
@@ -154,7 +166,7 @@ export function FleetBrowser({
             label={MODEL_SHORT_NAMES[m.id]}
             count={m.count}
             selected={filters.models.includes(m.id)}
-            dark={dark}
+            scheme={scheme}
             onPress={() => toggleModel(m.id)}
           />
         ))}
@@ -171,7 +183,7 @@ export function FleetBrowser({
           <FilterChip
             label="All"
             selected={filters.lines.length === 0}
-            dark={dark}
+            scheme={scheme}
             onPress={() => onChangeFilters({ ...filters, lines: [] })}
           />
           {lines.map((line) => {
@@ -208,13 +220,13 @@ export function FleetBrowser({
       <SymbolView
         name="line.3.horizontal.decrease.circle"
         size={30}
-        tintColor={c.textSecondary}
+        tintColor={c.secondary}
         style={styles.emptyIcon}
       />
       <Text style={[styles.emptyTitle, { color: c.text }]}>
         {live.length === 0 ? 'No trams reporting yet' : 'No trams match these filters'}
       </Text>
-      <Text style={[styles.emptyBody, { color: c.textSecondary }]}>
+      <Text style={[styles.emptyBody, { color: c.secondary }]}>
         {live.length === 0
           ? 'Live positions appear a few seconds after the first poll.'
           : 'Loosen the model or line filters to see more of the fleet.'}
@@ -227,6 +239,7 @@ export function FleetBrowser({
       data={data}
       keyExtractor={keyExtractor}
       renderItem={renderItem}
+      ItemSeparatorComponent={separator}
       ListHeaderComponent={header}
       ListEmptyComponent={empty}
       onEndReached={loadMore}
@@ -250,22 +263,22 @@ export function FleetBrowser({
 
 const keyExtractor = (s: TramPublicState): string => s.key;
 
-// ── Filter chip (models + the line row's "All") ──────────────────────────────
+// ── Filter chip (models + each line row's "All") ─────────────────────────────
 
 function FilterChip({
   label,
   count,
   selected,
-  dark,
+  scheme,
   onPress,
 }: {
   label: string;
   count?: number;
   selected: boolean;
-  dark: boolean;
+  scheme: 'light' | 'dark';
   onPress: () => void;
 }) {
-  const c = Colors[dark ? 'dark' : 'light'];
+  const c = appleScheme(scheme);
   return (
     <Pressable
       onPress={onPress}
@@ -274,19 +287,13 @@ function FilterChip({
       accessibilityLabel={count != null ? `${label}, ${count} trams` : label}
       style={({ pressed }) => [
         styles.chip,
-        {
-          backgroundColor: selected
-            ? Tram.pidRed
-            : dark
-              ? 'rgba(255,255,255,0.08)'
-              : 'rgba(0,0,0,0.05)',
-        },
+        { backgroundColor: selected ? Apple.blue : c.fillTertiary },
         pressed && styles.pressed,
       ]}
     >
       <Text
         allowFontScaling={false}
-        style={[styles.chipLabel, { color: selected ? Tram.cream : c.text }]}
+        style={[styles.chipLabel, { color: selected ? '#FFFFFF' : c.text }]}
       >
         {label}
       </Text>
@@ -295,7 +302,7 @@ function FilterChip({
           allowFontScaling={false}
           style={[
             styles.chipCount,
-            { color: selected ? 'rgba(245,235,216,0.75)' : c.textSecondary },
+            { color: selected ? 'rgba(255,255,255,0.75)' : c.secondary },
           ]}
         >
           {count}
@@ -308,31 +315,32 @@ function FilterChip({
 const styles = StyleSheet.create({
   list: { flex: 1 },
   listContent: {
-    paddingHorizontal: Spacing.three,
-    paddingBottom: Spacing.six,
+    paddingHorizontal: 16,
+    paddingBottom: 64,
   },
   header: {
-    gap: Spacing.two + 2,
-    paddingTop: Spacing.one,
-    paddingBottom: Spacing.two,
+    gap: 10,
+    paddingTop: 4,
+    paddingBottom: 8,
   },
   headerTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.8,
+    fontSize: 13,
+    fontWeight: '500',
+    letterSpacing: 0.5,
     textTransform: 'uppercase',
+    marginLeft: 2,
   },
   modelChips: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: Spacing.two - 2,
+    gap: 6,
   },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    borderRadius: 999,
-    paddingHorizontal: Spacing.two + 4,
+    borderRadius: Radii.circle,
+    paddingHorizontal: 12,
     paddingVertical: 6,
   },
   chipLabel: { fontSize: 13, fontWeight: '600' },
@@ -340,8 +348,9 @@ const styles = StyleSheet.create({
   lineChips: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two - 2,
+    gap: 6,
     paddingVertical: 2,
+    paddingRight: 8,
   },
   lineChip: {
     borderRadius: 12,
@@ -350,16 +359,16 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
     padding: 2,
   },
-  lineChipSelected: { borderColor: Tram.gold },
+  lineChipSelected: { borderColor: Apple.blue },
   lineDimmed: { opacity: 0.45 },
   pressed: { opacity: 0.6 },
   empty: {
     alignItems: 'center',
-    gap: Spacing.two,
-    paddingVertical: Spacing.five,
-    paddingHorizontal: Spacing.four,
+    gap: 8,
+    paddingVertical: 32,
+    paddingHorizontal: 24,
   },
-  emptyIcon: { marginBottom: Spacing.one },
-  emptyTitle: { fontSize: 16, fontWeight: '600', textAlign: 'center' },
+  emptyIcon: { marginBottom: 4 },
+  emptyTitle: { fontSize: 17, fontWeight: '600', textAlign: 'center' },
   emptyBody: { fontSize: 13, textAlign: 'center', lineHeight: 18 },
 });
