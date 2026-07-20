@@ -1,5 +1,8 @@
-// From/To stop pickers in one Liquid Glass card: two text fields, a swap
-// button, and inline stop-name suggestions (with the lines serving each stop).
+// From/To stop pickers as Apple Maps' Directions endpoint card (IMG_0080): a
+// grouped glass card with two rows — a blue origin dot and a blue destination
+// pin joined by a connecting line, reorder drag glyphs on the right, and a
+// circular swap button. Inline stop-name suggestions (with the serving lines)
+// drop below. Purely visual: every prop and interaction is unchanged.
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
 import { useMemo, useRef, useState } from 'react';
@@ -16,7 +19,7 @@ import {
 
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
-import { Colors, Spacing, Tram } from '@/constants/theme';
+import { Apple, appleScheme, Radii } from '@/constants/theme';
 
 type Field = 'from' | 'to';
 
@@ -56,8 +59,7 @@ export function StopSearchCard({
   autoFocusTo = false,
 }: StopSearchCardProps) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const palette = Colors[scheme];
-  const separatorColor = scheme === 'dark' ? 'rgba(84,84,88,0.5)' : 'rgba(60,60,67,0.24)';
+  const c = appleScheme(scheme);
 
   const fromRef = useRef<TextInput>(null);
   const toRef = useRef<TextInput>(null);
@@ -95,20 +97,22 @@ export function StopSearchCard({
     const isFrom = field === 'from';
     return (
       <View style={styles.fieldRow}>
-        <SymbolView
-          name={isFrom ? 'smallcircle.filled.circle' : 'mappin.circle.fill'}
-          size={18}
-          tintColor={isFrom ? Tram.pidRed : Tram.gold}
-          style={styles.fieldIcon}
-        />
+        <View style={styles.dotCol}>
+          {isFrom ? (
+            <SymbolView name="location.fill" size={13} tintColor="#FFFFFF" style={styles.dotGlyph} />
+          ) : (
+            <SymbolView name="mappin" size={13} tintColor="#FFFFFF" style={styles.dotGlyph} />
+          )}
+          <View style={[styles.dot, { backgroundColor: Apple.blue }]} />
+        </View>
         <TextInput
           ref={isFrom ? fromRef : toRef}
           value={isFrom ? from : to}
           onChangeText={isFrom ? onChangeFrom : onChangeTo}
           onFocus={() => setActiveField(field)}
-          placeholder={isFrom ? 'From stop' : 'To stop'}
-          placeholderTextColor={palette.textSecondary}
-          style={[styles.input, { color: palette.text }]}
+          placeholder={isFrom ? 'My Location' : 'Choose destination'}
+          placeholderTextColor={c.secondary}
+          style={[styles.input, { color: c.text }]}
           autoFocus={!isFrom && autoFocusTo}
           autoCorrect={false}
           autoCapitalize="none"
@@ -138,22 +142,27 @@ export function StopSearchCard({
             style={({ pressed }) => [styles.locateButton, { opacity: pressed || locating ? 0.6 : 1 }]}
           >
             {locating ? (
-              <ActivityIndicator size="small" color={Tram.pidRed} />
+              <ActivityIndicator size="small" color={Apple.blue} />
             ) : (
-              <SymbolView name="location.fill" size={17} tintColor={Tram.pidRed} />
+              <SymbolView name="location" size={17} weight="semibold" tintColor={Apple.blue} />
             )}
           </Pressable>
         )}
+        <SymbolView name="line.3.horizontal" size={16} tintColor={c.secondary} style={styles.dragGlyph} />
       </View>
     );
   };
 
   return (
-    <GlassPanel style={styles.card}>
+    <GlassPanel variant="clear" style={styles.card}>
       <View style={styles.fieldsBlock}>
         <View style={styles.fieldsCol}>
           {renderField('from')}
-          <View style={[styles.fieldSeparator, { backgroundColor: separatorColor }]} />
+          {/* Connecting line between the two endpoint dots. */}
+          <View style={styles.connectorWrap} pointerEvents="none">
+            <View style={[styles.connector, { backgroundColor: c.separator }]} />
+          </View>
+          <View style={[styles.fieldSeparator, { backgroundColor: c.separator }]} />
           {renderField('to')}
         </View>
         <Pressable
@@ -162,15 +171,15 @@ export function StopSearchCard({
           accessibilityLabel="Swap stops"
           style={({ pressed }) => [
             styles.swapButton,
-            { backgroundColor: palette.backgroundElement, opacity: pressed ? 0.6 : 1 },
+            { backgroundColor: c.fillTertiary, opacity: pressed ? 0.6 : 1 },
           ]}
         >
-          <SymbolView name="arrow.up.arrow.down" size={15} weight="semibold" tintColor={Tram.pidRed} />
+          <SymbolView name="arrow.up.arrow.down" size={15} weight="semibold" tintColor={Apple.blue} />
         </Pressable>
       </View>
 
       {suggestions.length > 0 && (
-        <View style={[styles.suggestions, { borderTopColor: separatorColor }]}>
+        <View style={[styles.suggestions, { borderTopColor: c.separator }]}>
           {suggestions.map((name, i) => {
             const lines = linesFor(name);
             return (
@@ -179,11 +188,12 @@ export function StopSearchCard({
                 onPress={() => pickSuggestion(name)}
                 style={({ pressed }) => [
                   styles.suggestionRow,
-                  i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: separatorColor },
-                  pressed && { backgroundColor: palette.backgroundSelected },
+                  i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.separator },
+                  pressed && { backgroundColor: c.fillTertiary },
                 ]}
               >
-                <Text numberOfLines={1} style={[styles.suggestionName, { color: palette.text }]}>
+                <SymbolView name="mappin.circle.fill" size={22} tintColor={c.secondary} />
+                <Text numberOfLines={1} style={[styles.suggestionName, { color: c.text }]}>
                   {name}
                 </Text>
                 {lines.length > 0 && (
@@ -192,7 +202,7 @@ export function StopSearchCard({
                       <LineBadge key={line} line={line} size="sm" />
                     ))}
                     {lines.length > MAX_BADGES && (
-                      <Text style={[styles.moreLines, { color: palette.textSecondary }]}>
+                      <Text style={[styles.moreLines, { color: c.secondary }]}>
                         +{lines.length - MAX_BADGES}
                       </Text>
                     )}
@@ -209,14 +219,14 @@ export function StopSearchCard({
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 20,
+    borderRadius: Radii.group,
     borderCurve: 'continuous',
   },
   fieldsBlock: {
     alignItems: 'center',
     flexDirection: 'row',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.one,
+    paddingHorizontal: 14,
+    paddingVertical: 4,
   },
   fieldsCol: {
     flex: 1,
@@ -224,16 +234,38 @@ const styles = StyleSheet.create({
   fieldRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: Spacing.two + 2,
-    minHeight: 46,
+    gap: 12,
+    minHeight: 48,
   },
-  fieldIcon: {
-    width: 18,
-    height: 18,
+  dotCol: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 22,
+    width: 22,
+  },
+  dot: {
+    borderRadius: 11,
+    height: 22,
+    width: 22,
+  },
+  dotGlyph: {
+    position: 'absolute',
+    zIndex: 1,
+  },
+  connectorWrap: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 10,
+  },
+  connector: {
+    position: 'absolute',
+    bottom: -13,
+    top: -13,
+    width: 2,
+    borderRadius: 1,
   },
   fieldSeparator: {
     height: StyleSheet.hairlineWidth,
-    marginLeft: 28,
+    marginLeft: 34,
   },
   input: {
     flex: 1,
@@ -246,12 +278,16 @@ const styles = StyleSheet.create({
     height: 30,
     width: 30,
   },
+  dragGlyph: {
+    marginLeft: 2,
+    opacity: 0.7,
+  },
   swapButton: {
     alignItems: 'center',
     borderRadius: 17,
     height: 34,
     justifyContent: 'center',
-    marginLeft: Spacing.two,
+    marginLeft: 10,
     width: 34,
   },
   suggestions: {
@@ -260,10 +296,10 @@ const styles = StyleSheet.create({
   suggestionRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: Spacing.two,
+    gap: 10,
     minHeight: 44,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
   suggestionName: {
     flexShrink: 1,
@@ -272,7 +308,7 @@ const styles = StyleSheet.create({
   suggestionBadges: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: Spacing.one,
+    gap: 4,
     marginLeft: 'auto',
   },
   moreLines: {

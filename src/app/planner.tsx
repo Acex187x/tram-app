@@ -25,8 +25,10 @@ import { ItineraryCard } from '@/components/planner/ItineraryCard';
 import { RecentRoutes } from '@/components/planner/RecentRoutes';
 import { StopSearchCard } from '@/components/planner/StopSearchCard';
 import { GlassPanel } from '@/components/ui/GlassPanel';
+import { SegmentedPills, type PillSegment } from '@/components/ui/SegmentedPills';
 import { SheetContent } from '@/components/ui/SheetContent';
-import { Colors, Spacing, Tram } from '@/constants/theme';
+import { SheetHeader } from '@/components/ui/SheetHeader';
+import { appleScheme, Apple, Radii, Spacing, Tram } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
 import {
   computeItineraryTiming,
@@ -46,6 +48,16 @@ type PlanError =
   | { type: 'same' }
   | { type: 'unknown'; field: 'from' | 'to'; name: string };
 
+// Transport-mode selector (IMG_0080). Only tram is real; the rest are display-
+// only flavor (greyed), matching Apple's mode row.
+const MODE_SEGMENTS: PillSegment[] = [
+  { key: 'drive', symbol: 'car.fill', disabled: true },
+  { key: 'walk', symbol: 'figure.walk', disabled: true },
+  { key: 'tram', symbol: 'tram.fill', label: 'Transit' },
+  { key: 'bike', symbol: 'bicycle', disabled: true },
+  { key: 'ride', symbol: 'figure.wave', disabled: true },
+];
+
 interface RankedResult {
   itinerary: PlannerItinerary;
   timing: ItineraryTiming;
@@ -57,7 +69,7 @@ interface RankedResult {
 
 export default function PlannerScreen() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const palette = Colors[scheme];
+  const c = appleScheme(scheme);
   const geometries = useLoadedGeometries();
   // Live tram states (~1 Hz) drive the wall-clock departure/arrival times on
   // the itinerary cards + active banner.
@@ -395,182 +407,176 @@ export default function PlannerScreen() {
 
   return (
     <GlassPanel style={styles.root}>
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        automaticallyAdjustKeyboardInsets
-        contentContainerStyle={styles.scrollBottom}
-      >
-        <SheetContent style={styles.content}>
-        <View style={styles.header}>
-          <Text style={[styles.title, { color: palette.text }]}>Journey Planner</Text>
-          <Pressable
-            onPress={handleClose}
-            hitSlop={8}
-            accessibilityLabel="Close"
-            style={({ pressed }) => [
-              styles.closeButton,
-              { backgroundColor: palette.backgroundElement, opacity: pressed ? 0.6 : 1 },
-            ]}
-          >
-            <SymbolView name="xmark" size={13} weight="semibold" tintColor={palette.textSecondary} />
-          </Pressable>
-        </View>
-
-        {itinerary && (
-          <View
-            style={[
-              styles.banner,
-              { backgroundColor: scheme === 'dark' ? 'rgba(224,165,38,0.18)' : 'rgba(224,165,38,0.20)' },
-            ]}
-          >
-            <SymbolView name="map.fill" size={17} tintColor={Tram.gold} />
-            <View style={styles.bannerBody}>
-              <Text numberOfLines={1} style={[styles.bannerText, { color: palette.text }]}>
-                {bannerLabel}
-              </Text>
-              <Text
-                numberOfLines={1}
-                style={[styles.bannerTimes, { color: palette.textSecondary }]}
-                allowFontScaling={false}
-              >
-                {bannerTimes ?? 'Awaiting a live tram for departure times'}
-              </Text>
-            </View>
-            {!guidance && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Start journey guidance"
-                onPress={() => handleStart(itinerary, activeWalkS)}
-                style={({ pressed }) => [styles.bannerStart, { opacity: pressed ? 0.7 : 1 }]}
-              >
-                <SymbolView name="play.fill" size={11} tintColor={Tram.cream} />
-                <Text style={styles.bannerStartText}>Start</Text>
-              </Pressable>
-            )}
-            <Pressable
-              onPress={handleClearItinerary}
-              style={({ pressed }) => [styles.bannerClear, { opacity: pressed ? 0.7 : 1 }]}
-            >
-              <Text style={styles.bannerClearText}>Clear route</Text>
-            </Pressable>
-          </View>
-        )}
-
-        {/* Active guidance: the sheet becomes the full stepper; planning UI
-            stays out of the way until guidance ends. */}
-        {guidance && guidanceProgress ? (
-          <GuidanceStepper
-            session={guidance}
-            progress={guidanceProgress}
-            states={states}
-            geometries={geometries}
-            nowMs={nowMs}
-            onEnd={handleEndGuidance}
-          />
-        ) : (
-          <>
-        <StopSearchCard
-          from={from}
-          to={to}
-          onChangeFrom={handleChangeFrom}
-          onChangeTo={handleChangeTo}
-          onSwap={handleSwap}
-          search={search}
-          linesFor={linesFor}
-          onSubmit={handlePlan}
-          onLocate={() => void handleLocate()}
-          locating={locating}
-          autoFocusTo={autoFocusTo}
-        />
-
-        <Pressable
-          onPress={handlePlan}
-          disabled={!canPlan}
-          accessibilityRole="button"
-          accessibilityLabel="Plan route"
-          style={({ pressed }) => [
-            styles.planButton,
-            { opacity: !canPlan ? 0.4 : pressed ? 0.75 : 1 },
-          ]}
+      <SheetContent style={styles.column}>
+        <SheetHeader title="Directions" onClose={handleClose} />
+        <ScrollView
+          contentInsetAdjustmentBehavior="automatic"
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          automaticallyAdjustKeyboardInsets
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
         >
-          <SymbolView
-            name="arrow.triangle.turn.up.right.diamond.fill"
-            size={17}
-            tintColor={Tram.cream}
-          />
-          <Text style={styles.planButtonText}>
-            {results && results.length > 0 ? 'Update route' : 'Plan'}
-          </Text>
-        </Pressable>
+          {itinerary && (
+            <View style={[styles.activeCard, { backgroundColor: c.fillTertiary }]}>
+              <View style={styles.activeHead}>
+                <View style={[styles.activeIcon, { backgroundColor: Apple.blue }]}>
+                  <SymbolView name="map.fill" size={17} weight="semibold" tintColor="#FFFFFF" />
+                </View>
+                <View style={styles.activeBody}>
+                  <Text numberOfLines={1} style={[styles.activeLabel, { color: c.text }]}>
+                    {bannerLabel}
+                  </Text>
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.activeTimes, { color: c.secondary }]}
+                    allowFontScaling={false}
+                  >
+                    {bannerTimes ?? 'Awaiting a live tram for departure times'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.activeActions}>
+                {!guidance && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Start journey guidance"
+                    onPress={() => handleStart(itinerary, activeWalkS)}
+                    style={({ pressed }) => [styles.activeStart, { opacity: pressed ? 0.8 : 1 }]}
+                  >
+                    <SymbolView name="location.north.line.fill" size={13} weight="semibold" tintColor="#FFFFFF" />
+                    <Text style={styles.activeStartText}>Start</Text>
+                  </Pressable>
+                )}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear route"
+                  onPress={handleClearItinerary}
+                  style={({ pressed }) => [
+                    styles.activeClear,
+                    { backgroundColor: c.fillSecondary, opacity: pressed ? 0.7 : 1 },
+                  ]}
+                >
+                  <Text style={[styles.activeClearText, { color: Apple.red }]}>Clear route</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
 
-        {showRecents && (
-          <RecentRoutes
-            recents={recents}
-            onPick={handlePickRecent}
-            onRemove={removeRecent}
-          />
-        )}
+          {/* Active guidance: the sheet becomes the full stepper; planning UI
+              stays out of the way until guidance ends. */}
+          {guidance && guidanceProgress ? (
+            <GuidanceStepper
+              session={guidance}
+              progress={guidanceProgress}
+              states={states}
+              geometries={geometries}
+              nowMs={nowMs}
+              onEnd={handleEndGuidance}
+            />
+          ) : (
+            <>
+              <SegmentedPills segments={MODE_SEGMENTS} selectedKey="tram" onChange={() => {}} size="lg" />
 
-        {loading ? (
-          <View style={styles.stateBlock}>
-            <ActivityIndicator />
-            <Text style={[styles.stateBody, { color: palette.textSecondary }]}>
-              Loading tram network — more routes appear as trams report in
-            </Text>
-          </View>
-        ) : error ? (
-          <View style={styles.stateBlock}>
-            <SymbolView name="exclamationmark.circle" size={30} tintColor={Tram.late} />
-            <Text style={[styles.stateTitle, { color: palette.text }]}>
-              {error.type === 'same' ? 'Same stop twice' : 'Stop not found'}
-            </Text>
-            <Text style={[styles.stateBody, { color: palette.textSecondary }]}>
-              {error.type === 'same'
-                ? 'The start and destination are the same stop — pick two different stops.'
-                : `Couldn't find “${error.name}” on the tram network. Pick a stop from the suggestions.`}
-            </Text>
-          </View>
-        ) : results === null ? (
-          recents.length === 0 ? (
-            <Text style={[styles.hint, { color: palette.textSecondary }]}>
-              Plan a journey across {network.stations.size} stops on{' '}
-              {network.sequencesByLine.size} tram lines
-            </Text>
-          ) : null
-        ) : results.length === 0 ? (
-          <View style={styles.stateBlock}>
-            <SymbolView name="tram.fill" size={34} tintColor={palette.textSecondary} />
-            <Text style={[styles.stateTitle, { color: palette.text }]}>No route found</Text>
-            <Text style={[styles.stateBody, { color: palette.textSecondary }]}>
-              No tram path connects these stops yet. More routes appear as trams report in —
-              try again shortly, or pick nearby stops.
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.results}>
-            <Text style={[styles.sectionLabel, { color: palette.textSecondary }]}>
-              Routes · earliest arrival first
-            </Text>
-            {ranked.map(({ itinerary: it, timing, walkS, leaveByMs }, i) => (
-              <ItineraryCard
-                key={`${i}-${it.legs.map((l) => l.line).join('-')}-${it.legs[0]?.fromStopId}`}
-                itinerary={it}
-                timing={timing}
-                nowMs={nowMs}
-                walkS={walkS}
-                leaveByMs={leaveByMs}
-                onPress={() => handlePick(it)}
-                onStart={() => handleStart(it, walkS)}
+              <StopSearchCard
+                from={from}
+                to={to}
+                onChangeFrom={handleChangeFrom}
+                onChangeTo={handleChangeTo}
+                onSwap={handleSwap}
+                search={search}
+                linesFor={linesFor}
+                onSubmit={handlePlan}
+                onLocate={() => void handleLocate()}
+                locating={locating}
+                autoFocusTo={autoFocusTo}
               />
-            ))}
-          </View>
-        )}
-          </>
-        )}
-        </SheetContent>
-      </ScrollView>
+
+              <View style={styles.optionsRow}>
+                <View style={[styles.optionChip, { backgroundColor: c.fillTertiary }]}>
+                  <Text style={[styles.optionChipText, { color: c.text }]}>Now</Text>
+                  <SymbolView name="chevron.down" size={11} weight="semibold" tintColor={c.secondary} />
+                </View>
+              </View>
+
+              <Pressable
+                onPress={handlePlan}
+                disabled={!canPlan}
+                accessibilityRole="button"
+                accessibilityLabel="Plan route"
+                style={({ pressed }) => [
+                  styles.planButton,
+                  { opacity: !canPlan ? 0.4 : pressed ? 0.82 : 1 },
+                ]}
+              >
+                <SymbolView name="arrow.triangle.turn.up.right.diamond.fill" size={17} weight="semibold" tintColor="#FFFFFF" />
+                <Text style={styles.planButtonText}>
+                  {results && results.length > 0 ? 'Update Route' : 'Find Routes'}
+                </Text>
+              </Pressable>
+
+              {showRecents && (
+                <RecentRoutes recents={recents} onPick={handlePickRecent} onRemove={removeRecent} />
+              )}
+
+              {loading ? (
+                <View style={styles.stateBlock}>
+                  <ActivityIndicator />
+                  <Text style={[styles.stateBody, { color: c.secondary }]}>
+                    Loading tram network — more routes appear as trams report in
+                  </Text>
+                </View>
+              ) : error ? (
+                <View style={styles.stateBlock}>
+                  <SymbolView name="exclamationmark.circle" size={30} tintColor={Tram.late} />
+                  <Text style={[styles.stateTitle, { color: c.text }]}>
+                    {error.type === 'same' ? 'Same stop twice' : 'Stop not found'}
+                  </Text>
+                  <Text style={[styles.stateBody, { color: c.secondary }]}>
+                    {error.type === 'same'
+                      ? 'The start and destination are the same stop — pick two different stops.'
+                      : `Couldn't find “${error.name}” on the tram network. Pick a stop from the suggestions.`}
+                  </Text>
+                </View>
+              ) : results === null ? (
+                recents.length === 0 ? (
+                  <Text style={[styles.hint, { color: c.secondary }]}>
+                    Plan a journey across {network.stations.size} stops on{' '}
+                    {network.sequencesByLine.size} tram lines
+                  </Text>
+                ) : null
+              ) : results.length === 0 ? (
+                <View style={styles.stateBlock}>
+                  <SymbolView name="tram.fill" size={34} tintColor={c.secondary} />
+                  <Text style={[styles.stateTitle, { color: c.text }]}>No route found</Text>
+                  <Text style={[styles.stateBody, { color: c.secondary }]}>
+                    No tram path connects these stops yet. More routes appear as trams report in —
+                    try again shortly, or pick nearby stops.
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.results}>
+                  <Text style={[styles.sectionLabel, { color: c.secondary }]}>
+                    ROUTES · EARLIEST ARRIVAL FIRST
+                  </Text>
+                  {ranked.map(({ itinerary: it, timing, walkS, leaveByMs }, i) => (
+                    <ItineraryCard
+                      key={`${i}-${it.legs.map((l) => l.line).join('-')}-${it.legs[0]?.fromStopId}`}
+                      itinerary={it}
+                      timing={timing}
+                      nowMs={nowMs}
+                      walkS={walkS}
+                      leaveByMs={leaveByMs}
+                      onPress={() => handlePick(it)}
+                      onStart={() => handleStart(it, walkS)}
+                    />
+                  ))}
+                </View>
+              )}
+            </>
+          )}
+        </ScrollView>
+      </SheetContent>
     </GlassPanel>
   );
 }
@@ -580,91 +586,107 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     flex: 1,
   },
-  scrollBottom: {
-    paddingBottom: Spacing.five,
+  column: {
+    flex: 1,
   },
-  content: {
+  scrollContent: {
     gap: Spacing.three,
-    padding: Spacing.three,
-  },
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
+    paddingBottom: Spacing.six,
+    paddingHorizontal: Spacing.three,
     paddingTop: Spacing.one,
   },
-  title: {
-    flex: 1,
-    fontSize: 24,
-    fontWeight: '700',
-    letterSpacing: 0.2,
-  },
-  closeButton: {
-    alignItems: 'center',
-    borderRadius: 15,
-    height: 30,
-    justifyContent: 'center',
-    width: 30,
-  },
-  banner: {
-    alignItems: 'center',
+  activeCard: {
     borderCurve: 'continuous',
-    borderRadius: 14,
+    borderRadius: Radii.card,
+    gap: Spacing.two + 2,
+    padding: Spacing.three,
+  },
+  activeHead: {
+    alignItems: 'center',
     flexDirection: 'row',
-    gap: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two + 2,
+    gap: Spacing.two + 2,
   },
-  bannerBody: {
+  activeIcon: {
+    alignItems: 'center',
+    borderRadius: 16,
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
+  },
+  activeBody: {
     flex: 1,
-    gap: 1,
+    gap: 2,
   },
-  bannerText: {
-    fontSize: 14,
+  activeLabel: {
+    fontSize: 16,
     fontWeight: '600',
   },
-  bannerTimes: {
-    fontSize: 12,
+  activeTimes: {
+    fontSize: 13,
     fontVariant: ['tabular-nums'],
   },
-  bannerStart: {
+  activeActions: {
     alignItems: 'center',
-    backgroundColor: Tram.onTime,
-    borderCurve: 'continuous',
-    borderRadius: 12,
     flexDirection: 'row',
-    gap: 5,
-    paddingHorizontal: Spacing.two + 2,
-    paddingVertical: 5,
+    gap: Spacing.two,
   },
-  bannerStartText: {
-    color: Tram.cream,
-    fontSize: 13,
+  activeStart: {
+    alignItems: 'center',
+    backgroundColor: Apple.blue,
+    borderCurve: 'continuous',
+    borderRadius: Radii.field,
+    flexDirection: 'row',
+    gap: 6,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.three,
+    paddingVertical: 9,
+  },
+  activeStartText: {
+    color: '#FFFFFF',
+    fontSize: 15,
     fontWeight: '600',
   },
-  bannerClear: {
-    backgroundColor: Tram.pidRed,
+  activeClear: {
+    alignItems: 'center',
     borderCurve: 'continuous',
-    borderRadius: 12,
-    paddingHorizontal: Spacing.two + 2,
-    paddingVertical: 5,
+    borderRadius: Radii.field,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.three,
+    paddingVertical: 9,
   },
-  bannerClearText: {
-    color: Tram.cream,
-    fontSize: 13,
+  activeClearText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  optionsRow: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+  },
+  optionChip: {
+    alignItems: 'center',
+    borderCurve: 'continuous',
+    borderRadius: Radii.circle,
+    flexDirection: 'row',
+    gap: 5,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: 7,
+  },
+  optionChipText: {
+    fontSize: 15,
     fontWeight: '600',
   },
   planButton: {
     alignItems: 'center',
-    backgroundColor: Tram.pidRed,
+    backgroundColor: Apple.blue,
     borderCurve: 'continuous',
-    borderRadius: 14,
+    borderRadius: Radii.field,
     flexDirection: 'row',
     gap: Spacing.two,
     justifyContent: 'center',
-    minHeight: 50,
+    minHeight: 52,
   },
   planButtonText: {
-    color: Tram.cream,
+    color: '#FFFFFF',
     fontSize: 17,
     fontWeight: '600',
   },
@@ -690,13 +712,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   results: {
-    gap: Spacing.two + 2,
+    gap: Spacing.three,
   },
   sectionLabel: {
     fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: 0.6,
-    marginLeft: Spacing.one,
-    textTransform: 'uppercase',
+    fontWeight: '500',
+    letterSpacing: 0.4,
+    marginLeft: Spacing.three,
   },
 });

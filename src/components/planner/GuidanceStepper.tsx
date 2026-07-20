@@ -1,14 +1,17 @@
 // Full step-by-step view of the active guidance session, rendered inside the
-// planner sheet. Pure presentation over (session, progress, live states) — the
-// actual step advancement runs in GuidanceBanner's driver on the map, so this
-// component only derives display state (same pure helpers, same inputs).
+// planner sheet, restyled to Apple Maps' itinerary "Details" list (IMG_0081):
+// big SF-symbol / line-badge step icons in a gutter, hairline separators, and
+// an Apple-red "End guidance" button. Pure presentation over (session,
+// progress, live states) — step advancement runs in GuidanceBanner's driver on
+// the map, so this only derives display state (same pure helpers, same inputs).
 import * as Haptics from 'expo-haptics';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { Fragment, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
 import { LineBadge } from '@/components/ui/LineBadge';
-import { Colors, Spacing, Tram } from '@/constants/theme';
+import { RowSeparator } from '@/components/ui/Inset';
+import { appleScheme, Apple, Radii, Tram, Type } from '@/constants/theme';
 import {
   computeItineraryTiming,
   computeLeaveByMs,
@@ -44,9 +47,8 @@ export function GuidanceStepper({
   onEnd,
 }: GuidanceStepperProps) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const palette = Colors[scheme];
+  const c = appleScheme(scheme);
   const accent = scheme === 'dark' ? Tram.gold : Tram.pidRed;
-  const separatorColor = scheme === 'dark' ? 'rgba(84,84,88,0.5)' : 'rgba(60,60,67,0.24)';
 
   const steps = useMemo(
     () => buildSteps(session.itinerary, session.accessWalkS > 0),
@@ -66,38 +68,35 @@ export function GuidanceStepper({
   );
 
   return (
-    <View
-      style={[
-        styles.card,
-        { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.62)' },
-      ]}
-    >
+    <View style={styles.wrap}>
       <View style={styles.headerRow}>
-        <SymbolView name="point.topleft.down.curvedto.point.bottomright.up.fill" size={15} tintColor={accent} />
-        <Text style={[styles.headerText, { color: palette.text }]}>Journey guidance</Text>
-        <Text style={[styles.headerStep, { color: palette.textSecondary }]} allowFontScaling={false}>
+        <SymbolView name="location.north.line.fill" size={17} weight="semibold" tintColor={accent} />
+        <Text style={[Type.title3, styles.headerText, { color: c.text }]}>Journey guidance</Text>
+        <Text style={[styles.headerStep, { color: c.secondary }]} allowFontScaling={false}>
           Step {Math.min(activeIdx + 1, steps.length)} of {steps.length}
         </Text>
       </View>
 
-      {steps.map((step, i) => {
-        const status: StepStatus = i < activeIdx ? 'done' : i === activeIdx ? 'active' : 'upcoming';
-        return (
-          <Fragment key={`${step.kind}-${'legIndex' in step ? step.legIndex : 0}-${i}`}>
-            {i > 0 && <View style={[styles.separator, { backgroundColor: separatorColor }]} />}
-            <StepRow
-              step={step}
-              status={status}
-              timing={timing}
-              live={live}
-              progress={progress}
-              session={session}
-              nowMs={nowMs}
-              scheme={scheme}
-            />
-          </Fragment>
-        );
-      })}
+      <View>
+        {steps.map((step, i) => {
+          const status: StepStatus = i < activeIdx ? 'done' : i === activeIdx ? 'active' : 'upcoming';
+          return (
+            <Fragment key={`${step.kind}-${'legIndex' in step ? step.legIndex : 0}-${i}`}>
+              {i > 0 && <RowSeparator inset={52} />}
+              <StepRow
+                step={step}
+                status={status}
+                timing={timing}
+                live={live}
+                progress={progress}
+                session={session}
+                nowMs={nowMs}
+                scheme={scheme}
+              />
+            </Fragment>
+          );
+        })}
+      </View>
 
       <Pressable
         accessibilityRole="button"
@@ -106,10 +105,10 @@ export function GuidanceStepper({
           void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           onEnd();
         }}
-        style={({ pressed }) => [styles.endButton, { opacity: pressed ? 0.7 : 1 }]}
+        style={({ pressed }) => [styles.endButton, { opacity: pressed ? 0.75 : 1 }]}
       >
-        <SymbolView name="xmark" size={12} weight="semibold" tintColor={Tram.cream} />
-        <Text style={styles.endButtonText}>End guidance</Text>
+        <SymbolView name="xmark" size={13} weight="semibold" tintColor="#FFFFFF" />
+        <Text style={styles.endButtonText}>End Guidance</Text>
       </Pressable>
     </View>
   );
@@ -136,20 +135,18 @@ function StepRow({
   nowMs: number;
   scheme: 'light' | 'dark';
 }) {
-  const palette = Colors[scheme];
+  const c = appleScheme(scheme);
   const accent = scheme === 'dark' ? Tram.gold : Tram.pidRed;
   const dim = status === 'done';
-  const textColor = dim ? palette.textSecondary : palette.text;
+  const textColor = dim ? c.secondary : c.text;
 
   // Pinned exit arrival for the leg currently being ridden (frozen at boarding).
-  // Non-null only for the ride/arrive step of the active ridden leg; used in
-  // place of the nearest-tram timing so the ETA never jumps to the tram behind.
   const pinnedArrivalMs =
     progress.phase === 'ride' && 'legIndex' in step && progress.legIndex === step.legIndex
       ? live.arrivalMs
       : null;
 
-  let symbol: Parameters<typeof SymbolView>[0]['name'];
+  let symbol: SFSymbol;
   let title: string;
   let detail: string | null = null;
   let liveNote: string | null = null;
@@ -182,8 +179,6 @@ function StepRow({
     symbol = 'tram.fill';
     title = `Ride ${step.stopCount} ${step.stopCount === 1 ? 'stop' : 'stops'} — exit at ${step.exitName}`;
     const legTiming = timing.legs[step.legIndex];
-    // While riding THIS leg, arrival is the pinned tram's frozen exit arrival —
-    // never the nearest-tram re-search (which would jump to the tram behind).
     const arrivalMs = pinnedArrivalMs ?? legTiming?.arrivalMs ?? null;
     if (arrivalMs != null) detail = `arrive ${formatPragueClock(arrivalMs)}`;
     if (status === 'active') {
@@ -194,42 +189,36 @@ function StepRow({
         : 'tracking…';
     }
   } else {
-    symbol = 'mappin.circle.fill';
+    symbol = 'flag.fill';
     title = `Arrive at ${step.stopName}`;
-    // On the final ride leg the pinned tram's frozen arrival is the destination
-    // ETA — stable, not the nearest-tram re-search.
     const arrivalMs = pinnedArrivalMs ?? timing.arrivalMs;
     if (arrivalMs != null) detail = formatPragueClock(arrivalMs);
   }
 
+  const iconTint = status === 'active' ? accent : c.secondary;
+
   return (
-    <View style={[styles.row, status === 'active' && styles.rowActive]}>
-      <View style={styles.iconCol}>
+    <View style={styles.row}>
+      <View style={styles.gutter}>
         {status === 'done' ? (
-          <SymbolView name="checkmark.circle.fill" size={18} tintColor={Tram.onTime} />
+          <SymbolView name="checkmark.circle.fill" size={24} tintColor={Apple.green} />
+        ) : step.kind === 'board' || step.kind === 'ride' ? (
+          <LineBadge line={step.line} size="md" />
         ) : (
-          <SymbolView
-            name={symbol}
-            size={18}
-            tintColor={status === 'active' ? accent : palette.textSecondary}
-          />
+          <SymbolView name={symbol} size={24} weight="regular" tintColor={iconTint} />
         )}
       </View>
-      {(step.kind === 'board' || step.kind === 'ride') && (
-        <LineBadge line={step.line} size="sm" />
-      )}
       <View style={styles.rowText}>
         <Text
           style={[
             styles.rowTitle,
-            { color: status === 'active' ? palette.text : textColor },
-            status === 'active' && styles.rowTitleActive,
+            { color: status === 'active' ? c.text : textColor, fontWeight: status === 'active' ? '600' : '400' },
           ]}
         >
           {title}
         </Text>
         {detail != null && (
-          <Text style={[styles.rowDetail, { color: palette.textSecondary }]} allowFontScaling={false}>
+          <Text style={[styles.rowDetail, { color: c.secondary }]} allowFontScaling={false}>
             {detail}
           </Text>
         )}
@@ -244,79 +233,67 @@ function StepRow({
 }
 
 const styles = StyleSheet.create({
-  card: {
-    borderCurve: 'continuous',
-    borderRadius: 16,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two + 4,
-    gap: Spacing.one,
+  wrap: {
+    gap: 4,
   },
   headerRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: Spacing.two,
-    marginBottom: Spacing.one,
+    gap: 8,
+    marginBottom: 4,
   },
   headerText: {
     flex: 1,
-    fontSize: 15,
-    fontWeight: '700',
   },
   headerStep: {
-    fontSize: 12,
+    fontSize: 13,
     fontVariant: ['tabular-nums'],
     fontWeight: '600',
-  },
-  separator: {
-    height: StyleSheet.hairlineWidth,
-    marginLeft: 26,
   },
   row: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: Spacing.two,
-    minHeight: 40,
-    paddingVertical: Spacing.one,
+    gap: 14,
+    minHeight: 52,
+    paddingVertical: 10,
   },
-  rowActive: {},
-  iconCol: {
+  gutter: {
     alignItems: 'center',
-    width: 22,
+    justifyContent: 'center',
+    width: 34,
   },
   rowText: {
     flex: 1,
-    gap: 1,
+    gap: 2,
   },
   rowTitle: {
-    fontSize: 14,
-  },
-  rowTitleActive: {
-    fontWeight: '600',
+    fontSize: 17,
+    lineHeight: 21,
   },
   rowDetail: {
-    fontSize: 12,
+    fontSize: 13,
     fontVariant: ['tabular-nums'],
   },
   liveNote: {
-    fontSize: 12,
+    fontSize: 13,
     fontVariant: ['tabular-nums'],
     fontWeight: '600',
   },
   endButton: {
     alignItems: 'center',
     alignSelf: 'stretch',
-    backgroundColor: Tram.pidRed,
+    backgroundColor: Apple.red,
     borderCurve: 'continuous',
-    borderRadius: 12,
+    borderRadius: Radii.field,
     flexDirection: 'row',
-    gap: Spacing.two,
+    gap: 8,
     justifyContent: 'center',
-    marginTop: Spacing.two,
-    minHeight: 40,
+    marginTop: 12,
+    minHeight: 50,
   },
   endButtonText: {
-    color: Tram.cream,
-    fontSize: 15,
+    color: '#FFFFFF',
+    fontSize: 16,
     fontWeight: '600',
   },
 });

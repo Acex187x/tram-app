@@ -1,23 +1,21 @@
-// One planned itinerary as a tappable card: a departure → arrival wall-time
-// header (Europe/Prague, from live tram data when available), legs rendered as
-// [LineBadge → towards <stop> · N stops] with the SPECIFIC next tram (model
-// illustration, name, AC snowflake) under each leg, transfer dots between
-// legs, and a totals footer. Tap = draw on the map.
+// One planned itinerary as an Apple Maps transit result card (IMG_0080/81): a
+// big total-duration headline, a "Tram scheduled in … · ETA" secondary line, a
+// mini leg strip (walk ▸ line badge ▸ …), and a green GO button that hands the
+// itinerary to the map. A "Details" disclosure expands into the StepList
+// (Start / Walk / Board / dotted ride-timeline / Exit / Arrive), and Start
+// journey guidance lives at its foot. Data/handoff semantics unchanged: GO and
+// the card body both call onPress; onStart starts guidance.
 import { SymbolView } from 'expo-symbols';
-import { Fragment } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
-import { AcSnowflake, TramModelImage } from '@/components/tram/TramModelImage';
-import { LineBadge } from '@/components/ui/LineBadge';
-import { Colors, Spacing, Tram } from '@/constants/theme';
-import { formatCountdown, type ItineraryTiming, type LegTiming } from '@/lib/arrivals';
+import { GoButton } from '@/components/ui/GoButton';
+import { LineBadge, isNightLine } from '@/components/ui/LineBadge';
+import { StepList, type Step } from '@/components/ui/StepList';
+import { appleScheme, Apple, Radii, Tram } from '@/constants/theme';
+import { formatCountdown, type ItineraryTiming } from '@/lib/arrivals';
 import { formatPragueClock } from '@/lib/format/pragueTime';
 import type { PlannerItinerary } from '@/lib/types';
-
-/** 'Tatra T3R.P' → 'T3R.P', 'Škoda 15T ForCity Alfa' → '15T ForCity Alfa'. */
-function shortModelName(name: string): string {
-  return name.replace(/^(Tatra|Škoda|ČKD)\s+/u, '');
-}
 
 function fmtDurationMin(s: number): string {
   return `${Math.max(1, Math.round(s / 60))} min`;
@@ -48,20 +46,91 @@ export function ItineraryCard({
   onStart,
 }: ItineraryCardProps) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const palette = Colors[scheme];
-  const separatorColor = scheme === 'dark' ? 'rgba(84,84,88,0.5)' : 'rgba(60,60,67,0.24)';
-  const accent = scheme === 'dark' ? Tram.gold : Tram.pidRed;
+  const c = appleScheme(scheme);
   const { legs, totalStops, transferCount } = itinerary;
+  const [expanded, setExpanded] = useState(false);
 
   const departureMs = timing?.departureMs ?? null;
   const arrivalMs = timing?.arrivalMs ?? null;
   const now = nowMs ?? Date.now();
 
+  // Total-duration headline: live (arrival − departure) when a tram matched,
+  // else the summed scheduled leg durations, else the stop count as a fallback.
+  const durationLabel = useMemo(() => {
+    if (departureMs != null && arrivalMs != null) {
+      return fmtDurationMin((arrivalMs - departureMs) / 1000);
+    }
+    const sched = timing?.legs.reduce((sum, l) => sum + (l.travelS ?? 0), 0) ?? 0;
+    if (sched > 0) return fmtDurationMin(sched);
+    return `${totalStops} ${totalStops === 1 ? 'stop' : 'stops'}`;
+  }, [departureMs, arrivalMs, timing, totalStops]);
+
+  const scheduleLine =
+    departureMs != null && arrivalMs != null
+      ? `Tram scheduled in ${formatCountdown(departureMs - now)} · ${formatPragueClock(arrivalMs)} ETA`
+      : 'Scheduled times — no live tram matched yet';
+
+  // Steps for the expanded "Details" list (IMG_0081).
+  const steps = useMemo<Step[]>(() => {
+    const out: Step[] = [];
+    out.push({
+      key: 'start',
+      icon: { symbol: 'smallcircle.filled.circle', circleTint: Apple.red },
+      title: 'Start',
+      subtitle: legs[0]?.fromStopName,
+    });
+    if (walkS != null && walkS > 0 && legs[0]) {
+      out.push({
+        key: 'walk',
+        icon: { symbol: 'figure.walk' },
+        title: `Walk to ${legs[0].fromStopName}`,
+        subtitle: `About ${Math.max(1, Math.round(walkS / 60))} min`,
+      });
+    }
+    legs.forEach((leg, i) => {
+      const lt = timing?.legs[i];
+      const tint = isNightLine(leg.line) ? Tram.night : Tram.pidRed;
+      const rideMin =
+        lt?.travelS != null
+          ? fmtDurationMin(lt.travelS)
+          : lt?.departureMs != null && lt?.arrivalMs != null
+            ? fmtDurationMin((lt.arrivalMs - lt.departureMs) / 1000)
+            : null;
+      out.push({
+        key: `board-${i}`,
+        icon: { lineBadge: leg.line },
+        title: i > 0 ? `Transfer to the ${leg.line} tram` : `Board the ${leg.line} tram`,
+        subtitle: `Toward ${leg.toStopName}`,
+        note: lt?.departureMs != null ? `Scheduled in ${formatCountdown(lt.departureMs - now)}` : undefined,
+      });
+      out.push({
+        key: `exit-${i}`,
+        icon: { symbol: 'rectangle.portrait.and.arrow.right' },
+        title: `Exit tram at ${leg.toStopName}`,
+        timeline: {
+          fromStop: leg.fromStopName,
+          toStop: leg.toStopName,
+          detail: `Ride ${leg.stopCount} ${leg.stopCount === 1 ? 'stop' : 'stops'}${
+            rideMin != null ? `, ${rideMin}` : ''
+          }`,
+          tint,
+        },
+      });
+    });
+    out.push({
+      key: 'arrive',
+      icon: { symbol: 'flag.fill', circleTint: Apple.blue },
+      title: 'Arrive',
+      subtitle: legs[legs.length - 1]?.toStopName,
+    });
+    return out;
+  }, [legs, timing, walkS, now]);
+
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`Route with ${totalStops} stops and ${transferCount} transfers${
+      accessibilityLabel={`Route, ${durationLabel}${
         departureMs != null && arrivalMs != null
           ? `, departing ${formatPragueClock(departureMs)}, arriving ${formatPragueClock(arrivalMs)}`
           : ''
@@ -69,293 +138,162 @@ export function ItineraryCard({
       style={({ pressed }) => [
         styles.card,
         {
-          backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.62)',
-          opacity: pressed ? 0.65 : 1,
+          backgroundColor: c.fillTertiary,
+          opacity: pressed ? 0.8 : 1,
         },
       ]}
     >
-      {/* Wall-time header — departure → arrival in Prague time. */}
-      {departureMs != null && arrivalMs != null ? (
-        <View style={styles.timesRow}>
-          <Text style={[styles.timeBig, { color: palette.text }]} allowFontScaling={false}>
-            {formatPragueClock(departureMs)}
+      <View style={styles.summaryRow}>
+        <View style={styles.summaryText}>
+          <Text style={[styles.duration, { color: c.text }]} allowFontScaling={false}>
+            {durationLabel}
           </Text>
-          <SymbolView name="arrow.right" size={13} weight="semibold" tintColor={palette.textSecondary} />
-          <Text style={[styles.timeBig, { color: palette.text }]} allowFontScaling={false}>
-            {formatPragueClock(arrivalMs)}
+          <Text style={[styles.schedule, { color: c.secondary }]} numberOfLines={2} allowFontScaling={false}>
+            {scheduleLine}
           </Text>
-          <Text
-            style={[styles.countdown, { color: accent }]}
-            allowFontScaling={false}
-            numberOfLines={1}
-          >
-            {formatCountdown(departureMs - now)}
-          </Text>
-          <Text style={[styles.timeDuration, { color: palette.textSecondary }]} allowFontScaling={false}>
-            {fmtDurationMin((arrivalMs - departureMs) / 1000)}
-          </Text>
-        </View>
-      ) : (
-        <View style={styles.timesRow}>
-          <SymbolView name="clock" size={12} tintColor={palette.textSecondary} />
-          <Text style={[styles.timesFallback, { color: palette.textSecondary }]}>
-            Scheduled times — no live tram matched yet
-          </Text>
-        </View>
-      )}
 
-      {/* Walk-aware leave-by line: departure − walk − 1 min buffer. */}
+          {/* Mini leg strip: walk ▸ badge ▸ badge … */}
+          <View style={styles.legStrip}>
+            {walkS != null && walkS > 0 && (
+              <>
+                <View style={[styles.walkChip, { backgroundColor: c.fillSecondary }]}>
+                  <SymbolView name="figure.walk" size={12} tintColor={c.secondary} />
+                  <Text style={[styles.walkChipText, { color: c.secondary }]} allowFontScaling={false}>
+                    {Math.max(1, Math.round(walkS / 60))} min
+                  </Text>
+                </View>
+                <SymbolView name="chevron.right" size={9} weight="semibold" tintColor={c.secondary} />
+              </>
+            )}
+            {legs.map((leg, i) => (
+              <View key={`${i}-${leg.line}-${leg.fromStopId}`} style={styles.stripSeg}>
+                {i > 0 && (
+                  <SymbolView name="chevron.right" size={9} weight="semibold" tintColor={c.secondary} />
+                )}
+                <LineBadge line={leg.line} size="sm" />
+              </View>
+            ))}
+          </View>
+        </View>
+
+        <GoButton onPress={onPress} size={68} />
+      </View>
+
+      {/* Walk-aware leave-by line (existing behavior). */}
       {walkS != null && leaveByMs != null && departureMs != null && (
         <View style={styles.leaveRow}>
-          <SymbolView name="figure.walk" size={12} tintColor={accent} />
-          <Text style={[styles.leaveText, { color: palette.text }]} allowFontScaling={false}>
+          <SymbolView name="figure.walk" size={12} tintColor={Apple.blue} />
+          <Text style={[styles.leaveText, { color: c.text }]} allowFontScaling={false}>
             {leaveByMs <= now ? 'Leave now' : `Leave by ${formatPragueClock(leaveByMs)}`}
           </Text>
-          <Text style={[styles.leaveWalk, { color: palette.textSecondary }]} allowFontScaling={false}>
+          <Text style={[styles.leaveWalk, { color: c.secondary }]} allowFontScaling={false}>
             {Math.max(1, Math.round(walkS / 60))} min walk to the stop
           </Text>
         </View>
       )}
 
-      {legs.map((leg, i) => {
-        const legTiming: LegTiming | undefined = timing?.legs[i];
-        // Transfer wait = this leg's departure − previous leg's arrival, when
-        // both wall times are live.
-        const prevArrivalMs = timing?.legs[i - 1]?.arrivalMs ?? null;
-        const waitMs =
-          i > 0 && prevArrivalMs != null && legTiming?.departureMs != null
-            ? legTiming.departureMs - prevArrivalMs
-            : null;
-        return (
-          <Fragment key={`${i}-${leg.line}-${leg.fromStopId}`}>
-            {i > 0 && (
-              <View style={styles.transferRow}>
-                <View style={styles.dotsCol}>
-                  <View style={[styles.dot, { backgroundColor: palette.textSecondary }]} />
-                  <View style={[styles.dot, { backgroundColor: palette.textSecondary }]} />
-                </View>
-                <Text numberOfLines={1} style={[styles.transferText, { color: palette.textSecondary }]}>
-                  Transfer at {leg.fromStopName}
-                </Text>
-                {waitMs != null && (
-                  <Text style={[styles.transferWait, { color: palette.textSecondary }]} allowFontScaling={false}>
-                    {waitMs < 60_000 ? '<1 min wait' : `${Math.round(waitMs / 60_000)} min wait`}
-                  </Text>
-                )}
-              </View>
-            )}
-            <View style={styles.legRow}>
-              <LineBadge line={leg.line} size="sm" />
-              <Text numberOfLines={1} style={[styles.legText, { color: palette.text }]}>
-                towards <Text style={styles.legDestination}>{leg.toStopName}</Text>
-              </Text>
-              <Text style={[styles.legStops, { color: palette.textSecondary }]}>
-                {leg.stopCount} {leg.stopCount === 1 ? 'stop' : 'stops'}
-              </Text>
-            </View>
-            <LegTramLine timing={legTiming} scheme={scheme} />
-          </Fragment>
-        );
-      })}
+      <View style={[styles.divider, { backgroundColor: c.separator }]} />
 
-      <View style={[styles.footer, { borderTopColor: separatorColor }]}>
-        <Text style={[styles.footerTotals, { color: palette.textSecondary }]}>
+      <View style={styles.footerRow}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={expanded ? 'Hide details' : 'Show details'}
+          hitSlop={8}
+          onPress={() => setExpanded((x) => !x)}
+          style={({ pressed }) => [styles.detailsToggle, pressed && styles.pressed]}
+        >
+          <Text style={[styles.detailsText, { color: Apple.blue }]}>Details</Text>
+          <SymbolView
+            name={expanded ? 'chevron.up' : 'chevron.down'}
+            size={12}
+            weight="semibold"
+            tintColor={Apple.blue}
+          />
+        </Pressable>
+        <Text style={[styles.totals, { color: c.secondary }]} allowFontScaling={false}>
           {totalStops} {totalStops === 1 ? 'stop' : 'stops'} ·{' '}
-          {transferCount === 0 ? 'Direct' : `${transferCount} ${transferCount === 1 ? 'transfer' : 'transfers'}`}
+          {transferCount === 0
+            ? 'Direct'
+            : `${transferCount} ${transferCount === 1 ? 'transfer' : 'transfers'}`}
         </Text>
-        {onStart && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Start journey guidance on this route"
-            hitSlop={6}
-            onPress={onStart}
-            style={({ pressed }) => [styles.startButton, { opacity: pressed ? 0.7 : 1 }]}
-          >
-            <SymbolView name="play.fill" size={10} tintColor={Tram.cream} />
-            <Text style={styles.startButtonText} allowFontScaling={false}>
-              Start
-            </Text>
-          </Pressable>
-        )}
-        <View style={styles.footerAction}>
-          <Text style={[styles.footerActionText, { color: accent }]}>Show on map</Text>
-          <SymbolView name="chevron.right" size={11} weight="semibold" tintColor={accent} />
+      </View>
+
+      {expanded && (
+        <View style={styles.details}>
+          <StepList steps={steps} />
+          {onStart && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Start journey guidance on this route"
+              onPress={onStart}
+              style={({ pressed }) => [styles.startButton, { opacity: pressed ? 0.8 : 1 }]}
+            >
+              <SymbolView name="location.north.line.fill" size={15} weight="semibold" tintColor="#FFFFFF" />
+              <Text style={styles.startButtonText}>Start Guidance</Text>
+            </Pressable>
+          )}
         </View>
-      </View>
+      )}
     </Pressable>
-  );
-}
-
-/** The specific next live tram serving a leg — or the schedule-only fallback. */
-function LegTramLine({ timing, scheme }: { timing: LegTiming | undefined; scheme: 'light' | 'dark' }) {
-  const palette = Colors[scheme];
-  if (!timing) return null;
-
-  if (timing.tram && timing.departureMs != null) {
-    const { tram } = timing;
-    return (
-      <View style={styles.tramLine}>
-        <View style={styles.dotsColSpacer} />
-        <TramModelImage modelId={tram.model.id} height={22} style={styles.tramImage} />
-        <Text numberOfLines={1} style={[styles.tramText, { color: palette.textSecondary }]}>
-          {shortModelName(tram.model.name)}
-          {tram.regNumber != null && ` #${tram.regNumber}`}
-        </Text>
-        <AcSnowflake airConditioned={tram.airConditioned} size={11} />
-        <Text style={[styles.tramDep, { color: palette.textSecondary }]} allowFontScaling={false}>
-          dep {formatPragueClock(timing.departureMs)}
-        </Text>
-      </View>
-    );
-  }
-
-  // Schedule-only: no live tram found for this leg (yet).
-  return (
-    <View style={styles.tramLine}>
-      <View style={styles.dotsColSpacer} />
-      <SymbolView name="clock" size={11} tintColor={palette.textSecondary} />
-      <Text numberOfLines={1} style={[styles.tramText, { color: palette.textSecondary }]}>
-        {timing.travelS != null
-          ? `Scheduled ride ${fmtDurationMin(timing.travelS)} — no live tram yet`
-          : 'No live tram yet'}
-      </Text>
-    </View>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
     borderCurve: 'continuous',
-    borderRadius: 16,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two + 4,
+    borderRadius: Radii.card,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
-  timesRow: {
+  summaryRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: Spacing.two,
-    marginBottom: Spacing.one,
+    gap: 14,
   },
-  timeBig: {
-    fontSize: 20,
-    fontVariant: ['tabular-nums'],
+  summaryText: {
+    flex: 1,
+    gap: 4,
+  },
+  duration: {
+    fontSize: 28,
     fontWeight: '700',
-    letterSpacing: -0.3,
+    letterSpacing: -0.4,
   },
-  countdown: {
-    fontSize: 13,
-    fontVariant: ['tabular-nums'],
-    fontWeight: '600',
-    marginLeft: 'auto',
-  },
-  timeDuration: {
-    fontSize: 13,
+  schedule: {
+    fontSize: 14,
+    lineHeight: 18,
     fontVariant: ['tabular-nums'],
   },
-  timesFallback: {
-    flex: 1,
-    fontSize: 12,
-  },
-  legRow: {
+  legStrip: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: Spacing.two + 2,
-    minHeight: 32,
+    flexWrap: 'wrap',
+    gap: 5,
+    marginTop: 4,
   },
-  legText: {
-    flex: 1,
-    fontSize: 15,
-  },
-  legDestination: {
-    fontWeight: '600',
-  },
-  legStops: {
-    fontSize: 13,
-    fontVariant: ['tabular-nums'],
-  },
-  tramLine: {
+  stripSeg: {
     alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    minHeight: 22,
-    paddingBottom: 2,
-  },
-  dotsColSpacer: { width: 22 }, // aligns under the sm LineBadge
-  tramImage: { width: 48 },
-  tramText: { flexShrink: 1, fontSize: 12 },
-  tramDep: {
-    fontSize: 12,
-    fontVariant: ['tabular-nums'],
-    fontWeight: '600',
-    marginLeft: 'auto',
-  },
-  transferRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: Spacing.two + 2,
-    paddingVertical: Spacing.one,
-  },
-  dotsCol: {
-    alignItems: 'center',
-    gap: 3,
-    width: 22, // aligns under the sm LineBadge
-  },
-  dot: {
-    borderRadius: 1.5,
-    height: 3,
-    width: 3,
-  },
-  transferText: {
-    flex: 1,
-    fontSize: 12,
-  },
-  transferWait: {
-    fontSize: 12,
-    fontVariant: ['tabular-nums'],
-    fontWeight: '600',
-  },
-  footer: {
-    alignItems: 'center',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    marginTop: Spacing.two + 2,
-    paddingTop: Spacing.two + 2,
-  },
-  footerTotals: {
-    flex: 1,
-    fontSize: 13,
-    fontVariant: ['tabular-nums'],
-  },
-  startButton: {
-    alignItems: 'center',
-    backgroundColor: Tram.pidRed,
-    borderCurve: 'continuous',
-    borderRadius: 11,
     flexDirection: 'row',
     gap: 5,
-    marginRight: Spacing.three,
-    paddingHorizontal: Spacing.two + 2,
-    paddingVertical: 4,
   },
-  startButtonText: {
-    color: Tram.cream,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  footerAction: {
+  walkChip: {
     alignItems: 'center',
+    borderRadius: 999,
     flexDirection: 'row',
     gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
-  footerActionText: {
-    fontSize: 13,
-    fontWeight: '600',
+  walkChipText: {
+    fontSize: 12,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '500',
   },
   leaveRow: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 6,
-    marginBottom: Spacing.one,
+    marginTop: 10,
   },
   leaveText: {
     fontSize: 13,
@@ -367,4 +305,48 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     marginLeft: 'auto',
   },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginTop: 12,
+  },
+  footerRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 10,
+  },
+  detailsToggle: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 4,
+  },
+  detailsText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  totals: {
+    fontSize: 13,
+    fontVariant: ['tabular-nums'],
+  },
+  details: {
+    marginTop: 4,
+    gap: 10,
+  },
+  startButton: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    backgroundColor: Apple.blue,
+    borderCurve: 'continuous',
+    borderRadius: Radii.field,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    minHeight: 48,
+  },
+  startButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  pressed: { opacity: 0.55 },
 });

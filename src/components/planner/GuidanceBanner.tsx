@@ -19,7 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
-import { Colors, Spacing, Tram } from '@/constants/theme';
+import { appleScheme, Colors, Spacing, Tram } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
 import { formatCountdown, formatEtaMinutes } from '@/lib/arrivals';
 import { formatPragueClock } from '@/lib/format/pragueTime';
@@ -48,6 +48,7 @@ function ActiveBanner({
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = Colors[scheme];
+  const c = appleScheme(scheme);
   const accent = scheme === 'dark' ? Tram.gold : Tram.pidRed;
 
   // Live inputs — ~1 Hz runtime states + a 1 s wall clock for countdowns.
@@ -174,20 +175,25 @@ function ActiveBanner({
             router.push('/planner');
           }}
         >
-          <SymbolView
-            name={symbol}
-            size={20}
-            tintColor={highlight ? Tram.veryLate : accent}
-          />
-          <LineBadge line={leg.line} size="sm" />
+          <View
+            style={[
+              styles.iconCircle,
+              { backgroundColor: highlight ? Tram.veryLate : accent },
+            ]}
+          >
+            <SymbolView name={symbol} size={22} weight="semibold" tintColor="#FFFFFF" />
+          </View>
           <View style={styles.textCol}>
-            <Text
-              numberOfLines={1}
-              style={[styles.title, { color: highlight ? Tram.veryLate : palette.text }]}
-              allowFontScaling={false}
-            >
-              {title}
-            </Text>
+            <View style={styles.titleRow}>
+              <LineBadge line={leg.line} size="sm" />
+              <Text
+                numberOfLines={1}
+                style={[styles.title, { color: highlight ? Tram.veryLate : palette.text }]}
+                allowFontScaling={false}
+              >
+                {title}
+              </Text>
+            </View>
             <Text
               numberOfLines={1}
               style={[styles.subtitle, { color: palette.textSecondary }]}
@@ -208,8 +214,9 @@ function ActiveBanner({
             void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             usePlannerStore.getState().stopGuidance();
           }}
+          style={({ pressed }) => [styles.closeButton, { backgroundColor: c.fillTertiary, opacity: pressed ? 0.6 : 1 }]}
         >
-          <SymbolView name="xmark.circle.fill" size={20} tintColor={palette.textSecondary} />
+          <SymbolView name="xmark" size={13} weight="semibold" tintColor={palette.textSecondary} />
         </Pressable>
       </GlassPanel>
     </View>
@@ -228,25 +235,40 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
-    maxWidth: 420,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderRadius: 18,
+    maxWidth: 440,
+    paddingLeft: 10,
+    paddingRight: 10,
+    paddingVertical: 10,
+    borderRadius: 20,
     borderCurve: 'continuous',
   },
   body: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
+    gap: 10,
     flexShrink: 1,
+  },
+  iconCircle: {
+    alignItems: 'center',
+    borderRadius: 19,
+    height: 38,
+    justifyContent: 'center',
+    width: 38,
   },
   textCol: {
     flexShrink: 1,
-    gap: 1,
+    gap: 2,
+  },
+  titleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    flexShrink: 1,
   },
   title: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '600',
+    flexShrink: 1,
   },
   subtitle: {
     fontSize: 12,
@@ -257,5 +279,12 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     fontWeight: '600',
     marginLeft: Spacing.one,
+  },
+  closeButton: {
+    alignItems: 'center',
+    borderRadius: 15,
+    height: 30,
+    justifyContent: 'center',
+    width: 30,
   },
 });
