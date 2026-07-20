@@ -1,8 +1,8 @@
-// Liquid Glass chrome floating over the map: status chip (poll ring + live
-// count + sync detail), top-right control stack (2D/3D · settings), the bottom
-// dock (search + favorites + planner), and the bottom cluster — locate button
-// plus the follow/spotter/ride/planner chips sharing one row above the dock.
-// All surfaces are GlassPanel over the map.
+// Apple-Maps map chrome floating over the basemap: the weather/AQI-style live
+// StatusTile (top-left), the right-edge control column (2D/3D circle + a fused
+// layers/locate capsule with a light-preset / route-lines quick menu), and the
+// bottom chip cluster (follow / spotter / ride / planner) that RIDES above the
+// home sheet — translating with the sheet's heightSV on the UI thread.
 //
 // APPEARANCE: the chrome floats over the BASEMAP, not over app UI — so its
 // light/dark styling follows the map's resolved light preset (day/dawn →
@@ -12,21 +12,31 @@
 
 import * as Haptics from 'expo-haptics';
 import { router, type Href } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
+import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { createContext, useContext, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
 
 import { PollRing, usePollModel } from '@/components/map/PollIndicator';
+import {
+  CircleControl,
+  ControlCapsule,
+  ControlStack as KitControlStack,
+  CONTROL_GAP,
+  CONTROL_SIZE,
+} from '@/components/maps-kit/CircleControl';
+import { StatusTile } from '@/components/maps-kit/StatusTile';
 import { DelayPill } from '@/components/ui/DelayPill';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
-import { Colors, Fonts, Spacing, Tram } from '@/constants/theme';
+import { Apple, Colors, Fonts, Radii, Spacing, Tram } from '@/constants/theme';
 import { useAllTramStates, useTramState } from '@/hooks/tramData';
 import { formatEtaMinutes } from '@/lib/arrivals';
 import { usePlannerStore } from '@/stores/planner';
 import { useRidePreviewStore } from '@/stores/ridePreview';
 import { useSelectionStore } from '@/stores/selection';
+import { useSettingsStore, type LightPreset } from '@/stores/settings';
 import { useSpotterStore } from '@/stores/spotter';
 
 // ── Chrome appearance (follows the MAP light preset, not the system scheme) ──
@@ -52,30 +62,25 @@ function tapLight() {
 
 // ── Layout constants (shared with the map screen's compass ornament) ─────────
 
-const CONTROL_BUTTON_SIZE = 46;
-const CONTROL_GAP = Spacing.two + 2;
-/** Right inset of the control column — one shared vertical axis for all round buttons. */
+/** Right inset of the control column — one shared vertical axis. */
 const CONTROL_RIGHT = Spacing.two + 4;
-const TOP_STACK_BUTTONS = 2; // 2D/3D · settings
+/**
+ * Height of the right control stack: a 2D/3D circle (46) + gap + the fused
+ * layers/locate capsule (two 46 buttons ≈ 92).
+ */
+const STACK_H = CONTROL_SIZE + CONTROL_GAP + 2 * CONTROL_SIZE;
 /**
  * Mapbox compass ornament slot: directly below the top-right control stack,
  * on the same right axis. NOTE: rnmapbox ornament offsets are already
  * safe-area-relative on iOS — do NOT add insets.top here (adding it double
  * counted the inset and stranded the compass mid-screen).
  */
-export const COMPASS_TOP =
-  Spacing.two + TOP_STACK_BUTTONS * CONTROL_BUTTON_SIZE + (TOP_STACK_BUTTONS - 1) * CONTROL_GAP + 12;
+export const COMPASS_TOP = Spacing.two + STACK_H + 12;
 /** The native compass is ~44 pt wide; +1 centers it on the 46 pt button axis. */
 export const COMPASS_RIGHT = CONTROL_RIGHT + 1;
 
-/** Bottom dock footprint (38 pt search field + vertical padding). */
-const DOCK_H = 54;
-/** Bottom-cluster row slot: floating just above the dock. */
-const LOCATE_BOTTOM = Spacing.three + DOCK_H + 12;
 /** Vertical footprint of one stacked bottom chip (chip height + gap). */
-const CHIP_STACK_H = CONTROL_BUTTON_SIZE + 10;
-/** Gap between a chip's right edge and the locate button in the base row. */
-const CHIP_ROW_GAP = 10;
+const CHIP_STACK_H = CONTROL_SIZE + 10;
 /** Most chips that can stack at once: planner + ride + spotter + follow. */
 const MAX_STACKED_CHIPS = 4;
 /**
@@ -84,239 +89,239 @@ const MAX_STACKED_CHIPS = 4;
  * single consistent set instead of four differently-sized controls.
  */
 const CHIP_ELEMENT_H = 30;
+/** Gap between the sheet's top edge and the base chip row. */
+const CHIP_GAP = 10;
 
-// ── Status chip (top-left): poll ring + live tram count + sync detail ────────
+// ── Status tile (top-left): weather/AQI-style live-data glass square ─────────
 
 /**
- * The poll indicator and the status chip are ONE element: the 5-segment ring
+ * The poll indicator and the status tile are ONE element: the 5-segment ring
  * counts down the 5 s positions poll (fills once per second at the shared
  * 1 Hz UI cadence — no timers or animations of its own, see PollIndicator),
- * recolors on stale/error, and tapping the chip toggles an inline "updated
+ * recolors on stale/error, and tapping the tile toggles an inline "updated
  * N s ago" / offline detail so the information lives in a single surface.
+ * Restyled as Apple Maps' rounded weather tile: 🚊 N over a LIVE ● dot row.
  */
-export function StatusChip() {
+export function MapStatusTile() {
   const insets = useSafeAreaInsets();
   const states = useAllTramStates(); // ~1 Hz
-  const colors = useTextColors();
+  const { scheme, text, secondary } = useTextColors();
   const poll = usePollModel(); // ~1 Hz, same subscription
-  const [expanded, setExpanded] = useState(false);
 
-  const trouble = poll.state === 'error' || poll.state === 'stale';
-  const dimColor = colors.scheme === 'dark' ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.15)';
+  const dimColor = scheme === 'dark' ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.15)';
+  const status = statusLabel(poll.state);
+
+  const topRow = (
+    <>
+      <PollRing model={poll} color={text} dimColor={dimColor} size={20} />
+      <SymbolView
+        name="tram.fill"
+        size={15}
+        tintColor={scheme === 'dark' ? Tram.liveryRed : Tram.pidRed}
+      />
+      <Text style={[styles.tileCount, { color: text }]} allowFontScaling={false}>
+        {states.length}
+      </Text>
+    </>
+  );
+  const bottomRow = (
+    <>
+      <View style={[styles.tileDot, { backgroundColor: status.color }]} />
+      <Text style={[styles.tileStatus, { color: secondary }]} allowFontScaling={false}>
+        {status.label}
+      </Text>
+    </>
+  );
 
   return (
-    <View style={[styles.statusChipWrap, { top: insets.top + Spacing.two }]}>
-      <GlassPanel
-        variant="regular"
-        interactive
-        appearance={colors.scheme}
-        style={styles.statusChip}
-      >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Live data: ${states.length} trams, ${poll.detail}`}
-          accessibilityHint="Shows when tram positions were last updated"
-          hitSlop={6}
-          style={styles.statusBody}
-          onPress={() => {
-            tapLight();
-            setExpanded((e) => !e);
-          }}
-        >
-          <PollRing model={poll} color={colors.text} dimColor={dimColor} />
-          <SymbolView
-            name="tram.fill"
-            size={14}
-            tintColor={colors.scheme === 'dark' ? Tram.liveryRed : Tram.pidRed}
-          />
-          <Text style={[styles.statusText, { color: colors.text }]} allowFontScaling={false}>
-            {states.length}
+    <View style={[styles.statusTileWrap, { top: insets.top + Spacing.two }]}>
+      <StatusTile
+        appearance={scheme}
+        label={`Live data: ${states.length} trams, ${poll.detail}`}
+        topRow={topRow}
+        bottomRow={bottomRow}
+        expandedDetail={
+          <Text style={[styles.tileDetail, { color: secondary }]} allowFontScaling={false}>
+            {poll.detail}
           </Text>
-          {trouble && (
-            <SymbolView
-              name="wifi.exclamationmark"
-              size={14}
-              tintColor={poll.state === 'error' ? Tram.veryLate : Tram.late}
-            />
-          )}
-          {(expanded || trouble) && (
-            <Text
-              style={[
-                styles.statusDetail,
-                {
-                  color: trouble
-                    ? poll.state === 'error'
-                      ? Tram.veryLate
-                      : Tram.late
-                    : colors.secondary,
-                },
-              ]}
-              allowFontScaling={false}
-            >
-              {poll.detail}
-            </Text>
-          )}
-        </Pressable>
-      </GlassPanel>
+        }
+      />
     </View>
   );
 }
 
-// ── Round glass control button (shared by the stacks + locate) ───────────────
-
-function ControlButton({
-  symbol,
-  label,
-  onPress,
-}: {
-  symbol: Parameters<typeof SymbolView>[0]['name'];
+function statusLabel(state: ReturnType<typeof usePollModel>['state']): {
   label: string;
-  onPress: () => void;
-}) {
-  const colors = useTextColors();
-  return (
-    <GlassPanel
-      variant="regular"
-      interactive
-      appearance={colors.scheme}
-      style={styles.controlButton}
-    >
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        hitSlop={6}
-        style={styles.controlPressable}
-        onPress={() => {
-          tapLight();
-          onPress();
-        }}
-      >
-        <SymbolView name={symbol} size={19} tintColor={colors.text} />
-      </Pressable>
-    </GlassPanel>
-  );
+  color: string;
+} {
+  switch (state) {
+    case 'error':
+      return { label: 'OFFLINE', color: Tram.veryLate };
+    case 'stale':
+      return { label: 'STALE', color: Tram.late };
+    case 'off':
+      return { label: 'PAUSED', color: '#8E8E93' };
+    default:
+      return { label: 'LIVE', color: Tram.onTime };
+  }
 }
 
-// ── Control stack (top-right): 2D/3D · settings ──────────────────────────────
+// ── Right control stack: 2D/3D circle + fused layers/locate capsule ──────────
 
 export interface ControlStackProps {
   is3D: boolean;
   onTogglePitch: () => void;
+  onLocate: () => void;
 }
 
-export function ControlStack({ is3D, onTogglePitch }: ControlStackProps) {
+export function MapControlStack({ is3D, onTogglePitch, onLocate }: ControlStackProps) {
   const insets = useSafeAreaInsets();
+  const { scheme } = useTextColors();
+  const [layersOpen, setLayersOpen] = useState(false);
+
   return (
-    <View style={[styles.controlStack, { top: insets.top + Spacing.two }]}>
-      <ControlButton
-        symbol={is3D ? 'view.2d' : 'view.3d'}
-        label={is3D ? 'Switch to 2D map' : 'Switch to 3D map'}
-        onPress={onTogglePitch}
-      />
-      <ControlButton
-        symbol="gearshape.fill"
-        label="Settings"
-        onPress={() => router.push('/settings' as Href)}
-      />
-    </View>
+    <>
+      <KitControlStack topInset={insets.top + Spacing.two} right={CONTROL_RIGHT}>
+        <CircleControl
+          symbol={is3D ? 'view.2d' : 'view.3d'}
+          label={is3D ? 'Switch to 2D map' : 'Switch to 3D map'}
+          appearance={scheme}
+          onPress={() => {
+            tapLight();
+            onTogglePitch();
+          }}
+        />
+        <ControlCapsule appearance={scheme}>
+          <CircleControl
+            symbol="map.fill"
+            label="Map settings"
+            appearance={scheme}
+            active={layersOpen}
+            onPress={() => {
+              tapLight();
+              setLayersOpen((o) => !o);
+            }}
+          />
+          <CircleControl
+            symbol="location.fill"
+            label="Show my location"
+            appearance={scheme}
+            onPress={() => {
+              tapLight();
+              onLocate();
+            }}
+          />
+        </ControlCapsule>
+      </KitControlStack>
+      {layersOpen && <LayersMenu scheme={scheme} onClose={() => setLayersOpen(false)} />}
+    </>
   );
 }
 
-// ── Bottom cluster: [ chip … ][locate] row + chips stacking upward ───────────
-//
-// One centered wrap using the SAME horizontal language as the dock below it
-// (left/right Spacing.three, width capped at 560 pt on iPad) so the row reads
-// as part of the dock family: the locate button is the right end of the row
-// (its right edge flush with the dock/search field), and the base chip
-// stretches from the dock's left edge all the way to the button. Additional
-// chips stack upward at the same full width. `box-none` keeps the transparent
-// stacking area gesture-transparent for the map.
+// ── Layers quick-menu: light preset + route-lines toggle (settings-store) ────
 
-export function BottomCluster({ onLocate }: { onLocate: () => void }) {
+const LIGHT_PRESETS: { key: LightPreset; label: string; symbol: SFSymbol }[] = [
+  { key: 'auto', label: 'Automatic', symbol: 'circle.lefthalf.filled' },
+  { key: 'day', label: 'Day', symbol: 'sun.max.fill' },
+  { key: 'dusk', label: 'Dusk', symbol: 'sunset.fill' },
+  { key: 'night', label: 'Night', symbol: 'moon.stars.fill' },
+];
+
+function LayersMenu({ scheme, onClose }: { scheme: ChromeScheme; onClose: () => void }) {
   const insets = useSafeAreaInsets();
+  const palette = Colors[scheme];
+  const preset = useSettingsStore((s) => s.lightPreset);
+  const setPreset = useSettingsStore((s) => s.setLightPreset);
+  const showLines = useSettingsStore((s) => s.showRouteLines);
+  const setShowLines = useSettingsStore((s) => s.setShowRouteLines);
+  const sep = Apple.separator[scheme];
+
   return (
-    <View
-      pointerEvents="box-none"
-      style={[styles.clusterWrap, { bottom: insets.bottom + LOCATE_BOTTOM }]}
-    >
-      <View pointerEvents="box-none" style={styles.clusterRow}>
-        <FollowChip />
-        <SpotterChip />
-        <RideChip />
-        <PlannerChip />
-        <View style={styles.locateSlot}>
-          <ControlButton symbol="location" label="Show my location" onPress={onLocate} />
-        </View>
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Close map settings"
+        style={StyleSheet.absoluteFill}
+        onPress={onClose}
+      />
+      <View style={[styles.layersAnchor, { top: insets.top + Spacing.two + STACK_H + 10 }]}>
+        <GlassPanel variant="regular" appearance={scheme} style={styles.layersPanel}>
+          <Text style={[styles.layersLabel, { color: palette.textSecondary }]}>MAP LIGHTING</Text>
+          {LIGHT_PRESETS.map((p) => (
+            <Pressable
+              key={p.key}
+              accessibilityRole="button"
+              accessibilityLabel={p.label}
+              accessibilityState={{ selected: preset === p.key }}
+              style={({ pressed }) => [styles.layersRow, pressed && styles.layersRowPressed]}
+              onPress={() => {
+                tapLight();
+                setPreset(p.key);
+              }}
+            >
+              <SymbolView name={p.symbol} size={18} tintColor={palette.text} />
+              <Text style={[styles.layersRowText, { color: palette.text }]} allowFontScaling={false}>
+                {p.label}
+              </Text>
+              {preset === p.key && (
+                <SymbolView name="checkmark" size={15} weight="semibold" tintColor={Apple.blue} />
+              )}
+            </Pressable>
+          ))}
+          <View style={[styles.layersSep, { backgroundColor: sep }]} />
+          <View style={styles.layersRow}>
+            <SymbolView name="point.topleft.down.to.point.bottomright.curvepath" size={18} tintColor={palette.text} />
+            <Text style={[styles.layersRowText, { color: palette.text }]} allowFontScaling={false}>
+              Route lines
+            </Text>
+            <Switch
+              value={showLines}
+              onValueChange={(v) => {
+                tapLight();
+                setShowLines(v);
+              }}
+            />
+          </View>
+        </GlassPanel>
       </View>
     </View>
   );
 }
 
-// ── Bottom dock: search pill + favorites + planner ───────────────────────────
+// ── Bottom chips — follow / spotter / ride / planner riding above the sheet ──
+//
+// All are full-width glass chips inside one container anchored `CHIP_GAP` above
+// the home sheet's top edge. The container translates on the UI thread from the
+// sheet's heightSV: effective bottom = heightSV + gap, so the chips always sit
+// just above whatever detent the sheet has settled/dragged to (zero per-frame
+// React — docs/performance.md invariant #1). The planner chip owns the base
+// row, ride stacks above it, spotter above that, and follow floats on top.
 
-export function BottomDock() {
-  const insets = useSafeAreaInsets();
-  const colors = useTextColors();
-  const fieldBg =
-    colors.scheme === 'dark' ? 'rgba(120,120,128,0.22)' : 'rgba(120,120,128,0.16)';
-
-  return (
-    <View style={[styles.dockWrap, { bottom: insets.bottom + Spacing.three }]}>
-      <GlassPanel variant="regular" appearance={colors.scheme} style={styles.dock}>
-        <Pressable
-          accessibilityRole="search"
-          style={[styles.searchField, { backgroundColor: fieldBg }]}
-          onPress={() => {
-            tapLight();
-            router.push('/search');
-          }}
-        >
-          <SymbolView name="magnifyingglass" size={15} tintColor={colors.secondary} />
-          <Text
-            style={[styles.searchPlaceholder, { color: colors.secondary }]}
-            numberOfLines={1}
-            allowFontScaling={false}
-          >
-            Lines, trams, stops
-          </Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Favorites"
-          hitSlop={6}
-          style={styles.dockButton}
-          onPress={() => {
-            tapLight();
-            router.push('/favorites');
-          }}
-        >
-          <SymbolView name="star.fill" size={19} tintColor={Tram.gold} />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Trip planner"
-          hitSlop={6}
-          style={styles.dockButton}
-          onPress={() => {
-            tapLight();
-            router.push('/planner');
-          }}
-        >
-          <SymbolView name="arrow.triangle.swap" size={19} tintColor={colors.text} />
-        </Pressable>
-      </GlassPanel>
-    </View>
-  );
+export interface MapChipsProps {
+  /** Sheet height in px, UI-thread updated every frame — the reflow driver. */
+  heightSV: SharedValue<number>;
+  /** Peek-detent height in px — the container's resting anchor. */
+  peekPx: number;
 }
 
-// ── Bottom chips: follow + spotter + planner-route clear + ride preview ──────
-//
-// All are full-width glass chips inside the BottomCluster row (same height as
-// the locate button), stretching from the dock's left edge to the locate
-// button: `[ chip ……………… ][locate]`. The planner chip owns the base row, the
-// ride-preview chip stacks above it, the spotter chip above that, and the
-// follow chip floats on top of whichever are visible (each +CHIP_STACK_H,
-// relative to the cluster row's bottom).
+export function MapChips({ heightSV, peekPx }: MapChipsProps) {
+  const reflow = useAnimatedStyle(() => ({
+    transform: [{ translateY: -Math.max(0, heightSV.value - peekPx) }],
+  }));
+  return (
+    <Animated.View
+      pointerEvents="box-none"
+      style={[styles.chipsWrap, { bottom: peekPx + CHIP_GAP }, reflow]}
+    >
+      <View pointerEvents="box-none" style={styles.chipsRow}>
+        <FollowChip />
+        <SpotterChip />
+        <RideChip />
+        <PlannerChip />
+      </View>
+    </Animated.View>
+  );
+}
 
 /**
  * Shared ✕ for all chips: a 30 pt tinted circle — the SAME element height as
@@ -339,10 +344,7 @@ function ChipClose({ label, onPress }: { label: string; onPress: () => void }) {
     >
       {({ pressed }) => (
         <View
-          style={[
-            styles.chipCloseCircle,
-            { backgroundColor: bg, opacity: pressed ? 0.65 : 1 },
-          ]}
+          style={[styles.chipCloseCircle, { backgroundColor: bg, opacity: pressed ? 0.65 : 1 }]}
         >
           <SymbolView name="xmark" size={13} weight="semibold" tintColor={colors.secondary} />
         </View>
@@ -373,18 +375,12 @@ function FollowChip() {
   const accent = colors.scheme === 'dark' ? Tram.liveryRed : Tram.pidRed;
   return (
     <View style={[styles.chipSlot, { bottom }]}>
-      <GlassPanel
-        variant="regular"
-        interactive
-        appearance={colors.scheme}
-        style={styles.chip}
-      >
+      <GlassPanel variant="regular" interactive appearance={colors.scheme} style={styles.chip}>
         {/* The tram identity (line + reg + delay) stays visible in BOTH states;
             tapping it reopens the detail sheet. Only the trailing control
             changes: "Following ⌃" hint while locked, a compact accent "Follow"
             pill to re-center while paused — never a full-width button over the
-            info. Every element shares the 30 pt pill height (badge md, delay
-            pill md, follow button, ✕ circle) so the row reads as one set. */}
+            info. Every element shares the 30 pt pill height. */}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Open tram ${reg ?? followKey} details`}
@@ -405,18 +401,10 @@ function FollowChip() {
           <View style={styles.chipSpacer} />
           {!paused && (
             <>
-              <Text
-                style={[styles.followHint, { color: colors.secondary }]}
-                allowFontScaling={false}
-              >
+              <Text style={[styles.followHint, { color: colors.secondary }]} allowFontScaling={false}>
                 Following
               </Text>
-              <SymbolView
-                name="chevron.up"
-                size={12}
-                weight="semibold"
-                tintColor={colors.secondary}
-              />
+              <SymbolView name="chevron.up" size={12} weight="semibold" tintColor={colors.secondary} />
             </>
           )}
         </Pressable>
@@ -453,8 +441,6 @@ function FollowChip() {
  * camera through the trams arriving at the spotted stop). Body reopens the
  * stop sheet (planner-chip pattern); the ✕ ends spotting AND the follow it
  * drives. While nobody is inbound the chip stays up with a waiting hint.
- * Note the follow-banner ✕ also ends spotting — the controller reconciles
- * any follow change it didn't make (no orphaned spotter sessions).
  */
 function SpotterChip() {
   const station = useSpotterStore((s) => s.station);
@@ -486,7 +472,7 @@ function SpotterChip() {
             tintColor={colors.scheme === 'dark' ? Tram.liveryRed : Tram.pidRed}
           />
           <Text
-            style={[styles.plannerRoute, { color: colors.text }]}
+            style={[styles.chipLabel, { color: colors.text }]}
             numberOfLines={1}
             allowFontScaling={false}
           >
@@ -517,8 +503,8 @@ function SpotterChip() {
 
 /**
  * Shown while a recorded ride is previewed on the map (RideOverlay). Tapping
- * the chip body reopens the rides sheet (planner-chip pattern); the ✕ clears
- * the preview. Stacks one slot above the planner chip when both are active.
+ * the chip body reopens the rides sheet; the ✕ clears the preview. Stacks one
+ * slot above the planner chip when both are active.
  */
 function RideChip() {
   const preview = useRidePreviewStore((s) => s.preview);
@@ -531,7 +517,10 @@ function RideChip() {
     ride.line ? `Line ${ride.line}` : null,
     ride.tramKey ? `#${ride.tramKey}` : null,
     ride.startedMs != null
-      ? new Date(ride.startedMs).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+      ? new Date(ride.startedMs).toLocaleTimeString(undefined, {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
       : null,
   ]
     .filter(Boolean)
@@ -552,7 +541,7 @@ function RideChip() {
         >
           <SymbolView name="record.circle" size={15} tintColor={Tram.veryLate} />
           <Text
-            style={[styles.plannerRoute, { color: colors.text }]}
+            style={[styles.chipLabel, { color: colors.text }]}
             numberOfLines={1}
             allowFontScaling={false}
           >
@@ -572,8 +561,7 @@ function RideChip() {
 /**
  * Shown whenever a planned route is drawn on the map. Tapping the chip body
  * REOPENS the planner sheet (with the active itinerary — users kept losing the
- * sheet with no way back); the ✕ clears the route. The chevron.up hints that
- * the chip itself is tappable.
+ * sheet with no way back); the ✕ clears the route.
  */
 function PlannerChip() {
   const itinerary = usePlannerStore((s) => s.itinerary);
@@ -599,7 +587,7 @@ function PlannerChip() {
         >
           <SymbolView name="arrow.triangle.swap" size={15} tintColor={Tram.gold} />
           <Text
-            style={[styles.plannerRoute, { color: colors.text }]}
+            style={[styles.chipLabel, { color: colors.text }]}
             numberOfLines={1}
             allowFontScaling={false}
           >
@@ -617,94 +605,68 @@ function PlannerChip() {
 }
 
 const styles = StyleSheet.create({
-  statusChipWrap: { position: 'absolute', left: Spacing.three },
-  statusChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 999,
-  },
-  statusBody: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  statusText: {
-    fontSize: 14,
-    fontWeight: '600',
+  // ── Status tile ──
+  statusTileWrap: { position: 'absolute', left: Spacing.three },
+  tileCount: {
+    fontSize: 15,
+    fontWeight: '700',
     fontVariant: ['tabular-nums'],
     fontFamily: Fonts?.rounded,
   },
-  statusDetail: { fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  tileDot: { width: 7, height: 7, borderRadius: 3.5 },
+  tileStatus: { fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
+  tileDetail: { fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'] },
 
-  controlStack: { position: 'absolute', right: CONTROL_RIGHT, gap: CONTROL_GAP },
-  controlButton: { borderRadius: CONTROL_BUTTON_SIZE / 2 },
-  controlPressable: {
-    width: CONTROL_BUTTON_SIZE,
-    height: CONTROL_BUTTON_SIZE,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  // Wide layouts (iPad): the dock caps at 560 pt and centers instead of
-  // stretching edge-to-edge; on phones maxWidth never binds.
-  dockWrap: {
-    position: 'absolute',
-    left: Spacing.three,
-    right: Spacing.three,
-    alignItems: 'center',
-  },
-  dock: {
-    width: '100%',
-    maxWidth: 560,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    paddingHorizontal: 10,
+  // ── Layers quick-menu ──
+  layersAnchor: { position: 'absolute', right: CONTROL_RIGHT },
+  layersPanel: {
+    minWidth: 232,
     paddingVertical: 8,
-    borderRadius: 999,
+    borderRadius: Radii.group,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
   },
-  searchField: {
-    flex: 1,
+  layersLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 6,
+  },
+  layersRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    height: 38,
+    gap: 12,
+    minHeight: 42,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
   },
-  searchPlaceholder: { fontSize: 15, flexShrink: 1 },
-  dockButton: {
-    width: 38,
-    height: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  layersRowPressed: { opacity: 0.55 },
+  layersRowText: { flex: 1, fontSize: 16, fontWeight: '400' },
+  layersSep: { height: StyleSheet.hairlineWidth, marginVertical: 4, marginLeft: 16 },
 
-  // Bottom cluster: same horizontal language as the dock (left/right
-  // Spacing.three, 560 pt cap centered on iPad) so `[ chip … ][locate]` reads
-  // as one family with the dock below. The row is tall enough to CONTAIN the
-  // full upward chip stack — iOS hit-testing is bounds-limited, so chips
-  // rendered outside the row would be visible but untappable.
-  clusterWrap: {
+  // ── Bottom chips ──
+  // Same horizontal language as the sheet (left/right Spacing.three, 560 pt cap
+  // centered on iPad). The row is tall enough to CONTAIN the full upward chip
+  // stack — iOS hit-testing is bounds-limited, so chips rendered outside the
+  // row would be visible but untappable.
+  chipsWrap: {
     position: 'absolute',
     left: Spacing.three,
     right: Spacing.three,
     alignItems: 'center',
   },
-  clusterRow: {
+  chipsRow: {
     width: '100%',
     maxWidth: 560,
-    height: CONTROL_BUTTON_SIZE + (MAX_STACKED_CHIPS - 1) * CHIP_STACK_H,
+    height: CONTROL_SIZE + (MAX_STACKED_CHIPS - 1) * CHIP_STACK_H,
   },
-  locateSlot: { position: 'absolute', right: 0, bottom: 0 },
-  // Chips stretch the full row width, fenced short of the locate button; the
-  // stack offset (`bottom`) is set inline per chip.
-  chipSlot: {
-    position: 'absolute',
-    left: 0,
-    right: CONTROL_BUTTON_SIZE + CHIP_ROW_GAP,
-  },
+  chipSlot: { position: 'absolute', left: 0, right: 0 },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    // Match the locate button's height (pill row).
-    height: CONTROL_BUTTON_SIZE,
+    height: CONTROL_SIZE,
     gap: Spacing.two,
     paddingLeft: 12,
     paddingRight: 6,
@@ -712,7 +674,6 @@ const styles = StyleSheet.create({
   },
   chipBody: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   chipSpacer: { flex: 1 },
-  // ✕: 34 pt touch box wrapping a 30 pt visible circle (CHIP_ELEMENT_H).
   chipClose: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
   chipCloseCircle: {
     width: CHIP_ELEMENT_H,
@@ -722,15 +683,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   followReg: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '600',
     fontVariant: ['tabular-nums'],
     fontFamily: Fonts?.rounded,
   },
-  followHint: { fontSize: 14, fontWeight: '500' },
-  // Paused follow: a COMPACT accent pill sitting where "Following" was — the
-  // tram identity to its left stays visible; never full-width. Same 30 pt
-  // element height as everything else in the row.
+  followHint: { fontSize: 15, fontWeight: '600' },
   followResume: {
     height: CHIP_ELEMENT_H,
     paddingHorizontal: 12,
@@ -741,11 +699,11 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   followResumeLabel: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '600',
     color: '#FFFFFF',
     fontFamily: Fonts?.rounded,
   },
-  plannerRoute: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
+  chipLabel: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
   spotterDetail: { fontSize: 12, fontWeight: '500', fontVariant: ['tabular-nums'] },
 });

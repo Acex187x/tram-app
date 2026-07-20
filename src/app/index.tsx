@@ -14,18 +14,20 @@ import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
 import * as SplashScreen from 'expo-splash-screen';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { useSharedValue } from 'react-native-reanimated';
 
 import { resolveLightPreset, STANDARD_CONFIG } from '@/components/map/mapStyle';
 import {
-  BottomCluster,
-  BottomDock,
   COMPASS_RIGHT,
   COMPASS_TOP,
-  ControlStack,
+  MapChips,
+  MapControlStack,
   MapChromeSchemeContext,
-  StatusChip,
+  MapStatusTile,
 } from '@/components/map/MapChrome';
+import { AppleSheet } from '@/components/maps-kit/AppleSheet';
+import { HomeSheetContent, HomeSheetHeader } from '@/components/home/HomeSheetContent';
 import { PlannerOverlay } from '@/components/map/PlannerOverlay';
 import { RideOverlay } from '@/components/map/RideOverlay';
 import { SpotterController } from '@/components/map/SpotterController';
@@ -49,6 +51,8 @@ const INITIAL_VIEWPORT: Viewport = {
 };
 /** Re-evaluate the 'auto' light preset this often. */
 const LIGHT_REFRESH_MS = 5 * 60 * 1000;
+/** Home sheet detents as window-height fractions: peek · medium · large. */
+const HOME_DETENTS = [0.135, 0.46, 0.92];
 /** Never leave the user stuck on the splash if the map fails to load. */
 const SPLASH_FAILSAFE_MS = 8_000;
 
@@ -58,6 +62,11 @@ export default function MapScreen() {
   const cameraRef = useRef<Camera>(null);
   const viewportRef = useRef<Viewport>({ ...INITIAL_VIEWPORT });
   const splashHiddenRef = useRef(false);
+  // Home-sheet height (px), UI-thread updated every frame by AppleSheet; the map
+  // chips read it to ride above the sheet with zero per-frame React.
+  const windowH = useWindowDimensions().height;
+  const sheetHeightSV = useSharedValue(0);
+  const peekPx = Math.round(HOME_DETENTS[0] * windowH);
   const [is3D, setIs3D] = useState(true);
   const [styleLoaded, setStyleLoaded] = useState(false);
   const [locationGranted, setLocationGranted] = useState(false);
@@ -263,11 +272,28 @@ export default function MapScreen() {
       </MapView>
 
       <MapChromeSchemeContext.Provider value={chromeScheme}>
-        <StatusChip />
-        <ControlStack is3D={is3D} onTogglePitch={onTogglePitch} />
-        <BottomCluster onLocate={() => void onLocate()} />
-        <BottomDock />
+        <MapStatusTile />
+        <MapControlStack
+          is3D={is3D}
+          onTogglePitch={onTogglePitch}
+          onLocate={() => void onLocate()}
+        />
+        <MapChips heightSV={sheetHeightSV} peekPx={peekPx} />
       </MapChromeSchemeContext.Provider>
+
+      {/* The persistent Apple-Maps home surface — pinned search + settings
+          avatar (header), Places / Recents / Your-Fleet body. Mounted over the
+          map; its heightSV drives the chip reflow above on the UI thread. Only
+          the sheet-body follows the system scheme (chrome follows the map). */}
+      <AppleSheet
+        detents={HOME_DETENTS}
+        initialIndex={0}
+        heightSV={sheetHeightSV}
+        scrimAtLargest
+        pinnedHeader={<HomeSheetHeader />}
+      >
+        <HomeSheetContent />
+      </AppleSheet>
 
       {/* Invisible: while stop-spotting is active, drives the follow camera
           through the trams arriving at the spotted stop (1 Hz; renders null
