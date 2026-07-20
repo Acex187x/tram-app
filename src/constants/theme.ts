@@ -5,7 +5,7 @@
 
 import '@/global.css';
 
-import { Platform } from 'react-native';
+import { Platform, type TextStyle } from 'react-native';
 
 export const Colors = {
   light: {
@@ -86,3 +86,63 @@ export const Spacing = {
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;
+
+// ─── Apple-Maps design tokens (additive) ─────────────────────────────────────
+// The chrome + sheet re-skin to Apple Maps conventions. These sit ALONGSIDE the
+// existing Colors/Tram palettes — the PID Tram colors still own badges, livery,
+// and every map layer. These tokens own the iOS system accents, translucent
+// fills, hairline separators, type ramp, and corner radii of the new UI kit.
+
+/** iOS system accent + fill colors used by the Apple-Maps chrome/sheets. */
+export const Apple = {
+  /** System blue — primary actions, links, prominent pills, checkmarks. */
+  blue: '#0A84FF',
+  /** System green — live/fresh tints, positive stats. */
+  green: '#30D158',
+  /** The big Directions GO button green. */
+  goGreen: '#30D158',
+  /** System red — destructive, recording. */
+  red: '#FF453A',
+  /** Secondary translucent fill (search fields, non-prominent pills). */
+  fillSecondary: 'rgba(120,120,128,0.16)',
+  /** Tertiary translucent fill (control circles, segmented tracks) per scheme. */
+  fillTertiary: {
+    dark: 'rgba(118,118,128,0.24)',
+    light: 'rgba(118,118,128,0.12)',
+  },
+  /** Hairline separator color per scheme. */
+  separator: {
+    dark: 'rgba(255,255,255,0.12)',
+    light: 'rgba(0,0,0,0.10)',
+  },
+} as const;
+
+/** iOS text ramp (SF). Spread into a Text style: `style={[Type.largeTitle, …]}`. */
+export const Type = {
+  largeTitle: { fontSize: 28, fontWeight: '700' },
+  title3: { fontSize: 20, fontWeight: '600' },
+  body: { fontSize: 17, fontWeight: '400' },
+  subhead: { fontSize: 15, fontWeight: '400' },
+  footnote: { fontSize: 13, fontWeight: '400' },
+  caption: { fontSize: 11, fontWeight: '500' },
+} satisfies Record<string, TextStyle>;
+
+/** Corner radii used across the Apple-Maps UI kit. */
+export const Radii = {
+  field: 12,
+  card: 16,
+  group: 22,
+  sheet: 24,
+  circle: 999,
+} as const;
+
+/** Resolve an Apple scheme's text/secondary/separator/fill in one call. */
+export function appleScheme(scheme: 'light' | 'dark') {
+  return {
+    text: Colors[scheme].text,
+    secondary: Colors[scheme].textSecondary,
+    separator: Apple.separator[scheme],
+    fillTertiary: Apple.fillTertiary[scheme],
+    fillSecondary: Apple.fillSecondary,
+  };
+}
