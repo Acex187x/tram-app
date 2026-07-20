@@ -16,7 +16,12 @@ import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { createContext, useContext, useState } from 'react';
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
+import Animated, {
+  Extrapolation,
+  interpolate,
+  useAnimatedStyle,
+  type SharedValue,
+} from 'react-native-reanimated';
 
 import { PollRing, usePollModel } from '@/components/map/PollIndicator';
 import {
@@ -302,12 +307,26 @@ export interface MapChipsProps {
   heightSV: SharedValue<number>;
   /** Peek-detent height in px — the container's resting anchor. */
   peekPx: number;
+  /** Medium-detent height in px — the chips stop climbing here. */
+  mediumPx: number;
+  /** Large-detent height in px — the chips have fully faded out by here. */
+  largePx: number;
 }
 
-export function MapChips({ heightSV, peekPx }: MapChipsProps) {
-  const reflow = useAnimatedStyle(() => ({
-    transform: [{ translateY: -Math.max(0, heightSV.value - peekPx) }],
-  }));
+export function MapChips({ heightSV, peekPx, mediumPx, largePx }: MapChipsProps) {
+  // Chips ride the sheet up on the UI thread (invariant #1: no per-frame React),
+  // but Apple never lifts chrome over a raised sheet into the status bar. So:
+  // (1) clamp the upward climb at the medium detent, and (2) fade the chips out
+  // as the sheet grows from medium → large. Both are pure worklet reads of the
+  // sheet's heightSV — zero React work per frame.
+  const reflow = useAnimatedStyle(() => {
+    const raised = Math.max(0, heightSV.value - peekPx);
+    const maxRaise = Math.max(0, mediumPx - peekPx);
+    return {
+      transform: [{ translateY: -Math.min(raised, maxRaise) }],
+      opacity: interpolate(heightSV.value, [mediumPx, largePx], [1, 0], Extrapolation.CLAMP),
+    };
+  });
   return (
     <Animated.View
       pointerEvents="box-none"
@@ -359,12 +378,19 @@ function FollowChip() {
   // becomes one big accent "Follow" button (re-centers under the user's
   // current zoom/pitch/heading). The ✕ always stops the follow entirely.
   const paused = useSelectionStore((s) => s.followPaused);
+  // The tram sheet owns `selectedTramKey` for the whole time it is presented
+  // (set on mount, cleared on unmount). When the sheet on screen is THIS tram's,
+  // its compact mini-bar already shows the same badge·#reg·delay identity — a
+  // FollowChip stacked right above it would duplicate that (and land two ✕'s
+  // doing different things). Hide the chip while that tram's sheet is up.
+  const selectedKey = useSelectionStore((s) => s.selectedTramKey);
   const state = useTramState(followKey);
   const plannerActive = usePlannerStore((s) => s.itinerary != null);
   const rideActive = useRidePreviewStore((s) => s.preview != null);
   const spotterActive = useSpotterStore((s) => s.station != null);
   const colors = useTextColors();
   if (!followKey || !state) return null;
+  if (selectedKey === followKey) return null;
 
   // Float above the planner/ride/spotter chips when they are visible.
   const bottom =

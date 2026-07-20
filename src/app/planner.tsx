@@ -311,7 +311,11 @@ export default function PlannerScreen() {
       Keyboard.dismiss();
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setItinerary(it);
-      router.back(); // map draws the route + fits bounds
+      // Always land on the MAP so the drawn route + PlannerChip are visible.
+      // router.back() would return to whatever sheet opened the planner (e.g.
+      // the stop sheet in the "Route here" flow), hiding the route behind a
+      // stale list. dismissAll pops every sheet back to the map.
+      router.dismissAll();
     },
     [setItinerary],
   );
@@ -333,7 +337,9 @@ export default function PlannerScreen() {
       Keyboard.dismiss();
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       startGuidance(it, walkS ?? 0);
-      router.back(); // the guidance banner over the map takes over
+      // Land on the map (not a stale underlying sheet) so the guidance banner +
+      // route take over — same rationale as handlePick.
+      router.dismissAll();
     },
     [startGuidance],
   );

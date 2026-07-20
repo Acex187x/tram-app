@@ -65,9 +65,12 @@ export function ItineraryCard({
     return `${totalStops} ${totalStops === 1 ? 'stop' : 'stops'}`;
   }, [departureMs, arrivalMs, timing, totalStops]);
 
+  // formatCountdown already yields 'in N min' / 'now' — so the template must NOT
+  // add its own 'in' (that produced "Tram scheduled in in 6 min"). 'now' reads
+  // "Tram scheduled now".
   const scheduleLine =
     departureMs != null && arrivalMs != null
-      ? `Tram scheduled in ${formatCountdown(departureMs - now)} · ${formatPragueClock(arrivalMs)} ETA`
+      ? `Tram scheduled ${formatCountdown(departureMs - now)} · ${formatPragueClock(arrivalMs)} ETA`
       : 'Scheduled times — no live tram matched yet';
 
   // Steps for the expanded "Details" list (IMG_0081).

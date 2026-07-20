@@ -37,8 +37,13 @@ export default function RootLayout() {
           <Stack.Screen name="index" options={{ headerShown: false }} />
           {/* Tram sheet is the flagship detail card: 0.15 renders the minimized
               place bar (IMG_0079), 0.42 the card, 0.95 the full sheet. Both the
-              minimized and card detents keep the followed tram visible (undimmed). */}
-          <Stack.Screen name="tram/[key]" options={sheet([0.15, 0.42, 0.95], 1)} />
+              minimized and card detents keep the followed tram visible (undimmed).
+              Opens on the CARD detent (index 1) like Apple's place card — the
+              minimized bar is a swipe-down state, not the landing state. */}
+          <Stack.Screen
+            name="tram/[key]"
+            options={{ ...sheet([0.15, 0.42, 0.95], 1), sheetInitialDetentIndex: 1 }}
+          />
           <Stack.Screen name="line/[id]" options={sheet([0.45, 0.95])} />
           <Stack.Screen name="stop/[key]" options={sheet([0.45, 0.95])} />
           <Stack.Screen name="favorites" options={sheet([0.5, 0.95])} />
