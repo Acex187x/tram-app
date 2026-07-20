@@ -27,9 +27,12 @@ import {
   presentationDragIndicator,
   type ModifierConfig,
 } from '@expo/ui/swift-ui/modifiers';
-import type { ReactNode } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { ScrollView, StyleSheet, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import type { NativeDetent } from '@/components/maps-kit/sheetDetent';
 
 export interface HomeSheetNativeProps {
   /** Peek-detent height in px — the smallest resting height (search bar only). */
@@ -38,11 +41,46 @@ export interface HomeSheetNativeProps {
   header: ReactNode;
   /** Scrollable body, revealed as the sheet is dragged up. */
   children: ReactNode;
+  /**
+   * Fired when the sheet settles on a new detent (peek / medium / large) — the
+   * only position signal the native sheet exposes. Drives the map chrome that
+   * rides with the sheet.
+   */
+  onDetentChange?: (detent: NativeDetent) => void;
 }
 
-export function HomeSheetNative({ peekPx, header, children }: HomeSheetNativeProps) {
+export function HomeSheetNative({ peekPx, header, children, onDetentChange }: HomeSheetNativeProps) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const insets = useSafeAreaInsets();
+  // The home surface must ALWAYS be present — peek is its resting state, not a
+  // "closed" state. Two mechanisms guarantee it never vanishes for good (the old
+  // bug: it disappeared and only an app restart brought it back):
+  //   1. `interactiveDismissDisabled(true)` (below) stops the user swiping it
+  //      away past its peek detent.
+  //   2. Presenting a router formSheet over it (settings / search / a tram
+  //      sheet) dismisses this native `.sheet` — a UIKit modal can't stack on
+  //      one. So we REMOUNT (bump `presentKey`) every time the map screen
+  //      regains focus, i.e. right after that formSheet closes, which re-presents
+  //      the sheet at peek. The first focus is skipped so the initial mount isn't
+  //      double-presented.
+  // `isPresented` stays a literal `true`; driving it from state that
+  // `onIsPresentedChange` can flip to `false` made the sheet fail to present at
+  // all (verified on-device).
+  const [presentKey, setPresentKey] = useState(0);
+  const firstFocus = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      if (firstFocus.current) {
+        firstFocus.current = false;
+        return;
+      }
+      setPresentKey((k) => k + 1);
+      // The remounted sheet re-presents at peek; snap the map chrome back to the
+      // peek offset too (a detent change to peek isn't emitted for the fresh
+      // mount, so the chrome would otherwise stay stuck at its last shift).
+      onDetentChange?.({ height: peekPx });
+    }, [onDetentChange, peekPx]),
+  );
   // iOS system grouped-list background: our clear-glass inset cards are designed
   // to sit on exactly this, so the sheet reads like a native Settings surface.
   const sheetBg = scheme === 'dark' ? '#1C1C1E' : '#F2F2F7';
@@ -56,6 +94,9 @@ export function HomeSheetNative({ peekPx, header, children }: HomeSheetNativePro
     // detent — the sheet still drags freely between all three.
     presentationDetents([{ height: peekPx }, { fraction: 0.5 }, 'large'], {
       selection: { height: peekPx },
+      // Discrete detent-change callback (the only position signal the native
+      // sheet exposes) — the map chrome springs to match on each change.
+      onSelectionChange: onDetentChange,
     }),
     presentationDragIndicator('visible'),
     // The live map MUST stay pannable/tappable behind the sheet at every resting
@@ -78,7 +119,7 @@ export function HomeSheetNative({ peekPx, header, children }: HomeSheetNativePro
     // frame, so a zero-height bottom anchor presents the exact same sheet while
     // leaving the entire map above it free for pan / zoom / tram taps.
     <Host style={styles.hostAnchor} pointerEvents="box-none">
-      <BottomSheet isPresented onIsPresentedChange={noop} fitToContents={false}>
+      <BottomSheet key={presentKey} isPresented onIsPresentedChange={noop} fitToContents={false}>
         <Group modifiers={modifiers}>
           <RNHostView>
             <View style={styles.root}>
@@ -87,9 +128,11 @@ export function HomeSheetNative({ peekPx, header, children }: HomeSheetNativePro
                 style={styles.scroll}
                 contentContainerStyle={[
                   styles.scrollContent,
-                  // Scroll all the way into the home-indicator safe area, like
-                  // Apple Maps — the content is never boxed above the inset.
-                  { paddingBottom: insets.bottom + 28 },
+                  // Just clear the home indicator — the old `+28` left a tall dead
+                  // strip below the last row that looked like the content was cut
+                  // off before the sheet's bottom edge (fix #5). Content now scrolls
+                  // right down to the inset, Apple-Maps style.
+                  { paddingBottom: insets.bottom + 8 },
                 ]}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"

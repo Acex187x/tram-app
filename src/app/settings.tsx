@@ -500,6 +500,7 @@ export default function SettingsScreen() {
       <MapSection />
       <IconPackSection />
       <MotionDataSection />
+      <DeveloperSection />
       <AboutSection />
     </SheetSurface>
   );

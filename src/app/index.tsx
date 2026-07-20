@@ -14,7 +14,8 @@ import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
 import * as SplashScreen from 'expo-splash-screen';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 
 import { resolveLightPreset, STANDARD_CONFIG } from '@/components/map/mapStyle';
 import {
@@ -27,6 +28,11 @@ import {
 } from '@/components/map/MapChrome';
 import { DebugOverlay } from '@/components/debug/DebugOverlay';
 import { HomeSheetNative } from '@/components/maps-kit/HomeSheetNative';
+import {
+  chromeLayoutForDetent,
+  classifyDetent,
+  type NativeDetent,
+} from '@/components/maps-kit/sheetDetent';
 import { HomeSheetContent, HomeSheetHeader } from '@/components/home/HomeSheetContent';
 import { PlannerOverlay } from '@/components/map/PlannerOverlay';
 import { RideOverlay } from '@/components/map/RideOverlay';
@@ -73,6 +79,26 @@ export default function MapScreen() {
   // control column + contextual chips) is pinned just above this so the whole
   // cluster rides over the sheet's resting edge.
   const peekPx = PEEK_HEIGHT;
+  const { height: windowHeight } = useWindowDimensions();
+  // Map chrome (control column + contextual chips) rides UP with the home sheet
+  // and fades out at the large detent — Apple Maps behaviour. The native sheet
+  // exposes only its resting detent (no continuous position), so we spring these
+  // two shared values on each discrete detent change: zero per-frame React, all
+  // animation on the UI thread (docs/performance.md invariant #1).
+  const chromeShift = useSharedValue(0);
+  const chromeOpacity = useSharedValue(1);
+  const onSheetDetentChange = useCallback(
+    (detent: NativeDetent) => {
+      const layout = chromeLayoutForDetent(classifyDetent(detent, PEEK_HEIGHT), {
+        peekPx: PEEK_HEIGHT,
+        windowHeight,
+      });
+      chromeShift.value = withSpring(layout.shift, { damping: 26, stiffness: 240, mass: 0.9 });
+      chromeOpacity.value = withTiming(layout.opacity, { duration: 220 });
+    },
+    // Shared values are stable refs; only the window height affects the math.
+    [windowHeight, chromeShift, chromeOpacity],
+  );
   const [is3D, setIs3D] = useState(true);
   const [styleLoaded, setStyleLoaded] = useState(false);
   const [locationGranted, setLocationGranted] = useState(false);
@@ -289,8 +315,10 @@ export default function MapScreen() {
           onTogglePitch={onTogglePitch}
           onLocate={() => void onLocate()}
           peekPx={peekPx}
+          chromeShift={chromeShift}
+          chromeOpacity={chromeOpacity}
         />
-        <MapChips peekPx={peekPx} />
+        <MapChips peekPx={peekPx} chromeShift={chromeShift} chromeOpacity={chromeOpacity} />
       </MapChromeSchemeContext.Provider>
 
       {/* The persistent home surface — a REAL native iOS sheet (device-matched
@@ -298,7 +326,11 @@ export default function MapScreen() {
           search + account header; our own grouped-list body (favorites, planner,
           fleet, rides, recents) revealed on drag. Follows the system scheme;
           the map chrome above follows the map light preset. */}
-      <HomeSheetNative peekPx={peekPx} header={<HomeSheetHeader />}>
+      <HomeSheetNative
+        peekPx={peekPx}
+        header={<HomeSheetHeader />}
+        onDetentChange={onSheetDetentChange}
+      >
         <HomeSheetContent />
       </HomeSheetNative>
 

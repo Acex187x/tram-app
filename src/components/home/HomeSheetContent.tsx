@@ -29,10 +29,10 @@ export function HomeSheetHeader() {
 
   return (
     <View style={styles.header}>
-      {/* Fresh Apple-Maps peek bar (IMG_0072/0074): search glyph · placeholder ·
-          microphone inside one translucent rounded field, with a circular
-          account/settings button alongside. Tapping anywhere in the field (or
-          the mic) opens our existing /search sheet — data flow unchanged. */}
+      {/* Fresh iOS 26 Apple-Maps peek bar: search glyph · placeholder · mic
+          inside one translucent PILL, with a circular account/settings button of
+          the same height alongside. Tapping anywhere in the pill (or the mic)
+          opens our existing /search sheet — data flow unchanged. */}
       <Pressable
         accessibilityRole="search"
         accessibilityLabel="Search lines, trams and stops"
@@ -42,7 +42,7 @@ export function HomeSheetHeader() {
           { backgroundColor: fieldBg, opacity: pressed ? 0.7 : 1 },
         ]}
       >
-        <SymbolView name="magnifyingglass" size={18} weight="semibold" tintColor={c.secondary} />
+        <SymbolView name="magnifyingglass" size={20} weight="semibold" tintColor={c.secondary} />
         <Text
           style={[styles.searchPlaceholder, { color: c.secondary }]}
           numberOfLines={1}
@@ -57,7 +57,7 @@ export function HomeSheetHeader() {
           onPress={() => router.push('/search')}
           style={({ pressed }) => [styles.micButton, { opacity: pressed ? 0.5 : 1 }]}
         >
-          <SymbolView name="mic.fill" size={17} weight="medium" tintColor={c.secondary} />
+          <SymbolView name="mic.fill" size={18} weight="medium" tintColor={c.secondary} />
         </Pressable>
       </Pressable>
       <Pressable
@@ -136,6 +136,13 @@ export function HomeSheetContent() {
 /** Leading icon circle (29) + row padding (16) + gap (12): the row-text inset. */
 const ROW_INSET = 16 + 29 + 12;
 
+/**
+ * Height of the search pill AND the account avatar circle beside it — one shared
+ * value keeps them the exact same height (Apple Maps). Also the basis of the
+ * peek-detent height in index.tsx, so keep them in sync if this changes.
+ */
+const SEARCH_H = 46;
+
 const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
@@ -145,28 +152,33 @@ const styles = StyleSheet.create({
     paddingTop: 6,
     paddingBottom: 12,
   },
+  // iOS 26 "Liquid Glass" Apple-Maps search bar: a full PILL (not a rounded
+  // rect — that boxy 12 pt radius clashed with the app's own pill chips + circle
+  // controls and read as foreign), with the magnifier · placeholder · mic set on
+  // one translucent capsule and the account/settings avatar a circle of the SAME
+  // height alongside it.
   searchField: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    height: 46,
-    borderRadius: Radii.field,
+    gap: 10,
+    height: SEARCH_H,
+    borderRadius: Radii.circle,
     borderCurve: 'continuous',
-    paddingLeft: 12,
-    paddingRight: 6,
+    paddingLeft: 16,
+    paddingRight: 8,
   },
   searchPlaceholder: { fontSize: 17, flex: 1 },
   micButton: {
-    width: 34,
-    height: 34,
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: SEARCH_H,
+    height: SEARCH_H,
+    borderRadius: SEARCH_H / 2,
     alignItems: 'center',
     justifyContent: 'center',
   },

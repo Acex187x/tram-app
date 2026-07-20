@@ -9,6 +9,8 @@
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { createContext, useContext, type ReactNode } from 'react';
 import { Pressable, StyleSheet, useColorScheme, View } from 'react-native';
+import Animated, { type AnimatedStyle } from 'react-native-reanimated';
+import type { StyleProp, ViewStyle } from 'react-native';
 
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { Apple, appleScheme } from '@/constants/theme';
@@ -130,17 +132,26 @@ export interface ControlStackProps {
   bottom?: number;
   /** Right inset — defaults to 12. */
   right?: number;
+  /**
+   * Reanimated style driving the column as it rides with the home sheet
+   * (translateY + opacity per detent). Applied on the UI thread — no per-frame
+   * React (docs/performance.md invariant #1).
+   */
+  animatedStyle?: StyleProp<AnimatedStyle<ViewStyle>>;
 }
 
-export function ControlStack({ children, topInset, bottom, right = 12 }: ControlStackProps) {
+export function ControlStack({ children, topInset, bottom, right = 12, animatedStyle }: ControlStackProps) {
   // Bottom-anchored (Apple Maps, bottom-right) or top-anchored. Children keep
   // their source order top-to-bottom either way (normal column); when pinned to
   // `bottom` the last child sits nearest the sheet.
   const anchor = bottom != null ? { bottom } : { top: topInset };
   return (
-    <View pointerEvents="box-none" style={[styles.stack, { right, gap: CONTROL_GAP }, anchor]}>
+    <Animated.View
+      pointerEvents="box-none"
+      style={[styles.stack, { right, gap: CONTROL_GAP }, anchor, animatedStyle]}
+    >
       {children}
-    </View>
+    </Animated.View>
   );
 }
 

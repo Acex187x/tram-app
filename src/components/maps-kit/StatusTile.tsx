@@ -43,7 +43,7 @@ export function StatusTile({
         style={styles.body}
       >
         <View style={styles.microRow}>{topRow}</View>
-        <View style={styles.microRow}>{bottomRow}</View>
+        {bottomRow != null && <View style={styles.microRow}>{bottomRow}</View>}
         {expanded && expandedDetail != null && <View style={styles.detail}>{expandedDetail}</View>}
       </Pressable>
     </GlassPanel>

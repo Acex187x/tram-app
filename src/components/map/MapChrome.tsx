@@ -15,6 +15,7 @@ import { router, type Href } from 'expo-router';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { createContext, useContext, useState } from 'react';
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import Animated, { useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PollRing, usePollModel } from '@/components/map/PollIndicator';
@@ -77,6 +78,12 @@ export const CHROME_BOTTOM_GAP = 12;
 /** The native compass is ~44 pt wide; +1 centers it on the 46 pt button axis. */
 export const COMPASS_RIGHT = CONTROL_RIGHT + 1;
 /**
+ * Right inset of the contextual chip cluster: it stops one control-gap to the
+ * LEFT of the right-edge control column so the full-width follow pill can never
+ * sit over the 2D/layers/locate buttons (the reported overlap).
+ */
+const CHIPS_RIGHT_INSET = CONTROL_RIGHT + CONTROL_SIZE + CONTROL_GAP;
+/**
  * Bottom offset (px, from the window bottom) of the Mapbox compass ornament:
  * it floats just above the bottom-right control column, on the same right axis.
  * The caller adds the peek-sheet height so the whole cluster rides above the
@@ -129,14 +136,17 @@ export function MapStatusTile() {
       </Text>
     </>
   );
-  const bottomRow = (
+  // Only non-nominal states get a status row — the healthy "LIVE" label was
+  // removed (it read as redundant chrome over the tram count). STALE / OFFLINE /
+  // PAUSED still surface as a dot + label so a broken feed is never silent.
+  const bottomRow = status ? (
     <>
       <View style={[styles.tileDot, { backgroundColor: status.color }]} />
       <Text style={[styles.tileStatus, { color: secondary }]} allowFontScaling={false}>
         {status.label}
       </Text>
     </>
-  );
+  ) : null;
 
   return (
     <View style={[styles.statusTileWrap, { top: insets.top + Spacing.two }]}>
@@ -158,7 +168,7 @@ export function MapStatusTile() {
 function statusLabel(state: ReturnType<typeof usePollModel>['state']): {
   label: string;
   color: string;
-} {
+} | null {
   switch (state) {
     case 'error':
       return { label: 'OFFLINE', color: Tram.veryLate };
@@ -167,7 +177,8 @@ function statusLabel(state: ReturnType<typeof usePollModel>['state']): {
     case 'off':
       return { label: 'PAUSED', color: '#8E8E93' };
     default:
-      return { label: 'LIVE', color: Tram.onTime };
+      // Nominal live feed: no label (the "LIVE" pill was intentionally removed).
+      return null;
   }
 }
 
@@ -177,17 +188,34 @@ export interface ControlStackProps {
   is3D: boolean;
   onTogglePitch: () => void;
   onLocate: () => void;
-  /** Peek-sheet height in px — the control column is pinned just above it. */
+  /** Peek-sheet height in px — the control column's static base sits just above it. */
   peekPx: number;
+  /** Rides the column UP with the sheet (px). Driven per detent on the UI thread. */
+  chromeShift: SharedValue<number>;
+  /** Fades the column out when the sheet is fully open (large detent). */
+  chromeOpacity: SharedValue<number>;
 }
 
-export function MapControlStack({ is3D, onTogglePitch, onLocate, peekPx }: ControlStackProps) {
+export function MapControlStack({
+  is3D,
+  onTogglePitch,
+  onLocate,
+  peekPx,
+  chromeShift,
+  chromeOpacity,
+}: ControlStackProps) {
   const { scheme } = useTextColors();
   const [layersOpen, setLayersOpen] = useState(false);
+  // The whole cluster rides with the home sheet: translate up per detent, fade
+  // out at large. Pure UI-thread animation — no per-frame React.
+  const rideStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: -chromeShift.value }],
+    opacity: chromeOpacity.value,
+  }));
 
   return (
     <>
-      <KitControlStack bottom={peekPx + CHROME_BOTTOM_GAP} right={CONTROL_RIGHT}>
+      <KitControlStack bottom={peekPx + CHROME_BOTTOM_GAP} right={CONTROL_RIGHT} animatedStyle={rideStyle}>
         <CircleControl
           symbol={is3D ? 'view.2d' : 'view.3d'}
           label={is3D ? 'Switch to 2D map' : 'Switch to 3D map'}
@@ -313,26 +341,34 @@ function LayersMenu({
 // row, ride stacks above it, spotter above that, and follow floats on top.
 
 export interface MapChipsProps {
-  /** Peek-sheet height in px — the chip cluster rests above it. */
+  /** Peek-sheet height in px — the chip cluster's static base rests above it. */
   peekPx: number;
+  /** Rides the chip cluster UP with the sheet (px). Driven per detent on the UI thread. */
+  chromeShift: SharedValue<number>;
+  /** Fades the chips out when the sheet is fully open (large detent). */
+  chromeOpacity: SharedValue<number>;
 }
 
-export function MapChips({ peekPx }: MapChipsProps) {
+export function MapChips({ peekPx, chromeShift, chromeOpacity }: MapChipsProps) {
   // Contextual chips (follow / spotter / ride / planner) float above the
-  // bottom-right control column, just over the peek sheet. When the user opens
-  // the home sheet it slides up and covers the whole cluster — Apple-style, the
-  // map chrome is simply hidden behind the raised sheet, so there is nothing to
-  // reflow and zero per-frame React (docs/performance.md invariant #1).
+  // bottom-right control column and ride UP with the home sheet as it opens
+  // (translateY per detent), fading out once it reaches the large detent. The
+  // cluster is also inset from the right edge (CHIPS_RIGHT_INSET) so the
+  // full-width follow pill never sits over the 2D/layers/locate column.
   const bottom = peekPx + CHROME_BOTTOM_GAP + STACK_H + CONTROL_GAP;
+  const rideStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: -chromeShift.value }],
+    opacity: chromeOpacity.value,
+  }));
   return (
-    <View pointerEvents="box-none" style={[styles.chipsWrap, { bottom }]}>
+    <Animated.View pointerEvents="box-none" style={[styles.chipsWrap, { bottom }, rideStyle]}>
       <View pointerEvents="box-none" style={styles.chipsRow}>
         <FollowChip />
         <SpotterChip />
         <RideChip />
         <PlannerChip />
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -674,7 +710,7 @@ const styles = StyleSheet.create({
   chipsWrap: {
     position: 'absolute',
     left: Spacing.three,
-    right: Spacing.three,
+    right: CHIPS_RIGHT_INSET,
     alignItems: 'center',
   },
   chipsRow: {
