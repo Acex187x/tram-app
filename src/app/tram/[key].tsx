@@ -184,15 +184,21 @@ const HEADER_EXPANDED = 64;
 const HEADER_COLLAPSED = 44;
 // Scroll distance (pt) over which the header fully collapses.
 const COLLAPSE_DISTANCE = 88;
-// Top inset baked into the sticky header so its content always clears the
-// transparent native toolbar bar (star/⋯) — in BOTH the expanded and the pinned
-// (collapsed) state. We drive top spacing manually here instead of via
-// contentInsetAdjustmentBehavior="automatic": an automatic inset only shifts the
-// resting content, so a sticky header still pins to the scroll-view frame top and
-// slides UNDER the toolbar when scrolled. A constant inset that is part of the
-// sticky child keeps the identity row below the toolbar at every scroll position,
-// and the fade-in surface masks scrolling content behind the toolbar band.
-const HEADER_TOP_INSET = 52;
+// Top inset baked into the sticky header. It positions the identity row so it
+// sits in the SAME top band as the transparent native toolbar (star/⋯) — the
+// Apple place-card idiom where the title and the header actions share one row
+// right under the grabber, with only a small intentional gap. The toolbar star/⋯
+// float on the right; the identity (portrait · line · headsign) fills the left of
+// that band, so there is no empty dead space above it. We drive this spacing
+// manually (not contentInsetAdjustmentBehavior="automatic"): an automatic inset
+// only shifts the resting content, so a sticky header still pins to the
+// scroll-view frame top and slides UNDER the toolbar when scrolled. A constant
+// inset that is part of the sticky child keeps the identity row in the toolbar
+// band at every scroll position, and the fade-in surface masks scrolling content.
+// Measured on-device (iPhone 17 Pro, full detent): scroll content y=0 lands ~5pt
+// below the grabber and the star/⋯ pill occupies ~16–46pt below the sheet top, so
+// this small inset aligns the portrait's top with the toolbar's — no gap.
+const HEADER_TOP_INSET = 12;
 
 /** Empty native header title — renders nothing (no text, no quote-glyph fallback
  * that an empty/space string produces). Kept module-level so the option identity
@@ -259,12 +265,14 @@ function CollapsingHeader({
   }));
   // Surface + hairline that fade IN as the header pins, masking the scrolling
   // content beneath the sticky bar (the iOS large-title→inline idiom). This is a
-  // PLAIN near-opaque View matching the sheet surface — deliberately NOT a
+  // PLAIN, FULLY OPAQUE View matching the sheet surface — deliberately NOT a
   // BlurView: inside a sticky header the native blur layer composites ON TOP of
   // the row content and washes it out, whereas a plain View honors child z-order
-  // and sits cleanly behind the icon / badge / headsign.
-  const surface =
-    scheme === 'dark' ? 'rgba(28,28,30,0.92)' : 'rgba(248,248,250,0.94)';
+  // and sits cleanly behind the icon / badge / headsign. It MUST be opaque (not
+  // translucent): a partly-transparent bar lets the stats row / "UPCOMING STOPS"
+  // bleed through as the content scrolls under it, which reads as broken. Solid
+  // systemBackground makes the pinned bar a clean, intentional inline nav bar.
+  const surface = scheme === 'dark' ? 'rgb(28,28,30)' : 'rgb(249,249,251)';
   const chromeStyle = useAnimatedStyle(() => ({
     opacity: interpolate(
       scrollY.value,
@@ -687,7 +695,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 0,
   },
-  headerInner: { alignItems: 'center', flexDirection: 'row', gap: 12, paddingHorizontal: 20 },
+  // The identity row now shares the top band with the native toolbar (star/⋯),
+  // which floats over the right ~110pt of the header. Reserve that space with a
+  // wide paddingRight so a long headsign truncates cleanly instead of sliding
+  // under the star/⋯ buttons — in BOTH the expanded and pinned (collapsed) state.
+  headerInner: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    paddingLeft: 20,
+    paddingRight: 116,
+  },
   portraitPressed: { transform: [{ scale: 0.96 }] },
   iconBox: {
     borderCurve: 'continuous',
