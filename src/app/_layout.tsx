@@ -35,14 +35,28 @@ export default function RootLayout() {
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack>
           <Stack.Screen name="index" options={{ headerShown: false }} />
-          {/* Tram sheet is the flagship detail card: 0.15 renders the minimized
-              place bar (IMG_0079), 0.42 the card, 0.95 the full sheet. Both the
-              minimized and card detents keep the followed tram visible (undimmed).
-              Opens on the CARD detent (index 1) like Apple's place card — the
-              minimized bar is a swipe-down state, not the landing state. */}
+          {/* Tram sheet is the flagship detail card: 0.15 is the minimized bar
+              (the collapsed native header), 0.42 the card, 0.95 the full sheet.
+              Both the minimized and card detents keep the followed tram visible
+              (undimmed). Opens on the CARD detent (index 1) like Apple's place
+              card. It runs a REAL native large-title header (headsign collapses
+              to a compact bar on scroll) — headerTransparent so the sheet's own
+              glass shows through, and NO sheetCornerRadius override so the system
+              presentation supplies the device-matched corners. */}
           <Stack.Screen
             name="tram/[key]"
-            options={{ ...sheet([0.15, 0.42, 0.95], 1), sheetInitialDetentIndex: 1 }}
+            options={{
+              presentation: 'formSheet',
+              sheetAllowedDetents: [0.15, 0.42, 0.95],
+              sheetLargestUndimmedDetentIndex: 1,
+              sheetInitialDetentIndex: 1,
+              sheetGrabberVisible: true,
+              headerShown: true,
+              headerTransparent: true,
+              headerLargeTitle: true,
+              headerBlurEffect: 'none',
+              contentStyle: { backgroundColor: 'transparent' },
+            }}
           />
           <Stack.Screen name="line/[id]" options={sheet([0.45, 0.95])} />
           <Stack.Screen name="stop/[key]" options={sheet([0.45, 0.95])} />

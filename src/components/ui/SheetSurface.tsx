@@ -19,7 +19,7 @@ export interface SheetSurfaceProps {
   children: ReactNode;
   /** Pinned above the scroll body (e.g. a SheetHeader). */
   header?: ReactNode;
-  /** Pinned below the scroll body (e.g. a FloatingActionBar). */
+  /** Pinned below the scroll body (e.g. a footer action bar). */
   footer?: ReactNode;
   /** Default true — wrap children in a scroll view. */
   scrollable?: boolean;

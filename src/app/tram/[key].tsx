@@ -1,44 +1,42 @@
-// Tram detail sheet — the Apple Maps place-detail card (IMG_0077/78/79). Floats
-// over the live map (transparent formSheet, detents [0.15, 0.42, 0.95]). At the
-// 0.15 detent it collapses to the minimized place bar (share · title · X); at
-// 0.42/0.95 it is the full card: TramSheetHeader identity, an ActionPillRow
-// (Follow / Show Line / 3D), a live stat quad (Updated / Status / Next stop /
-// Delay), the sim-honesty line, the upcoming-stops timeline, the About spec
-// group, and a floating action bar (star / record / photos / more).
+// Tram detail sheet — a native iOS place card floating over the live map. The
+// route is a transparent formSheet (detents [0.15, 0.42, 0.95], opens on the
+// card detent, index 1) whose corners come from the system presentation, not a
+// hand-rolled radius. The header is a REAL native large-title stack header
+// (react-native-screens): the headsign is the large title that collapses to a
+// compact inline bar as the body scrolls, and it doubles as the minimized bar
+// when the sheet is dragged down to the 0.15 detent. Favorite lives as a native
+// header star; secondary actions (model info, photos, record ride) live in a
+// native header ⋯ menu — no floating bar, no share button.
 //
 // Opening this sheet ENGAGES FOLLOW on the tram (and keeps following after
 // close). The card's Follow pill toggles it; the map's FollowChip ✕ also ends
 // it. Live data via useTramState(key) at ~1 Hz; the 1 s freshness / ETA tickers
 // anchor on each runtime value and tick locally so countdowns never freeze.
 import * as Haptics from 'expo-haptics';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActionSheetIOS,
-  Share,
+  Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   useColorScheme,
-  useWindowDimensions,
   View,
-  type LayoutChangeEvent,
 } from 'react-native';
 
 import { AboutTramCard } from '@/components/tram/AboutTramCard';
 import { RideStatusStrip, useRideRecorder } from '@/components/tram/RideRecorder';
 import { StopsTimeline } from '@/components/tram/StopsTimeline';
-import { TramSheetHeader } from '@/components/tram/TramSheetHeader';
+import { TramFace } from '@/components/tram/TramFace';
+import { AcSnowflake } from '@/components/tram/TramModelImage';
 import { ActionPillRow, type PillAction } from '@/components/ui/ActionPillRow';
-import { CloseCircle } from '@/components/ui/CloseCircle';
-import { delayColor, delayLabel } from '@/components/ui/DelayPill';
+import { DelayPill, delayColor, delayLabel } from '@/components/ui/DelayPill';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { SectionLabel } from '@/components/ui/Inset';
 import { LineBadge } from '@/components/ui/LineBadge';
 import { SheetContent } from '@/components/ui/SheetContent';
-import { SheetSurface } from '@/components/ui/SheetSurface';
 import { StatRow, type Stat } from '@/components/ui/StatRow';
-import { FloatingActionBar, type BarItem } from '@/components/ui/FloatingActionBar';
 import { Apple, appleScheme, Tram } from '@/constants/theme';
 import { getRuntime, useLoadedGeometries, useTramState } from '@/hooks/tramData';
 import type { TramPublicState } from '@/lib/types';
@@ -98,6 +96,58 @@ const PHASE_LABEL: Record<TramPublicState['phase'], string> = {
   terminal: 'Terminus',
   unknown: 'Tracking',
 };
+
+// ── identity hero (horizontal) ───────────────────────────────────────────────
+
+/**
+ * The place-card identity block, laid out HORIZONTALLY: a tappable model
+ * portrait (→ full-screen 3D viewer, the established face→3D entry) beside the
+ * line badge + live delay pill and the model · reg line. The headsign is NOT
+ * repeated here — it is the native large title above.
+ */
+function TramHero({ state }: { state: TramPublicState }) {
+  const router = useRouter();
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const c = appleScheme(scheme);
+
+  const line = state.snapshot.line;
+  const reg = state.snapshot.registrationNumber;
+  const subtitle = `${state.model.name}${reg != null ? ` · #${reg}` : ''}`;
+
+  const onPortrait = () => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push(`/model/${state.model.id}`);
+  };
+
+  return (
+    <View style={styles.hero}>
+      <Pressable
+        onPress={onPortrait}
+        style={({ pressed }) => pressed && styles.portraitPressed}
+        accessibilityRole="button"
+        accessibilityLabel={`View ${state.model.name} in 3D`}
+        hitSlop={4}
+      >
+        <GlassPanel variant="clear" style={styles.portraitGlass}>
+          <TramFace modelId={state.model.id} size={56} />
+        </GlassPanel>
+      </Pressable>
+
+      <View style={styles.heroText}>
+        <View style={styles.heroTitleRow}>
+          <LineBadge line={line} size="md" />
+          <DelayPill delaySeconds={state.snapshot.delaySeconds} />
+        </View>
+        <View style={styles.heroSubRow}>
+          <Text style={[styles.heroSubtitle, { color: c.secondary }]} numberOfLines={1}>
+            {subtitle}
+          </Text>
+          <AcSnowflake airConditioned={state.snapshot.airConditioned} size={12} />
+        </View>
+      </View>
+    </View>
+  );
+}
 
 // ── live stat quad + honesty line ────────────────────────────────────────────
 
@@ -196,7 +246,6 @@ export default function TramDetailSheet() {
   const router = useRouter();
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const c = appleScheme(scheme);
-  const { height: windowH } = useWindowDimensions();
 
   const state = useTramState(key);
   const geometries = useLoadedGeometries();
@@ -260,21 +309,6 @@ export default function TramDetailSheet() {
   const ride = useRideRecorder(key);
   const positionMode = useSettingsStore((s) => s.positionMode);
 
-  // Detent tracking: the formSheet resizes the content view to the active
-  // detent, so onLayout reports its height. We flip to the minimized place bar
-  // below ~0.30·windowHeight (between the 0.15 and 0.42 detents). Only a
-  // threshold crossing commits — not every drag frame.
-  const [minimized, setMinimized] = useState(false);
-  const minimizedRef = useRef(false);
-  const onRootLayout = (e: LayoutChangeEvent) => {
-    const h = e.nativeEvent.layout.height;
-    const next = h > 0 && h < windowH * 0.3;
-    if (next !== minimizedRef.current) {
-      minimizedRef.current = next;
-      setMinimized(next);
-    }
-  };
-
   const onFavorite = () => {
     void Haptics.selectionAsync();
     toggleTram(key);
@@ -297,65 +331,34 @@ export default function TramDetailSheet() {
     if (state) router.push(`/model-info/${state.model.id}`);
   };
 
-  const onShare = () => {
-    if (!state) return;
-    const reg = state.snapshot.registrationNumber;
-    void Share.share({
-      message: `Tram ${state.snapshot.line} to ${state.snapshot.headsign}${
-        reg != null ? ` · #${reg}` : ''
-      } — spotted on Tram Spotter`,
-    });
-  };
-
-  const onMore = () => {
-    if (!state) return;
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        options: ['Model info & specs', 'View in 3D', 'Share', 'Cancel'],
-        cancelButtonIndex: 3,
-      },
-      (i) => {
-        if (i === 0) onModelInfo();
-        else if (i === 1) on3D();
-        else if (i === 2) onShare();
-      },
-    );
-  };
-
-  // ── minimized place bar (0.15 detent) ──
-  if (minimized && state) {
-    return (
-      <View style={styles.root} onLayout={onRootLayout}>
-        <GlassPanel style={styles.glass}>
-          <SheetContent>
-            <TramSheetHeader state={state} onClose={() => router.back()} onShare={onShare} compact />
-          </SheetContent>
-        </GlassPanel>
-      </View>
-    );
-  }
-
   // ── loading / gone ──
   if (!state) {
     return (
-      <View style={styles.root} onLayout={onRootLayout}>
-        <GlassPanel style={styles.glass}>
-          <SheetContent style={styles.centerContent}>
-            {gone ? (
-              <GoneState lastState={lastStateRef.current} />
-            ) : (
-              <View style={styles.goneWrap}>
-                <SymbolView
-                  name="antenna.radiowaves.left.and.right"
-                  size={36}
-                  tintColor={c.secondary}
-                />
-                <Text style={[styles.goneSubtitle, { color: c.secondary }]}>Locating tram…</Text>
-              </View>
-            )}
-          </SheetContent>
-        </GlassPanel>
-      </View>
+      // Glass IS the sheet background: the scroll body renders inside it (a
+      // GlassView composites above later siblings, so it must be the container,
+      // not an absoluteFill behind the content).
+      <GlassPanel style={styles.root}>
+        <Stack.Title>{gone ? 'Left service' : 'Locating tram'}</Stack.Title>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.centerContent}
+          contentInsetAdjustmentBehavior="automatic"
+          showsVerticalScrollIndicator={false}
+        >
+          {gone ? (
+            <GoneState lastState={lastStateRef.current} />
+          ) : (
+            <View style={styles.goneWrap}>
+              <SymbolView
+                name="antenna.radiowaves.left.and.right"
+                size={36}
+                tintColor={c.secondary}
+              />
+              <Text style={[styles.goneSubtitle, { color: c.secondary }]}>Locating tram…</Text>
+            </View>
+          )}
+        </ScrollView>
+      </GlassPanel>
     );
   }
 
@@ -374,81 +377,115 @@ export default function TramDetailSheet() {
     { key: '3d', symbol: 'rotate.3d', label: '3D Model', onPress: on3D },
   ];
 
-  const barItems: BarItem[] = [
-    {
-      key: 'fav',
-      symbol: isFavorite ? 'star.fill' : 'star',
-      label: isFavorite ? 'Remove favorite' : 'Add favorite',
-      onPress: onFavorite,
-      active: isFavorite,
-      tint: Tram.gold,
-    },
-    {
-      key: 'record',
-      symbol: 'record.circle',
-      label: ride.recordingThis ? 'Stop recording' : 'Record ride',
-      onPress: ride.toggle,
-      active: ride.recordingThis,
-      tint: Apple.red,
-    },
-    ...(reg != null
-      ? [
-          {
-            key: 'photos',
-            symbol: 'camera' as const,
-            label: 'Photos of this car',
-            onPress: () => router.push(`/tram-photos/${reg}`),
-          },
-        ]
-      : []),
-    { key: 'more', symbol: 'ellipsis', label: 'More', onPress: onMore },
-  ];
-
   return (
-    <View style={styles.root} onLayout={onRootLayout}>
-      <SheetSurface
-        header={
-          <TramSheetHeader state={state} onClose={() => router.back()} onShare={onShare} />
-        }
-        footer={<FloatingActionBar items={barItems} style={styles.bar} />}
+    // Glass IS the sheet background (fills the transparent formSheet, including
+    // behind the transparent native header, so the large title and its collapsed
+    // bar sit over a legible material with no seam). Content renders inside it —
+    // a GlassView composites above later siblings, so it must be the container.
+    <GlassPanel style={styles.root}>
+      {/* Native large-title header: headsign collapses to a compact inline bar
+          on scroll and when the sheet is dragged to the minimized detent. */}
+      <Stack.Title large style={{ color: c.text }}>
+        {state.snapshot.headsign}
+      </Stack.Title>
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Button
+          icon={isFavorite ? 'star.fill' : 'star'}
+          tintColor={isFavorite ? Tram.gold : undefined}
+          onPress={onFavorite}
+          accessibilityLabel={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+        />
+        <Stack.Toolbar.Menu icon="ellipsis.circle" accessibilityLabel="More actions">
+          <Stack.Toolbar.MenuAction icon="info.circle" onPress={onModelInfo}>
+            Model info & history
+          </Stack.Toolbar.MenuAction>
+          {reg != null && (
+            <Stack.Toolbar.MenuAction
+              icon="camera"
+              onPress={() => router.push(`/tram-photos/${reg}`)}
+            >
+              Photos of this car
+            </Stack.Toolbar.MenuAction>
+          )}
+          <Stack.Toolbar.MenuAction
+            icon={ride.recordingThis ? 'stop.fill' : 'record.circle'}
+            destructive={ride.recordingThis}
+            onPress={ride.toggle}
+          >
+            {ride.recordingThis ? 'Stop ride recording' : 'Record ride'}
+          </Stack.Toolbar.MenuAction>
+        </Stack.Toolbar.Menu>
+      </Stack.Toolbar>
+
+      {/* Scroll spans the whole sheet; automatic inset accounts for the header. */}
+      <ScrollView
+        style={styles.scroll}
         contentContainerStyle={styles.body}
+        contentInsetAdjustmentBehavior="automatic"
+        showsVerticalScrollIndicator={false}
       >
-        <ActionPillRow actions={actions} />
+        <SheetContent style={styles.column}>
+          <TramHero state={state} />
 
-        <LiveStats state={state} positionMode={positionMode} />
+          <ActionPillRow actions={actions} />
 
-        <View>
-          <SectionLabel>Upcoming stops</SectionLabel>
-          <StopsTimeline
-            geometry={geometry}
-            simDistM={state.simDistM}
-            delaySeconds={state.snapshot.delaySeconds}
-            phase={state.phase}
-            nextStopEtaS={state.nextStopEtaS}
-            collapsible
-          />
-        </View>
+          <LiveStats state={state} positionMode={positionMode} />
 
-        <RideStatusStrip tramKey={key} />
+          <View>
+            <SectionLabel>Upcoming stops</SectionLabel>
+            <StopsTimeline
+              geometry={geometry}
+              simDistM={state.simDistM}
+              delaySeconds={state.snapshot.delaySeconds}
+              phase={state.phase}
+              nextStopEtaS={state.nextStopEtaS}
+              collapsible
+            />
+          </View>
 
-        <View>
-          <SectionLabel>About</SectionLabel>
-          <AboutTramCard model={state.model} snapshot={state.snapshot} />
-        </View>
-      </SheetSurface>
-    </View>
+          <RideStatusStrip tramKey={key} />
+
+          <View>
+            <SectionLabel>About</SectionLabel>
+            <AboutTramCard model={state.model} snapshot={state.snapshot} />
+          </View>
+        </SheetContent>
+      </ScrollView>
+    </GlassPanel>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  glass: { flex: 1, borderRadius: 0 },
-  centerContent: { flex: 1, justifyContent: 'center' },
-  body: { paddingTop: 4, gap: 18 },
-  bar: { marginTop: 4, marginBottom: 10 },
+  // Glass fills the sheet with square corners; the native formSheet presentation
+  // clips to the device-matched system corner radius.
+  root: { flex: 1, borderRadius: 0 },
+  scroll: { flex: 1 },
+  body: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 40 },
+  // No flex here — inside a ScrollView's content container a flex:1 child
+  // collapses to zero height and the whole card renders blank.
+  column: { gap: 18 },
+  centerContent: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 20 },
+
+  // identity hero (horizontal)
+  hero: { alignItems: 'center', flexDirection: 'row', gap: 14 },
+  portraitPressed: { transform: [{ scale: 0.96 }] },
+  portraitGlass: {
+    alignItems: 'center',
+    borderCurve: 'continuous',
+    borderRadius: 20,
+    height: 72,
+    justifyContent: 'center',
+    width: 72,
+  },
+  heroText: { flex: 1, gap: 6 },
+  heroTitleRow: { alignItems: 'center', flexDirection: 'row', gap: 9 },
+  heroSubRow: { alignItems: 'center', flexDirection: 'row', gap: 5 },
+  heroSubtitle: { flexShrink: 1, fontSize: 14 },
+
   statsBlock: { gap: 8 },
   honestyRow: { alignItems: 'center', flexDirection: 'row', gap: 5, justifyContent: 'center' },
   honestyText: { fontSize: 12 },
+
   goneWrap: {
     alignItems: 'center',
     gap: 12,
