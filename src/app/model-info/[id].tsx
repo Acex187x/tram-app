@@ -1,19 +1,22 @@
 // Model reference screen ("about this tram", the big version): history, fun
 // facts, spec table and Prague-service notes for one tram model. Full-screen
-// push registered in _layout as model-info/[id]; navigate with
-// router.push('/model-info/' + modelId). Content lives in
-// '@/lib/fleet/modelHistory'; header art is the model's TramFace.
+// push registered in _layout as model-info/[id]. Re-skinned to Apple Maps: a
+// circular translucent back control (CloseCircle), a large-title header over the
+// model's TramFace, and grouped InsetGroups — specs as Apple key-value InsetRows.
+// Content lives in '@/lib/fleet/modelHistory'; navigate with
+// router.push('/model-info/' + modelId).
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useEffect } from 'react';
+import { Fragment, useEffect } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { InsetGroup, RowSeparator, SectionLabel } from '@/components/favorites/InsetGroup';
 import { TramFace } from '@/components/tram/TramFace';
+import { CloseCircle } from '@/components/ui/CloseCircle';
 import { GlassPanel } from '@/components/ui/GlassPanel';
+import { InsetGroup, RowSeparator, SectionLabel } from '@/components/ui/Inset';
 import { SheetContent } from '@/components/ui/SheetContent';
-import { Colors, Tram } from '@/constants/theme';
+import { appleScheme, Tram, Type } from '@/constants/theme';
 import { MODEL_HISTORY, type ModelHistory } from '@/lib/fleet/modelHistory';
 import { MODEL_SPECS } from '@/lib/fleet/modelSpecs';
 import type { TramModelId } from '@/lib/types';
@@ -25,7 +28,7 @@ export default function ModelInfoScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const c = Colors[scheme];
+  const c = appleScheme(scheme);
   const background = scheme === 'dark' ? '#0B0B0D' : '#F2F2F6';
 
   // Unknown / missing id → graceful back (the route can be deep-linked).
@@ -62,11 +65,9 @@ export default function ModelInfoScreen() {
           {/* ── Header: face + name + maker/years ────────────────────────── */}
           <View style={styles.header}>
             <TramFace modelId={modelId} size={112} />
-            <Text style={[styles.title, { color: c.text }]}>{history.title}</Text>
-            <Text style={[styles.subtitle, { color: c.textSecondary }]}>
-              {history.maker}
-            </Text>
-            <Text style={[styles.years, { color: c.textSecondary }]}>{history.years}</Text>
+            <Text style={[Type.largeTitle, styles.title, { color: c.text }]}>{history.title}</Text>
+            <Text style={[styles.subtitle, { color: c.secondary }]}>{history.maker}</Text>
+            <Text style={[styles.years, { color: c.secondary }]}>{history.years}</Text>
 
             {has3d && (
               <GlassPanel variant="clear" interactive style={styles.viewerButtonGlass}>
@@ -109,29 +110,24 @@ export default function ModelInfoScreen() {
               <View key={i}>
                 {i > 0 && <RowSeparator inset={44} />}
                 <View style={styles.factRow}>
-                  <SymbolView
-                    name="sparkles"
-                    size={16}
-                    tintColor={Tram.gold}
-                    style={styles.factIcon}
-                  />
+                  <SymbolView name="sparkles" size={16} tintColor={Tram.gold} style={styles.factIcon} />
                   <Text style={[styles.factText, { color: c.text }]}>{fact}</Text>
                 </View>
               </View>
             ))}
           </InsetGroup>
 
-          {/* ── Specifications ───────────────────────────────────────────── */}
+          {/* ── Specifications — Apple key-value rows (values wrap) ───────── */}
           <SectionLabel>Specifications</SectionLabel>
           <InsetGroup style={styles.group}>
             {history.specs.map((spec, i) => (
-              <View key={spec.label}>
+              <Fragment key={spec.label}>
                 {i > 0 && <RowSeparator />}
                 <View style={styles.specRow}>
-                  <Text style={[styles.specLabel, { color: c.textSecondary }]}>{spec.label}</Text>
+                  <Text style={[styles.specLabel, { color: c.secondary }]}>{spec.label}</Text>
                   <Text style={[styles.specValue, { color: c.text }]}>{spec.value}</Text>
                 </View>
-              </View>
+              </Fragment>
             ))}
           </InsetGroup>
 
@@ -143,36 +139,23 @@ export default function ModelInfoScreen() {
             </View>
           </InsetGroup>
 
-          <Text style={[styles.sourcesNote, { color: c.textSecondary }]}>
-            Compiled from DPP, Škoda Transportation and public transit-history sources.
-            Figures marked ≈ are approximate or vary between batches.
+          <Text style={[styles.sourcesNote, { color: c.secondary }]}>
+            Compiled from DPP, Škoda Transportation and public transit-history sources. Figures
+            marked ≈ are approximate or vary between batches.
           </Text>
         </SheetContent>
       </ScrollView>
 
       {/* Back — floats over the scroll, top-left */}
-      <GlassPanel
-        variant="clear"
-        interactive
-        style={[styles.backGlass, { top: insets.top + 8 }]}
-      >
-        <Pressable
-          onPress={onBack}
-          hitSlop={10}
-          style={({ pressed }) => [styles.backPress, pressed && { opacity: 0.6 }]}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <SymbolView name="chevron.left" size={17} tintColor={c.text} />
-        </Pressable>
-      </GlassPanel>
+      <View style={[styles.backSlot, { top: insets.top + 8 }]}>
+        <CloseCircle onPress={onBack} label="Back" symbol="chevron.left" size={40} />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  backGlass: { borderRadius: 20, left: 16, position: 'absolute' },
-  backPress: { alignItems: 'center', height: 40, justifyContent: 'center', width: 40 },
+  backSlot: { left: 16, position: 'absolute' },
   cardPadding: { paddingHorizontal: 16, paddingVertical: 14 },
   column: { paddingHorizontal: 16 },
   factIcon: { marginTop: 2, width: 20 },
@@ -183,7 +166,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 11,
   },
-  factText: { flex: 1, fontSize: 14, lineHeight: 20 },
+  factText: { flex: 1, fontSize: 15, lineHeight: 21 },
   group: { marginBottom: 24 },
   header: { alignItems: 'center', marginBottom: 28 },
   paragraph: { fontSize: 15, lineHeight: 22 },
@@ -196,19 +179,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     textAlign: 'center',
   },
-  specLabel: { fontSize: 14 },
+  specLabel: { fontSize: 15 },
   specRow: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 12,
     justifyContent: 'space-between',
-    minHeight: 42,
+    minHeight: 44,
     paddingHorizontal: 16,
-    paddingVertical: 9,
+    paddingVertical: 10,
   },
-  specValue: { flex: 1, fontSize: 14, fontWeight: '500', textAlign: 'right' },
-  subtitle: { fontSize: 14, marginTop: 4, textAlign: 'center' },
-  title: { fontSize: 28, fontWeight: '700', letterSpacing: -0.4, marginTop: 14, textAlign: 'center' },
+  specValue: { flex: 1, fontSize: 15, fontWeight: '500', textAlign: 'right' },
+  subtitle: { fontSize: 15, marginTop: 4, textAlign: 'center' },
+  title: { marginTop: 14, textAlign: 'center', letterSpacing: -0.4 },
   viewerButton: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -217,6 +200,6 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   viewerButtonGlass: { borderRadius: 999, marginTop: 16 },
-  viewerButtonText: { fontSize: 14, fontWeight: '600' },
+  viewerButtonText: { fontSize: 15, fontWeight: '600' },
   years: { fontSize: 13, marginTop: 2, textAlign: 'center' },
 });

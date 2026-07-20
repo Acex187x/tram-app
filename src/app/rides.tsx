@@ -1,20 +1,29 @@
-// /rides form sheet — every recorded ride (including interrupted/orphaned
-// ones), newest first: date, line/model, duration, points, size. Tapping a
-// ride parses its JSONL and previews it on the MAIN map (RideOverlay draws the
-// GPS vs sim tracks; the RideChip in MapChrome clears it), dismissing the
-// sheets so the map is visible. Share per row via the export button.
+// /rides form sheet — every recorded ride (including interrupted/orphaned ones),
+// newest first, re-skinned to Apple Maps' grouped-inset list (IMG_0076): a
+// large-title SheetHeader with a circular X, LineBadge-led rows with a
+// date/duration subtitle, and a trailing ellipsis that opens the native
+// Preview/Export menu. Tapping a row still parses the ride's JSONL and previews
+// it on the MAIN map (RideOverlay draws GPS vs sim; the RideChip clears it),
+// dismissing the sheets — every data flow is unchanged, this is chrome only.
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { Fragment, useMemo } from 'react';
-import { Pressable, ScrollView, Share, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import {
+  ActionSheetIOS,
+  Pressable,
+  Share,
+  StyleSheet,
+  Text,
+  useColorScheme,
+  View,
+} from 'react-native';
 
-import { InsetGroup, RowSeparator, SectionLabel } from '@/components/favorites/InsetGroup';
-import { SheetHeader } from '@/components/favorites/SheetHeader';
-import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
-import { SheetContent } from '@/components/ui/SheetContent';
-import { Colors, Tram } from '@/constants/theme';
+import { InsetGroup, RowSeparator, SectionLabel } from '@/components/ui/Inset';
+import { SheetHeader } from '@/components/ui/SheetHeader';
+import { SheetSurface } from '@/components/ui/SheetSurface';
+import { appleScheme, Tram } from '@/constants/theme';
 import { useMotionLog, type MotionFileInfo } from '@/lib/motionlog';
 import { parseRideFile, type ParsedRide } from '@/lib/motionlog/rideFile';
 import { useRidePreviewStore } from '@/stores/ridePreview';
@@ -33,9 +42,11 @@ function fmtBytes(n: number): string {
 function fmtWhen(ms: number | null): string {
   if (ms == null) return 'Unknown time';
   const d = new Date(ms);
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) +
+  return (
+    d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) +
     ' · ' +
-    d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  );
 }
 
 function fmtDuration(ride: ParsedRide): string {
@@ -47,8 +58,7 @@ function fmtDuration(ride: ParsedRide): string {
 }
 
 function RideRow({ entry }: { entry: RideEntry }) {
-  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const palette = Colors[scheme];
+  const c = appleScheme(useColorScheme() === 'dark' ? 'dark' : 'light');
   const { file, ride } = entry;
 
   const onPreview = () => {
@@ -58,36 +68,43 @@ function RideRow({ entry }: { entry: RideEntry }) {
     router.dismissAll();
   };
 
-  const onShare = () => {
+  const onExport = () => {
     void Haptics.selectionAsync();
     void Share.share({ url: file.uri }).catch(() => {});
   };
 
-  const title = [
-    ride.line ? `Line ${ride.line}` : null,
-    ride.model ? ride.model.toUpperCase() : null,
-    ride.tramKey ? `#${ride.tramKey}` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const onMore = () => {
+    const options = ['Preview on map', 'Export…', 'Cancel'];
+    ActionSheetIOS.showActionSheetWithOptions(
+      { title: file.name, options, cancelButtonIndex: 2 },
+      (index) => {
+        if (index === 0) onPreview();
+        else if (index === 1) onExport();
+      },
+    );
+  };
+
+  const title =
+    [
+      ride.line ? `Line ${ride.line}` : null,
+      ride.model ? ride.model.toUpperCase() : null,
+      ride.tramKey ? `#${ride.tramKey}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ') || file.name;
 
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Preview ride ${file.name} on the map`}
       onPress={onPreview}
-      style={({ pressed }) => [
-        styles.row,
-        pressed && {
-          backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
-        },
-      ]}
+      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
     >
       <LineBadge line={ride.line ?? '?'} size="sm" />
       <View style={styles.rowText}>
         <View style={styles.titleRow}>
-          <Text style={[styles.title, { color: palette.text }]} numberOfLines={1}>
-            {title || file.name}
+          <Text style={[styles.title, { color: c.text }]} numberOfLines={1}>
+            {title}
           </Text>
           {ride.orphaned && (
             <View style={styles.orphanBadge}>
@@ -96,26 +113,29 @@ function RideRow({ entry }: { entry: RideEntry }) {
             </View>
           )}
         </View>
-        <Text style={[styles.subtitle, { color: palette.textSecondary }]} numberOfLines={1}>
+        <Text style={[styles.subtitle, { color: c.secondary }]} numberOfLines={1}>
           {fmtWhen(ride.startedMs)} · {fmtDuration(ride)} · {ride.points} pts · {fmtBytes(file.size)}
         </Text>
       </View>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Share ride ${file.name}`}
+        accessibilityLabel={`Ride ${file.name} options`}
         hitSlop={8}
-        onPress={onShare}
-        style={styles.shareBtn}
+        onPress={onMore}
+        style={({ pressed }) => [
+          styles.moreBtn,
+          { backgroundColor: c.fillSecondary },
+          pressed && styles.pressed,
+        ]}
       >
-        <SymbolView name="square.and.arrow.up" size={17} tintColor={palette.textSecondary} />
+        <SymbolView name="ellipsis" size={15} weight="semibold" tintColor={c.secondary} />
       </Pressable>
     </Pressable>
   );
 }
 
 export default function RidesScreen() {
-  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const palette = Colors[scheme];
+  const c = appleScheme(useColorScheme() === 'dark' ? 'dark' : 'light');
   const log = useMotionLog(); // re-renders on ride/file changes
   const version = log.getVersion(); // cache key: files changed -> reparse
 
@@ -130,50 +150,38 @@ export default function RidesScreen() {
   );
 
   return (
-    <GlassPanel style={styles.sheet}>
-      <SheetContent>
-        <SheetHeader title="Recorded rides" />
-      </SheetContent>
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={styles.scrollBottom}
-        showsVerticalScrollIndicator={false}
-      >
-        <SheetContent style={styles.content}>
-          {entries.length === 0 ? (
-            <View style={styles.empty}>
-              <SymbolView name="record.circle" size={46} weight="light" tintColor={Tram.veryLate} />
-              <Text style={[styles.emptyTitle, { color: palette.text }]}>No rides recorded</Text>
-              <Text style={[styles.emptyHint, { color: palette.textSecondary }]}>
-                Open a tram you are riding and tap Record ride — the GPS vs. simulation track
-                will be stored here, safe across restarts.
-              </Text>
-            </View>
-          ) : (
-            <View>
-              <SectionLabel>Tap a ride to preview it on the map</SectionLabel>
-              <InsetGroup>
-                {entries.map((entry, i) => (
-                  <Fragment key={entry.file.relPath}>
-                    {i > 0 ? <RowSeparator inset={SEPARATOR_INSET} /> : null}
-                    <RideRow entry={entry} />
-                  </Fragment>
-                ))}
-              </InsetGroup>
-            </View>
-          )}
-        </SheetContent>
-      </ScrollView>
-    </GlassPanel>
+    <SheetSurface header={<SheetHeader title="Recorded rides" />}>
+      {entries.length === 0 ? (
+        <View style={styles.empty}>
+          <SymbolView name="record.circle" size={46} weight="light" tintColor={Tram.veryLate} />
+          <Text style={[styles.emptyTitle, { color: c.text }]}>No rides recorded</Text>
+          <Text style={[styles.emptyHint, { color: c.secondary }]}>
+            Open a tram you are riding and tap Record ride — the GPS vs. simulation track will be
+            stored here, safe across restarts.
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.section}>
+          <SectionLabel>Tap a ride to preview it on the map</SectionLabel>
+          <InsetGroup>
+            {entries.map((entry, i) => (
+              <Fragment key={entry.file.relPath}>
+                {i > 0 && <RowSeparator inset={SEPARATOR_INSET} />}
+                <RideRow entry={entry} />
+              </Fragment>
+            ))}
+          </InsetGroup>
+        </View>
+      )}
+    </SheetSurface>
   );
 }
 
 const SEPARATOR_INSET = 58;
 
 const styles = StyleSheet.create({
-  sheet: { flex: 1 },
-  scrollBottom: { paddingBottom: 48 },
-  content: { gap: 24, padding: 16 },
+  section: { gap: 8 },
+  pressed: { opacity: 0.55 },
   row: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -183,8 +191,8 @@ const styles = StyleSheet.create({
   },
   rowText: { flex: 1, gap: 2 },
   titleRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
-  title: { flexShrink: 1, fontSize: 15, fontWeight: '600' },
-  subtitle: { fontSize: 12 },
+  title: { flexShrink: 1, fontSize: 16, fontWeight: '600' },
+  subtitle: { fontSize: 13 },
   orphanBadge: {
     alignItems: 'center',
     backgroundColor: Tram.late,
@@ -195,13 +203,19 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   orphanLabel: { color: '#FFFFFF', fontSize: 10, fontWeight: '700' },
-  shareBtn: { padding: 4 },
+  moreBtn: {
+    alignItems: 'center',
+    borderRadius: 15,
+    height: 30,
+    justifyContent: 'center',
+    width: 30,
+  },
   empty: {
     alignItems: 'center',
     gap: 10,
     paddingHorizontal: 32,
     paddingVertical: 56,
   },
-  emptyTitle: { fontSize: 20, fontWeight: '700', marginTop: 6 },
-  emptyHint: { fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  emptyTitle: { fontSize: 22, fontWeight: '700', marginTop: 6 },
+  emptyHint: { fontSize: 15, lineHeight: 21, textAlign: 'center' },
 });

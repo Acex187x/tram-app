@@ -9,7 +9,7 @@ import { GLView, type ExpoWebGLRenderingContext } from 'expo-gl';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as THREE from 'three';
@@ -41,6 +41,7 @@ import {
   ZOOM_MIN_FACTOR,
   type OrbitState,
 } from '@/components/model/orbitMath';
+import { CircleControl } from '@/components/maps-kit/CircleControl';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { Colors } from '@/constants/theme';
 import { MODEL_ASSETS, MODEL_SPECS } from '@/lib/fleet/modelSpecs';
@@ -439,22 +440,15 @@ export default function ModelViewerScreen() {
         </View>
       )}
 
-      {/* Close — top-right */}
-      <GlassPanel
-        variant="clear"
-        interactive
-        style={[styles.closeGlass, { top: insets.top + 8 }]}
-      >
-        <Pressable
+      {/* Close — top-right, Apple circular translucent control */}
+      <View style={[styles.closeSlot, { top: insets.top + 8 }]}>
+        <CircleControl
+          symbol="xmark"
+          label="Close 3D viewer"
           onPress={onClose}
-          hitSlop={10}
-          style={({ pressed }) => [styles.closePress, pressed && { opacity: 0.6 }]}
-          accessibilityRole="button"
-          accessibilityLabel="Close 3D viewer"
-        >
-          <SymbolView name="xmark" size={17} tintColor={c.text} />
-        </Pressable>
-      </GlassPanel>
+          appearance={scheme}
+        />
+      </View>
 
       {/* Model card — bottom */}
       <GlassPanel style={[styles.infoGlass, { bottom: Math.max(insets.bottom, 12) + 8 }]}>
@@ -505,8 +499,7 @@ const styles = StyleSheet.create({
   },
   chipText: { fontSize: 12, fontVariant: ['tabular-nums'], fontWeight: '600' },
   chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
-  closeGlass: { position: 'absolute', right: 16 },
-  closePress: { alignItems: 'center', height: 40, justifyContent: 'center', width: 40 },
+  closeSlot: { position: 'absolute', right: 16 },
   errorTitle: { fontSize: 17, fontWeight: '700' },
   gl: { flex: 1 },
   hintRow: { alignItems: 'center', flexDirection: 'row', gap: 5, marginTop: 10 },

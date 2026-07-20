@@ -1,28 +1,22 @@
-// /icon-preview/[pack] — large-scale icon-pack preview sheet. Opened from the
-// Settings 'Tram icons' picker (magnifier on each pack row); shows every tram
-// model of one pack big enough to actually study the art, with a segmented
-// pack switcher to compare all four styles side by side. Tapping a model zooms
-// it further (near full-sheet). 'Use this pack' applies the previewed pack via
+// /icon-preview/[pack] — large-scale icon-pack preview sheet, re-skinned to
+// Apple Maps chrome: a large-title SheetHeader with circular X, an Apple
+// SegmentedPills pack switcher, the study grid, and a prominent blue "Use pack"
+// action pinned at the bottom. Opened from the Settings 'Tram icons' picker
+// (magnifier on each pack row). 'Use this pack' applies the previewed pack via
 // the same settings-store path as the picker; browsing alone changes nothing.
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  useColorScheme,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { SheetHeader } from '@/components/favorites/SheetHeader';
 import { TramFace } from '@/components/tram/TramFace';
 import { GlassPanel } from '@/components/ui/GlassPanel';
+import { SegmentedPills } from '@/components/ui/SegmentedPills';
 import { SheetContent } from '@/components/ui/SheetContent';
-import { Colors, Tram } from '@/constants/theme';
+import { SheetHeader } from '@/components/ui/SheetHeader';
+import { appleScheme, Apple, Radii } from '@/constants/theme';
 import { ICON_PACKS, ICON_PACK_IDS, type IconPackId } from '@/lib/fleet/iconPacks';
 import { MODEL_SPECS } from '@/lib/fleet/modelSpecs';
 import type { TramModelId } from '@/lib/types';
@@ -50,69 +44,13 @@ const PACK_SHORT_NAME: Record<IconPackId, string> = {
   chibi: 'Chibi',
 };
 
+const PACK_SEGMENTS = ICON_PACK_IDS.map((id) => ({ key: id, label: PACK_SHORT_NAME[id] }));
+
 const GRID_FACE_SIZE = 132;
 const ZOOM_FACE_SIZE = 240;
 
 function isIconPackId(value: string): value is IconPackId {
   return (ICON_PACK_IDS as string[]).includes(value);
-}
-
-/** Segmented control over the 4 packs (same look as the settings segments). */
-function PackSegments({
-  value,
-  onChange,
-}: {
-  value: IconPackId;
-  onChange: (pack: IconPackId) => void;
-}) {
-  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const palette = Colors[scheme];
-  return (
-    <View
-      style={[
-        styles.segments,
-        {
-          backgroundColor:
-            scheme === 'dark' ? 'rgba(118,118,128,0.24)' : 'rgba(118,118,128,0.14)',
-        },
-      ]}
-    >
-      {ICON_PACK_IDS.map((packId) => {
-        const selected = packId === value;
-        return (
-          <Pressable
-            key={packId}
-            accessibilityRole="button"
-            accessibilityState={{ selected }}
-            accessibilityLabel={`Preview ${ICON_PACKS[packId].meta.name}`}
-            onPress={() => {
-              if (selected) return;
-              void Haptics.selectionAsync();
-              onChange(packId);
-            }}
-            style={[
-              styles.segment,
-              selected && {
-                backgroundColor: scheme === 'dark' ? '#636366' : '#FFFFFF',
-                boxShadow: '0 1px 4px rgba(0,0,0,0.14)',
-              },
-            ]}
-          >
-            <Text
-              allowFontScaling={false}
-              style={{
-                color: selected ? palette.text : palette.textSecondary,
-                fontSize: 13,
-                fontWeight: selected ? '600' : '500',
-              }}
-            >
-              {PACK_SHORT_NAME[packId]}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
 }
 
 /** Near-full-sheet single-model zoom: huge face, code + real name, switcher. */
@@ -127,8 +65,7 @@ function ZoomOverlay({
   onChangePack: (pack: IconPackId) => void;
   onClose: () => void;
 }) {
-  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const palette = Colors[scheme];
+  const c = appleScheme(useColorScheme() === 'dark' ? 'dark' : 'light');
   const insets = useSafeAreaInsets();
   const spec = MODEL_SPECS[modelId];
   return (
@@ -140,21 +77,17 @@ function ZoomOverlay({
         style={styles.zoomBody}
       >
         <TramFace pack={pack} modelId={modelId} size={ZOOM_FACE_SIZE} />
-        <Text style={[styles.zoomCode, { color: palette.text }]}>
-          {MODEL_CODE[modelId]}
-        </Text>
-        <Text style={[styles.zoomName, { color: palette.textSecondary }]}>
-          {spec.name}
-        </Text>
-        <Text style={[styles.zoomHint, { color: palette.textSecondary }]}>
-          Tap to close
-        </Text>
+        <Text style={[styles.zoomCode, { color: c.text }]}>{MODEL_CODE[modelId]}</Text>
+        <Text style={[styles.zoomName, { color: c.secondary }]}>{spec.name}</Text>
+        <Text style={[styles.zoomHint, { color: c.secondary }]}>Tap to close</Text>
       </Pressable>
       {/* Pack switcher stays live in zoom so one model can be compared across styles. */}
-      <SheetContent
-        style={[styles.zoomFooter, { paddingBottom: Math.max(insets.bottom, 12) + 8 }]}
-      >
-        <PackSegments value={pack} onChange={onChangePack} />
+      <SheetContent style={[styles.zoomFooter, { paddingBottom: Math.max(insets.bottom, 12) + 8 }]}>
+        <SegmentedPills
+          segments={PACK_SEGMENTS}
+          selectedKey={pack}
+          onChange={(key) => onChangePack(key as IconPackId)}
+        />
       </SheetContent>
     </GlassPanel>
   );
@@ -162,8 +95,7 @@ function ZoomOverlay({
 
 export default function IconPreviewScreen() {
   const params = useLocalSearchParams<{ pack: string }>();
-  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const palette = Colors[scheme];
+  const c = appleScheme(useColorScheme() === 'dark' ? 'dark' : 'light');
   const insets = useSafeAreaInsets();
   const iconPack = useSettingsStore((s) => s.iconPack);
   const setIconPack = useSettingsStore((s) => s.setIconPack);
@@ -190,17 +122,20 @@ export default function IconPreviewScreen() {
       <SheetContent>
         <SheetHeader title="Icon preview" />
         <View style={styles.switcher}>
-          <PackSegments value={viewPack} onChange={setViewPack} />
-          <Text style={[styles.packDescription, { color: palette.textSecondary }]}>
-            {meta.description}
-          </Text>
+          <SegmentedPills
+            segments={PACK_SEGMENTS}
+            selectedKey={viewPack}
+            onChange={(key) => {
+              if (key === viewPack) return;
+              void Haptics.selectionAsync();
+              setViewPack(key as IconPackId);
+            }}
+          />
+          <Text style={[styles.packDescription, { color: c.secondary }]}>{meta.description}</Text>
         </View>
       </SheetContent>
 
-      <ScrollView
-        contentContainerStyle={styles.scrollBottom}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={styles.scrollBottom} showsVerticalScrollIndicator={false}>
         <SheetContent>
           <View style={styles.grid}>
             {MODEL_IDS.map((modelId) => (
@@ -215,13 +150,8 @@ export default function IconPreviewScreen() {
                 style={({ pressed }) => [styles.tile, pressed && { opacity: 0.6 }]}
               >
                 <TramFace pack={viewPack} modelId={modelId} size={GRID_FACE_SIZE} />
-                <Text style={[styles.tileCode, { color: palette.text }]}>
-                  {MODEL_CODE[modelId]}
-                </Text>
-                <Text
-                  style={[styles.tileName, { color: palette.textSecondary }]}
-                  numberOfLines={2}
-                >
+                <Text style={[styles.tileCode, { color: c.text }]}>{MODEL_CODE[modelId]}</Text>
+                <Text style={[styles.tileName, { color: c.secondary }]} numberOfLines={2}>
                   {MODEL_SPECS[modelId].name}
                 </Text>
               </Pressable>
@@ -231,9 +161,7 @@ export default function IconPreviewScreen() {
       </ScrollView>
 
       {/* Sticky apply footer — mirrors the picker's setIconPack path. */}
-      <SheetContent
-        style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) + 4 }]}
-      >
+      <SheetContent style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ disabled: isCurrent }}
@@ -241,27 +169,15 @@ export default function IconPreviewScreen() {
           onPress={onUsePack}
           style={({ pressed }) => [
             styles.useButton,
-            isCurrent
-              ? {
-                  backgroundColor:
-                    scheme === 'dark' ? 'rgba(118,118,128,0.24)' : 'rgba(118,118,128,0.14)',
-                }
-              : { backgroundColor: Tram.pidRed },
+            isCurrent ? { backgroundColor: c.fillTertiary } : { backgroundColor: Apple.blue },
             pressed && !isCurrent && { opacity: 0.75 },
           ]}
         >
           {isCurrent && (
-            <SymbolView
-              name="checkmark.circle.fill"
-              size={17}
-              tintColor={palette.textSecondary}
-            />
+            <SymbolView name="checkmark.circle.fill" size={17} tintColor={c.secondary} />
           )}
           <Text
-            style={[
-              styles.useButtonText,
-              { color: isCurrent ? palette.textSecondary : '#FFFFFF' },
-            ]}
+            style={[styles.useButtonText, { color: isCurrent ? c.secondary : '#FFFFFF' }]}
           >
             {isCurrent ? 'Current pack' : `Use ${meta.name}`}
           </Text>
@@ -281,36 +197,18 @@ export default function IconPreviewScreen() {
 }
 
 const styles = StyleSheet.create({
-  sheet: {
-    flex: 1,
-  },
+  sheet: { flex: 1 },
   switcher: {
-    gap: 8,
+    gap: 10,
     paddingHorizontal: 16,
     paddingTop: 4,
-  },
-  segments: {
-    borderCurve: 'continuous',
-    borderRadius: 10,
-    flexDirection: 'row',
-    padding: 2,
-  },
-  segment: {
-    alignItems: 'center',
-    borderCurve: 'continuous',
-    borderRadius: 8,
-    flex: 1,
-    justifyContent: 'center',
-    paddingVertical: 7,
   },
   packDescription: {
     fontSize: 13,
     lineHeight: 18,
     minHeight: 36,
   },
-  scrollBottom: {
-    paddingBottom: 12,
-  },
+  scrollBottom: { paddingBottom: 12 },
   grid: {
     columnGap: 12,
     flexDirection: 'row',
@@ -343,14 +241,14 @@ const styles = StyleSheet.create({
   useButton: {
     alignItems: 'center',
     borderCurve: 'continuous',
-    borderRadius: 14,
+    borderRadius: Radii.card,
     flexDirection: 'row',
     gap: 7,
     justifyContent: 'center',
-    minHeight: 50,
+    minHeight: 52,
   },
   useButtonText: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
   },
   zoomBody: {

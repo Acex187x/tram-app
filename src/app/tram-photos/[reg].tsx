@@ -1,14 +1,15 @@
 // Historical photos of one physical tram car, by DPP registration number —
 // full-screen push registered in _layout as tram-photos/[reg]; navigate with
-// router.push('/tram-photos/' + registrationNumber).
+// router.push('/tram-photos/' + registrationNumber). Re-skinned to Apple Maps:
+// circular translucent header controls (CloseCircle), a big rounded photo-band
+// container framing the gallery, and Apple typography for the empty/error states.
 //
 // Source: TransPhoto (transphoto.org — "Urban Electric Transit", ex-СТТС), the
 // community archive with a page per physical vehicle. We resolve reg → vehicle
 // page via the site's own public quick-search endpoint (one tiny GET, see
 // '@/lib/photos/transphoto'), then render the ORIGINAL page in a WebView so
 // photographer credits, watermarks and site branding stay intact — photos are
-// never scraped or re-hosted. Attribution footer links to transphoto.org;
-// the header offers "open in Safari" for the full experience.
+// never scraped or re-hosted. Attribution footer links to transphoto.org.
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import * as WebBrowser from 'expo-web-browser';
@@ -24,8 +25,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 
+import { CloseCircle } from '@/components/ui/CloseCircle';
 import { GlassPanel } from '@/components/ui/GlassPanel';
-import { Colors, Tram } from '@/constants/theme';
+import { appleScheme, Apple, Radii } from '@/constants/theme';
 import {
   PRAGUE_CITY_URL,
   resolveVehiclePageUrl,
@@ -50,21 +52,19 @@ function CenterState({
   subtitle: string;
   children?: React.ReactNode;
 }) {
-  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const c = Colors[scheme];
+  const c = appleScheme(useColorScheme() === 'dark' ? 'dark' : 'light');
   return (
     <View style={styles.centerWrap}>
-      <SymbolView name={icon} size={44} tintColor={c.textSecondary} />
+      <SymbolView name={icon} size={44} tintColor={c.secondary} />
       <Text style={[styles.centerTitle, { color: c.text }]}>{title}</Text>
-      <Text style={[styles.centerSubtitle, { color: c.textSecondary }]}>{subtitle}</Text>
+      <Text style={[styles.centerSubtitle, { color: c.secondary }]}>{subtitle}</Text>
       {children}
     </View>
   );
 }
 
+/** Prominent blue-tinted pill action for the empty/error states. */
 function GlassAction({ label, onPress }: { label: string; onPress: () => void }) {
-  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const c = Colors[scheme];
   return (
     <GlassPanel variant="clear" interactive style={styles.actionGlass}>
       <Pressable
@@ -73,7 +73,7 @@ function GlassAction({ label, onPress }: { label: string; onPress: () => void })
         accessibilityRole="button"
         accessibilityLabel={label}
       >
-        <Text style={[styles.actionText, { color: c.text }]}>{label}</Text>
+        <Text style={[styles.actionText, { color: Apple.blue }]}>{label}</Text>
       </Pressable>
     </GlassPanel>
   );
@@ -87,7 +87,7 @@ export default function TramPhotosScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const c = Colors[scheme];
+  const c = appleScheme(scheme);
   const background = scheme === 'dark' ? '#0B0B0D' : '#F2F2F6';
 
   const [phase, setPhase] = useState<Phase>({ kind: 'resolving' });
@@ -128,37 +128,15 @@ export default function TramPhotosScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: background }]}>
-      {/* ── Header: back · title · open-in-browser ─────────────────────── */}
+      {/* ── Header: back · title · open-in-browser (Apple circular controls) ─ */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <GlassPanel variant="clear" interactive style={styles.headerButtonGlass}>
-          <Pressable
-            onPress={onBack}
-            hitSlop={10}
-            style={({ pressed }) => [styles.headerButtonPress, pressed && { opacity: 0.6 }]}
-            accessibilityRole="button"
-            accessibilityLabel="Back"
-          >
-            <SymbolView name="chevron.left" size={17} tintColor={c.text} />
-          </Pressable>
-        </GlassPanel>
-
+        <CloseCircle onPress={onBack} label="Back" symbol="chevron.left" size={38} />
         <View style={styles.headerTitleWrap}>
           <Text style={[styles.headerTitle, { color: c.text }]} numberOfLines={1}>
             {reg != null ? `Photos · #${reg}` : 'Photos'}
           </Text>
         </View>
-
-        <GlassPanel variant="clear" interactive style={styles.headerButtonGlass}>
-          <Pressable
-            onPress={openInBrowser}
-            hitSlop={10}
-            style={({ pressed }) => [styles.headerButtonPress, pressed && { opacity: 0.6 }]}
-            accessibilityRole="button"
-            accessibilityLabel="Open in browser"
-          >
-            <SymbolView name="safari" size={18} tintColor={c.text} />
-          </Pressable>
-        </GlassPanel>
+        <CloseCircle onPress={openInBrowser} label="Open in browser" symbol="safari" size={38} />
       </View>
 
       {/* ── Body ───────────────────────────────────────────────────────── */}
@@ -166,7 +144,7 @@ export default function TramPhotosScreen() {
         {phase.kind === 'resolving' && (
           <View style={styles.centerWrap}>
             <ActivityIndicator />
-            <Text style={[styles.centerSubtitle, { color: c.textSecondary }]}>
+            <Text style={[styles.centerSubtitle, { color: c.secondary }]}>
               Finding car #{reg} on TransPhoto…
             </Text>
           </View>
@@ -200,7 +178,7 @@ export default function TramPhotosScreen() {
         )}
 
         {phase.kind === 'found' && (
-          <View style={styles.webviewWrap}>
+          <View style={styles.photoBand}>
             <WebView
               key={`${phase.url}#${attempt}`}
               source={{ uri: phase.url }}
@@ -235,8 +213,8 @@ export default function TramPhotosScreen() {
         accessibilityRole="link"
         accessibilityLabel="Photos from TransPhoto, opens transphoto.org"
       >
-        <SymbolView name="camera.fill" size={11} tintColor={c.textSecondary} />
-        <Text style={[styles.attributionText, { color: c.textSecondary }]}>
+        <SymbolView name="camera.fill" size={11} tintColor={c.secondary} />
+        <Text style={[styles.attributionText, { color: c.secondary }]}>
           Photos from TransPhoto · transphoto.org — © their photographers
         </Text>
       </Pressable>
@@ -248,7 +226,7 @@ const styles = StyleSheet.create({
   actionGlass: { borderRadius: 999 },
   actionPress: { paddingHorizontal: 20, paddingVertical: 9 },
   actionRow: { flexDirection: 'row', gap: 10 },
-  actionText: { fontSize: 14, fontWeight: '600' },
+  actionText: { fontSize: 15, fontWeight: '600' },
   attribution: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -259,8 +237,8 @@ const styles = StyleSheet.create({
   },
   attributionText: { fontSize: 11, fontWeight: '500' },
   body: { flex: 1 },
-  centerSubtitle: { fontSize: 14, lineHeight: 20, textAlign: 'center' },
-  centerTitle: { fontSize: 19, fontWeight: '700' },
+  centerSubtitle: { fontSize: 15, lineHeight: 21, textAlign: 'center' },
+  centerTitle: { fontSize: 20, fontWeight: '700' },
   centerWrap: {
     alignItems: 'center',
     flex: 1,
@@ -275,15 +253,16 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     paddingHorizontal: 16,
   },
-  headerButtonGlass: { borderRadius: 20 },
-  headerButtonPress: {
-    alignItems: 'center',
-    height: 40,
-    justifyContent: 'center',
-    width: 40,
-  },
   headerTitle: { fontSize: 17, fontWeight: '700', letterSpacing: -0.2 },
   headerTitleWrap: { alignItems: 'center', flex: 1 },
+  photoBand: {
+    borderCurve: 'continuous',
+    borderRadius: Radii.card,
+    flex: 1,
+    marginBottom: 8,
+    marginHorizontal: 12,
+    overflow: 'hidden',
+  },
   root: { flex: 1 },
   webview: { flex: 1 },
   webviewLoader: {
@@ -295,5 +274,4 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
   },
-  webviewWrap: { flex: 1 },
 });
