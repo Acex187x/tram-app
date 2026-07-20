@@ -118,6 +118,15 @@ SHIP = dict(
     daytime=False,
     off_gate=30.0,         # fOffM gate on ground-truth points
     proj_alpha=0.5,        # schedule-pace-proxy EWMA gain (replay.py value)
+    feed_latency=3.0,      # FEED_LATENCY_S (R12, 2026-07-20): hidden pipeline
+                           # latency BEYOND obsAt. Used as a latency-aware
+                           # EFFECTIVE FIX AGE (fix_age + feed_latency) in the
+                           # stop-hold staleness checks (pin freeze + dwell
+                           # hold), so a stale at-stop fix releases this many
+                           # seconds earlier. The ride shows the raw fix already
+                           # +77 m behind reality at apparent age 0-15 s (≈8-14 s
+                           # of latency at ~5 m/s); 3 s is the shrunk half-step
+                           # (effective wall release ~42 s, within one cadence).
 )
 
 GRID_M = 10.0  # vLimit sampling grid along the shape
@@ -436,9 +445,14 @@ def replay(ride, cfg):
                     dwell_until = t + dwell_s(cfg, pseq) * 1000
 
         fix_age = (t - fx["at"]) / 1000.0
-        pin_active = fix_pin is not None and fix_age <= cfg["stop_hold_age"]
+        # R12 latency-aware effective age: the fix is older than obsAt claims by
+        # the hidden pipeline latency, so the "too stale to still be standing"
+        # clock runs on (fix_age + feed_latency) — releasing a stale at-stop
+        # hold that much earlier (the ride's dominant −374 m behind-mass).
+        eff_age = fix_age + cfg["feed_latency"]
+        pin_active = fix_pin is not None and eff_age <= cfg["stop_hold_age"]
 
-        # target: obs projected forward at the schedule-pace proxy
+        # target: obs projected forward at the schedule-pace proxy.
         if pin_active:
             s_obs = fx["dist"]
         else:
@@ -452,7 +466,7 @@ def replay(ride, cfg):
             v = 0.0
             if t >= dwell_until:
                 hold_fix = (
-                    fix_age <= cfg["stop_hold_age"]
+                    eff_age <= cfg["stop_hold_age"]
                     and fx["dist"] - dwell_obs <= cfg["stop_hold_move"]
                     and s - fx["dist"] >= -cfg["stop_hold_ahead"]
                     and (s - fx["dist"] <= cfg["stop_hold_near"]
@@ -554,12 +568,21 @@ def score(ride, cfg):
 
 # The shipped 2026-07-20 change: STOP_HOLD_MAX_FIX_AGE_S 60 → 45 (one fix
 # cadence p50). BASELINE_60 reproduces the pre-change engine for the gate row.
-BASELINE_60 = {**SHIP, "stop_hold_age": 60.0}
+BASELINE_60 = {**SHIP, "stop_hold_age": 60.0, "feed_latency": 0.0}
+# R11 prior: the pre-R12 engine (hold 45, NO latency-aware effective fix age).
+# This is the row the R12 change must beat on the ground truth.
+NO_LATENCY = {**SHIP, "feed_latency": 0.0}
 CANDIDATE = dict(SHIP)
 
 SWEEP = [
-    ("hold_age 40", {**SHIP, "stop_hold_age": 40.0}),
-    ("hold_age 45", {**SHIP, "stop_hold_age": 45.0}),
+    ("feed_latency 0 (pre-R12)", {**SHIP, "feed_latency": 0.0}),
+    ("feed_latency 3 (SHIP)", {**SHIP, "feed_latency": 3.0}),
+    ("feed_latency 5", {**SHIP, "feed_latency": 5.0}),
+    ("feed_latency 6", {**SHIP, "feed_latency": 6.0}),
+    ("feed_latency 8", {**SHIP, "feed_latency": 8.0}),
+    ("feed_latency 10 (probe)", {**SHIP, "feed_latency": 10.0}),
+    ("hold_age 40", {**SHIP, "stop_hold_age": 40.0, "feed_latency": 0.0}),
+    ("hold_age 45", {**SHIP, "stop_hold_age": 45.0, "feed_latency": 0.0}),
     ("catchup 1.5", {**SHIP, "catchup_max": 1.5}),
     ("catchup 1.55", {**SHIP, "catchup_max": 1.55}),
     ("catchup 1.7 (probe)", {**SHIP, "catchup_max": 1.7}),
@@ -590,9 +613,10 @@ def main():
               f"span {r.s_min:.0f}-{r.s_max:.0f} m")
 
     configs = [("BASELINE (hold 60, pre-change)", BASELINE_60)]
+    configs.append(("R11 prior (hold 45, no latency)", NO_LATENCY))
     if sweep:
         configs += SWEEP
-    configs.append(("SHIP (hold 45, current)", SHIP))
+    configs.append(("SHIP (hold 45, feed_latency 3, R12)", SHIP))
 
     print(f"\n{'config':28s} {'mean|e|':>8s} {'p50|e|':>7s} {'p90|e|':>7s} "
           f"{'signed':>7s} {'%ahead':>7s} {'fid_mean':>9s}")

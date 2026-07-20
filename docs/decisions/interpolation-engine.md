@@ -585,12 +585,47 @@ latest fix still pins the tram at the stop: fix within `[−STOP_HOLD_AHEAD_EPS_
 +STOP_HOLD_NEAR_BEHIND_M]` of the dwell position (or explicit `at_stop` within
 `AT_STOP_MATCH_M`), **and** the fix has not advanced more than `STOP_HOLD_MOVE_EPS_M` past
 the fix seen at dwell entry (`dwellObsDistM`), **and** the fix is younger than
-`STOP_HOLD_MAX_FIX_AGE_S = 60 s`. Release triggers: a fresh fix that **moved** (departure
-evidence — released within a tick), or fix **staleness** (the feed's cadence is ~45 s p50; a
-tram that left right after its last fix shows a moving fix within ~one cadence, so past 60 s
-an unseen departure is likelier than a record dwell — the bounded compromise, never an
-eternal wait). Applies to **all** sims — main and projections (both render modes had the
-early-departure bug). Fresh at-stop fixes re-arm the hold indefinitely: that is reality.
+`STOP_HOLD_MAX_FIX_AGE_S = 45 s` **on the latency-aware clock** (below). Release triggers: a
+fresh fix that **moved** (departure evidence — released within a tick), or fix **staleness**
+(the feed's cadence is ~45 s p50; a tram that left right after its last fix shows a moving
+fix within ~one cadence, so past the bound an unseen departure is likelier than a record
+dwell — the bounded compromise, never an eternal wait). Applies to **all** sims — main and
+projections (both render modes had the early-departure bug). Fresh at-stop fixes re-arm the
+hold indefinitely: that is reality.
+
+### Latency-aware effective fix age (R12, first ground-truth ride 2026-07-20)
+
+**Problem.** `obsAt` is not the instant the tram was at `obsDist`. The rider recording
+(`docs/calibration/analysis-2026-07-20-ride.md` §2) shows the raw fix trails reality by
+**+77 m at an apparent age of 0–15 s** — i.e. ≈ 8–14 s of hidden pipeline latency (poll +
+AVL processing) **beyond `obsAt`**, at the ~5 m/s real pace. The feed keeps reporting
+`at_stop` for 50–75 s while the real platform dwell is 15–20 s, so a staleness clock run on
+the *apparent* age pinned the sim at stops long after the real departure (worst observed
+**−374 m**, the ride's single largest behind-mass; sim glued to a stale fix for 95 s vs a
+15 s real dwell).
+
+**Decision.** Every "is this fix too stale to still be a stand?" check runs on the **true**
+age `staleFixAgeMs = (now − obsAt) + FEED_LATENCY_S` (`tramSim.ts`), used by both
+`fixPinActive` (the arrival-pin projection freeze / target cap) and `fixPinsDwell` (the
+dwell hold). A stale at-stop hold therefore releases `FEED_LATENCY_S` **earlier** than its
+apparent age — the tram departs the phantom-held stop sooner and the following inter-stop
+run starts from a smaller deficit. **`STOP_HOLD_MAX_FIX_AGE_S` is unchanged (45 s = one fix
+cadence p50)** — this corrects the age *measurement* it is compared against, not the
+cadence constant; the effective wall release lands at ~42 s, still within one cadence (not
+the sub-cadence 35–40 s hold the analysis defers pending ≥2 rides). `FEED_LATENCY_S = 3 s`
+is a **shrunk half-step** from the shipped 0 toward the ride-replay optimum (~5–8 s), well
+under the measured 8–14 s — **tunable, recalibrate on future ride recordings.**
+
+Gate: **ride replay** (`ride_replay.py`, scored vs the rider GPS) mean |err| **135 → 124 m
+(−8 %)**, p90 266 → 257 (dispersion improves — the behind-tail shrinks), signed −94 → −81;
+**fleet replay** (`replay.py`, session-2026-07-11) **bit-identical** (median 124.9 — the
+hold bound never binds at fleet cadence, verified identical across 35–45 s, the same
+neutrality the STOP_HOLD 60→45 change had). The projection-forward variant (adding the
+latency to the schedule-pace dead-reckoning) was rejected: it cut the signed bias but
+inflated the ride's ahead-tail and grew the fleet at-fix median (it scores against lagged
+fixes, so any forward compensation reads as "more ahead") — the stale-hold release attacks
+the same bias where the error is actually born. Tests: `engine-realism.test.ts`
+"latency-aware release … without jitter".
 
 ### Arrival-fix anchor (`updateFixStopPin`, tramSim.ts) — a fix AT a stop never overshoots it (2026-07-19)
 
@@ -611,8 +646,9 @@ while the real tram stood boarding: "до апдейта ещё ехал к ос
   evidence; a tram sweeping past a platform shows a large inter-fix advance and is never
   pinned). The positional branch closes the `STUCK_NEAR_STOP_M` hole where platform stands
   were suppressed from stuck-holds but nothing else owned them.
-- **While pinned & fresh** (same `STOP_HOLD_MAX_FIX_AGE_S = 60 s` staleness bound as the
-  stop-hold): the observation is **not** projected forward at schedule pace
+- **While pinned & fresh** (same latency-aware `STOP_HOLD_MAX_FIX_AGE_S = 45 s` staleness
+  bound as the stop-hold — `fixPinActive` uses `staleFixAgeMs`, R12): the observation is
+  **not** projected forward at schedule pace
   (`observedDistAt`), and `targetDistAt` is **capped at the platform** — a late timetable
   can never drag the sim beyond a stop the fix holds it at; the adaptive shorten/skip paths
   see `e ≤ 0` there and never trim the dwell.
@@ -796,7 +832,8 @@ last-viewport fallback, per-poll re-assertion of the split).
 | `JUNCTION_MIN/MAX_ANGLE_DEG` | 25° / 155° | engine.ts | genuine crossing-angle gate (§9) |
 | `JUNCTION_ZONE_M` / `JUNCTION_CLEAR_M` | 12 / 3 m | engine.ts | conflict-zone hold point / tail-clear margin (§9) |
 | `SWITCH_SLOW_V_MS` / `SWITCH_SLOW_RADIUS_M` | 6.0 m/s / 25 m | engine.ts | contested-junction pass cap (§9 heuristic, tune vs ride data) |
-| `STOP_HOLD_MAX_FIX_AGE_S` | 60 s | tramSim.ts | fix-hold staleness release (§14) |
+| `STOP_HOLD_MAX_FIX_AGE_S` | 45 s | tramSim.ts | fix-hold staleness release, one fix cadence (§14) |
+| `FEED_LATENCY_S` | 3 s | tramSim.ts | latency-aware effective fix age: hold releases this earlier (§14, R12, tune vs ride data) |
 | `STOP_HOLD_MOVE_EPS_M` | 8 m | tramSim.ts | fix advance past dwell-entry fix = departure evidence |
 | `STOP_HOLD_NEAR_BEHIND_M` / `STOP_HOLD_AHEAD_EPS_M` | 30 / 8 m | tramSim.ts | "fix pins this stop" window |
 | `STUCK_FIX_EPS_M` / `STUCK_NEAR_STOP_M` | 8 / 40 m | tramSim.ts | stuck detection / near-stop suppression (§14) |

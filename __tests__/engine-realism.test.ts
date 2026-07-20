@@ -22,6 +22,7 @@ import {
   createSim,
   DEPART_BURST_DIST_M,
   DEPART_BURST_FACTOR,
+  FEED_LATENCY_S,
   PACE_BIAS_PRIOR,
   STOP_HOLD_MAX_FIX_AGE_S,
   STUCK_BACK_EPS_M,
@@ -408,7 +409,7 @@ describe('stop-hold: the sim never departs ahead of an at-stop fix (#1)', () => 
     expect(sim.sM).toBeGreaterThan(505);
   });
 
-  it('with NO fresh fixes the hold expires after STOP_HOLD_MAX_FIX_AGE_S (bounded compromise)', () => {
+  it('with NO fresh fixes the hold expires at STOP_HOLD_MAX_FIX_AGE_S − FEED_LATENCY_S (latency-aware, R12)', () => {
     const geo = stopGeo();
     const profile = buildSpeedProfile(geo, { daytime: false });
     const sim = createSim(
@@ -423,13 +424,68 @@ describe('stop-hold: the sim never departs ahead of an at-stop fix (#1)', () => 
       T0,
     );
     expect(sim.phase).toBe('dwell');
-    // Still held at the platform right before the staleness budget runs out…
-    run(sim, T0, STOP_HOLD_MAX_FIX_AGE_S - 2);
+    // The fix is FEED_LATENCY_S older than its obsAt claims (hidden pipeline
+    // latency), so the effective staleness clock runs on (age + FEED_LATENCY_S)
+    // and the hold releases a latency EARLIER than its apparent age — R12.
+    const releaseS = STOP_HOLD_MAX_FIX_AGE_S - FEED_LATENCY_S;
+    expect(FEED_LATENCY_S).toBeGreaterThan(0); // mechanism is active
+    // Still held right before the latency-adjusted budget runs out…
+    run(sim, T0, releaseS - 2);
     expect(sim.phase).toBe('dwell');
     // …and departed shortly after it does (the feed is silent — the tram most
-    // likely left between fixes; waiting forever would be worse).
-    run(sim, T0 + (STOP_HOLD_MAX_FIX_AGE_S - 2) * 1000, 10);
+    // likely left between fixes; waiting forever would be worse). The departure
+    // is a smooth cruise transition, never a teleport.
+    run(sim, T0 + (releaseS - 2) * 1000, 10);
     expect(sim.phase).toBe('cruise');
+    expect(sim.lastTeleportMs).toBe(0);
+  });
+
+  it('latency-aware release is EARLIER than the apparent age would allow, without jitter (R12)', () => {
+    const geo = stopGeo();
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const mk = () =>
+      createSim(
+        geo,
+        profile,
+        makeSnapshot({
+          shapeDistM: 499,
+          observedAtMs: T0,
+          statePosition: 'at_stop',
+          lastStopSequence: geo.stops[1].sequence,
+        }),
+        T0,
+      );
+
+    // Sampled at an age BETWEEN the latency-aware release (≈ 42 s) and the raw
+    // bound (45 s): a latency-blind hold would still be dwelling here; the R12
+    // hold has already left, because the fix is really FEED_LATENCY_S older.
+    const probeS = STOP_HOLD_MAX_FIX_AGE_S - FEED_LATENCY_S / 2;
+    expect(probeS).toBeLessThan(STOP_HOLD_MAX_FIX_AGE_S);
+    expect(probeS).toBeGreaterThan(STOP_HOLD_MAX_FIX_AGE_S - FEED_LATENCY_S);
+    const sim = mk();
+    run(sim, T0, probeS);
+    expect(sim.phase).toBe('cruise'); // released early by the latency correction
+    expect(sim.sM).toBeGreaterThanOrEqual(500); // departed forward, monotonic
+    expect(sim.lastTeleportMs).toBe(0); // no teleport/jerk on release
+
+    // A FRESH at_stop fix (age 0) is NOT affected by the latency: it re-arms
+    // the hold and the tram keeps standing — latency only ages an OLD fix.
+    const held = mk();
+    let now = run(held, T0, 20);
+    applySnapshot(
+      held,
+      makeSnapshot({
+        shapeDistM: 499,
+        observedAtMs: now,
+        statePosition: 'at_stop',
+        lastStopSequence: geo.stops[1].sequence,
+      }),
+      now,
+    );
+    // Well past FEED_LATENCY_S since the re-arm, still comfortably fresh: held.
+    now = run(held, now, FEED_LATENCY_S + 5);
+    expect(held.phase).toBe('dwell');
+    expect(held.sM).toBeLessThanOrEqual(500.01);
   });
 
   it('the live projection is held at the stop by the pinning fix too', () => {

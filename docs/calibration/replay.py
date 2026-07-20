@@ -220,9 +220,13 @@ def replay(cfg):
                     cap = cfg["v_center"] if in_center_at(loc, s) else cfg["v_max"]
                     # 45 s mirrors STOP_HOLD_MAX_FIX_AGE_S (60 → 45, ride
                     # calibration 2026-07-20 — see analysis-2026-07-20-ride.md;
-                    # fleet metrics verified identical at 60 vs 40/45 s on
-                    # session-2026-07-11: the bound rarely binds here).
-                    if stuck and t - tprev <= 45_000:
+                    # fleet metrics verified identical at 60 vs 40/45/39/35 s on
+                    # session-2026-07-11: the bound rarely binds here). R12
+                    # latency-aware effective age: the engine now compares
+                    # (age + FEED_LATENCY_S=3 s) against the bound, so the
+                    # effective wall release is ~42 s — still bit-identical here
+                    # (the effective bound stays inside the 35-45 s dead band).
+                    if stuck and t - tprev + 3_000 <= 45_000:
                         # Stuck-hold: target frozen AT the fix; brake to a
                         # stand there (envelope approach when still short).
                         # Releases when the pinning fix turns 60 s old (the

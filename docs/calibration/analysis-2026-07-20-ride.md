@@ -8,9 +8,14 @@ AVL latency — the thing `%ahead-vs-device` was carried open for since round 12
 
 **Headline: mean |fLagM| = 136 m, signed mean −85 m (the sim runs BEHIND the
 real tram two-thirds of the time). One dominant mechanism (stale at-stop
-fix-holds) explains the worst mass; one gated constant shipped
-(`STOP_HOLD_MAX_FIX_AGE_S` 60 → 45, ride-replay −25% mean |err|, fleet replay
-unchanged). New tool: `ride_replay.py` — the automated ride-calibration
+fix-holds) explains the worst mass. Two gated shipments target it:
+`STOP_HOLD_MAX_FIX_AGE_S` 60 → 45 (ride-replay −25% mean |err|), and — this
+round — **R12 latency-aware anchoring** (`FEED_LATENCY_S` 0 → 3 s: the
+stop-hold staleness clock runs on the fix's TRUE age, `(now − obsAt) +
+FEED_LATENCY_S`, releasing phantom at-stop holds ~3 s earlier; ride-replay
+135 → 124 m mean |err| −8%, p90 266 → 257, signed −94 → −81; fleet replay
+bit-identical). Both left the fleet unchanged (the bound never binds at fleet
+cadence). New tool: `ride_replay.py` — the automated ride-calibration
 pipeline for every future recording.**
 
 ## 1. The ride
@@ -136,6 +141,15 @@ anchor: one fix-cadence p50 (fleet-measured 45 s; this ride 40 s) instead of
 - jest green, `npx tsc --noEmit` clean (tests reference the constant
   symbolically).
 
+**`FEED_LATENCY_S` 0 → 3 s** (tramSim.ts — R12 latency-aware anchoring; see §5
+R12 for the full mechanism/gate). `obsAt` hides ~8–14 s of pipeline latency, so
+the stop-hold staleness clock now runs on `staleFixAgeMs = (now − obsAt) +
+FEED_LATENCY_S` (`fixPinActive` + `fixPinsDwell`), releasing stale at-stop holds
+~3 s earlier (effective wall release ~42 s). Ride replay mean |err| **135 → 124 m
+(−8 %)**, p90 266 → 257, signed −94 → −81; fleet replay **bit-identical** (median
+124.9). Shrunk half-step (the rejected forward-projection variant grew the fleet
+median; the ride optimum ~5–8 s and the `hold_age 40` equivalent await ≥2 rides).
+
 Deliberately NOT shipped despite replay wins (anti-overfit): hold 35–40 s
 (−33…−42 % on this ride but below one cadence — needs ≥2 independent rides),
 CATCHUP_MAX_FACTOR 1.5+ (≤5 %, inconsistent), CURVE_SLOW_FACTOR 1.0 (one half
@@ -182,11 +196,33 @@ plus the on-device logged error for absolute truth).
 **Structural follow-ups surfaced by this ride** (need tramSim/engine changes,
 own the next rounds; all replay-testable in ride_replay.py first):
 
-- **R12 (top): latency-aware projection** — project fixes forward by
-  `age × robust v_est` (moving-fix EWMA, uncertainty growing with age) instead
-  of pure schedule pace; the +77 m at fix age 0–15 s says even `obsAt` hides
-  ~10 s of pipeline latency. Expected to attack most of the remaining −85 m
-  signed bias.
+- **R12 (top): latency-aware anchoring — SHIPPED 2026-07-20 (this round).** The
+  +77 m at fix age 0–15 s says `obsAt` itself hides ~8–14 s of pipeline latency,
+  so a fix is older than its timestamp claims. Two mechanisms were built and
+  gated in `ride_replay.py`:
+  - *(rejected)* adding the latency to the schedule-pace **forward projection**
+    (`observedDistAt`/`targetDistAt`): cut the signed bias (−91 → −72 at 6 s)
+    but **did not drop mean |err|** — it traded the behind-tail for the ahead-
+    tail (the unobserved +205 m standstill episode) and **grew the fleet at-fix
+    median** (124.8 → 128 m: the fleet scores against LAGGED fixes, so any
+    forward compensation reads as "more ahead"). Both gates could not improve
+    together — the projection push is dispersion-limited by mechanisms R13–R15
+    own (the −374 m mass is a *held* dwell, not a projection error, so a target
+    moving forward under a fix-hold moves nothing).
+  - *(shipped)* **latency-aware effective fix age** in the stop-hold staleness
+    checks (`staleFixAgeMs = (now − obsAt) + FEED_LATENCY_S`, used by
+    `fixPinActive` + `fixPinsDwell`). This releases the dominant **stale at-stop
+    holds** `FEED_LATENCY_S` earlier — attacking the −374 m behind-mass where it
+    is actually born. `FEED_LATENCY_S = 3 s` (shrunk half-step; effective wall
+    release ~42 s, still within one cadence — NOT the deferred sub-cadence hold).
+    `STOP_HOLD_MAX_FIX_AGE_S` stays 45 s (the cadence); only the age *measurement*
+    is corrected. **Gate: ride replay mean |err| 135 → 124 m (−8 %), p90 266 →
+    257 (behind-tail shrinks), signed −94 → −81; fleet replay bit-identical
+    (median 124.9 — the bound never binds at fleet cadence, verified across
+    35–45 s, same neutrality as STOP_HOLD 60→45).** jest 714 green, tsc clean.
+    Note the equivalence in `ride_replay.py`: `FEED_LATENCY 5 ≡ hold_age 40`
+    (both effective 40 s) — the shipped 3 s is deliberately more conservative
+    than the deferred hold-40, awaiting ≥2 rides for the exact magnitude.
 - **R13: bias decontamination** — update paceBias only over confidently-moving
   spans (exclude spans containing standstill evidence: flat-fix stretches,
   at_stop transitions), so signal stops stop halving the catch-up ceiling.

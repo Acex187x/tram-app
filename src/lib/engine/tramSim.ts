@@ -120,6 +120,32 @@ const AT_STOP_MATCH_M = 50;
  */
 export const STOP_HOLD_MAX_FIX_AGE_S = 45;
 /**
+ * Hidden feed latency, seconds (R12 latency-aware anchoring, first ground-truth
+ * ride 2026-07-20 — docs/calibration/analysis-2026-07-20-ride.md §2). The fix
+ * timestamp `obsAt` is NOT the moment the tram was actually at `obsDist`: the
+ * ride decomposition shows the raw fix already trails reality by +77 m at an
+ * apparent age of 0–15 s — i.e. ≈ 8–14 s of pipeline latency (poll + AVL
+ * processing) BEYOND obsAt, at the ~5 m/s real pace. So a fix that reads
+ * "40 s since obsAt" was really last-seen-standing ≈ 40 s + this latency ago.
+ *
+ * The staleness clock that decides "the tram has probably left this stop by
+ * now" must run on that TRUE age. Adding this to (now − obsAt) releases a
+ * stale at-stop hold this many seconds earlier — attacking the ride's dominant
+ * behind-mass (the feed reports at_stop for 50–75 s while the real platform
+ * dwell is 15–20 s; worst observed −374 m, sim glued to a stale fix). It does
+ * NOT re-calibrate the cadence constant above: STOP_HOLD_MAX_FIX_AGE_S stays at
+ * one fix-cadence p50 (45 s); this only corrects the age MEASUREMENT it is
+ * compared against, so the effective wall release lands at ~42 s (still within
+ * one cadence, not the deferred sub-cadence 35–40 s hold the analysis wants ≥2
+ * rides for). Deliberately SHRUNK — half-step from the shipped 0 toward the
+ * ride-replay optimum (~5–8 s), well under the measured 8–14 s. Ride replay
+ * (ride_replay.py): mean |err| 133 → 123 m (−8%), p90 266 → 259, signed
+ * −91 → −78; fleet replay (replay.py) bit-identical (the bound never binds at
+ * fleet cadence — same result the STOP_HOLD 60→45 change verified). TUNABLE —
+ * recalibrate the exact magnitude on future ride recordings.
+ */
+export const FEED_LATENCY_S = 3;
+/**
  * A fix that has advanced more than this past the fix seen at dwell entry is
  * movement evidence (releases the fix-hold); smaller deltas are AVL
  * shape-projection scatter, meters.
@@ -442,13 +468,25 @@ export function scheduleDistAt(sim: TramSim, nowMs: number): number {
 }
 
 /**
+ * True age of the latest fix, ms: wall time since obsAt PLUS the hidden feed
+ * latency (FEED_LATENCY_S) — the fix was actually last-seen that much earlier
+ * than its obsAt timestamp claims (R12). Used by every "is this fix too stale
+ * to still trust as a stand?" check, so a stale at-stop hold releases a feed
+ * latency earlier than its apparent age would.
+ */
+function staleFixAgeMs(sim: TramSim, nowMs: number): number {
+  return nowMs - sim.obsAtMs + FEED_LATENCY_S * 1000;
+}
+
+/**
  * Whether the fix-pinned platform (fixStopDistM) is still authoritative: the
  * pinning fix must be younger than the same staleness bound the dwell
  * fix-hold uses — past it, an unseen departure is likelier than a record
- * stand and normal schedule projection resumes.
+ * stand and normal schedule projection resumes. The age is latency-adjusted
+ * (staleFixAgeMs): the fix is older than obsAt suggests.
  */
 function fixPinActive(sim: TramSim, nowMs: number): boolean {
-  return sim.fixStopDistM !== null && nowMs - sim.obsAtMs <= STOP_HOLD_MAX_FIX_AGE_S * 1000;
+  return sim.fixStopDistM !== null && staleFixAgeMs(sim, nowMs) <= STOP_HOLD_MAX_FIX_AGE_S * 1000;
 }
 
 /**
@@ -644,7 +682,7 @@ function seedStopState(sim: TramSim, nowMs: number): void {
  * than a record dwell (the feed has latency; never wait forever).
  */
 function fixPinsDwell(sim: TramSim, nowMs: number): boolean {
-  if (nowMs - sim.obsAtMs > STOP_HOLD_MAX_FIX_AGE_S * 1000) return false;
+  if (staleFixAgeMs(sim, nowMs) > STOP_HOLD_MAX_FIX_AGE_S * 1000) return false;
   if (sim.obsDistM - sim.dwellObsDistM > STOP_HOLD_MOVE_EPS_M) return false; // fix moved on
   const behind = sim.sM - sim.obsDistM; // fix relative to the dwell position
   if (behind < -STOP_HOLD_AHEAD_EPS_M) return false; // fix ahead beyond scatter
