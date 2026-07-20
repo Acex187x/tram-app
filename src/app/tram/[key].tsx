@@ -180,10 +180,24 @@ function fmtEta(s: number): string {
 // toward it. HEADER_* are the header row heights the container morphs between.
 const EXPANDED_ICON = 52;
 const COLLAPSED_ICON = 28;
-const HEADER_EXPANDED = 78;
-const HEADER_COLLAPSED = 46;
+const HEADER_EXPANDED = 64;
+const HEADER_COLLAPSED = 44;
 // Scroll distance (pt) over which the header fully collapses.
 const COLLAPSE_DISTANCE = 88;
+// Top inset baked into the sticky header so its content always clears the
+// transparent native toolbar bar (star/⋯) — in BOTH the expanded and the pinned
+// (collapsed) state. We drive top spacing manually here instead of via
+// contentInsetAdjustmentBehavior="automatic": an automatic inset only shifts the
+// resting content, so a sticky header still pins to the scroll-view frame top and
+// slides UNDER the toolbar when scrolled. A constant inset that is part of the
+// sticky child keeps the identity row below the toolbar at every scroll position,
+// and the fade-in surface masks scrolling content behind the toolbar band.
+const HEADER_TOP_INSET = 52;
+
+/** Empty native header title — renders nothing (no text, no quote-glyph fallback
+ * that an empty/space string produces). Kept module-level so the option identity
+ * is stable across renders. */
+const renderEmptyTitle = () => <View />;
 
 /**
  * The place-card identity block, laid out HORIZONTALLY and COLLAPSING on scroll:
@@ -243,9 +257,6 @@ function CollapsingHeader({
   const subtitleStyle = useAnimatedStyle(() => ({
     opacity: interpolate(scrollY.value, [0, COLLAPSE_DISTANCE * 0.4], [1, 0], Extrapolation.CLAMP),
   }));
-  const badgeStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(scrollY.value, [0, COLLAPSE_DISTANCE * 0.6], [1, 0], Extrapolation.CLAMP),
-  }));
   // Surface + hairline that fade IN as the header pins, masking the scrolling
   // content beneath the sticky bar (the iOS large-title→inline idiom). This is a
   // PLAIN near-opaque View matching the sheet surface — deliberately NOT a
@@ -264,7 +275,12 @@ function CollapsingHeader({
   }));
 
   return (
-    <Animated.View style={[styles.header, containerStyle]}>
+    // Sticky wrapper carries a constant top inset (HEADER_TOP_INSET) so the
+    // identity row always sits below the transparent native toolbar — expanded
+    // AND pinned. The fade-in surface fills the WHOLE wrapper (incl. the inset
+    // band behind the toolbar), so when pinned it masks the scrolling content the
+    // full width, reading as an inline nav bar.
+    <View style={styles.headerSticky}>
       <Animated.View
         pointerEvents="none"
         style={[StyleSheet.absoluteFill, { backgroundColor: surface }, chromeStyle]}
@@ -272,41 +288,41 @@ function CollapsingHeader({
         <View style={[styles.headerHairline, { backgroundColor: c.separator }]} />
       </Animated.View>
 
-      <SheetContent style={styles.headerInner}>
-        <Pressable
-          onPress={onPortrait}
-          style={({ pressed }) => pressed && styles.portraitPressed}
-          accessibilityRole="button"
-          accessibilityLabel={`View ${state.model.name} in 3D`}
-          hitSlop={4}
-        >
-          <Animated.View style={[styles.iconBox, { backgroundColor: c.fillTertiary }, iconBoxStyle]}>
-            <Animated.View style={[styles.iconScale, iconScaleStyle]}>
-              <TramFace modelId={state.model.id} size={EXPANDED_ICON} />
+      <Animated.View style={[styles.header, containerStyle]}>
+        <SheetContent style={styles.headerInner}>
+          <Pressable
+            onPress={onPortrait}
+            style={({ pressed }) => pressed && styles.portraitPressed}
+            accessibilityRole="button"
+            accessibilityLabel={`View ${state.model.name} in 3D`}
+            hitSlop={4}
+          >
+            <Animated.View
+              style={[styles.iconBox, { backgroundColor: c.fillTertiary }, iconBoxStyle]}
+            >
+              <Animated.View style={[styles.iconScale, iconScaleStyle]}>
+                <TramFace modelId={state.model.id} size={EXPANDED_ICON} />
+              </Animated.View>
             </Animated.View>
-          </Animated.View>
-        </Pressable>
+          </Pressable>
 
-        <View style={styles.headerText}>
-          <View style={styles.headerTitleRow}>
-            <LineBadge line={line} size="md" />
-            <Text style={[styles.headsign, { color: c.text }]} numberOfLines={1}>
-              {state.snapshot.headsign}
-            </Text>
+          <View style={styles.headerText}>
+            <View style={styles.headerTitleRow}>
+              <LineBadge line={line} size="md" />
+              <Text style={[styles.headsign, { color: c.text }]} numberOfLines={1}>
+                {state.snapshot.headsign}
+              </Text>
+            </View>
+            <Animated.View style={[styles.headerSubRow, subtitleStyle]}>
+              <Text style={[styles.headerSubtitle, { color: c.secondary }]} numberOfLines={1}>
+                {subtitle}
+              </Text>
+              <AcSnowflake airConditioned={state.snapshot.airConditioned} size={12} />
+            </Animated.View>
           </View>
-          <Animated.View style={[styles.headerSubRow, subtitleStyle]}>
-            <Text style={[styles.headerSubtitle, { color: c.secondary }]} numberOfLines={1}>
-              {subtitle}
-            </Text>
-            <AcSnowflake airConditioned={state.snapshot.airConditioned} size={12} />
-          </Animated.View>
-        </View>
-
-        <Animated.View style={badgeStyle}>
-          <DelayPill delaySeconds={state.snapshot.delaySeconds} />
-        </Animated.View>
-      </SheetContent>
-    </Animated.View>
+        </SheetContent>
+      </Animated.View>
+    </View>
   );
 }
 
@@ -356,15 +372,11 @@ function LiveStats({ state, positionMode }: { state: TramPublicState; positionMo
         {stats.map((s) => (
           <StatTile key={s.key} stat={s} />
         ))}
+        {/* Delay cell: just the centered pill (no caption). The pill is pushed to
+            the bottom of the stretched row so it sits on the same baseline as the
+            Updated / Next stop values. */}
         <View style={styles.delayTile}>
-          <Text
-            style={[styles.delayCaption, { color: c.secondary }]}
-            numberOfLines={1}
-            allowFontScaling={false}
-          >
-            Delay
-          </Text>
-          <DelayPill delaySeconds={delayS} />
+          <DelayPill delaySeconds={delayS} style={styles.delayPill} />
         </View>
       </View>
       {honesty != null && (
@@ -567,12 +579,17 @@ export default function TramDetailSheet() {
     <>
       <SheetBackground />
 
-      {/* Scroll spans the whole sheet; automatic inset drops content (and the
-          sticky header) below the transparent native toolbar bar. */}
+      {/* Scroll spans the whole sheet. Top spacing under the transparent toolbar
+          is baked into the sticky header (HEADER_TOP_INSET), NOT an automatic
+          content inset — so we use "never": the resting content offset is a clean
+          0, which the native sheet controller reads unambiguously for the
+          scroll-expands-to-edge gesture, and the sticky header keeps the identity
+          row below the toolbar at every scroll position. */}
       <Animated.ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.body}
-        contentInsetAdjustmentBehavior="automatic"
+        contentInsetAdjustmentBehavior="never"
+        automaticallyAdjustContentInsets={false}
         showsVerticalScrollIndicator={false}
         onScroll={onScroll}
         scrollEventThrottle={16}
@@ -609,11 +626,12 @@ export default function TramDetailSheet() {
       </Animated.ScrollView>
 
       {/* The native header carries ONLY the toolbar star/⋯ now — the headsign
-          moved into the CollapsingHeader identity block above. A blank (space)
-          title is rendered explicitly: an EMPTY string falls back to the route
-          name ("tram/[key]") on some entry paths (e.g. cold-launch deep link),
-          so a non-empty-but-invisible space reliably suppresses the fallback. */}
-      <Stack.Title>{' '}</Stack.Title>
+          moved into the CollapsingHeader identity block above. The center title
+          is fully suppressed by rendering an EMPTY VIEW as headerTitle: neither an
+          empty string (falls back to the "tram/[key]" route name on some entry
+          paths) nor a space (renders a stray quote glyph) leaves the center truly
+          blank — a custom empty title component does. */}
+      <Stack.Screen options={{ headerTitle: renderEmptyTitle }} />
       <Stack.Toolbar placement="right">
         <Stack.Toolbar.Button
           icon={isFavorite ? 'star.fill' : 'star'}
@@ -658,6 +676,9 @@ const styles = StyleSheet.create({
   centerContent: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 20 },
 
   // collapsing identity header (sticky, morphs on scrollY)
+  // Sticky wrapper: constant top inset keeps the identity row clear of the
+  // transparent native toolbar in both the expanded and pinned states.
+  headerSticky: { paddingTop: HEADER_TOP_INSET },
   header: { justifyContent: 'center', overflow: 'hidden' },
   headerHairline: {
     bottom: 0,
@@ -683,9 +704,11 @@ const styles = StyleSheet.create({
   headerSubtitle: { flexShrink: 1, fontSize: 13 },
 
   statsBlock: { gap: 8 },
-  statRow: { alignItems: 'flex-start', flexDirection: 'row' },
-  delayTile: { alignItems: 'center', flex: 1, gap: 5, paddingHorizontal: 4 },
-  delayCaption: { fontSize: 13, fontWeight: '400' },
+  // stretch so the delay cell matches the caption+value height of the other
+  // tiles; its pill then bottom-aligns to the same baseline as their values.
+  statRow: { alignItems: 'stretch', flexDirection: 'row' },
+  delayTile: { alignItems: 'center', flex: 1, justifyContent: 'flex-end', paddingHorizontal: 4 },
+  delayPill: { alignSelf: 'center' },
   honestyRow: { alignItems: 'center', flexDirection: 'row', gap: 5, justifyContent: 'center' },
   honestyText: { fontSize: 12 },
 
