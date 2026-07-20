@@ -39,6 +39,7 @@ import {
   StyleSheet,
   Text,
   useColorScheme,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import Animated, {
@@ -199,6 +200,29 @@ const COLLAPSE_DISTANCE = 88;
 // below the grabber and the star/⋯ pill occupies ~16–46pt below the sheet top, so
 // this small inset aligns the portrait's top with the toolbar's — no gap.
 const HEADER_TOP_INSET = 12;
+// Extra opaque strip painted BELOW the collapsed identity band. The transparent
+// native toolbar (star/⋯) is drawn by iOS at a fixed top band that hangs a few
+// points LOWER than our 44pt collapsed row; without this the pill overhangs the
+// first stop row and covers its time. Extending the pinned bar's opaque surface
+// this much further down means the toolbar always sits over the opaque nav bar
+// (content scrolls cleanly under it), never over a stop's time.
+const COLLAPSED_TOOLBAR_MASK = 18;
+// Full pixel height of the expanded identity bar (inset + expanded row). At the
+// minimized (bar) detent the sheet is cropped to just this, so anything below it
+// is out of the identity bar and must be hidden by the bar-mode curtain.
+const IDENTITY_BAR_HEIGHT = HEADER_TOP_INSET + HEADER_EXPANDED;
+// The sheet is in its minimized "bar" state when its laid-out height is below
+// this fraction of the window — between the 0.15 (bar) and 0.42 (card) detents.
+// The form-sheet content view is sized to the current detent, so onLayout gives
+// us the live sheet height without needing the native detent-changed event
+// (which expo-router's static screen options don't forward).
+const BAR_DETENT_MAX_RATIO = 0.3;
+
+/** Opaque sheet-surface color — the solid fill used to mask scrolling content
+ * behind the pinned identity bar and to fill the minimized-bar detent. Matches
+ * the system sheet material closely so the seam with the glass is invisible. */
+const sheetSurface = (scheme: 'light' | 'dark') =>
+  scheme === 'dark' ? 'rgb(28,28,30)' : 'rgb(249,249,251)';
 
 /** Empty native header title — renders nothing (no text, no quote-glyph fallback
  * that an empty/space string produces). Kept module-level so the option identity
@@ -217,9 +241,13 @@ const renderEmptyTitle = () => <View />;
 function CollapsingHeader({
   state,
   scrollY,
+  barMode,
 }: {
   state: TramPublicState;
   scrollY: SharedValue<number>;
+  // True at the minimized (bar) detent: the identity surface is forced fully
+  // opaque (regardless of scroll) so the bar reads as a clean, settled row.
+  barMode: boolean;
 }) {
   const router = useRouter();
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
@@ -272,14 +300,18 @@ function CollapsingHeader({
   // translucent): a partly-transparent bar lets the stats row / "UPCOMING STOPS"
   // bleed through as the content scrolls under it, which reads as broken. Solid
   // systemBackground makes the pinned bar a clean, intentional inline nav bar.
-  const surface = scheme === 'dark' ? 'rgb(28,28,30)' : 'rgb(249,249,251)';
+  const surface = sheetSurface(scheme);
   const chromeStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(
-      scrollY.value,
-      [COLLAPSE_DISTANCE * 0.4, COLLAPSE_DISTANCE],
-      [0, 1],
-      Extrapolation.CLAMP,
-    ),
+    // In bar mode the surface is always fully opaque (the minimized bar is a
+    // solid row); otherwise it fades in as the header pins on scroll.
+    opacity: barMode
+      ? 1
+      : interpolate(
+          scrollY.value,
+          [COLLAPSE_DISTANCE * 0.4, COLLAPSE_DISTANCE],
+          [0, 1],
+          Extrapolation.CLAMP,
+        ),
   }));
 
   return (
@@ -289,11 +321,16 @@ function CollapsingHeader({
     // band behind the toolbar), so when pinned it masks the scrolling content the
     // full width, reading as an inline nav bar.
     <View style={styles.headerSticky}>
+      {/* Opaque pinned-bar surface. Extends COLLAPSED_TOOLBAR_MASK past the band
+          bottom so the native toolbar (which hangs a little lower than the row)
+          always sits over the opaque bar, not over a stop's time. The hairline
+          is dropped in bar mode — there is no scrolling content below the bar to
+          separate from, so a mid-bar line would read as broken. */}
       <Animated.View
         pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { backgroundColor: surface }, chromeStyle]}
+        style={[styles.headerChrome, { backgroundColor: surface }, chromeStyle]}
       >
-        <View style={[styles.headerHairline, { backgroundColor: c.separator }]} />
+        {!barMode && <View style={[styles.headerHairline, { backgroundColor: c.separator }]} />}
       </Animated.View>
 
       <Animated.View style={[styles.header, containerStyle]}>
@@ -448,6 +485,16 @@ export default function TramDetailSheet() {
     scrollY.value = e.contentOffset.y;
   });
 
+  // The form-sheet content view is laid out to the current detent height, so the
+  // ScrollView's onLayout height tells us which detent we're resting at without
+  // the native detent-changed event (expo-router doesn't forward it). Below
+  // BAR_DETENT_MAX_RATIO of the window we're at the minimized (bar) detent and
+  // render only the clean identity bar (see barMode). Fires on detent settle,
+  // not per frame — no scroll-path state churn.
+  const { height: windowHeight } = useWindowDimensions();
+  const [sheetHeight, setSheetHeight] = useState(0);
+  const barMode = sheetHeight > 0 && sheetHeight < windowHeight * BAR_DETENT_MAX_RATIO;
+
   // Remember the last live state so we can render a friendly "left service"
   // screen (with line + reg) if the tram drops out of the feed while open.
   const lastStateRef = useRef<TramPublicState | undefined>(undefined);
@@ -600,10 +647,11 @@ export default function TramDetailSheet() {
         automaticallyAdjustContentInsets={false}
         showsVerticalScrollIndicator={false}
         onScroll={onScroll}
+        onLayout={(e) => setSheetHeight(e.nativeEvent.layout.height)}
         scrollEventThrottle={16}
         stickyHeaderIndices={[0]}
       >
-        <CollapsingHeader state={state} scrollY={scrollY} />
+        <CollapsingHeader state={state} scrollY={scrollY} barMode={barMode} />
 
         <View style={styles.bodyInner}>
           <SheetContent style={styles.column}>
@@ -632,6 +680,15 @@ export default function TramDetailSheet() {
           </SheetContent>
         </View>
       </Animated.ScrollView>
+
+      {/* Minimized (bar) detent: cover the cropped scroll body below the identity
+          bar with an opaque fill so only the clean bar shows — nothing bleeds
+          through, matching Apple's minimized place bar. Rendered after (over) the
+          ScrollView so it masks the sticky body; pointerEvents="none" so a drag
+          still reaches the scroll view beneath and raises the sheet. */}
+      {barMode && (
+        <View pointerEvents="none" style={[styles.barCurtain, { backgroundColor: sheetSurface(scheme) }]} />
+      )}
 
       {/* The native header carries ONLY the toolbar star/⋯ now — the headsign
           moved into the CollapsingHeader identity block above. The center title
@@ -687,6 +744,26 @@ const styles = StyleSheet.create({
   // Sticky wrapper: constant top inset keeps the identity row clear of the
   // transparent native toolbar in both the expanded and pinned states.
   headerSticky: { paddingTop: HEADER_TOP_INSET },
+  // Opaque pinned-bar surface. Absolute-fills the sticky wrapper and extends a
+  // little below it (COLLAPSED_TOOLBAR_MASK) to sit under the native toolbar.
+  headerChrome: {
+    bottom: -COLLAPSED_TOOLBAR_MASK,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  // Bar-mode curtain: a solid fill from just below the identity bar to the sheet
+  // bottom, hiding the cropped top of the scroll body at the minimized detent so
+  // only the clean identity bar shows. pointerEvents="none" so a drag still
+  // reaches the ScrollView beneath and expands the sheet.
+  barCurtain: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: IDENTITY_BAR_HEIGHT,
+  },
   header: { justifyContent: 'center', overflow: 'hidden' },
   headerHairline: {
     bottom: 0,
