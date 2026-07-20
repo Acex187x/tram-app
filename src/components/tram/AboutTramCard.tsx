@@ -1,40 +1,21 @@
-// "About this tram" card: tappable model illustration ("View in 3D" — opens
-// the full-screen viewer), fleet-model spec sheet (manufacturer, years, size,
-// top speed), low-floor + amenity badges sourced from the live snapshot, and
-// the model's fun fact as an italic footer. iOS grouped-list styling.
+// "About this tram" — the Apple Maps grouped-inset spec block for the tram
+// card (the "Good to Know" / spec-sheet region of a place detail, IMG_0078).
+// A tappable model illustration ("View in 3D" → full-screen viewer), a grouped
+// inset list of the fleet-model spec sheet (manufacturer, years, size, top
+// speed), the low-floor + per-vehicle amenity badges sourced from the live
+// snapshot, and the model's fun fact as an italic footer.
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { StyleSheet, Text, useColorScheme, View } from 'react-native';
 
 import { ModelPreviewButton } from '@/components/model/ModelPreviewButton';
 import { tramModelImageSource } from '@/components/tram/TramModelImage';
-import { Colors, Tram } from '@/constants/theme';
+import { InsetGroup, InsetRow, RowSeparator } from '@/components/ui/Inset';
+import { appleScheme, Tram } from '@/constants/theme';
 import type { TramModelSpec, TramSnapshot } from '@/lib/types';
 
 export interface AboutTramCardProps {
   model: TramModelSpec;
   snapshot: TramSnapshot;
-}
-
-interface SpecRowProps {
-  icon: SFSymbol;
-  label: string;
-  value: string;
-  isLast?: boolean;
-}
-
-function SpecRow({ icon, label, value, isLast }: SpecRowProps) {
-  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const c = Colors[scheme];
-  const separator = scheme === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)';
-  return (
-    <View style={[styles.specRow, !isLast && { borderBottomColor: separator, borderBottomWidth: StyleSheet.hairlineWidth }]}>
-      <SymbolView name={icon} size={16} tintColor={c.textSecondary} style={styles.specIcon} />
-      <Text style={[styles.specLabel, { color: c.textSecondary }]}>{label}</Text>
-      <Text style={[styles.specValue, { color: c.text }]} numberOfLines={1}>
-        {value}
-      </Text>
-    </View>
-  );
 }
 
 interface AmenityChipProps {
@@ -46,13 +27,13 @@ interface AmenityChipProps {
 
 function AmenityChip({ icon, label, active }: AmenityChipProps) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const c = Colors[scheme];
-  const fill = scheme === 'dark' ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.05)';
+  const c = appleScheme(scheme);
+  const fill = c.fillTertiary;
   const on = active === true;
   return (
-    <View style={[styles.chip, { backgroundColor: fill, opacity: on ? 1 : 0.35 }]}>
-      <SymbolView name={icon} size={13} tintColor={on ? c.text : c.textSecondary} />
-      <Text style={[styles.chipText, { color: on ? c.text : c.textSecondary }]} allowFontScaling={false}>
+    <View style={[styles.chip, { backgroundColor: fill, opacity: on ? 1 : 0.4 }]}>
+      <SymbolView name={icon} size={13} weight="semibold" tintColor={on ? c.text : c.secondary} />
+      <Text style={[styles.chipText, { color: on ? c.text : c.secondary }]} allowFontScaling={false}>
         {label}
       </Text>
     </View>
@@ -61,51 +42,51 @@ function AmenityChip({ icon, label, active }: AmenityChipProps) {
 
 export function AboutTramCard({ model, snapshot }: AboutTramCardProps) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const c = Colors[scheme];
-  const cardFill = scheme === 'dark' ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.55)';
-  const separator = scheme === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)';
+  const c = appleScheme(scheme);
 
   const sectionsLabel =
     model.sections.length === 1 ? 'single body' : `${model.sections.length} sections`;
 
   return (
-    <View style={[styles.card, { backgroundColor: cardFill }]}>
+    <View style={styles.wrap}>
       {tramModelImageSource(model.id) != null && (
-        <View style={[styles.illustrationWrap, { borderBottomColor: separator }]}>
-          <ModelPreviewButton modelId={model.id} height={110} style={styles.illustration} />
-        </View>
+        <ModelPreviewButton modelId={model.id} height={112} style={styles.illustration} />
       )}
-      <SpecRow icon="building.2" label="Manufacturer" value={model.manufacturer} />
-      <SpecRow icon="calendar" label="Built" value={model.yearsBuilt} />
-      <SpecRow
-        icon="ruler"
-        label="Size"
-        value={`${model.totalLengthM} m × ${model.widthM} m · ${sectionsLabel}`}
-      />
-      <SpecRow icon="speedometer" label="Top speed" value={`${model.maxSpeedKmh} km/h`} isLast />
 
-      <View style={[styles.badgesRow, { borderTopColor: separator }]}>
+      <InsetGroup>
+        <InsetRow title="Manufacturer" value={model.manufacturer} />
+        <RowSeparator />
+        <InsetRow title="Built" value={model.yearsBuilt} />
+        <RowSeparator />
+        <InsetRow
+          title="Size"
+          value={`${model.totalLengthM} m × ${model.widthM} m · ${sectionsLabel}`}
+        />
+        <RowSeparator />
+        <InsetRow title="Top speed" value={`${model.maxSpeedKmh} km/h`} />
+      </InsetGroup>
+
+      <View style={styles.badgesRow}>
         <View
           style={[
             styles.chip,
             {
               backgroundColor: model.lowFloor
                 ? scheme === 'dark'
-                  ? 'rgba(46,139,87,0.28)'
+                  ? 'rgba(48,209,88,0.24)'
                   : 'rgba(46,139,87,0.16)'
-                : scheme === 'dark'
-                  ? 'rgba(255,255,255,0.09)'
-                  : 'rgba(0,0,0,0.05)',
+                : c.fillTertiary,
             },
           ]}
         >
           <SymbolView
             name={model.lowFloor ? 'arrow.down.to.line' : 'stairs'}
             size={13}
-            tintColor={model.lowFloor ? Tram.onTime : c.textSecondary}
+            weight="semibold"
+            tintColor={model.lowFloor ? Tram.onTime : c.secondary}
           />
           <Text
-            style={[styles.chipText, { color: model.lowFloor ? Tram.onTime : c.textSecondary }]}
+            style={[styles.chipText, { color: model.lowFloor ? Tram.onTime : c.secondary }]}
             allowFontScaling={false}
           >
             {model.lowFloor ? 'Low floor' : 'High floor'}
@@ -116,62 +97,36 @@ export function AboutTramCard({ model, snapshot }: AboutTramCardProps) {
         <AmenityChip icon="figure.roll" label="Access" active={snapshot.wheelchairAccessible} />
       </View>
 
-      <View style={[styles.funFactRow, { borderTopColor: separator }]}>
-        <Text style={[styles.funFact, { color: c.textSecondary }]}>{model.funFact}</Text>
-      </View>
+      <Text style={[styles.funFact, { color: c.secondary }]}>{model.funFact}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    borderCurve: 'continuous',
-    borderRadius: 16,
-    paddingHorizontal: 14,
-  },
-  illustrationWrap: {
-    alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 12,
-  },
+  wrap: { gap: 12 },
   illustration: {
-    // ModelPreviewButton defaults to alignSelf:'flex-start'; center it here.
     alignSelf: 'center',
     maxWidth: '100%',
   },
-  specRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    minHeight: 42,
-    paddingVertical: 8,
-  },
-  specIcon: { width: 20 },
-  specLabel: { fontSize: 14 },
-  specValue: { flex: 1, fontSize: 14, fontWeight: '500', textAlign: 'right' },
   badgesRow: {
-    borderTopWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    paddingVertical: 12,
+    paddingHorizontal: 4,
   },
   chip: {
     alignItems: 'center',
     borderRadius: 999,
     flexDirection: 'row',
     gap: 4,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
   chipText: { fontSize: 12, fontWeight: '600' },
-  funFactRow: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 12,
-  },
   funFact: {
     fontSize: 13,
     fontStyle: 'italic',
     lineHeight: 18,
+    paddingHorizontal: 4,
   },
 });

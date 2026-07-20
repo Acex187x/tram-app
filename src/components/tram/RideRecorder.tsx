@@ -1,20 +1,23 @@
-// Record-ride control for the tram detail sheet. Starts/stops a GPS ride
-// recording (real-vs-sim telemetry) via the MotionLog singleton, so recording
-// survives the sheet closing. While active it shows a live reliability
-// readout — points on disk, seconds since the last fix, file size, and whether
-// background GPS is active (with an explicit warning when it is not) — because
-// a recording the user cannot verify is a recording they cannot trust
-// (two early recordings were lost silently). Stopping confirms the saved file
-// with its path and size. Only one ride runs at a time; if a different tram is
-// recording, this surfaces a chip pointing at it.
+// Ride recording control for the tram detail sheet, re-skinned to Apple Maps.
+// The start/stop entry point now lives behind the floating action bar's
+// record.circle item (the screen drives it via `useRideRecorder`); this file
+// owns the shared recording logic (MotionLog singleton, one-ride-at-a-time
+// rule, save confirmation) and the thin active-status strip that appears in the
+// card while a ride is running.
+//
+// The MotionLog data flow is unchanged: recording survives the sheet closing,
+// only one ride runs at a time, and the live reliability readout (points on
+// disk, seconds since the last fix, background-GPS state, stall warning) is
+// preserved — a recording the user cannot verify is a recording they cannot
+// trust (two early rides were lost silently).
 import * as Haptics from 'expo-haptics';
 import { router, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
 import { GlassPanel } from '@/components/ui/GlassPanel';
-import { Colors, Tram } from '@/constants/theme';
+import { appleScheme, Tram } from '@/constants/theme';
 import { useMotionLog } from '@/lib/motionlog';
 
 function fmtBytes(n: number): string {
@@ -48,28 +51,33 @@ function RecDot() {
   return <Animated.View style={[styles.recDot, { opacity: pulse }]} />;
 }
 
-export function RideRecorder({ tramKey, line }: { tramKey: string; line: string }) {
-  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const c = Colors[scheme];
-  const log = useMotionLog();
+// ── shared ride control ──────────────────────────────────────────────────────
 
+export interface RideControl {
+  recordingThis: boolean;
+  recordingOther: boolean;
+  busy: boolean;
+  /** Start (idle) / stop (recording this) / warn (recording another). */
+  toggle: () => void;
+  /** Stop the current ride, with the "Ride saved" confirmation. */
+  stop: () => void;
+  /** The tram key of the ride in progress, if any. */
+  ridingKey: string | null;
+}
+
+/**
+ * The tram sheet's ride control. Wraps the MotionLog singleton so both the
+ * floating-action-bar record item and the in-card status strip share one code
+ * path (start / stop / save-confirm / one-ride rule).
+ */
+export function useRideRecorder(tramKey: string): RideControl {
+  const log = useMotionLog();
   const ride = log.rideInfo();
   const recordingThis = ride?.key === tramKey;
   const recordingOther = ride != null && ride.key !== tramKey;
-
-  // Local 1 Hz ticker for the elapsed readout (points come via the log's
-  // subscription through useMotionLog()).
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (!ride) return;
-    const t = setInterval(() => setTick((n) => n + 1), 1000);
-    return () => clearInterval(t);
-  }, [ride]);
-
   const [busy, setBusy] = useState(false);
 
-  const onStart = async () => {
-    if (busy) return;
+  const start = useCallback(async () => {
     setBusy(true);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
@@ -83,10 +91,9 @@ export function RideRecorder({ tramKey, line }: { tramKey: string; line: string 
     } finally {
       setBusy(false);
     }
-  };
+  }, [log, tramKey]);
 
-  const onStop = async () => {
-    if (busy) return;
+  const stop = useCallback(async () => {
     setBusy(true);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Rigid);
     try {
@@ -109,23 +116,76 @@ export function RideRecorder({ tramKey, line }: { tramKey: string; line: string 
     } finally {
       setBusy(false);
     }
-  };
+  }, [log]);
 
-  // Recording a *different* tram — offer to stop it from here.
+  const toggle = useCallback(() => {
+    if (busy) return;
+    if (recordingThis) {
+      void stop();
+    } else if (recordingOther) {
+      Alert.alert(
+        'Recording another tram',
+        `A ride on tram #${ride?.key} is in progress. Stop it before starting a new one.`,
+      );
+    } else {
+      void start();
+    }
+  }, [busy, recordingThis, recordingOther, ride?.key, start, stop]);
+
+  const stopNow = useCallback(() => {
+    if (!busy) void stop();
+  }, [busy, stop]);
+
+  return {
+    recordingThis,
+    recordingOther,
+    busy,
+    toggle,
+    stop: stopNow,
+    ridingKey: ride?.key ?? null,
+  };
+}
+
+// ── in-card status strip ─────────────────────────────────────────────────────
+
+/**
+ * Thin recording-status strip shown in the tram card while a ride is running.
+ * Renders nothing when idle (the record.circle bar item is the start affordance).
+ * When a DIFFERENT tram is recording it surfaces a chip pointing at it with a
+ * Stop control.
+ */
+export function RideStatusStrip({ tramKey }: { tramKey: string }) {
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const c = appleScheme(scheme);
+  const log = useMotionLog();
+  const { recordingThis, recordingOther, stop } = useRideRecorder(tramKey);
+
+  const ride = log.rideInfo();
+
+  // Local 1 Hz ticker for the elapsed readout (point counts arrive via the
+  // log's subscription through useMotionLog()).
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!ride) return;
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [ride]);
+
   if (recordingOther && ride) {
     return (
-      <GlassPanel variant="clear" style={styles.card}>
+      <GlassPanel variant="clear" style={styles.strip}>
         <View style={styles.row}>
           <RecDot />
           <View style={styles.rowText}>
             <Text style={[styles.title, { color: c.text }]}>Recording another tram</Text>
-            <Text style={[styles.subtitle, { color: c.textSecondary }]} numberOfLines={1}>
+            <Text style={[styles.subtitle, { color: c.secondary }]} numberOfLines={1}>
               Tram #{ride.key} · {ride.points} pts · {fmtElapsed(Date.now() - ride.startedMs)}
             </Text>
           </View>
           <Pressable
             accessibilityRole="button"
-            onPress={onStop}
+            accessibilityLabel="Stop recording"
+            onPress={stop}
             style={({ pressed }) => [styles.stopBtn, pressed && { opacity: 0.6 }]}
           >
             <Text style={styles.stopLabel}>Stop</Text>
@@ -146,17 +206,17 @@ export function RideRecorder({ tramKey, line }: { tramKey: string; line: string 
     // A fix gap > 15 s while recording means GPS delivery has stalled.
     const stalled = lastAgoS != null && lastAgoS > 15;
     return (
-      <GlassPanel variant="clear" style={styles.card}>
+      <GlassPanel variant="clear" style={styles.strip}>
         <View style={styles.row}>
           <RecDot />
           <View style={styles.rowText}>
             <Text style={[styles.title, { color: c.text }]} accessibilityLabel="Recording ride">
               Recording · {fmtElapsed(Date.now() - ride.startedMs)}
             </Text>
-            <Text style={[styles.subtitle, { color: c.textSecondary }]}>
+            <Text style={[styles.subtitle, { color: c.secondary }]}>
               {ride.points} GPS pt{ride.points === 1 ? '' : 's'} · {lastLabel} · {fmtBytes(bytes)} on disk
             </Text>
-            <Text style={[styles.subtitle, { color: c.textSecondary }]}>
+            <Text style={[styles.subtitle, { color: c.secondary }]}>
               {motionOn
                 ? `${ride.motionSamples} motion samples @ 25 Hz`
                 : 'Motion sensor off — GPS only'}
@@ -173,7 +233,7 @@ export function RideRecorder({ tramKey, line }: { tramKey: string; line: string 
                 Foreground only — keep the app open or the recording pauses
               </Text>
             ) : (
-              <Text style={[styles.statusLine, { color: c.textSecondary }]}>Starting GPS…</Text>
+              <Text style={[styles.statusLine, { color: c.secondary }]}>Starting GPS…</Text>
             )}
             {stalled && (
               <Text style={[styles.statusLine, { color: Tram.veryLate }]}>
@@ -184,7 +244,7 @@ export function RideRecorder({ tramKey, line }: { tramKey: string; line: string 
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Stop recording"
-            onPress={onStop}
+            onPress={stop}
             style={({ pressed }) => [styles.stopBtn, pressed && { opacity: 0.6 }]}
           >
             <SymbolView name="stop.fill" size={13} tintColor="#FFFFFF" />
@@ -195,32 +255,13 @@ export function RideRecorder({ tramKey, line }: { tramKey: string; line: string 
     );
   }
 
-  // Idle — start button.
-  return (
-    <GlassPanel variant="clear" interactive style={styles.card}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Record ride"
-        onPress={onStart}
-        disabled={busy}
-        style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}
-      >
-        <SymbolView name="record.circle" size={26} tintColor={Tram.veryLate} />
-        <View style={styles.rowText}>
-          <Text style={[styles.title, { color: c.text }]}>Record ride</Text>
-          <Text style={[styles.subtitle, { color: c.textSecondary }]} numberOfLines={2}>
-            Log GPS vs. simulated position on line {line} to help recalibrate the physics.
-          </Text>
-        </View>
-      </Pressable>
-    </GlassPanel>
-  );
+  return null;
 }
 
 const styles = StyleSheet.create({
-  card: {
+  strip: {
     borderCurve: 'continuous',
-    borderRadius: 18,
+    borderRadius: 16,
     overflow: 'hidden',
   },
   row: {
@@ -228,7 +269,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 11,
   },
   rowText: { flex: 1, gap: 2 },
   title: { fontSize: 15, fontWeight: '600' },
