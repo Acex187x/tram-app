@@ -35,16 +35,16 @@ export default function RootLayout() {
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack>
           <Stack.Screen name="index" options={{ headerShown: false }} />
-          {/* Tram sheet is the flagship detail card: 0.15 is the minimized bar
-              (the collapsed native header), 0.42 the card, 0.95 the full sheet.
-              Both the minimized and card detents keep the followed tram visible
-              (undimmed). Opens on the CARD detent (index 1) like Apple's place
-              card. The headsign is a REAL native stack-header title that sits on
-              the SAME row as the toolbar star/⋯ (a large title would always drop a
-              full band below them — the "title fell down" look) — headerTransparent
-              so the sheet's own glass shows through, and NO sheetCornerRadius
-              override so the system presentation supplies the device-matched
-              corners. */}
+          {/* Tram sheet is the flagship detail card: 0.15 is the minimized bar,
+              0.42 the card, 0.95 the full sheet. Both the minimized and card
+              detents keep the followed tram visible (undimmed). Opens on the CARD
+              detent (index 1) like Apple's place card. The native header carries
+              ONLY the toolbar star/⋯ — the identity (headsign etc.) now lives in
+              the screen's custom CollapsingHeader. The title is blanked (the
+              screen renders a space via <Stack.Title>, since an empty string can
+              fall back to the "tram/[key]" route name on some entry paths).
+              headerTransparent so the sheet's own glass shows through, and NO
+              sheetCornerRadius override so the system supplies the corners. */}
           <Stack.Screen
             name="tram/[key]"
             options={{
@@ -53,6 +53,11 @@ export default function RootLayout() {
               sheetLargestUndimmedDetentIndex: 1,
               sheetInitialDetentIndex: 1,
               sheetGrabberVisible: true,
+              // No native title — the CollapsingHeader owns identity. This is the
+              // default; the screen renders a space <Stack.Title> to reliably blank
+              // it (an empty string can fall back to the route name on cold-launch
+              // deep links). Loading / gone branches override via <Stack.Title>.
+              title: '',
               // Native iOS sheet behavior: dragging the body up on a half-open
               // detent expands the sheet to the next/full detent FIRST, and only
               // scrolls the content once fully expanded

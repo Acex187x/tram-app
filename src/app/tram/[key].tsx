@@ -1,19 +1,26 @@
 // Tram detail sheet — a native iOS place card floating over the live map. The
 // route is a transparent formSheet (detents [0.15, 0.42, 0.95], opens on the
 // card detent, index 1) whose corners come from the system presentation, not a
-// hand-rolled radius. The header is a REAL native stack header
-// (react-native-screens): the headsign is the header title, sitting on the same
-// row as the toolbar star/⋯ (place-card style) and doubling as the minimized bar
-// when the sheet is dragged down to the 0.15 detent. Favorite lives as a native
-// header star; secondary actions (model info, photos, record ride) live in a
-// native header ⋯ menu — no floating bar, no share button.
+// hand-rolled radius. The native stack header carries ONLY the toolbar star/⋯
+// (no title): favorite lives as a native header star; secondary actions (model
+// info, photos, record ride) live in a native header ⋯ menu — no floating bar,
+// no share button.
+//
+// The identity lives in a CUSTOM COLLAPSING HEADER (CollapsingHeader) that is the
+// first row of the scroll body: [face icon][line badge][headsign][on-time badge].
+// It is a sticky scroll header (stickyHeaderIndices={[0]}) driven by a Reanimated
+// onScroll worklet — the face icon shrinks and the subtitle/badge fade as the
+// body scrolls, leaving a compact [small icon · line · headsign] bar. All of it
+// runs on the UI thread off one shared `scrollY`; no per-frame React state.
 //
 // The body ScrollView is a DIRECT child of the screen (NOT wrapped in a
 // GlassView) so the native sheet controller can track it: that is what wires
 // UISheetPresentationController.prefersScrollingExpandsWhenScrolledToEdge —
 // dragging the body up on a half-open detent raises the sheet to the next detent
-// before the content scrolls. The glass sheet background comes from the system
-// formSheet (iOS 26) or SheetBackground below, never a container around the scroll.
+// before the content scrolls. The collapsing header lives INSIDE that scroll (as
+// a sticky child, not a sibling overlay), so it never hides the ScrollView from
+// react-native-screens' scroll-finder. The glass sheet background comes from the
+// system formSheet (iOS 26) or SheetBackground below, never a container around it.
 //
 // Opening this sheet ENGAGES FOLLOW on the tram (and keeps following after
 // close). The card's Follow pill toggles it; the map's FollowChip ✕ also ends
@@ -34,6 +41,14 @@ import {
   useColorScheme,
   View,
 } from 'react-native';
+import Animated, {
+  Extrapolation,
+  interpolate,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useSharedValue,
+  type SharedValue,
+} from 'react-native-reanimated';
 
 import { AboutTramCard } from '@/components/tram/AboutTramCard';
 import { RideStatusStrip, useRideRecorder } from '@/components/tram/RideRecorder';
@@ -41,12 +56,12 @@ import { StopsTimeline } from '@/components/tram/StopsTimeline';
 import { TramFace } from '@/components/tram/TramFace';
 import { AcSnowflake } from '@/components/tram/TramModelImage';
 import { ActionPillRow, type PillAction } from '@/components/ui/ActionPillRow';
-import { DelayPill, delayColor, delayLabel } from '@/components/ui/DelayPill';
+import { DelayPill } from '@/components/ui/DelayPill';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { SectionLabel } from '@/components/ui/Inset';
 import { LineBadge } from '@/components/ui/LineBadge';
 import { SheetContent } from '@/components/ui/SheetContent';
-import { StatRow, type Stat } from '@/components/ui/StatRow';
+import { StatTile, type Stat } from '@/components/ui/StatRow';
 import { Apple, appleScheme, Tram } from '@/constants/theme';
 import { getRuntime, useLoadedGeometries, useTramState } from '@/hooks/tramData';
 import type { TramPublicState } from '@/lib/types';
@@ -157,22 +172,35 @@ function fmtEta(s: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-const PHASE_LABEL: Record<TramPublicState['phase'], string> = {
-  cruise: 'Cruising',
-  dwell: 'At stop',
-  terminal: 'Terminus',
-  unknown: 'Tracking',
-};
+// ── collapsing identity header ───────────────────────────────────────────────
 
-// ── identity hero (horizontal) ───────────────────────────────────────────────
+// The face icon is rendered once at its EXPANDED size and scaled down with a UI-
+// thread transform (SVG size is a React prop, not animatable per frame); the
+// icon box width/height animate in lockstep so the line badge + headsign reflow
+// toward it. HEADER_* are the header row heights the container morphs between.
+const EXPANDED_ICON = 52;
+const COLLAPSED_ICON = 28;
+const HEADER_EXPANDED = 78;
+const HEADER_COLLAPSED = 46;
+// Scroll distance (pt) over which the header fully collapses.
+const COLLAPSE_DISTANCE = 88;
 
 /**
- * The place-card identity block, laid out HORIZONTALLY: a tappable model
- * portrait (→ full-screen 3D viewer, the established face→3D entry) beside the
- * line badge + live delay pill and the model · reg line. The headsign is NOT
- * repeated here — it is the native large title above.
+ * The place-card identity block, laid out HORIZONTALLY and COLLAPSING on scroll:
+ * a tappable model portrait (→ full-screen 3D viewer, the established face→3D
+ * entry) beside the line badge, the headsign, and the live on-time/delay badge,
+ * with a model · reg subtitle underneath. As `scrollY` grows the face icon
+ * shrinks, the subtitle + delay badge fade, and a surface + hairline fade in — so
+ * the pinned (sticky) bar reads as a compact [small icon · line · headsign].
+ * Everything is driven off the shared `scrollY` on the UI thread; no React state.
  */
-function TramHero({ state }: { state: TramPublicState }) {
+function CollapsingHeader({
+  state,
+  scrollY,
+}: {
+  state: TramPublicState;
+  scrollY: SharedValue<number>;
+}) {
   const router = useRouter();
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const c = appleScheme(scheme);
@@ -186,33 +214,99 @@ function TramHero({ state }: { state: TramPublicState }) {
     router.push(`/model/${state.model.id}`);
   };
 
-  return (
-    <View style={styles.hero}>
-      <Pressable
-        onPress={onPortrait}
-        style={({ pressed }) => pressed && styles.portraitPressed}
-        accessibilityRole="button"
-        accessibilityLabel={`View ${state.model.name} in 3D`}
-        hitSlop={4}
-      >
-        <GlassPanel variant="clear" style={styles.portraitGlass}>
-          <TramFace modelId={state.model.id} size={56} />
-        </GlassPanel>
-      </Pressable>
+  const containerStyle = useAnimatedStyle(() => ({
+    height: interpolate(
+      scrollY.value,
+      [0, COLLAPSE_DISTANCE],
+      [HEADER_EXPANDED, HEADER_COLLAPSED],
+      Extrapolation.CLAMP,
+    ),
+  }));
+  const iconBoxStyle = useAnimatedStyle(() => {
+    const s = interpolate(
+      scrollY.value,
+      [0, COLLAPSE_DISTANCE],
+      [EXPANDED_ICON, COLLAPSED_ICON],
+      Extrapolation.CLAMP,
+    );
+    return { width: s, height: s };
+  });
+  const iconScaleStyle = useAnimatedStyle(() => {
+    const s = interpolate(
+      scrollY.value,
+      [0, COLLAPSE_DISTANCE],
+      [EXPANDED_ICON, COLLAPSED_ICON],
+      Extrapolation.CLAMP,
+    );
+    return { transform: [{ scale: s / EXPANDED_ICON }] };
+  });
+  const subtitleStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [0, COLLAPSE_DISTANCE * 0.4], [1, 0], Extrapolation.CLAMP),
+  }));
+  const badgeStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [0, COLLAPSE_DISTANCE * 0.6], [1, 0], Extrapolation.CLAMP),
+  }));
+  // Surface + hairline that fade IN as the header pins, masking the scrolling
+  // content beneath the sticky bar (the iOS large-title→inline idiom). This is a
+  // PLAIN near-opaque View matching the sheet surface — deliberately NOT a
+  // BlurView: inside a sticky header the native blur layer composites ON TOP of
+  // the row content and washes it out, whereas a plain View honors child z-order
+  // and sits cleanly behind the icon / badge / headsign.
+  const surface =
+    scheme === 'dark' ? 'rgba(28,28,30,0.92)' : 'rgba(248,248,250,0.94)';
+  const chromeStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      scrollY.value,
+      [COLLAPSE_DISTANCE * 0.4, COLLAPSE_DISTANCE],
+      [0, 1],
+      Extrapolation.CLAMP,
+    ),
+  }));
 
-      <View style={styles.heroText}>
-        <View style={styles.heroTitleRow}>
-          <LineBadge line={line} size="md" />
+  return (
+    <Animated.View style={[styles.header, containerStyle]}>
+      <Animated.View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFill, { backgroundColor: surface }, chromeStyle]}
+      >
+        <View style={[styles.headerHairline, { backgroundColor: c.separator }]} />
+      </Animated.View>
+
+      <SheetContent style={styles.headerInner}>
+        <Pressable
+          onPress={onPortrait}
+          style={({ pressed }) => pressed && styles.portraitPressed}
+          accessibilityRole="button"
+          accessibilityLabel={`View ${state.model.name} in 3D`}
+          hitSlop={4}
+        >
+          <Animated.View style={[styles.iconBox, { backgroundColor: c.fillTertiary }, iconBoxStyle]}>
+            <Animated.View style={[styles.iconScale, iconScaleStyle]}>
+              <TramFace modelId={state.model.id} size={EXPANDED_ICON} />
+            </Animated.View>
+          </Animated.View>
+        </Pressable>
+
+        <View style={styles.headerText}>
+          <View style={styles.headerTitleRow}>
+            <LineBadge line={line} size="md" />
+            <Text style={[styles.headsign, { color: c.text }]} numberOfLines={1}>
+              {state.snapshot.headsign}
+            </Text>
+          </View>
+          <Animated.View style={[styles.headerSubRow, subtitleStyle]}>
+            <Text style={[styles.headerSubtitle, { color: c.secondary }]} numberOfLines={1}>
+              {subtitle}
+            </Text>
+            <AcSnowflake airConditioned={state.snapshot.airConditioned} size={12} />
+          </Animated.View>
+        </View>
+
+        <Animated.View style={badgeStyle}>
           <DelayPill delaySeconds={state.snapshot.delaySeconds} />
-        </View>
-        <View style={styles.heroSubRow}>
-          <Text style={[styles.heroSubtitle, { color: c.secondary }]} numberOfLines={1}>
-            {subtitle}
-          </Text>
-          <AcSnowflake airConditioned={state.snapshot.airConditioned} size={12} />
-        </View>
-      </View>
-    </View>
+        </Animated.View>
+      </SheetContent>
+    </Animated.View>
   );
 }
 
@@ -229,6 +323,8 @@ function LiveStats({ state, positionMode }: { state: TramPublicState; positionMo
   const eta = useEtaCountdown(state.nextStopEtaS ?? null);
   const delayS = state.snapshot.delaySeconds;
 
+  // Two text stats (Updated / Next stop) + a Delay tile that renders the same
+  // on-time / +N min pill as the header (Status/Cruising dropped — not useful).
   const stats: Stat[] = [
     {
       key: 'updated',
@@ -237,18 +333,11 @@ function LiveStats({ state, positionMode }: { state: TramPublicState; positionMo
       symbol: 'antenna.radiowaves.left.and.right',
       valueTint: fresh ? Apple.green : undefined,
     },
-    { key: 'status', caption: 'Status', value: PHASE_LABEL[state.phase] },
     {
       key: 'next',
       caption: 'Next stop',
       value: eta != null ? fmtEta(eta) : '—',
       valueTint: eta != null ? Apple.green : undefined,
-    },
-    {
-      key: 'delay',
-      caption: 'Delay',
-      value: delayLabel(delayS),
-      valueTint: delayS > 60 ? delayColor(delayS) : undefined,
     },
   ];
 
@@ -263,7 +352,21 @@ function LiveStats({ state, positionMode }: { state: TramPublicState; positionMo
 
   return (
     <View style={styles.statsBlock}>
-      <StatRow stats={stats} />
+      <View style={styles.statRow}>
+        {stats.map((s) => (
+          <StatTile key={s.key} stat={s} />
+        ))}
+        <View style={styles.delayTile}>
+          <Text
+            style={[styles.delayCaption, { color: c.secondary }]}
+            numberOfLines={1}
+            allowFontScaling={false}
+          >
+            Delay
+          </Text>
+          <DelayPill delaySeconds={delayS} />
+        </View>
+      </View>
       {honesty != null && (
         <View style={styles.honestyRow}>
           <SymbolView name="wand.and.rays" size={11} weight="semibold" tintColor={c.secondary} />
@@ -316,6 +419,14 @@ export default function TramDetailSheet() {
 
   const state = useTramState(key);
   const geometries = useLoadedGeometries();
+
+  // Drives the collapsing header entirely on the UI thread — the onScroll worklet
+  // writes `scrollY`, CollapsingHeader's useAnimatedStyle hooks read it. No React
+  // state per frame (perf invariant §B.1).
+  const scrollY = useSharedValue(0);
+  const onScroll = useAnimatedScrollHandler((e) => {
+    scrollY.value = e.contentOffset.y;
+  });
 
   // Remember the last live state so we can render a friendly "left service"
   // screen (with line + reg) if the tram drops out of the feed while open.
@@ -445,53 +556,64 @@ export default function TramDetailSheet() {
   ];
 
   return (
-    // The ScrollView is a DIRECT child of the screen (not wrapped in a GlassView)
-    // so the native sheet controller can track it: this is what wires the
-    // scroll-expands-to-edge gesture (drag the body up on a half-open sheet → the
-    // sheet rises to the next detent, then the content scrolls). The glass sheet
-    // background comes from the system formSheet (iOS 26) or SheetBackground.
+    // The Animated.ScrollView is a DIRECT child of the screen (not wrapped in a
+    // GlassView) so the native sheet controller can track it: this is what wires
+    // the scroll-expands-to-edge gesture (drag the body up on a half-open sheet →
+    // the sheet rises to the next detent, then the content scrolls). The
+    // CollapsingHeader is the sticky FIRST child of THIS scroll (index 0), not a
+    // sibling overlay — so it never hides the ScrollView from the scroll-finder.
+    // The glass sheet background comes from the system formSheet (iOS 26) or
+    // SheetBackground.
     <>
       <SheetBackground />
 
-      {/* Scroll spans the whole sheet; automatic inset accounts for the header. */}
-      <ScrollView
+      {/* Scroll spans the whole sheet; automatic inset drops content (and the
+          sticky header) below the transparent native toolbar bar. */}
+      <Animated.ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.body}
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        stickyHeaderIndices={[0]}
       >
-        <SheetContent style={styles.column}>
-          <TramHero state={state} />
+        <CollapsingHeader state={state} scrollY={scrollY} />
 
-          <ActionPillRow actions={actions} />
+        <View style={styles.bodyInner}>
+          <SheetContent style={styles.column}>
+            <ActionPillRow actions={actions} />
 
-          <LiveStats state={state} positionMode={positionMode} />
+            <LiveStats state={state} positionMode={positionMode} />
 
-          <View>
-            <SectionLabel>Upcoming stops</SectionLabel>
-            <StopsTimeline
-              geometry={geometry}
-              simDistM={state.simDistM}
-              delaySeconds={state.snapshot.delaySeconds}
-              phase={state.phase}
-              nextStopEtaS={state.nextStopEtaS}
-              collapsible
-            />
-          </View>
+            <View>
+              <SectionLabel>Upcoming stops</SectionLabel>
+              <StopsTimeline
+                geometry={geometry}
+                simDistM={state.simDistM}
+                delaySeconds={state.snapshot.delaySeconds}
+                phase={state.phase}
+                nextStopEtaS={state.nextStopEtaS}
+                collapsible
+              />
+            </View>
 
-          <RideStatusStrip tramKey={key} />
+            <RideStatusStrip tramKey={key} />
 
-          <View>
-            <SectionLabel>About</SectionLabel>
-            <AboutTramCard model={state.model} snapshot={state.snapshot} />
-          </View>
-        </SheetContent>
-      </ScrollView>
+            <View>
+              <SectionLabel>About</SectionLabel>
+              <AboutTramCard model={state.model} snapshot={state.snapshot} />
+            </View>
+          </SheetContent>
+        </View>
+      </Animated.ScrollView>
 
-      {/* Native header title on the SAME row as the toolbar star/⋯ (place-card
-          style); it stays the minimized bar at the 0.15 detent too. Regular (not
-          large) is enforced by the route's headerLargeTitleEnabled:false. */}
-      <Stack.Title style={{ color: c.text }}>{state.snapshot.headsign}</Stack.Title>
+      {/* The native header carries ONLY the toolbar star/⋯ now — the headsign
+          moved into the CollapsingHeader identity block above. A blank (space)
+          title is rendered explicitly: an EMPTY string falls back to the route
+          name ("tram/[key]") on some entry paths (e.g. cold-launch deep link),
+          so a non-empty-but-invisible space reliably suppresses the fallback. */}
+      <Stack.Title>{' '}</Stack.Title>
       <Stack.Toolbar placement="right">
         <Stack.Toolbar.Button
           icon={isFavorite ? 'star.fill' : 'star'}
@@ -526,29 +648,44 @@ export default function TramDetailSheet() {
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
-  body: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 40 },
+  // Full-width container so the sticky header's blur/hairline span edge-to-edge;
+  // horizontal padding lives on the header inner + bodyInner instead.
+  body: { paddingBottom: 40 },
+  bodyInner: { paddingHorizontal: 20, paddingTop: 14 },
   // No flex here — inside a ScrollView's content container a flex:1 child
   // collapses to zero height and the whole card renders blank.
   column: { gap: 18 },
   centerContent: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 20 },
 
-  // identity hero (horizontal)
-  hero: { alignItems: 'center', flexDirection: 'row', gap: 14 },
-  portraitPressed: { transform: [{ scale: 0.96 }] },
-  portraitGlass: {
-    alignItems: 'center',
-    borderCurve: 'continuous',
-    borderRadius: 20,
-    height: 72,
-    justifyContent: 'center',
-    width: 72,
+  // collapsing identity header (sticky, morphs on scrollY)
+  header: { justifyContent: 'center', overflow: 'hidden' },
+  headerHairline: {
+    bottom: 0,
+    height: StyleSheet.hairlineWidth,
+    left: 0,
+    position: 'absolute',
+    right: 0,
   },
-  heroText: { flex: 1, gap: 6 },
-  heroTitleRow: { alignItems: 'center', flexDirection: 'row', gap: 9 },
-  heroSubRow: { alignItems: 'center', flexDirection: 'row', gap: 5 },
-  heroSubtitle: { flexShrink: 1, fontSize: 14 },
+  headerInner: { alignItems: 'center', flexDirection: 'row', gap: 12, paddingHorizontal: 20 },
+  portraitPressed: { transform: [{ scale: 0.96 }] },
+  iconBox: {
+    borderCurve: 'continuous',
+    borderRadius: 13,
+    overflow: 'hidden',
+  },
+  // Rendered at EXPANDED_ICON and scaled from the top-left so it stays pinned in
+  // the animating iconBox corner as both shrink in lockstep.
+  iconScale: { left: 0, position: 'absolute', top: 0, transformOrigin: 'top left' },
+  headerText: { flex: 1, gap: 3, justifyContent: 'center' },
+  headerTitleRow: { alignItems: 'center', flexDirection: 'row', gap: 9 },
+  headsign: { flexShrink: 1, fontSize: 17, fontWeight: '600' },
+  headerSubRow: { alignItems: 'center', flexDirection: 'row', gap: 5 },
+  headerSubtitle: { flexShrink: 1, fontSize: 13 },
 
   statsBlock: { gap: 8 },
+  statRow: { alignItems: 'flex-start', flexDirection: 'row' },
+  delayTile: { alignItems: 'center', flex: 1, gap: 5, paddingHorizontal: 4 },
+  delayCaption: { fontSize: 13, fontWeight: '400' },
   honestyRow: { alignItems: 'center', flexDirection: 'row', gap: 5, justifyContent: 'center' },
   honestyText: { fontSize: 12 },
 
