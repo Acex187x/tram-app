@@ -148,3 +148,83 @@ v4 raised `DIR_CAP_BYTES` 8 → 24 MB: a 90 min ride with motion is ~8 MB and
 ride files are never eviction victims — under the old cap one long ride would
 have force-evicted every passive-log archive. Rides remain excluded from
 eviction; the active daily log keeps its own rotation ceiling (R9).
+
+## Data-volume audit (2026-07-20, first full v4 ride) & recording data spec
+
+Measured on `20260720-193029-9097.jsonl` (40 min, 2 240 points, 59 881 IMU
+samples): **4.87 MB total = 1.13 MB points (23 %, ~506 B/point @1 Hz) +
+3.74 MB motion (77 %, ~62 B/sample @25 Hz)**. Extrapolated: ~7.3 MB/h, so a
+90 min ride is ~11 MB (revises the ~8 MB estimate above) and the 24 MB cap
+holds barely 3 h of accumulated rides — and rides are non-evictable by design.
+
+### What the analysis actually consumes
+
+- `ride_replay.py` (the gate for every ride-evidenced constant) reads ONLY
+  per-point fields: `t`, `fLat/fLng/fDist/fOffM` (shape reconstruction +
+  ground truth), `obsAt/obsDist/statePos/nextSeq` (fix sequence + stop table),
+  `simDist` (surrogate-fidelity check), header meta. **Zero IMU.**
+- The one-off analysis (analysis-2026-07-20-ride.md) additionally used
+  `gpsSpeed` (stop windows, junction speeds), `gpsAcc` (quality), `projDist/
+  devM` (error decomposition), `bias` (contamination diagnosis), `phase`,
+  `lagM` vs `fLagM` (filter transparency check, one-time: differed 0.2 m),
+  and the IMU — but only as **2 s-window accel/decel percentiles** (< 2 Hz
+  bandwidth). The envisioned future IMU use (per-stop jerk signatures to
+  split platform dwells from signal stops) also lives well under ~3 Hz.
+
+### Verdict: points OK as-is; IMU rate is the one cut worth making
+
+- **Per-point (1 Hz, ~0.5 KB/s): keep everything.** Every field either feeds
+  the pipeline or is cheap insurance; 98 % of points repeat the previous
+  AVL context (`obsAt` unchanged) and could be deduped for ~15 % of point
+  bytes, but that is ~3 % of the file — not worth the schema/parser churn.
+- **IMU 25 → 10 Hz** (`MOTION_UPDATE_INTERVAL_MS` 40 → 100) is the
+  recommended change when the implementer next touches sensors.ts: tram
+  dynamics live under 2 Hz, 10 Hz still gives 5× oversampling for every
+  current and planned analysis, and the file drops 4.87 → ~2.6 MB per 40 min
+  (~3.9 MB/h — the cap then holds ~6 h of rides). 25 Hz only serves
+  track-vibration analysis, an explicit non-goal. Keep all 10 channels
+  (attitude is required to rotate acceleration into the world frame).
+- Do NOT drop the raw GPS in favor of the projected position (next section):
+  it is ~3 % of the file and is the only recovery path when the projection
+  context was wrong at record time.
+
+### The projected on-line position IS the recorded ground truth (confirmed)
+
+The idea "записывать сразу положение реального трамвая на линии (GPS+fitness,
+спроецированный на shape в момент записи)" is **already implemented since v4**:
+`fLat/fLng` (filtered rider fix) → projected onto the tram's shape at write
+time → `fDist/fOffM/fLagM`. `fDist` is exactly the ground truth
+`ride_replay.py` scores against; `fLagM = simDist − fDist` is the headline
+metric. No new recording work is needed for it. It is *sufficient* for the
+whole current analysis **only together with** the raw fixes: the projection
+depends on the engine's shape/trip at record time (a wrong trip or shape
+variant would silently poison `fDist` for the whole ride), so the verbatim
+`gpsLat/gpsLng/gpsAcc` stay the re-derivation path. "Fitness"-style motion
+data contributes via the IMU batches (accel/decel envelopes, future
+dwell-vs-signal separation), not via the projection.
+
+### Recording data spec v5-min (for the implementer; = v4 minus IMU rate)
+
+Everything below is the minimal set that keeps the FULL analysis reproducible.
+Fields marked *(derivable)* may be dropped if a byte budget ever demands it —
+nothing else may.
+
+- **Meta**: `ride-start` {tramKey, model, line, tripId, t, schema};
+  `ride-end` {t, points, motionSamples, gpsRejects} / `ride-orphaned` {t}.
+- **Point @1 Hz per GPS fix** (synchronous append, never buffered):
+  - time/identity: `t`, `line`, `tripId`, `model`, `posMode`;
+  - raw GPS (verbatim, always): `gpsLat`, `gpsLng`, `gpsAcc`, `gpsSpeed`;
+  - filtered rider: `fLat`, `fLng`, `rej`;
+  - rider-on-shape (ground truth): `fDist`, `fOffM`, `fLagM`;
+  - raw-on-shape *(derivable from raw GPS + shape)*: `gpsDist`, `gpsOffM`,
+    `lagM`;
+  - sim: `simDist`, `simKmh`, `phase`, `bias`; `simLat/simLng` *(derivable,
+    kept for the in-app ride preview which reads tracks without geometry)*;
+  - raw AVL: `obsDist`, `obsAt`, `statePos`, `delayS`, `nextSeq`, `projDist`,
+    `devM`.
+- **Motion batches @10 Hz** (was 25 Hz — the only spec change): same
+  `{type:'motion', t0, n, s:[[dt,ax,ay,az,ra,rb,rg,oa,ob,og],…]}` encoding,
+  ≤1 s / ≤25-sample flush, all 10 channels, gaps observable via `t0`/`dt`.
+
+Parsers stay untouched: rate is not part of the schema, and every consumer
+(`rideFile.ts`, `ride_replay.py`) already handles arbitrary batch cadence.

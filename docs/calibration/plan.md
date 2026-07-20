@@ -146,8 +146,14 @@ The existing daytime center-zone cap (07:00–19:00) folds into this table event
   scores vs the RIDER's GPS (`fDist`); the gate for every ride-evidenced
   constant (methodology + shrinkage rules: analysis-2026-07-20-ride.md §5;
   double gate = ride-replay improvement + no `replay.py` fleet regression).
+  **Step-by-step runbook for calibrating on a new ride: `RUNBOOK.md`** (same
+  directory) — ingest → replay → double gate → shrinkage → commit.
 
 ## Runbook for agents ("собирай данные и вноси изменения")
+
+For a **device ride recording** ("вот новая поездка, откалибруй" in any
+wording) follow `docs/calibration/RUNBOOK.md` instead — the steps below are
+the fleet/simulator AVL loop.
 
 You are picking up the calibration loop. Everything you need:
 
