@@ -77,6 +77,29 @@ export function projectOnlineFix(
   };
 }
 
+/**
+ * Forward-extrapolate an on-line along-shape distance to `nowMs` using the
+ * fix's filtered ground speed — a smooth ~60 fps readout of the rider's
+ * position between the ~1 Hz foreground GPS fixes (the debug overlay rAF loop
+ * calls this every frame). `baseDistM` is the fix projected onto the shape
+ * (fDistM ?? gpsDistM); the advance is speed·Δt, forward-only and clamped to a
+ * short horizon so a stalled/stale fix can't run the readout away. Returns
+ * baseDistM unchanged when there is no usable speed, null when inputs are
+ * unusable. Pure — unit-tested; nothing here feeds the simulation.
+ */
+export function projectOnlineDistAt(
+  baseDistM: number | null,
+  fix: OnlineFix | null,
+  nowMs: number,
+  maxExtrapS = 3,
+): number | null {
+  if (baseDistM == null || fix == null) return null;
+  const speed = fix.fSpeedMs ?? fix.speedMs;
+  if (speed == null || !Number.isFinite(speed) || speed <= 0) return baseDistM;
+  const dtS = Math.min(Math.max((nowMs - fix.t) / 1000, 0), maxExtrapS);
+  return baseDistM + speed * dtS;
+}
+
 export interface OnlineLocatorDeps {
   location: LocationWatcher;
   now: () => number;

@@ -44,6 +44,7 @@ export {
 export {
   OnlineLocator,
   projectOnlineFix,
+  projectOnlineDistAt,
   type OnlineFix,
   type OnlineProjection,
 } from './onlinePosition';

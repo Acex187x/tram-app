@@ -21,8 +21,12 @@ import {
   A_BRK,
   buildSpeedProfile,
   cruiseCapAt,
+  curveCap,
   pragueHour,
+  todPaceFactor,
   vAllowedAt,
+  V_CRUISE_REF_MS,
+  zoneCapAt,
   ZONAL_DWELL_AB,
   ZONAL_DWELL_CENTRE,
   ZONAL_DWELL_OUT,
@@ -266,6 +270,26 @@ function capSwitchSpeed(sim: TramSim, sConfM: number): void {
         )
       : SWITCH_SLOW_V_MS;
   if (sim.vMs > vCap) sim.vMs = vCap;
+}
+
+/**
+ * Approximate track curvature (rad/m) at sM from the heading change across a
+ * ±10 m window — DEBUG-ONLY read (getDebugInfo). It is the same physical
+ * quantity the per-vertex profile uses (curvatureProfile), computed pointwise
+ * so the debug view can show κ / radius / the isolated curve cap at the
+ * rendered position without recomputing a whole-shape profile. 0 on a straight.
+ */
+function curvatureAtS(geometry: RouteGeometry, sM: number): number {
+  const total = geometry.totalM;
+  const s0 = Math.max(0, sM - 10);
+  const s1 = Math.min(total, sM + 10);
+  const arc = s1 - s0;
+  if (arc <= 1e-6) return 0;
+  const b0 = bearingAt(geometry.coordinates, geometry.cumDistM, s0);
+  const b1 = bearingAt(geometry.coordinates, geometry.cumDistM, s1);
+  let d = Math.abs(b1 - b0) % 360;
+  if (d > 180) d = 360 - d;
+  return (d * (Math.PI / 180)) / arc;
 }
 
 export interface TramEngineOptions {
@@ -1025,10 +1049,13 @@ export class TramEngine {
 
   /**
    * Additive, ON-DEMAND debug view of one tram's INTERNAL sim state for the
-   * debug overlay (~1 Hz — NEVER the frame path). Cheap: a handful of pure
-   * field reads plus two speed-cap evaluations at the current position. Returns
-   * undefined for an unknown key; hasSim=false when the tram has no geometry
-   * sim yet (raw-dot). Nothing here influences rendering or the simulation.
+   * debug overlay. The overlay reads this EVERY FRAME (~60 fps) while mounted —
+   * debug mode is deliberately exempt from the ≤1 Hz perf invariant so the
+   * readout is instant/raw. Kept cheap and pure regardless: a handful of field
+   * reads plus a few speed-cap/curvature evaluations at the current position,
+   * for ONE followed tram only. Returns undefined for an unknown key;
+   * hasSim=false when the tram has no geometry sim yet (raw-dot). Nothing here
+   * influences rendering or the simulation (pure read — verified by test).
    */
   getDebugInfo(
     key: string,
@@ -1062,14 +1089,36 @@ export class TramEngine {
         fixAgeMs: Math.max(0, nowMs - snapshot.observedAtMs),
         lastTeleportMs: 0,
         projDistM: null,
+        // Additive raw-internals (no sim → no physics to expose).
+        simSpeedMs: 0,
+        cruiseTargetKmh: null,
+        zoneCapKmh: null,
+        curveCapKmh: null,
+        curveKappa: null,
+        curveRadiusM: null,
+        todPaceFactor: null,
+        staleFixAgeMs: Math.max(0, nowMs - snapshot.observedAtMs) + FEED_LATENCY_S * 1000,
+        minStopDistM: null,
+        burstUntilM: 0,
+        skipRollUntilM: 0,
+        lengthM: null,
+        delaySeconds: snapshot.delaySeconds,
+        statePosition: snapshot.statePosition,
       };
     }
     const target = targetDistAt(sim, nowMs);
+    const staleFixAgeMs = Math.max(0, nowMs - sim.obsAtMs) + FEED_LATENCY_S * 1000;
     // Mirrors tramSim.fixPinActive (not exported): the fix-pin is authoritative
     // only while the latency-adjusted fix age is within the staleness bound.
     const fixPinActive =
-      sim.fixStopDistM !== null &&
-      nowMs - sim.obsAtMs + FEED_LATENCY_S * 1000 <= STOP_HOLD_MAX_FIX_AGE_S * 1000;
+      sim.fixStopDistM !== null && staleFixAgeMs <= STOP_HOLD_MAX_FIX_AGE_S * 1000;
+    // Isolated caps at the rendered position (debug read; nothing consumes
+    // these but the overlay). zoneCap/curveCap are the two ingredients of
+    // cruiseCap — shown split so a curve slow-down is legible as such.
+    const cruiseCapMs = cruiseCapAt(sim.profile, sim.geometry, sim.sM);
+    const coord = pointAt(sim.geometry.coordinates, sim.geometry.cumDistM, sim.sM);
+    const kappa = curvatureAtS(sim.geometry, sim.sM);
+    const tod = todPaceFactor(nowMs);
     return {
       hasSim: true,
       phase: sim.phase,
@@ -1079,7 +1128,7 @@ export class TramEngine {
       errorM: target - sim.sM,
       paceBias: sim.paceBias,
       vAllowedKmh: vAllowedAt(sim.profile, sim.geometry, sim.sM, sim.minStopDist) * 3.6,
-      cruiseCapKmh: cruiseCapAt(sim.profile, sim.geometry, sim.sM) * 3.6,
+      cruiseCapKmh: cruiseCapMs * 3.6,
       crawling: sim.crawling,
       deepCrawl: sim.deepCrawl,
       stuckAtM: sim.stuckAtM,
@@ -1094,6 +1143,21 @@ export class TramEngine {
       fixAgeMs: Math.max(0, nowMs - sim.obsAtMs),
       lastTeleportMs: sim.lastTeleportMs,
       projDistM: entry.projSim ? entry.projSim.sM : null,
+      // Additive raw-internals.
+      simSpeedMs: sim.vMs,
+      cruiseTargetKmh: Math.min(cruiseCapMs, V_CRUISE_REF_MS) * sim.paceBias * tod * 3.6,
+      zoneCapKmh: zoneCapAt(coord, sim.profile.daytime) * 3.6,
+      curveCapKmh: curveCap(kappa) * 3.6,
+      curveKappa: kappa,
+      curveRadiusM: kappa > 1e-6 ? 1 / kappa : null,
+      todPaceFactor: tod,
+      staleFixAgeMs,
+      minStopDistM: sim.minStopDist,
+      burstUntilM: sim.burstUntilM,
+      skipRollUntilM: sim.skipRollUntilM,
+      lengthM: sim.lengthM,
+      delaySeconds: sim.snapshot.delaySeconds,
+      statePosition: sim.snapshot.statePosition,
     };
   }
 

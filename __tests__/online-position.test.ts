@@ -7,7 +7,12 @@
 // watcher + GpsFilter.
 
 import type { LocationSample, LocationWatcher } from '@/lib/motionlog';
-import { OnlineLocator, projectOnlineFix, type OnlineFix } from '@/lib/motionlog';
+import {
+  OnlineLocator,
+  projectOnlineDistAt,
+  projectOnlineFix,
+  type OnlineFix,
+} from '@/lib/motionlog';
 import { makeGeometry, metersToCoord, ORIGIN } from './helpers';
 
 /** Straight 3 km shape running due east from the test origin. */
@@ -59,6 +64,37 @@ describe('projectOnlineFix', () => {
     expect(projectOnlineFix(fixAt(100, 0), undefined)).toBeNull();
     const oneVertex = { ...GEO, coordinates: [GEO.coordinates[0]], cumDistM: [0] };
     expect(projectOnlineFix(fixAt(100, 0), oneVertex)).toBeNull();
+  });
+});
+
+describe('projectOnlineDistAt', () => {
+  const baseFix = fixAt(500, 0, { t: 1_000, fSpeedMs: 8, speedMs: 6 });
+
+  it('extrapolates forward at the filtered speed over elapsed time', () => {
+    // 2 s after the fix at 8 m/s → +16 m.
+    expect(projectOnlineDistAt(500, baseFix, 3_000)).toBeCloseTo(516, 3);
+  });
+
+  it('prefers the filtered speed but falls back to the raw device speed', () => {
+    const noFilt = fixAt(500, 0, { t: 1_000, fSpeedMs: null, speedMs: 6 });
+    expect(projectOnlineDistAt(500, noFilt, 2_000)).toBeCloseTo(506, 3); // 1 s · 6 m/s
+  });
+
+  it('never runs backward and clamps a stale fix to the horizon', () => {
+    // now BEFORE the fix time → no negative advance.
+    expect(projectOnlineDistAt(500, baseFix, 500)).toBeCloseTo(500, 3);
+    // 60 s stale but clamped to the 3 s default horizon → +24 m, not +480.
+    expect(projectOnlineDistAt(500, baseFix, 61_000)).toBeCloseTo(524, 3);
+  });
+
+  it('returns the base unchanged when there is no usable speed', () => {
+    const noSpeed = fixAt(500, 0, { fSpeedMs: null, speedMs: null });
+    expect(projectOnlineDistAt(500, noSpeed, 9_000)).toBe(500);
+  });
+
+  it('returns null when the base distance or fix is missing', () => {
+    expect(projectOnlineDistAt(null, baseFix, 3_000)).toBeNull();
+    expect(projectOnlineDistAt(500, null, 3_000)).toBeNull();
   });
 });
 

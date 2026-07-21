@@ -190,6 +190,43 @@ export interface SimDebugInfo {
   lastTeleportMs: number;
   /** Live-projection (dead-reckoned raw fix) distance, m, or null. */
   projDistM: number | null;
+
+  // ── additive raw-internals extensions (60 fps debug overlay) ───────────────
+  // Diagnostics only — nothing below influences rendering or the simulation.
+  // Appended so existing consumers (and the on-disk debug shape) stay valid.
+
+  /** Sim speed, m/s (simSpeedKmh / 3.6, exposed raw alongside km/h). */
+  simSpeedMs: number;
+  /**
+   * Cruise AIM before the catch-up factor/burst, km/h:
+   * min(cruiseCap, V_CRUISE_REF) · paceBias · todPace — the speed a normally
+   * tracking sim cruises toward (still clamped by vAllowed). null w/o sim.
+   */
+  cruiseTargetKmh: number | null;
+  /** Zone speed cap at the current position (centre 31 vs network 50), km/h. null w/o sim. */
+  zoneCapKmh: number | null;
+  /** Curve speed cap at the current position, km/h (≈V_MAX where straight). null w/o sim. */
+  curveCapKmh: number | null;
+  /** Track curvature at the current position, rad/m (0 = straight). null w/o sim. */
+  curveKappa: number | null;
+  /** Curve radius at the current position, m (null when straight / no sim). */
+  curveRadiusM: number | null;
+  /** Time-of-day pace multiplier folded into the cruise target (1 = neutral). null w/o sim. */
+  todPaceFactor: number | null;
+  /** Latency-adjusted fix age, ms (fixAge + FEED_LATENCY) — the staleness clock. */
+  staleFixAgeMs: number;
+  /** Distance below which stops are ignored as 0-limits (served/passed), m. null w/o sim. */
+  minStopDistM: number | null;
+  /** Departure-burst end along shape, m (0 = none). */
+  burstUntilM: number;
+  /** Skip-roll zone end along shape, m (0 = none). */
+  skipRollUntilM: number;
+  /** Physical tram length incl. any coupled trailer, m. null w/o sim. */
+  lengthM: number | null;
+  /** Feed-reported schedule delay, seconds (+ late). */
+  delaySeconds: number;
+  /** Feed state string (on_track / at_stop / …). */
+  statePosition: string;
 }
 
 export interface PointFeatureProps {

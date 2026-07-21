@@ -1,16 +1,27 @@
 // DEBUG OVERLAY — a live, utilitarian technical readout of the simulation for
 // the followed tram, drawn over the map when Settings ▸ Developer ▸ Debug mode
 // is on. Deliberately NOT styled to the app's guidelines: dense monospace rows,
-// lots of numbers — built to evaluate the physics from inside a real tram.
+// lots of raw numbers — built to evaluate the physics from inside a real tram.
 //
-// Data sources (all read at ~1 Hz — never per frame; perf invariant #1):
-//   • engine.getDebugInfo(key) — internal sim state (phase, speeds, caps,
-//     pace bias, and every active hold: fix-pin / stuck / junction-yield /
-//     ahead-crawl / departure-burst / skip-roll / dwell);
+// UPDATE CADENCE — INSTANT (~60 fps). Debug mode is EXEMPT from the app's ≤1 Hz
+// perf invariant: while mounted the overlay drives its OWN requestAnimationFrame
+// loop and re-reads the engine every frame, so the panel tracks the 60 Hz
+// physics with zero smoothing/throttle. (subscribeFrame drops to ~10 Hz at far
+// zoom — a private rAF keeps the readout at display rate regardless.) The GPS
+// on-line position is read every frame too and forward-extrapolated between the
+// ~1 Hz foreground fixes (projectOnlineDistAt) so the "real" distance advances
+// smoothly instead of stepping once a second. Re-rendering ~60×/s is fine here:
+// one small panel, debug-only, mounted just for the followed tram.
+//
+// Data sources:
+//   • engine.getDebugInfo(key) — raw INTERNAL sim state (phase, every speed &
+//     cap, curvature, pace bias, the pace error, and every active hold with
+//     numbers: fix-pin / stuck / junction-yield / crawl / burst / skip-roll /
+//     dwell / teleport);
 //   • engine.getState(key)     — next stop + ETA, delay, raw fix;
-//   • OnlineLocator (useOnlineLocator) — the rider's filtered GPS projected
-//     onto the followed tram's shape = the REAL on-line position. The rider is
-//     physically in this tram, so that projection is the ground truth.
+//   • OnlineLocator            — the rider's filtered GPS projected onto the
+//     followed tram's shape = the REAL on-line position (ground truth: the
+//     rider is physically in this tram).
 //
 // Diffs are signed: POSITIVE lag = the SIM is AHEAD of the real tram.
 import { useEffect, useState } from 'react';
@@ -19,22 +30,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getRuntime } from '@/hooks/tramData';
 import { Fonts } from '@/constants/theme';
-import { projectOnlineFix, useOnlineLocator } from '@/lib/motionlog';
+import {
+  projectOnlineDistAt,
+  projectOnlineFix,
+  useOnlineLocator,
+  type OnlineFix,
+  type OnlineLocator,
+  type OnlineProjection,
+} from '@/lib/motionlog';
 import type { SimDebugInfo, TramPublicState } from '@/lib/types';
 import { useSelectionStore } from '@/stores/selection';
 
 const MONO = Fonts?.mono ?? 'monospace';
-/** Overlay refresh cadence — 1 Hz (perf: never the frame path). */
-const TICK_MS = 1_000;
 
-/** Force a ~1 Hz re-render so the panel re-reads live engine/GPS state. */
-function useSecondTick(): void {
-  const [, setN] = useState(0);
-  useEffect(() => {
-    const iv = setInterval(() => setN((n) => n + 1), TICK_MS);
-    return () => clearInterval(iv);
-  }, []);
-}
+// ── formatting ───────────────────────────────────────────────────────────────
 
 function num(n: number | null | undefined, digits = 0): string {
   if (n == null || !Number.isFinite(n)) return '—';
@@ -47,10 +56,73 @@ function signed(n: number | null | undefined, digits = 0): string {
   return (n >= 0 ? '+' : '') + n.toFixed(digits);
 }
 
-function secs(ms: number | null | undefined): string {
+/** Seconds, 1 decimal (from ms). */
+function sec1(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms)) return '—';
+  return (ms / 1000).toFixed(1) + 's';
+}
+
+/** Seconds, 0 decimals (from ms). */
+function sec0(ms: number | null | undefined): string {
   if (ms == null || !Number.isFinite(ms)) return '—';
   return (ms / 1000).toFixed(0) + 's';
 }
+
+// ── live snapshot (rebuilt every frame) ──────────────────────────────────────
+
+interface DebugSnapshot {
+  nowMs: number;
+  dbg: SimDebugInfo | undefined;
+  state: TramPublicState | undefined;
+  fix: OnlineFix | null;
+  proj: OnlineProjection | null;
+  /** Filtered on-line distance, forward-extrapolated to now (smooth 60 fps). */
+  realDistM: number | null;
+  /** Raw GPS projected on the shape (non-extrapolated). */
+  realRawDistM: number | null;
+  /** Along-shape distance to the next stop ahead of the sim, m. */
+  nextStopDistM: number | null;
+  watchActive: boolean;
+  watchError: string | null;
+}
+
+/** Read everything fresh for `key` at the current instant. Pure (no writes). */
+function buildSnapshot(key: string | null, locator: OnlineLocator): DebugSnapshot {
+  const nowMs = Date.now();
+  const engine = getRuntime().engine;
+  const dbg = key ? engine.getDebugInfo(key, nowMs) : undefined;
+  const state = key ? engine.getState(key, nowMs) : undefined;
+  const geometry = key ? engine.getGeometry(key) : undefined;
+  const fix = locator.latest();
+  const proj = fix ? projectOnlineFix(fix, geometry) : null;
+  const baseReal = proj ? (proj.fDistM ?? proj.gpsDistM) : null;
+  const realDistM = projectOnlineDistAt(baseReal, fix, nowMs);
+  const realRawDistM = proj ? proj.gpsDistM : null;
+
+  let nextStopDistM: number | null = null;
+  if (geometry && dbg?.hasSim) {
+    for (const st of geometry.stops) {
+      if (st.distM > dbg.simDistM + 0.5) {
+        nextStopDistM = st.distM - dbg.simDistM;
+        break;
+      }
+    }
+  }
+  return {
+    nowMs,
+    dbg,
+    state,
+    fix,
+    proj,
+    realDistM,
+    realRawDistM,
+    nextStopDistM,
+    watchActive: locator.active(),
+    watchError: locator.error(),
+  };
+}
+
+// ── phase / regime words ─────────────────────────────────────────────────────
 
 /** Human-readable phase headline. */
 function phaseLabel(d: SimDebugInfo): string {
@@ -64,6 +136,8 @@ function phaseLabel(d: SimDebugInfo): string {
       if (d.yieldHoldM !== null) return 'YIELDING at junction';
       if (d.deepCrawl) return 'FAR AHEAD — crawling (walking pace)';
       if (d.crawling) return 'AHEAD OF REALITY — easing off';
+      if (d.burstActive) return 'DEPARTURE BURST (brisk exit)';
+      if (d.skipRollActive) return 'ROLLING through skipped stop';
       if (d.errorM != null && d.errorM > 40) return 'BEHIND — catching up';
       if (d.vAllowedKmh != null && d.cruiseCapKmh != null && d.vAllowedKmh < d.cruiseCapKmh - 1)
         return 'BRAKING for curve / stop';
@@ -73,29 +147,33 @@ function phaseLabel(d: SimDebugInfo): string {
   }
 }
 
-/** Active holds/regimes, plain words, most-urgent first. */
+/** Active holds/regimes, plain words + numbers, most-urgent first. */
 function activeNotes(d: SimDebugInfo, nowMs: number): string[] {
   const out: string[] = [];
-  if (d.stuckAtM !== null) out.push(`stuck-hold @ ${num(d.stuckAtM)} m`);
-  if (d.yieldHoldM !== null) out.push(`junction-yield → ${num(d.yieldHoldM)} m`);
-  if (d.fixPinActive && d.fixStopDistM !== null) out.push(`fix-pin @ stop ${num(d.fixStopDistM)} m`);
+  if (d.stuckAtM !== null) out.push(`stuck-hold @ ${num(d.stuckAtM)}m`);
+  if (d.yieldHoldM !== null) out.push(`junction-yield → ${num(d.yieldHoldM)}m`);
+  if (d.fixPinActive && d.fixStopDistM !== null) out.push(`fix-pin @ ${num(d.fixStopDistM)}m`);
   if (d.phase === 'dwell' && d.dwellUntilMs > 0) {
     const left = d.dwellUntilMs - nowMs;
-    out.push(left > 0 ? `dwell ends in ${secs(left)}` : 'dwell (holding for fix)');
+    out.push(left > 0 ? `dwell ${sec1(left)} left` : 'dwell (holding for fix)');
   }
-  if (d.deepCrawl) out.push('deep-crawl backstop');
-  else if (d.crawling) out.push('soft-yield (ahead)');
-  if (d.burstActive) out.push('departure burst');
-  if (d.skipRollActive) out.push('rolling thru skipped stop');
-  if (nowMs - d.lastTeleportMs < 4_000) out.push('recent teleport');
+  if (d.deepCrawl) out.push('deep-crawl');
+  else if (d.crawling) out.push('soft-yield');
+  if (d.burstActive) out.push('depart-burst');
+  if (d.skipRollActive) out.push('skip-roll');
+  if (d.lastTeleportMs > 0 && nowMs - d.lastTeleportMs < 4_000) {
+    out.push(`teleport ${sec1(nowMs - d.lastTeleportMs)} ago`);
+  }
   return out;
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+// ── rows ─────────────────────────────────────────────────────────────────────
+
+function Row({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
   return (
     <View style={styles.row}>
       <Text style={styles.label}>{label}</Text>
-      <Text style={styles.value}>{value}</Text>
+      <Text style={[styles.value, warn && styles.valueWarn]}>{value}</Text>
     </View>
   );
 }
@@ -104,26 +182,45 @@ function SectionTitle({ children }: { children: string }) {
   return <Text style={styles.section}>{children}</Text>;
 }
 
+// ── component ────────────────────────────────────────────────────────────────
+
 export function DebugOverlay() {
-  useSecondTick();
   const insets = useSafeAreaInsets();
   const followKey = useSelectionStore((s) => s.followTramKey);
   const selectedKey = useSelectionStore((s) => s.selectedTramKey);
   const key = followKey ?? selectedKey;
   const locator = useOnlineLocator();
   const [collapsed, setCollapsed] = useState(false);
+  const [snap, setSnap] = useState<DebugSnapshot | null>(null);
 
-  const nowMs = Date.now();
-  const engine = getRuntime().engine;
-  const dbg: SimDebugInfo | undefined = key ? engine.getDebugInfo(key, nowMs) : undefined;
-  const state: TramPublicState | undefined = key ? engine.getState(key, nowMs) : undefined;
-  const geometry = key ? engine.getGeometry(key) : undefined;
-  const fix = locator.latest();
-  const proj = fix ? projectOnlineFix(fix, geometry) : null;
+  // Instant ~60 fps loop: re-read the engine + GPS every frame while mounted.
+  // Debug mode is exempt from the ≤1 Hz invariant (this whole component only
+  // exists while Settings ▸ Debug is on). rAF is display-rate and self-cancels
+  // when JS is suspended; the cleanup stops it the moment debug mode turns off.
+  useEffect(() => {
+    let raf = 0;
+    let alive = true;
+    const loop = () => {
+      if (!alive) return;
+      setSnap(buildSnapshot(key ?? null, locator));
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => {
+      alive = false;
+      cancelAnimationFrame(raf);
+    };
+  }, [key, locator]);
 
-  // The on-line (real) position: filtered GPS on shape, else raw GPS on shape.
-  const realDistM = proj ? (proj.fDistM ?? proj.gpsDistM) : null;
-  // Signed diffs (+ = sim ahead).
+  const nowMs = snap?.nowMs ?? Date.now();
+  const dbg = snap?.dbg;
+  const state = snap?.state;
+  const fix = snap?.fix ?? null;
+  const proj = snap?.proj ?? null;
+  const realDistM = snap?.realDistM ?? null;
+  const realRawDistM = snap?.realRawDistM ?? null;
+
+  // Signed diffs (+ = sim ahead of the real tram).
   const lagM = dbg?.hasSim && realDistM != null ? dbg.simDistM - realDistM : null;
   const simVsObs = dbg?.hasSim ? dbg.simDistM - dbg.obsDistM : null;
   const realVsObs = realDistM != null && dbg ? realDistM - dbg.obsDistM : null;
@@ -133,10 +230,7 @@ export function DebugOverlay() {
     : 'DEBUG — no tram followed';
 
   return (
-    <View
-      style={[styles.wrap, { top: insets.top + 4 }]}
-      pointerEvents="box-none"
-    >
+    <View style={[styles.wrap, { top: insets.top + 4 }]} pointerEvents="box-none">
       <Pressable
         onPress={() => setCollapsed((c) => !c)}
         style={styles.panel}
@@ -168,74 +262,138 @@ export function DebugOverlay() {
                 <Text style={styles.phase}>{phaseLabel(dbg)}</Text>
                 {!dbg.hasSim && (
                   <Text style={styles.note}>
-                    No geometry loaded — showing raw AVL only (no simulation).
+                    No geometry loaded — raw AVL only (no simulation).
                   </Text>
                 )}
 
-                <SectionTitle>PHYSICS</SectionTitle>
-                <Row label="sim speed" value={`${num(dbg.simSpeedKmh, 1)} km/h`} />
+                <SectionTitle>SPEED</SectionTitle>
                 <Row
-                  label="caps allow/cruise"
-                  value={`${num(dbg.vAllowedKmh, 1)} / ${num(dbg.cruiseCapKmh, 1)} km/h`}
+                  label="sim"
+                  value={`${num(dbg.simSpeedKmh, 1)} km/h  ${num(dbg.simSpeedMs, 2)} m/s`}
                 />
-                <Row label="pace bias" value={num(dbg.paceBias, 2)} />
+                <Row label="cruise target" value={`${num(dbg.cruiseTargetKmh, 1)} km/h`} />
+                <Row label="vAllowed (envelope)" value={`${num(dbg.vAllowedKmh, 1)} km/h`} />
+                <Row label="cruiseCap" value={`${num(dbg.cruiseCapKmh, 1)} km/h`} />
+                <Row label="zone cap" value={`${num(dbg.zoneCapKmh, 1)} km/h`} />
                 <Row
-                  label="error e = tgt−sim"
-                  value={`${signed(dbg.errorM)} m ${
+                  label="curve cap"
+                  value={`${num(dbg.curveCapKmh, 1)} km/h  R${
+                    dbg.curveRadiusM != null ? num(dbg.curveRadiusM, 0) + 'm' : '∞'
+                  }`}
+                  warn={dbg.curveRadiusM != null && dbg.curveRadiusM < 120}
+                />
+                <Row
+                  label="κ · bias · tod"
+                  value={`${num(dbg.curveKappa, 3)} · ${num(dbg.paceBias, 2)} · ${num(
+                    dbg.todPaceFactor,
+                    2,
+                  )}`}
+                />
+
+                <SectionTitle>ERROR (m)</SectionTitle>
+                <Row
+                  label="e = tgt−sim"
+                  value={`${signed(dbg.errorM)} ${
                     dbg.errorM == null ? '' : dbg.errorM > 0 ? '(behind)' : '(ahead)'
                   }`}
+                  warn={dbg.errorM != null && Math.abs(dbg.errorM) > 60}
                 />
+                <Row label="lag  sim−real" value={signed(lagM)} warn={lagM != null && Math.abs(lagM) > 60} />
+                <Row label="sim−golemio" value={signed(simVsObs)} />
+                <Row label="real−golemio" value={signed(realVsObs)} />
+                <Row
+                  label="deviation |sim−obs|"
+                  value={state?.deviationM != null ? num(state.deviationM) : '—'}
+                />
+
+                <SectionTitle>POSITIONS (m along shape)</SectionTitle>
+                <Row label="sim" value={num(dbg.simDistM)} />
+                <Row label="target" value={num(dbg.targetDistM)} />
+                <Row label="golemio fix (obs)" value={num(dbg.obsDistM)} />
+                <Row label="projection (live)" value={num(dbg.projDistM)} />
+                <Row label="real (GPS filt)" value={num(realDistM)} />
+                <Row label="real (GPS raw)" value={num(realRawDistM)} />
+                <Row label="minStopDist" value={num(dbg.minStopDistM)} />
 
                 <SectionTitle>HOLDS / REGIME</SectionTitle>
                 <Text style={styles.notes}>
                   {activeNotes(dbg, nowMs).join('  ·  ') || 'none — free cruise'}
                 </Text>
+                <Row
+                  label="fix-pin"
+                  value={
+                    dbg.fixStopDistM != null
+                      ? `@${num(dbg.fixStopDistM)}m ${dbg.fixPinActive ? 'ACTIVE' : 'stale'}`
+                      : '—'
+                  }
+                />
+                <Row label="stuck @" value={dbg.stuckAtM != null ? `${num(dbg.stuckAtM)}m` : '—'} />
+                <Row
+                  label="yield hold @"
+                  value={dbg.yieldHoldM != null ? `${num(dbg.yieldHoldM)}m` : '—'}
+                />
+                <Row
+                  label="dwell left"
+                  value={
+                    dbg.phase === 'dwell' && dbg.dwellUntilMs > 0
+                      ? sec1(dbg.dwellUntilMs - nowMs)
+                      : '—'
+                  }
+                />
+                <Row
+                  label="burst / skip-roll →"
+                  value={`${dbg.burstActive ? num(dbg.burstUntilM) + 'm' : '—'} / ${
+                    dbg.skipRollActive ? num(dbg.skipRollUntilM) + 'm' : '—'
+                  }`}
+                />
+                <Row
+                  label="crawl / deep"
+                  value={`${dbg.crawling ? 'yes' : 'no'} / ${dbg.deepCrawl ? 'yes' : 'no'}`}
+                />
+                <Row
+                  label="teleport ago"
+                  value={dbg.lastTeleportMs > 0 ? sec1(nowMs - dbg.lastTeleportMs) : '—'}
+                />
 
-                <SectionTitle>NEXT STOP</SectionTitle>
+                <SectionTitle>NEXT STOP / SCHEDULE</SectionTitle>
                 <Row label="name" value={state?.nextStopName ?? '—'} />
+                <Row
+                  label="dist"
+                  value={snap?.nextStopDistM != null ? `${num(snap.nextStopDistM)} m` : '—'}
+                />
                 <Row
                   label="eta"
                   value={state?.nextStopEtaS != null ? `${num(state.nextStopEtaS)} s` : '—'}
                 />
-                <Row label="delay" value={state ? `${signed(state.snapshot.delaySeconds)} s` : '—'} />
-                <Row label="last fix age" value={secs(dbg.fixAgeMs)} />
+                <Row label="delay" value={`${signed(dbg.delaySeconds)} s`} />
+                <Row label="state / phase" value={`${dbg.statePosition} / ${dbg.phase}`} />
+                <Row label="fix age (lat-adj)" value={`${sec1(dbg.fixAgeMs)} (${sec1(dbg.staleFixAgeMs)})`} />
 
-                <SectionTitle>POSITIONS (m along shape)</SectionTitle>
-                <Row label="sim" value={num(dbg.simDistM)} />
-                <Row label="golemio fix (obs)" value={num(dbg.obsDistM)} />
-                <Row label="projection (live)" value={num(dbg.projDistM)} />
-                <Row label="real (GPS on shape)" value={num(realDistM)} />
-
-                <SectionTitle>DIFFS (+ = sim ahead)</SectionTitle>
-                <Row label="sim − real (lag)" value={`${signed(lagM)} m`} />
-                <Row label="sim − golemio" value={`${signed(simVsObs)} m`} />
-                <Row label="real − golemio" value={`${signed(realVsObs)} m`} />
-                <Row
-                  label="deviation |sim−obs|"
-                  value={state?.deviationM != null ? `${num(state.deviationM)} m` : '—'}
-                />
-
-                <SectionTitle>ON-LINE GPS</SectionTitle>
+                <SectionTitle>GPS ON-LINE</SectionTitle>
                 <Row
                   label="watch"
-                  value={
-                    locator.active()
-                      ? fix
-                        ? 'live'
-                        : 'starting…'
-                      : (locator.error() ?? 'off')
-                  }
-                />
-                <Row label="accuracy" value={fix?.accuracyM != null ? `${num(fix.accuracyM, 0)} m` : '—'} />
-                <Row
-                  label="gps speed"
-                  value={fix?.speedMs != null ? `${num(fix.speedMs * 3.6, 1)} km/h` : '—'}
+                  value={snap?.watchActive ? (fix ? 'live' : 'starting…') : (snap?.watchError ?? 'off')}
+                  warn={!snap?.watchActive}
                 />
                 <Row
-                  label="filter offset"
-                  value={proj?.fOffM != null ? `${num(proj.fOffM, 1)} m` : '—'}
+                  label="accuracy"
+                  value={fix?.accuracyM != null ? `${num(fix.accuracyM, 0)} m` : '—'}
+                  warn={fix?.accuracyM != null && fix.accuracyM > 30}
                 />
-                <Row label="filter reject" value={fix?.rej ?? 'accepted'} />
+                <Row
+                  label="gps / filt speed"
+                  value={`${fix?.speedMs != null ? num(fix.speedMs * 3.6, 1) : '—'} / ${
+                    fix?.fSpeedMs != null ? num(fix.fSpeedMs * 3.6, 1) : '—'
+                  } km/h`}
+                />
+                <Row
+                  label="offset filt / raw"
+                  value={`${proj?.fOffM != null ? num(proj.fOffM, 1) : '—'} / ${
+                    proj?.gpsOffM != null ? num(proj.gpsOffM, 1) : '—'
+                  } m`}
+                />
+                <Row label="filter" value={fix?.rej ? `REJECT ${fix.rej}` : 'accepted'} warn={!!fix?.rej} />
+                <Row label="gps fix age" value={fix ? sec1(nowMs - fix.t) : '—'} />
               </>
             )}
           </ScrollView>
@@ -250,17 +408,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 6,
     // Narrow enough to leave the right-side map controls reachable.
-    width: 232,
+    width: 236,
   },
   panel: {
-    backgroundColor: 'rgba(8,10,14,0.86)',
+    backgroundColor: 'rgba(8,10,14,0.88)',
     borderColor: 'rgba(120,200,255,0.35)',
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 8,
     paddingVertical: 6,
   },
-  scroll: { maxHeight: 460 },
+  scroll: { maxHeight: 520 },
   headerRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   header: { color: '#6BE6A6', flex: 1, fontFamily: MONO, fontSize: 11, fontWeight: '700' },
   hint: { color: '#7FB2D9', fontFamily: MONO, fontSize: 11, paddingLeft: 6 },
@@ -276,8 +434,9 @@ const styles = StyleSheet.create({
     marginTop: 7,
   },
   row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 0.5 },
-  label: { color: '#9AA7B4', fontFamily: MONO, fontSize: 10.5 },
-  value: { color: '#EAF1F7', fontFamily: MONO, fontSize: 10.5, fontWeight: '600' },
+  label: { color: '#9AA7B4', fontFamily: MONO, fontSize: 10.5, flexShrink: 0 },
+  value: { color: '#EAF1F7', fontFamily: MONO, fontSize: 10.5, fontWeight: '600', flexShrink: 1, textAlign: 'right' },
+  valueWarn: { color: '#FF8F6B' },
   notes: { color: '#EAF1F7', fontFamily: MONO, fontSize: 10.5 },
   note: { color: '#9AA7B4', fontFamily: MONO, fontSize: 10, marginTop: 4 },
 });

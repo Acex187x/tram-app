@@ -35,6 +35,21 @@ function makeGeo() {
   );
 }
 
+/** L-bend: 1 km east, then a 90° right turn 1 km south — a tight corner at 1000 m. */
+function makeCurvedGeo() {
+  return makeGeometry(
+    [
+      [0, 0],
+      [1000, 0],
+      [1000, -1000],
+    ],
+    [
+      { atM: 0, arrivalMs: T0 - 60_000 },
+      { atM: 2000, arrivalMs: T0 + 600_000, isTerminal: true },
+    ],
+  );
+}
+
 function run(engine: TramEngine, fromMs: number, seconds: number): number {
   let now = fromMs;
   for (let i = 0; i < seconds * 10; i++) {
@@ -140,6 +155,75 @@ describe('getDebugInfo', () => {
     const d = dbg(engine, 't', now);
     expect(d.stuckAtM).not.toBeNull();
     expect(d.stuckAtM!).toBeCloseTo(600, 0);
+  });
+
+  it('exposes the additive raw internals with consistent units (straight track)', () => {
+    const engine = makeEngine();
+    const geo = makeGeo();
+    engine.ingest([makeSnapshot({ key: 't', shapeDistM: 300, observedAtMs: T0 })], () => geo, T0);
+    engine.tick(T0);
+    const now = run(engine, T0, 6);
+    const d = dbg(engine, 't', now);
+
+    // Raw speed mirrors the km/h field.
+    expect(d.simSpeedMs!).toBeCloseTo(d.simSpeedKmh / 3.6, 5);
+    // Cruise aim is positive and never above the braking envelope cap.
+    expect(d.cruiseTargetKmh!).toBeGreaterThan(0);
+    // Caps present; straight track → no curve constraint (κ≈0, radius ∞→null).
+    expect(d.zoneCapKmh!).toBeGreaterThan(0);
+    expect(d.curveKappa!).toBeCloseTo(0, 4);
+    expect(d.curveRadiusM).toBeNull();
+    expect(d.curveCapKmh!).toBeGreaterThan(45); // ≈ V_MAX 50 km/h off any curve
+    expect(d.todPaceFactor!).toBeCloseTo(1, 6); // shipped TOD table is neutral
+    // Staleness clock = raw age + feed latency (3 s).
+    expect(d.staleFixAgeMs).toBeCloseTo(d.fixAgeMs + 3_000, -2);
+    // Context echoed from the snapshot.
+    expect(d.statePosition).toBe('on_track');
+    expect(d.delaySeconds).toBe(0);
+    expect(d.lengthM!).toBeGreaterThan(0);
+    expect(d.minStopDistM).not.toBeNull();
+    expect(d.burstUntilM).toBeGreaterThanOrEqual(0);
+    expect(d.skipRollUntilM).toBeGreaterThanOrEqual(0);
+  });
+
+  it('reports curvature and a reduced curve cap at a tight corner', () => {
+    const engine = makeEngine();
+    const geo = makeCurvedGeo();
+    // Seed the sim right at the 90° corner (1000 m along the L-bend).
+    engine.ingest([makeSnapshot({ key: 't', shapeDistM: 1000, observedAtMs: T0 })], () => geo, T0);
+    engine.tick(T0);
+    const d = dbg(engine, 't', T0);
+    expect(d.curveKappa!).toBeGreaterThan(0);
+    expect(d.curveRadiusM).not.toBeNull();
+    expect(d.curveRadiusM!).toBeGreaterThan(0);
+    // A tight bend caps well below the 50 km/h network max.
+    expect(d.curveCapKmh!).toBeLessThan(45);
+    // The braking envelope near the corner is likewise below the network max.
+    expect(d.vAllowedKmh!).toBeLessThan(50);
+  });
+
+  it('populates the additive internals on the no-geometry (raw-dot) branch', () => {
+    const engine = makeEngine();
+    engine.ingest(
+      [makeSnapshot({ key: 'raw', shapeDistM: 42, observedAtMs: T0 - 5_000, delaySeconds: 30 })],
+      () => undefined,
+      T0,
+    );
+    engine.tick(T0);
+    const d = dbg(engine, 'raw', T0);
+    expect(d.hasSim).toBe(false);
+    expect(d.simSpeedMs).toBe(0);
+    expect(d.cruiseTargetKmh).toBeNull();
+    expect(d.zoneCapKmh).toBeNull();
+    expect(d.curveCapKmh).toBeNull();
+    expect(d.curveKappa).toBeNull();
+    expect(d.curveRadiusM).toBeNull();
+    expect(d.todPaceFactor).toBeNull();
+    expect(d.lengthM).toBeNull();
+    expect(d.minStopDistM).toBeNull();
+    expect(d.staleFixAgeMs).toBeCloseTo(5_000 + 3_000, -2);
+    expect(d.statePosition).toBe('on_track');
+    expect(d.delaySeconds).toBe(30);
   });
 
   it('does not mutate the simulation (pure read)', () => {
