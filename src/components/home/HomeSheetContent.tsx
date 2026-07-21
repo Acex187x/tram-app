@@ -14,6 +14,7 @@ import { SymbolView } from 'expo-symbols';
 import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
 import { HomeRecents } from '@/components/home/HomeRecents';
+import { GlassPanel } from '@/components/ui/GlassPanel';
 import { InsetGroup, InsetRow, RowSeparator, SectionLabel } from '@/components/ui/Inset';
 import { appleScheme, Apple, Radii, Tram } from '@/constants/theme';
 import { useFavoritesStore } from '@/stores/favorites';
@@ -21,53 +22,67 @@ import { usePlannerStore } from '@/stores/planner';
 
 // ── Pinned header: search field + settings avatar ───────────────────────────
 
-export function HomeSheetHeader() {
-  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+export function HomeSheetHeader({ chromeScheme }: { chromeScheme?: 'light' | 'dark' }) {
+  // The peek search bar sits on the SAME visual band as the map chrome (status
+  // tile + control column), floating just over the basemap — so its glass must
+  // follow the MAP light preset the caller passes (day → light glass, night →
+  // dark glass), exactly like StatusTile / CircleControl. Falling back to the
+  // system scheme only if no map scheme is supplied. Using the system scheme made
+  // the bar a lone dark slab beside light chrome over a daytime map.
+  const systemScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const scheme = chromeScheme ?? systemScheme;
   const c = appleScheme(scheme);
-  const avatarBg = scheme === 'dark' ? Apple.fillTertiary.dark : Apple.fillTertiary.light;
-  const fieldBg = scheme === 'dark' ? 'rgba(118,118,128,0.24)' : 'rgba(118,118,128,0.12)';
 
   return (
     <View style={styles.header}>
-      {/* Fresh iOS 26 Apple-Maps peek bar: search glyph · placeholder · mic
-          inside one translucent PILL, with a circular account/settings button of
-          the same height alongside. Tapping anywhere in the pill (or the mic)
-          opens our existing /search sheet — data flow unchanged. */}
-      <Pressable
-        accessibilityRole="search"
-        accessibilityLabel="Search lines, trams and stops"
-        onPress={() => router.push('/search')}
-        style={({ pressed }) => [
-          styles.searchField,
-          { backgroundColor: fieldBg, opacity: pressed ? 0.7 : 1 },
-        ]}
+      {/* Fresh iOS 26 Apple-Maps peek bar (IMG_0072): a translucent Liquid-Glass
+          PILL — search glyph · centered "Search" placeholder · voice mic — beside
+          a Liquid-Glass account/settings circle of the SAME height. The glass is
+          a real GlassView (expo-glass-effect) so the pill reads as a light,
+          floating capsule over the sheet instead of the old dark opaque slab;
+          it degrades to blur, then a solid fill (GlassPanel). Tapping anywhere in
+          the pill (or the mic) opens our existing /search sheet — data unchanged. */}
+      <GlassPanel
+        variant="regular"
+        interactive
+        appearance={scheme}
+        style={styles.searchField}
       >
-        <SymbolView name="magnifyingglass" size={20} weight="semibold" tintColor={c.secondary} />
-        <Text
-          style={[styles.searchPlaceholder, { color: c.secondary }]}
-          numberOfLines={1}
-          allowFontScaling={false}
+        <Pressable
+          accessibilityRole="search"
+          accessibilityLabel="Search lines, trams and stops"
+          onPress={() => router.push('/search')}
+          style={({ pressed }) => [styles.searchPress, { opacity: pressed ? 0.6 : 1 }]}
         >
-          Search
-        </Text>
+          <SymbolView name="magnifyingglass" size={17} weight="semibold" tintColor={c.secondary} />
+          <Text
+            style={[styles.searchPlaceholder, { color: c.secondary }]}
+            numberOfLines={1}
+            allowFontScaling={false}
+          >
+            Search
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Search by voice"
+            hitSlop={8}
+            onPress={() => router.push('/search')}
+            style={({ pressed }) => [styles.micButton, { opacity: pressed ? 0.5 : 1 }]}
+          >
+            <SymbolView name="mic.fill" size={17} weight="medium" tintColor={c.secondary} />
+          </Pressable>
+        </Pressable>
+      </GlassPanel>
+      <GlassPanel variant="regular" interactive appearance={scheme} style={styles.avatar}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Search by voice"
-          hitSlop={8}
-          onPress={() => router.push('/search')}
-          style={({ pressed }) => [styles.micButton, { opacity: pressed ? 0.5 : 1 }]}
+          accessibilityLabel="Settings"
+          onPress={() => router.push('/settings')}
+          style={({ pressed }) => [styles.avatarPress, { opacity: pressed ? 0.6 : 1 }]}
         >
-          <SymbolView name="mic.fill" size={18} weight="medium" tintColor={c.secondary} />
+          <SymbolView name="gearshape.fill" size={19} tintColor={c.text} />
         </Pressable>
-      </Pressable>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Settings"
-        onPress={() => router.push('/settings')}
-        style={({ pressed }) => [styles.avatar, { backgroundColor: avatarBg, opacity: pressed ? 0.7 : 1 }]}
-      >
-        <SymbolView name="gearshape.fill" size={19} tintColor={c.text} />
-      </Pressable>
+      </GlassPanel>
     </View>
   );
 }
@@ -138,10 +153,11 @@ const ROW_INSET = 16 + 29 + 12;
 
 /**
  * Height of the search pill AND the account avatar circle beside it — one shared
- * value keeps them the exact same height (Apple Maps). Also the basis of the
- * peek-detent height in index.tsx, so keep them in sync if this changes.
+ * value keeps them the exact same height (Apple Maps). Trimmed to a compact,
+ * un-bulky capsule matching the fresh Apple-Maps peek bar (IMG_0072). Also the
+ * basis of the peek-detent height in index.tsx, so keep them in sync if changed.
  */
-const SEARCH_H = 46;
+const SEARCH_H = 44;
 
 /**
  * Max width of the sheet's inner column (header search row + grouped body),
@@ -170,24 +186,30 @@ const styles = StyleSheet.create({
     maxWidth: CONTENT_MAX_WIDTH,
     alignSelf: 'center',
   },
-  // iOS 26 "Liquid Glass" Apple-Maps search bar: a full PILL (not a rounded
-  // rect — that boxy 12 pt radius clashed with the app's own pill chips + circle
-  // controls and read as foreign), with the magnifier · placeholder · mic set on
-  // one translucent capsule and the account/settings avatar a circle of the SAME
-  // height alongside it.
+  // iOS 26 "Liquid Glass" Apple-Maps search bar: a full-height translucent PILL
+  // (GlassView) — NOT a boxy rounded rect nor the old dark opaque slab. The glass
+  // is the container; a Pressable fills it and holds the centered glyph +
+  // placeholder with the voice mic pinned to the trailing edge.
   searchField: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
     height: SEARCH_H,
     borderRadius: Radii.circle,
     borderCurve: 'continuous',
-    paddingLeft: 16,
-    paddingRight: 8,
   },
-  searchPlaceholder: { fontSize: 17, flex: 1 },
+  // Fills the glass pill; centers the glyph + "Search" group (Apple's collapsed
+  // peek bar), leaving the mic free-floating on the trailing edge (absolute).
+  searchPress: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+  },
+  searchPlaceholder: { fontSize: 17, fontWeight: '400' },
   micButton: {
+    position: 'absolute',
+    right: 6,
     width: 32,
     height: 32,
     alignItems: 'center',
@@ -197,9 +219,9 @@ const styles = StyleSheet.create({
     width: SEARCH_H,
     height: SEARCH_H,
     borderRadius: SEARCH_H / 2,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderCurve: 'continuous',
   },
+  avatarPress: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   body: {
     paddingHorizontal: 16,

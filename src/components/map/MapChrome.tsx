@@ -70,11 +70,14 @@ const CONTROL_RIGHT = Spacing.two + 4;
  */
 export const STACK_H = CONTROL_SIZE + CONTROL_GAP + 2 * CONTROL_SIZE;
 /**
- * Gap between the home sheet's peek top edge and the bottom-right control
- * column. Apple Maps pins its map controls bottom-right, just above the search
- * sheet — closer to the thumb than a top-right stack.
+ * Air between the home sheet's peek top edge and the floating chrome that rides
+ * above it — the bottom-right control column AND the contextual chip cluster
+ * (follow / spotter / ride / planner) both rest on this band. Apple Maps leaves
+ * a clear gap here so its banners/controls never look glued to the search sheet;
+ * the old 12 pt let the follow pill kiss the search bar, so widen it to give the
+ * whole cluster visible breathing room above the sheet.
  */
-export const CHROME_BOTTOM_GAP = 12;
+export const CHROME_BOTTOM_GAP = 24;
 /** The native compass is ~44 pt wide; +1 centers it on the 46 pt button axis. */
 export const COMPASS_RIGHT = CONTROL_RIGHT + 1;
 /**

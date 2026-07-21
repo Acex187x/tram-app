@@ -328,7 +328,12 @@ export default function MapScreen() {
           the map chrome above follows the map light preset. */}
       <HomeSheetNative
         peekPx={peekPx}
-        header={<HomeSheetHeader />}
+        // The peek search bar floats over the basemap at the sheet's resting
+        // edge, on the SAME visual band as the map chrome — so it follows the map
+        // light preset (day → light glass, night → dark glass), NOT the system
+        // scheme, or it read as a lone dark slab beside the light StatusTile /
+        // control column over a daytime map.
+        header={<HomeSheetHeader chromeScheme={chromeScheme} />}
         onDetentChange={onSheetDetentChange}
       >
         <HomeSheetContent />
