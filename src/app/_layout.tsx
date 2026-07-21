@@ -43,8 +43,18 @@ export default function RootLayout() {
               the screen's custom CollapsingHeader. The title is blanked (the
               screen renders a space via <Stack.Title>, since an empty string can
               fall back to the "tram/[key]" route name on some entry paths).
-              headerTransparent so the sheet's own glass shows through, and NO
-              sheetCornerRadius override so the system supplies the corners. */}
+              The native header is TRULY transparent — no blur, no backing, no
+              shadow — so ONLY the floating toolbar star/⋯ hover over the sheet's
+              own glass. Any header material (blur OR the react-navigation theme's
+              card-colored headerStyle background) composites OVER the identity
+              block, which is scroll content sitting under the transparent header
+              (HEADER_TOP_INSET), and dims it in both the expanded and bar states.
+              headerBlurEffect:'none' alone is NOT enough: without an explicit
+              transparent headerStyle the theme still paints an opaque card
+              background. Masking of scrolling content stays the screen's job via
+              its OWN opaque surfaces (CollapsingHeader's headerChrome fade-in and
+              the bar-mode barCurtain), never the native header. NO sheetCornerRadius
+              override so the system supplies the corners. */}
           <Stack.Screen
             name="tram/[key]"
             options={{
@@ -75,7 +85,11 @@ export default function RootLayout() {
               // `headerLargeTitle` alias is NOT honored here (native reads the
               // new prop), so `headerLargeTitle: false` silently stayed large.
               headerLargeTitleEnabled: false,
+              // Truly transparent header: no blur, no theme card background, no
+              // hairline shadow — so nothing dims the identity block below it.
               headerBlurEffect: 'none',
+              headerStyle: { backgroundColor: 'transparent' },
+              headerShadowVisible: false,
               contentStyle: { backgroundColor: 'transparent' },
             }}
           />
