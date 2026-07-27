@@ -13,7 +13,7 @@ import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -24,14 +24,15 @@ import {
   View,
 } from 'react-native';
 
-import { AcSnowflake } from '@/components/tram/TramModelImage';
+import { AcSnowflake, acTint } from '@/components/tram/TramModelImage';
 import { ActionPillRow, type PillAction } from '@/components/ui/ActionPillRow';
 import { InsetGroup, InsetRow, RowSeparator, SectionLabel } from '@/components/ui/Inset';
 import { LineBadge } from '@/components/ui/LineBadge';
 import { SheetHeader } from '@/components/ui/SheetHeader';
 import { SheetSurface } from '@/components/ui/SheetSurface';
-import { Apple, appleScheme, Fonts, Tram } from '@/constants/theme';
+import { appleScheme, Fonts, TabularNums, TextScale, Tram } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
+import { useNowMs } from '@/hooks/uiClock';
 import {
   computeArrivals,
   formatEtaMinutes,
@@ -63,16 +64,28 @@ export default function StopSheet() {
   const requestFlyTo = useSelectionStore((s) => s.requestFlyTo);
   const requestPrefill = usePlannerStore((s) => s.requestPrefill);
   const [routing, setRouting] = useState(false);
+  // The sheet can be dismissed while the location request is still in flight —
+  // never alert or navigate from a screen the user has already left.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const station = useMemo(
     () => stationStops(stationKey, geometries),
     [stationKey, geometries],
   );
   // Recomputed on every ~1 Hz runtime tick (states identity changes), so the
-  // ETAs count down without a dedicated timer.
+  // ETAs count down without a dedicated timer. The clock comes from the shared
+  // 1 Hz useNowMs — same tick, and calling Date.now() during render would make
+  // the screen impure (React Compiler is on; see hooks/uiClock).
+  const nowMs = useNowMs();
   const arrivals = useMemo(
-    () => computeArrivals(stationKey, states, geometries, Date.now()),
-    [stationKey, states, geometries],
+    () => computeArrivals(stationKey, states, geometries, nowMs),
+    [stationKey, states, geometries, nowMs],
   );
 
   const loading = geometries.length === 0;
@@ -84,9 +97,13 @@ export default function StopSheet() {
     router.back();
   };
 
+  // The tram card is an owned sheet on the MAP screen: present it and dismiss
+  // this sheet back to the map. `openTram` also claims the gold halo, which this
+  // call site used to forget entirely (it only pushed the route).
   const onOpenTram = (arrival: StopArrival): void => {
     void Haptics.selectionAsync();
-    router.push(('/tram/' + encodeURIComponent(arrival.tramKey)) as Href);
+    useSelectionStore.getState().openTram(arrival.tramKey);
+    router.dismissAll();
   };
 
   const onOpenLine = (line: string): void => {
@@ -126,6 +143,7 @@ export default function StopSheet() {
     setRouting(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
+      if (!mounted.current) return;
       if (status !== 'granted') {
         Alert.alert(
           'Location off',
@@ -136,6 +154,7 @@ export default function StopSheet() {
       const pos = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
+      if (!mounted.current) return;
       const origin = nearestStation([pos.coords.longitude, pos.coords.latitude], geometries);
       if (!origin) {
         Alert.alert('No nearby stop', 'No tram stop is loaded near you yet — try again shortly.');
@@ -149,11 +168,17 @@ export default function StopSheet() {
       requestPrefill(origin.name, station.name);
       router.replace('/planner');
     } catch {
-      Alert.alert('Location unavailable', "Couldn't read your location. Please try again.");
+      if (mounted.current) {
+        Alert.alert('Location unavailable', "Couldn't read your location. Please try again.");
+      }
     } finally {
-      setRouting(false);
+      if (mounted.current) setRouting(false);
     }
   };
+
+  // systemGreen reads at only ~2:1 on the inset card's near-white light fill;
+  // the darker goGreen ramp is the accessible light-appearance green.
+  const etaColor = scheme === 'dark' ? c.green : c.goGreen;
 
   const lines = station?.lines ?? [];
   const subtitle =
@@ -176,13 +201,15 @@ export default function StopSheet() {
           symbol: 'binoculars.fill',
           label: isSpottingHere ? 'Stop' : 'Spot',
           onPress: onSpot,
-          tint: isSpottingHere ? Apple.red : Apple.blue,
+          tint: isSpottingHere ? c.red : c.blue,
+          disabled: routing,
         },
         {
           key: 'map',
           symbol: 'map.fill',
           label: 'Show Map',
           onPress: onShowOnMap,
+          disabled: routing,
         },
       ]
     : [];
@@ -193,7 +220,7 @@ export default function StopSheet() {
         <View style={styles.pillWrap}>
           {routing ? (
             <View style={styles.routingOverlay} pointerEvents="none">
-              <ActivityIndicator color={Apple.blue} />
+              <ActivityIndicator color={c.blue} />
             </View>
           ) : null}
           <ActionPillRow actions={actions} />
@@ -210,7 +237,7 @@ export default function StopSheet() {
                 onPress={() => onOpenLine(line)}
                 accessibilityRole="button"
                 accessibilityLabel={`Line ${line}`}
-                hitSlop={6}
+                hitSlop={7}
                 style={({ pressed }) => pressed && styles.pressed}
               >
                 <LineBadge line={line} size="md" />
@@ -253,7 +280,7 @@ export default function StopSheet() {
             {arrivals.map((a, i) => (
               <Fragment key={a.tramKey}>
                 {i > 0 ? <RowSeparator inset={ARRIVAL_SEPARATOR_INSET} /> : null}
-                <ArrivalRow arrival={a} onPress={() => onOpenTram(a)} />
+                <ArrivalRow arrival={a} etaColor={etaColor} onPress={() => onOpenTram(a)} />
               </Fragment>
             ))}
           </InsetGroup>
@@ -265,17 +292,26 @@ export default function StopSheet() {
 
 function ArrivalRow({
   arrival,
+  etaColor,
   onPress,
 }: {
   arrival: StopArrival;
+  etaColor: string;
   onPress: () => void;
 }) {
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const etaLabel = formatEtaMinutes(arrival.etaS);
   const soon = etaLabel === 'now';
+  const a11yLabel = `Line ${arrival.line} to ${arrival.headsign}, ${
+    soon ? 'arriving now' : `in ${etaLabel}`
+  }, ${shortModelName(arrival.model.name)}${
+    arrival.regNumber != null ? ` number ${arrival.regNumber}` : ''
+  }${arrival.airConditioned ? ', air conditioned' : ''}`;
   return (
     <InsetRow
       iconNode={<LineBadge line={arrival.line} size="md" />}
       title={arrival.headsign}
+      label={a11yLabel}
       subtitle={`${shortModelName(arrival.model.name)}${
         arrival.regNumber != null ? ` · #${arrival.regNumber}` : ''
       }`}
@@ -283,10 +319,10 @@ function ArrivalRow({
       chevron
       trailing={
         <View style={styles.etaWrap}>
-          <AcSnowflake airConditioned={arrival.airConditioned} />
+          <AcSnowflake airConditioned={arrival.airConditioned} tint={acTint(scheme)} decorative />
           <Text
-            style={[styles.eta, soon && styles.etaNow, { color: Apple.green }]}
-            allowFontScaling={false}
+            style={[styles.eta, soon && styles.etaNow, { color: etaColor }]}
+            maxFontSizeMultiplier={TextScale.compact}
           >
             {etaLabel}
           </Text>
@@ -304,7 +340,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     left: 0,
     position: 'absolute',
-    right: 0,
+    // The three pills are equal-width, so the leading third is 'Route Here' —
+    // the pill actually doing the work. Centring across the row put the
+    // spinner on 'Spot'.
+    right: '66.67%',
     top: 0,
     zIndex: 1,
   },
@@ -313,14 +352,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    paddingHorizontal: 4,
+    // 30 pt badge + hitSlop 7 = a 44 pt target; the gap keeps neighbouring
+    // targets from overlapping. No horizontal padding: the badge boxes sit on
+    // the same content line as the cards/pills (the hitSlop overhang is
+    // invisible and stays on-screen).
+    gap: 14,
   },
   etaWrap: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   eta: {
+    ...TabularNums,
     fontFamily: Fonts?.rounded,
-    fontSize: 19,
-    fontVariant: ['tabular-nums'],
+    fontSize: 20,
     fontWeight: '700',
   },
   etaNow: { fontSize: 16 },
@@ -331,6 +373,6 @@ const styles = StyleSheet.create({
     paddingVertical: 32,
   },
   stateTitle: { fontSize: 17, fontWeight: '600' },
-  stateBody: { fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  stateBody: { fontSize: 15, lineHeight: 20, textAlign: 'center' },
   pressed: { opacity: 0.55 },
 });

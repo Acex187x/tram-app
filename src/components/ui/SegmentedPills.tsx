@@ -1,16 +1,27 @@
-// Apple's dark capsule segmented control with a lighter selected pill:
-//  - `lg` symbol row = the Directions transport-mode selector (IMG_0080)
-//  - `md` label row  = line-direction headsigns / Smooth-Live choice
+// Apple's segmented control:
+//  - `md` label row  = line-direction headsigns / Smooth-Live choice / icon packs.
+//    This is the REAL UISegmentedControl (@expo/ui `segmented-control`), so the
+//    selection pill slides, the labels take Dynamic Type, the drag-across-segments
+//    gesture works and VoiceOver announces the segmented traits.
+//  - `lg` symbol row = the Directions transport-mode selector (IMG_0080), still
+//    hand-rolled: the native control has no PER-SEGMENT `disabled` (only a
+//    whole-control `enabled`) and Apple Maps' own mode row is a custom capsule.
+//    Symbol segments and any `disabled` segment therefore stay on this path.
 // Follows the map light preset when `appearance` is passed (it floats over the
 // map in Directions), else the system scheme inside a sheet.
+// Named export (identical binding to the default one) — the default import
+// shadows it and trips import/no-named-as-default.
+import { SegmentedControl } from '@expo/ui/community/segmented-control';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
-import { appleScheme } from '@/constants/theme';
+import { appleScheme, TextScale, Type } from '@/constants/theme';
 
 export interface PillSegment {
   key: string;
   label?: string;
+  /** VoiceOver label — required for symbol-only segments, whose `key` is a developer identifier. */
+  a11yLabel?: string;
   symbol?: SFSymbol;
   disabled?: boolean;
 }
@@ -35,6 +46,27 @@ export function SegmentedPills({
   const scheme = appearance ?? system;
   const c = appleScheme(scheme);
   const lg = size === 'lg';
+
+  // The native control renders labels only and disables as a whole, so fall back
+  // to the hand-rolled capsule whenever a segment needs a symbol or its own
+  // disabled state.
+  const nativeCapable =
+    !lg && segments.every((s) => s.label != null && s.symbol == null && s.disabled !== true);
+  if (nativeCapable) {
+    const selectedIndex = segments.findIndex((s) => s.key === selectedKey);
+    return (
+      <SegmentedControl
+        values={segments.map((s) => s.label as string)}
+        selectedIndex={selectedIndex < 0 ? undefined : selectedIndex}
+        appearance={scheme}
+        onChange={(e) => {
+          const seg = segments[e.nativeEvent.selectedSegmentIndex];
+          if (seg != null) onChange(seg.key);
+        }}
+      />
+    );
+  }
+
   const height = lg ? 56 : 34;
   const trackRadius = height / 2;
   const pillRadius = (height - 6) / 2;
@@ -63,7 +95,11 @@ export function SegmentedPills({
             key={seg.key}
             accessibilityRole="button"
             accessibilityState={{ selected, disabled: seg.disabled }}
-            accessibilityLabel={seg.label ?? seg.key}
+            accessibilityLabel={seg.a11yLabel ?? seg.label ?? seg.key}
+            // A permanently disabled segment is decorative flavor, not a control
+            // a VoiceOver user can reach — keep it visible but out of the tree.
+            accessibilityElementsHidden={seg.disabled === true}
+            importantForAccessibility={seg.disabled === true ? 'no-hide-descendants' : 'auto'}
             disabled={seg.disabled}
             onPress={() => onChange(seg.key)}
             style={[
@@ -84,7 +120,7 @@ export function SegmentedPills({
               <Text
                 style={[styles.label, { color: fg, fontWeight: selected ? '600' : '400' }]}
                 numberOfLines={1}
-                allowFontScaling={false}
+                maxFontSizeMultiplier={TextScale.compact}
               >
                 {seg.label}
               </Text>
@@ -112,10 +148,7 @@ const styles = StyleSheet.create({
   },
   selected: {
     // Subtle lift on the selected pill (Apple's segmented shadow).
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
+    boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
   },
-  label: { fontSize: 15 },
+  label: { ...Type.subhead },
 });

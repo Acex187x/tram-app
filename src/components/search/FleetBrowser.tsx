@@ -19,12 +19,13 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SymbolView } from 'expo-symbols';
+import { Host } from '@expo/ui';
+import { ContentUnavailableView } from '@expo/ui/swift-ui';
 
 import { RowSeparator } from '@/components/ui/Inset';
 import { LineBadge } from '@/components/ui/LineBadge';
 import { SHEET_CONTENT_MAX_WIDTH } from '@/components/ui/SheetContent';
-import { appleScheme, Apple, Radii } from '@/constants/theme';
+import { appleScheme, Radii, TabularNums, TextScale, Type } from '@/constants/theme';
 import type { RouteGeometry, TramModelId, TramPublicState } from '@/lib/types';
 
 import { FleetRow } from './FleetRow';
@@ -44,6 +45,12 @@ const PAGE_SIZE = 30;
 
 /** Leading-icon inset for fleet-row separators: 16 pad + 30 badge + 12 gap. */
 const ROW_SEPARATOR_INSET = 58;
+
+// The chips must keep their Apple-pill visual height (a 44 pt pill would no
+// longer read as a filter next to the 30 pt line badges), so the 44 pt minimum
+// target is reached with hit slop instead: 28 + 8·2 and 38 + 3·2.
+const CHIP_HIT_SLOP = { top: 8, bottom: 8, left: 4, right: 4 } as const;
+const LINE_CHIP_HIT_SLOP = { top: 3, bottom: 3, left: 3, right: 3 } as const;
 
 /** Now-ms ticking every second — drives the rows' updated-age labels (same
  * pattern as the tram sheet's useNowTick). */
@@ -193,12 +200,13 @@ export function FleetBrowser({
               <Pressable
                 key={line}
                 onPress={() => toggleLine(line)}
+                hitSlop={LINE_CHIP_HIT_SLOP}
                 accessibilityRole="button"
                 accessibilityState={{ selected }}
                 accessibilityLabel={`Filter line ${line}`}
                 style={({ pressed }) => [
                   styles.lineChip,
-                  selected && styles.lineChipSelected,
+                  selected && { borderColor: c.blue },
                   pressed && styles.pressed,
                 ]}
               >
@@ -215,23 +223,21 @@ export function FleetBrowser({
     </View>
   );
 
+  // NOT `matchContents`: that asks SwiftUI for ContentUnavailableView's ideal
+  // size, which is wider than the sheet — it then overflows instead of wrapping.
+  // A definite RN frame keeps the copy inside the column.
   const empty = (
-    <View style={styles.empty}>
-      <SymbolView
-        name="line.3.horizontal.decrease.circle"
-        size={30}
-        tintColor={c.secondary}
-        style={styles.emptyIcon}
+    <Host style={styles.empty}>
+      <ContentUnavailableView
+        systemImage="line.3.horizontal.decrease.circle"
+        title={live.length === 0 ? 'No trams reporting yet' : 'No trams match these filters'}
+        description={
+          live.length === 0
+            ? 'Live positions appear a few seconds after the first poll.'
+            : 'Loosen the model or line filters to see more of the fleet.'
+        }
       />
-      <Text style={[styles.emptyTitle, { color: c.text }]}>
-        {live.length === 0 ? 'No trams reporting yet' : 'No trams match these filters'}
-      </Text>
-      <Text style={[styles.emptyBody, { color: c.secondary }]}>
-        {live.length === 0
-          ? 'Live positions appear a few seconds after the first poll.'
-          : 'Loosen the model or line filters to see more of the fleet.'}
-      </Text>
-    </View>
+    </Host>
   );
 
   return (
@@ -251,6 +257,7 @@ export function FleetBrowser({
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
       contentInsetAdjustmentBehavior="automatic"
+      automaticallyAdjustKeyboardInsets
       showsVerticalScrollIndicator={false}
       style={styles.list}
       contentContainerStyle={[
@@ -282,24 +289,25 @@ function FilterChip({
   return (
     <Pressable
       onPress={onPress}
+      hitSlop={CHIP_HIT_SLOP}
       accessibilityRole="button"
       accessibilityState={{ selected }}
       accessibilityLabel={count != null ? `${label}, ${count} trams` : label}
       style={({ pressed }) => [
         styles.chip,
-        { backgroundColor: selected ? Apple.blue : c.fillTertiary },
+        { backgroundColor: selected ? c.blue : c.fillTertiary },
         pressed && styles.pressed,
       ]}
     >
       <Text
-        allowFontScaling={false}
+        maxFontSizeMultiplier={TextScale.compact}
         style={[styles.chipLabel, { color: selected ? '#FFFFFF' : c.text }]}
       >
         {label}
       </Text>
       {count != null && (
         <Text
-          allowFontScaling={false}
+          maxFontSizeMultiplier={TextScale.compact}
           style={[
             styles.chipCount,
             { color: selected ? 'rgba(255,255,255,0.75)' : c.secondary },
@@ -323,12 +331,15 @@ const styles = StyleSheet.create({
     paddingTop: 4,
     paddingBottom: 8,
   },
+  // Matches `SectionLabel` (Inset.tsx) — including its left edge. The stray
+  // `marginLeft: 2` this used to carry put it 2 pt inboard of the search field
+  // and the filter chips it sits between, which is exactly the kind of one-off
+  // nudge the sheet grid exists to prevent (measured 18.67 against their 16.00).
   headerTitle: {
     fontSize: 13,
     fontWeight: '500',
     letterSpacing: 0.5,
     textTransform: 'uppercase',
-    marginLeft: 2,
   },
   modelChips: {
     flexDirection: 'row',
@@ -344,7 +355,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   chipLabel: { fontSize: 13, fontWeight: '600' },
-  chipCount: { fontSize: 11.5, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  chipCount: { ...Type.caption1, fontWeight: '600', ...TabularNums },
   lineChips: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -359,16 +370,7 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
     padding: 2,
   },
-  lineChipSelected: { borderColor: Apple.blue },
   lineDimmed: { opacity: 0.45 },
   pressed: { opacity: 0.6 },
-  empty: {
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 32,
-    paddingHorizontal: 24,
-  },
-  emptyIcon: { marginBottom: 4 },
-  emptyTitle: { fontSize: 17, fontWeight: '600', textAlign: 'center' },
-  emptyBody: { fontSize: 13, textAlign: 'center', lineHeight: 18 },
+  empty: { minHeight: 240, paddingVertical: 32 },
 });

@@ -174,8 +174,6 @@ export interface FleetRowData {
   modelShort: string;
   headsign: string;
   status: string;
-  /** '≈42 km/h' — tilde marks it as simulated. Null without geometry. */
-  speedText: string | null;
   delaySeconds: number;
   airConditioned: boolean;
   /** Age of the last real AVL fix, e.g. '12 s'. */
@@ -202,7 +200,8 @@ export function fleetRowData(
       nextStopEtaS: state.nextStopEtaS,
       atStopName,
     }),
-    speedText: state.hasGeometry ? `≈${Math.round(state.simSpeedKmh)} km/h` : null,
+    // No km/h here on purpose: simSpeedKmh is synthesized by the interpolator,
+    // and ux-screens §8 forbids showing a simulated quantity as a measurement.
     delaySeconds: state.snapshot.delaySeconds,
     airConditioned: state.snapshot.airConditioned === true,
     ageText: formatShortDuration((nowMs - state.snapshot.observedAtMs) / 1000),

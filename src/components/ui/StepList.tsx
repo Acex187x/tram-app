@@ -8,7 +8,7 @@ import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native'
 
 import { LineBadge } from '@/components/ui/LineBadge';
 import { RowSeparator } from '@/components/ui/Inset';
-import { Apple, appleScheme, Tram } from '@/constants/theme';
+import { appleScheme, Tram, Type } from '@/constants/theme';
 
 export type StepIcon =
   | { symbol: SFSymbol; /** Draw the symbol on a colored circle (Start/Arrive). */ circleTint?: string }
@@ -58,7 +58,7 @@ export function StepList({ steps }: { steps: Step[] }) {
                   <Text style={[styles.note, { color: c.text }]}>{step.note}</Text>
                   {step.onMore != null && (
                     <Pressable accessibilityRole="button" hitSlop={8} onPress={step.onMore}>
-                      <Text style={[styles.more, { color: Apple.blue }]}>More</Text>
+                      <Text style={[styles.more, { color: c.blue }]}>More</Text>
                     </Pressable>
                   )}
                 </View>
@@ -135,11 +135,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   content: { flex: 1, gap: 3 },
-  title: { fontSize: 19, fontWeight: '600' },
-  subtitle: { fontSize: 15, fontWeight: '400', lineHeight: 20 },
+  title: { ...Type.headline },
+  subtitle: { ...Type.subhead, lineHeight: 20 },
   noteRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
-  note: { fontSize: 17, fontWeight: '400' },
-  more: { fontSize: 17, fontWeight: '400' },
+  note: { ...Type.body },
+  more: { ...Type.body },
 
   timeline: { flexDirection: 'row', gap: 12, marginTop: 8 },
   timelineRail: { alignItems: 'center', width: 14 },
@@ -147,6 +147,6 @@ const styles = StyleSheet.create({
   railDots: { flex: 1, justifyContent: 'space-evenly', alignItems: 'center', paddingVertical: 4 },
   railTinyDot: { width: 4, height: 4, borderRadius: 2 },
   timelineText: { flex: 1, justifyContent: 'space-between', gap: 10 },
-  stopName: { fontSize: 19, fontWeight: '600' },
-  rideDetail: { fontSize: 17, fontWeight: '400' },
+  stopName: { ...Type.headline },
+  rideDetail: { ...Type.body },
 });

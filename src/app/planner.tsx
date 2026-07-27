@@ -3,6 +3,14 @@
 // network graph built from loaded geometries, then hand the chosen itinerary to
 // the map via usePlannerStore. Google-Maps-style: recent searches, nearest-stop
 // fill, live departure/arrival wall times with a 1 Hz 'in N min' countdown.
+//
+// Surface: <SheetSurface/>, the shared route-sheet scaffold. The root used to be
+// a GlassPanel with its own hand-coded borderRadius: 24 — glass-on-glass over
+// the system formSheet's Liquid Glass, AND a second, silently diverging copy of
+// the sheet corner radius. Both now come from one place (sheetLook.SHEET_RADIUS,
+// applied by the sheet() factory in _layout). The scroll body is the surface's
+// own ScrollView, which also puts it back at the top level of the screen where
+// rn-screens can find it and wire drag-to-expand.
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
@@ -12,8 +20,8 @@ import {
   ActivityIndicator,
   Alert,
   Keyboard,
+  Linking,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   useColorScheme,
@@ -24,11 +32,10 @@ import { GuidanceStepper } from '@/components/planner/GuidanceStepper';
 import { ItineraryCard } from '@/components/planner/ItineraryCard';
 import { RecentRoutes } from '@/components/planner/RecentRoutes';
 import { StopSearchCard } from '@/components/planner/StopSearchCard';
-import { GlassPanel } from '@/components/ui/GlassPanel';
 import { SegmentedPills, type PillSegment } from '@/components/ui/SegmentedPills';
-import { SheetContent } from '@/components/ui/SheetContent';
 import { SheetHeader } from '@/components/ui/SheetHeader';
-import { appleScheme, Apple, Radii, Spacing, Tram } from '@/constants/theme';
+import { SheetSurface } from '@/components/ui/SheetSurface';
+import { appleScheme, Radii, Spacing, TextScale, Tram } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
 import {
   computeItineraryTiming,
@@ -40,7 +47,7 @@ import {
 } from '@/lib/arrivals';
 import { formatPragueClock } from '@/lib/format/pragueTime';
 import { buildNetwork, normalizeName } from '@/lib/planner/network';
-import { planItineraries, searchStops } from '@/lib/planner/planner';
+import { planItineraries } from '@/lib/planner/planner';
 import type { PlannerItinerary } from '@/lib/types';
 import { usePlannerStore } from '@/stores/planner';
 
@@ -135,7 +142,6 @@ export default function PlannerScreen() {
 
   // Autofill From with the nearest stop once location + geometry are both in —
   // one-shot, and only when the user hasn't typed/prefilled anything yet.
-  // The fill itself is deferred a tick (no synchronous setState in an effect).
   const autoFilledRef = useRef(false);
   useEffect(() => {
     if (autoFilledRef.current || !userCoords || loading) return;
@@ -145,6 +151,7 @@ export default function PlannerScreen() {
       autoFilledRef.current = true;
       return;
     }
+    // Deferred a tick: no synchronous setState in an effect body.
     const t = setTimeout(() => {
       autoFilledRef.current = true;
       setFrom((prev) => (prev.trim().length > 0 ? prev : station.name));
@@ -152,13 +159,34 @@ export default function PlannerScreen() {
     return () => clearTimeout(t);
   }, [userCoords, loading, geometries]);
 
-  // Station index for suggestion badges + input validation. Rebuilt only when
-  // the geometry set changes (~1 Hz re-render at most while shapes stream in).
-  const network = useMemo(() => buildNetwork(geometries), [geometries]);
+  // Station index for suggestion badges + input validation. Keyed on the NUMBER
+  // of loaded geometries, not the array: `useLoadedGeometries()` hands back a
+  // fresh array on every call, so a `[geometries]` dep rebuilt the whole graph
+  // on every render (including each 1 Hz clock tick) and on every keystroke.
+  // The cache only ever gains trips — an already-loaded tripId short-circuits
+  // before the write — so its size is a faithful version of the geometry set.
+  const geometryCount = geometries.length;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const network = useMemo(() => buildNetwork(geometries), [geometryCount]);
 
+  // Suggestions scan the MEMOIZED graph. `searchStops(query, geometries)` calls
+  // buildNetwork internally, i.e. rebuilds the whole network per keystroke.
   const search = useCallback(
-    (query: string) => searchStops(query, geometries, 8),
-    [geometries],
+    (query: string): string[] => {
+      const q = normalizeName(query);
+      if (q.length === 0) return [];
+      const prefix: string[] = [];
+      const substring: string[] = [];
+      for (const node of network.stations.values()) {
+        const idx = node.key.indexOf(q);
+        if (idx === 0) prefix.push(node.name);
+        else if (idx > 0) substring.push(node.name);
+      }
+      prefix.sort((a, b) => a.localeCompare(b));
+      substring.sort((a, b) => a.localeCompare(b));
+      return [...prefix, ...substring].slice(0, 8);
+    },
+    [network],
   );
 
   const linesFor = useCallback(
@@ -264,7 +292,11 @@ export default function PlannerScreen() {
       if (status !== 'granted') {
         Alert.alert(
           'Location off',
-          'Allow location access in Settings to fill the nearest stop automatically.',
+          'Allow location access to fill the nearest stop automatically.',
+          [
+            { text: 'Not Now', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => void Linking.openSettings() },
+          ],
         );
         return;
       }
@@ -290,6 +322,12 @@ export default function PlannerScreen() {
   // One-shot prefill handoff from the stop sheet's "Route here": fill both
   // fields, plan immediately once geometry is ready, then clear the handoff.
   const [autoPlanPending, setAutoPlanPending] = useState(false);
+  /* eslint-disable react-hooks/set-state-in-effect -- this IS the sanctioned
+     external-system sync: the handoff is written into the planner store by a
+     DIFFERENT screen ("Route here" on the stop sheet), and consuming it must
+     also clear that store — neither can happen during render. Both effects are
+     self-terminating one-shots (clearPrefill / autoPlanPending → false), so
+     there is no render cascade, just two extra renders per handoff. */
   useEffect(() => {
     if (!prefill) return;
     setFrom(prefill.from);
@@ -305,6 +343,7 @@ export default function PlannerScreen() {
     // from/to were just set from the prefill; runPlan reads them explicitly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPlanPending, loading]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handlePick = useCallback(
     (it: PlannerItinerary) => {
@@ -412,21 +451,15 @@ export default function PlannerScreen() {
   const showRecents = !loading && error === null && results === null && recents.length > 0;
 
   return (
-    <GlassPanel style={styles.root}>
-      <SheetContent style={styles.column}>
-        <SheetHeader title="Directions" onClose={handleClose} />
-        <ScrollView
-          contentInsetAdjustmentBehavior="automatic"
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          automaticallyAdjustKeyboardInsets
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
-        >
+    <SheetSurface
+      header={<SheetHeader title="Directions" onClose={handleClose} />}
+      contentContainerStyle={styles.scrollContent}
+      scrollProps={SCROLL_PROPS}
+    >
           {itinerary && (
             <View style={[styles.activeCard, { backgroundColor: c.fillTertiary }]}>
               <View style={styles.activeHead}>
-                <View style={[styles.activeIcon, { backgroundColor: Apple.blue }]}>
+                <View style={[styles.activeIcon, { backgroundColor: c.blue }]}>
                   <SymbolView name="map.fill" size={17} weight="semibold" tintColor="#FFFFFF" />
                 </View>
                 <View style={styles.activeBody}>
@@ -436,7 +469,7 @@ export default function PlannerScreen() {
                   <Text
                     numberOfLines={1}
                     style={[styles.activeTimes, { color: c.secondary }]}
-                    allowFontScaling={false}
+                    maxFontSizeMultiplier={TextScale.content}
                   >
                     {bannerTimes ?? 'Awaiting a live tram for departure times'}
                   </Text>
@@ -448,7 +481,10 @@ export default function PlannerScreen() {
                     accessibilityRole="button"
                     accessibilityLabel="Start journey guidance"
                     onPress={() => handleStart(itinerary, activeWalkS)}
-                    style={({ pressed }) => [styles.activeStart, { opacity: pressed ? 0.8 : 1 }]}
+                    style={({ pressed }) => [
+                      styles.activeStart,
+                      { backgroundColor: c.blue, opacity: pressed ? 0.8 : 1 },
+                    ]}
                   >
                     <SymbolView name="location.north.line.fill" size={13} weight="semibold" tintColor="#FFFFFF" />
                     <Text style={styles.activeStartText}>Start</Text>
@@ -463,7 +499,7 @@ export default function PlannerScreen() {
                     { backgroundColor: c.fillSecondary, opacity: pressed ? 0.7 : 1 },
                   ]}
                 >
-                  <Text style={[styles.activeClearText, { color: Apple.red }]}>Clear route</Text>
+                  <Text style={[styles.activeClearText, { color: c.red }]}>Clear route</Text>
                 </Pressable>
               </View>
             </View>
@@ -498,21 +534,15 @@ export default function PlannerScreen() {
                 autoFocusTo={autoFocusTo}
               />
 
-              <View style={styles.optionsRow}>
-                <View style={[styles.optionChip, { backgroundColor: c.fillTertiary }]}>
-                  <Text style={[styles.optionChipText, { color: c.text }]}>Now</Text>
-                  <SymbolView name="chevron.down" size={11} weight="semibold" tintColor={c.secondary} />
-                </View>
-              </View>
-
               <Pressable
                 onPress={handlePlan}
                 disabled={!canPlan}
                 accessibilityRole="button"
                 accessibilityLabel="Plan route"
+                accessibilityState={{ disabled: !canPlan }}
                 style={({ pressed }) => [
                   styles.planButton,
-                  { opacity: !canPlan ? 0.4 : pressed ? 0.82 : 1 },
+                  { backgroundColor: c.blue, opacity: !canPlan ? 0.4 : pressed ? 0.82 : 1 },
                 ]}
               >
                 <SymbolView name="arrow.triangle.turn.up.right.diamond.fill" size={17} weight="semibold" tintColor="#FFFFFF" />
@@ -581,20 +611,18 @@ export default function PlannerScreen() {
               )}
             </>
           )}
-        </ScrollView>
-      </SheetContent>
-    </GlassPanel>
+    </SheetSurface>
   );
 }
 
+/** The planner's inputs are text fields, so the keyboard should go away on a
+ *  DRAG rather than track the finger interactively. */
+const SCROLL_PROPS = {
+  keyboardDismissMode: 'on-drag',
+  showsVerticalScrollIndicator: false,
+} as const;
+
 const styles = StyleSheet.create({
-  root: {
-    borderRadius: 24,
-    flex: 1,
-  },
-  column: {
-    flex: 1,
-  },
   scrollContent: {
     gap: Spacing.three,
     paddingBottom: Spacing.six,
@@ -638,7 +666,6 @@ const styles = StyleSheet.create({
   },
   activeStart: {
     alignItems: 'center',
-    backgroundColor: Apple.blue,
     borderCurve: 'continuous',
     borderRadius: Radii.field,
     flexDirection: 'row',
@@ -664,26 +691,8 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
   },
-  optionsRow: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-  },
-  optionChip: {
-    alignItems: 'center',
-    borderCurve: 'continuous',
-    borderRadius: Radii.circle,
-    flexDirection: 'row',
-    gap: 5,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: 7,
-  },
-  optionChipText: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
   planButton: {
     alignItems: 'center',
-    backgroundColor: Apple.blue,
     borderCurve: 'continuous',
     borderRadius: Radii.field,
     flexDirection: 'row',
@@ -707,7 +716,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   stateBody: {
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 20,
     textAlign: 'center',
   },

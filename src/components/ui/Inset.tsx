@@ -13,13 +13,23 @@ import {
   Text,
   useColorScheme,
   View,
+  type AccessibilityActionEvent,
+  type AccessibilityActionInfo,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
 
-import { GlassPanel } from '@/components/ui/GlassPanel';
 import { appleScheme, Apple, Colors, Radii } from '@/constants/theme';
 
+/**
+ * A grouped-inset card. Deliberately a STANDARD translucent fill, not Liquid
+ * Glass: these cards live on surfaces that are themselves glass (the home sheet,
+ * every form sheet), and HIG is explicit that Liquid Glass belongs to the
+ * floating functional layer, not the content layer — stacking glass on glass
+ * both muddies the hierarchy and rendered as a heavy opaque-white slab that
+ * fought the sheet it sat on. A plain fill lets the sheet's own material (and
+ * the map through it) read behind the rows.
+ */
 export function InsetGroup({
   children,
   style,
@@ -27,19 +37,50 @@ export function InsetGroup({
   children?: ReactNode;
   style?: StyleProp<ViewStyle>;
 }) {
-  return (
-    <GlassPanel variant="clear" style={[styles.group, style]}>
-      {children}
-    </GlassPanel>
-  );
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const fill = scheme === 'dark' ? 'rgba(118,118,128,0.24)' : 'rgba(255,255,255,0.55)';
+  return <View style={[styles.group, { backgroundColor: fill }, style]}>{children}</View>;
 }
 
-export function SectionLabel({ children }: { children: string }) {
+/**
+ * An uppercase section caption sitting on the sheet's content edge.
+ *
+ * `trailing` is an OPTIONAL right-hand slot on the same baseline — the tram
+ * card hangs its trip delay pill and the position-freshness chip there, so a
+ * section's live metadata rides its own heading instead of eating a dedicated
+ * stats row above the content. Without it the component renders EXACTLY as it
+ * always did (one Text, `accessibilityRole="header"`, marginBottom 8), which is
+ * what keeps every existing screen byte-identical.
+ *
+ * The trailing node is deliberately OUTSIDE the header Text, so VoiceOver reads
+ * the heading and the metadata as two elements rather than concatenating a
+ * ticking value into a heading (which would re-announce on every 1 Hz tick).
+ */
+export function SectionLabel({ children, trailing }: { children: string; trailing?: ReactNode }) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const color = Colors[scheme].textSecondary;
+
+  if (trailing == null) {
+    return (
+      <Text accessibilityRole="header" style={[styles.sectionLabel, { color }]}>
+        {children.toUpperCase()}
+      </Text>
+    );
+  }
   return (
-    <Text style={[styles.sectionLabel, { color: Colors[scheme].textSecondary }]}>
-      {children.toUpperCase()}
-    </Text>
+    <View style={styles.sectionRow}>
+      {/* The LABEL is the shrinking element: the trailing meta is fixed-width
+          data and must never wrap or truncate. */}
+      <Text
+        accessibilityRole="header"
+        numberOfLines={1}
+        style={[styles.sectionLabelText, styles.sectionLabelShrink, { color }]}
+      >
+        {children.toUpperCase()}
+      </Text>
+      <View style={styles.sectionSpacer} />
+      {trailing}
+    </View>
   );
 }
 
@@ -75,6 +116,13 @@ export interface InsetRowProps {
   /** Custom leading node (e.g. a <LineBadge/>) instead of the symbol circle. */
   iconNode?: ReactNode;
   title: string;
+  /**
+   * VoiceOver label for the whole row. A pressable row is ONE accessibility
+   * element, so `trailing`/`iconNode` content is unreachable — pass the full
+   * sentence here when the row carries data the title/subtitle/value can't.
+   * Defaults to `title, subtitle, value`.
+   */
+  label?: string;
   subtitle?: string;
   /** Right-aligned grey value, e.g. 'Driving', '09:00–21:00'. */
   value?: string;
@@ -87,6 +135,13 @@ export interface InsetRowProps {
   destructive?: boolean;
   /** Blue-checkmark selected row (IMG_0076 Preferences). */
   checked?: boolean;
+  /**
+   * VoiceOver custom actions for interactive `trailing` content (an ellipsis
+   * menu, etc.). The row is one accessibility element, so a nested Pressable is
+   * unreachable by VoiceOver — expose its action through the rotor here.
+   */
+  accessibilityActions?: readonly AccessibilityActionInfo[];
+  onAccessibilityAction?: (event: AccessibilityActionEvent) => void;
 }
 
 /** ICON_CIRCLE — leading colored circle diameter (Apple settings/reports rows). */
@@ -97,6 +152,7 @@ export function InsetRow({
   iconTint,
   iconNode,
   title,
+  label,
   subtitle,
   value,
   valueTint,
@@ -105,10 +161,12 @@ export function InsetRow({
   trailing,
   destructive,
   checked,
+  accessibilityActions,
+  onAccessibilityAction,
 }: InsetRowProps) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const c = appleScheme(scheme);
-  const titleColor = destructive ? Apple.red : c.text;
+  const titleColor = destructive ? c.red : c.text;
 
   const body = (
     <>
@@ -140,7 +198,7 @@ export function InsetRow({
         </Text>
       )}
       {trailing}
-      {checked && <SymbolView name="checkmark" size={16} weight="semibold" tintColor={Apple.blue} />}
+      {checked && <SymbolView name="checkmark" size={16} weight="semibold" tintColor={c.blue} />}
       {chevron && (
         <SymbolView name="chevron.right" size={13} weight="semibold" tintColor={c.secondary} />
       )}
@@ -153,9 +211,12 @@ export function InsetRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={title}
+      accessibilityLabel={label ?? [title, subtitle, value].filter(Boolean).join(', ')}
+      accessibilityState={{ selected: checked === true }}
+      accessibilityActions={accessibilityActions}
+      onAccessibilityAction={onAccessibilityAction}
       onPress={onPress}
-      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+      style={({ pressed }) => [styles.row, pressed && { backgroundColor: c.fillHighlight }]}
     >
       {body}
     </Pressable>
@@ -168,12 +229,46 @@ const styles = StyleSheet.create({
     borderRadius: Radii.group,
     overflow: 'hidden',
   },
+  // The label's OWN typography and left edge, shared by both paths so the
+  // trailing-slot variant cannot drift from the plain one.
+  sectionLabelText: {
+    fontSize: 13,
+    fontWeight: '500',
+    letterSpacing: 0.6,
+    marginLeft: 0,
+  },
+  // `minWidth: 0` is load-bearing, not decoration. A flex item's automatic
+  // minimum size is its MIN-CONTENT width (the longest word), so without this
+  // the heading stops shrinking at "UPCOMING" and the overflow lands on the
+  // trailing meta instead — measured at Dynamic Type XXXL, where the delay pill
+  // clipped to "5 min ea" and the freshness chip to "4 r". The data must never
+  // be the thing that truncates; the heading must.
+  sectionLabelShrink: { flexShrink: 1, minWidth: 0 },
+  sectionRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  sectionSpacer: { flex: 1 },
   sectionLabel: {
     fontSize: 13,
     fontWeight: '500',
     letterSpacing: 0.6,
     marginBottom: 8,
-    marginLeft: 16,
+    // NO extra indent. The label sits on the sheet's content edge, which is the
+    // same edge as the InsetGroup card (or the bare list) it labels and as the
+    // sheet header's title above it — one left edge for every top-level element.
+    //
+    // It used to carry marginLeft 16, which put it 16 pt inboard of the card it
+    // captions and left it aligned with nothing on the tram card: measured
+    // there at card + 37 against the timeline's rows at card + 22 and the
+    // header at card + 14. UIKit's insetGrouped tables DO indent their section
+    // headers that way (iOS 26 Settings: card 20.00, "Vision" 36.67), but the
+    // reference for these sheets is Apple Maps' place card, where the headings
+    // sit essentially ON the rail they caption — "About" at 20.67 and "Ratings
+    // & Guides" at 21.33 against a photo/button rail at 16.00.
+    marginLeft: 0,
   },
   hintRow: {
     alignItems: 'center',
@@ -184,8 +279,8 @@ const styles = StyleSheet.create({
   },
   hintText: {
     flex: 1,
-    fontSize: 14,
-    lineHeight: 19,
+    fontSize: 15,
+    lineHeight: 20,
   },
 
   row: {
@@ -196,7 +291,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 11,
   },
-  rowPressed: { opacity: 0.55 },
   leading: { alignItems: 'center', justifyContent: 'center' },
   iconCircle: {
     width: ICON_CIRCLE,

@@ -12,8 +12,9 @@ import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native'
 import { GoButton } from '@/components/ui/GoButton';
 import { LineBadge, isNightLine } from '@/components/ui/LineBadge';
 import { StepList, type Step } from '@/components/ui/StepList';
-import { appleScheme, Apple, Radii, Tram } from '@/constants/theme';
+import { appleScheme, Radii, TextScale, Tram } from '@/constants/theme';
 import { formatCountdown, type ItineraryTiming } from '@/lib/arrivals';
+import { useNowMs } from '@/hooks/uiClock';
 import { formatPragueClock } from '@/lib/format/pragueTime';
 import type { PlannerItinerary } from '@/lib/types';
 
@@ -52,7 +53,10 @@ export function ItineraryCard({
 
   const departureMs = timing?.departureMs ?? null;
   const arrivalMs = timing?.arrivalMs ?? null;
-  const now = nowMs ?? Date.now();
+  // Fallback clock = the shared 1 Hz tick, not Date.now(): reading the wall
+  // clock during render makes the card impure under React Compiler.
+  const clockNowMs = useNowMs();
+  const now = nowMs ?? clockNowMs;
 
   // Total-duration headline: live (arrival − departure) when a tram matched,
   // else the summed scheduled leg durations, else the stop count as a fallback.
@@ -78,7 +82,7 @@ export function ItineraryCard({
     const out: Step[] = [];
     out.push({
       key: 'start',
-      icon: { symbol: 'smallcircle.filled.circle', circleTint: Apple.red },
+      icon: { symbol: 'smallcircle.filled.circle', circleTint: c.red },
       title: 'Start',
       subtitle: legs[0]?.fromStopName,
     });
@@ -122,22 +126,20 @@ export function ItineraryCard({
     });
     out.push({
       key: 'arrive',
-      icon: { symbol: 'flag.fill', circleTint: Apple.blue },
+      icon: { symbol: 'flag.fill', circleTint: c.blue },
       title: 'Arrive',
       subtitle: legs[legs.length - 1]?.toStopName,
     });
     return out;
-  }, [legs, timing, walkS, now]);
+  }, [legs, timing, walkS, now, c.red, c.blue]);
 
   return (
+    // A plain grouping container: `accessible` would merge GO, Details and
+    // Start Guidance into one element, leaving them unreachable by VoiceOver.
+    // The summary block below carries the card's own tap target and label.
     <Pressable
+      accessible={false}
       onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`Route, ${durationLabel}${
-        departureMs != null && arrivalMs != null
-          ? `, departing ${formatPragueClock(departureMs)}, arriving ${formatPragueClock(arrivalMs)}`
-          : ''
-      }. Show on map.`}
       style={({ pressed }) => [
         styles.card,
         {
@@ -147,11 +149,24 @@ export function ItineraryCard({
       ]}
     >
       <View style={styles.summaryRow}>
-        <View style={styles.summaryText}>
-          <Text style={[styles.duration, { color: c.text }]} allowFontScaling={false}>
+        <Pressable
+          onPress={onPress}
+          accessibilityRole="button"
+          accessibilityLabel={`Route, ${durationLabel}${
+            departureMs != null && arrivalMs != null
+              ? `, departing ${formatPragueClock(departureMs)}, arriving ${formatPragueClock(arrivalMs)}`
+              : ''
+          }. Show on map.`}
+          style={styles.summaryText}
+        >
+          <Text style={[styles.duration, { color: c.text }]} maxFontSizeMultiplier={TextScale.content}>
             {durationLabel}
           </Text>
-          <Text style={[styles.schedule, { color: c.secondary }]} numberOfLines={2} allowFontScaling={false}>
+          <Text
+            style={[styles.schedule, { color: c.secondary }]}
+            numberOfLines={2}
+            maxFontSizeMultiplier={TextScale.content}
+          >
             {scheduleLine}
           </Text>
 
@@ -161,7 +176,10 @@ export function ItineraryCard({
               <>
                 <View style={[styles.walkChip, { backgroundColor: c.fillSecondary }]}>
                   <SymbolView name="figure.walk" size={12} tintColor={c.secondary} />
-                  <Text style={[styles.walkChipText, { color: c.secondary }]} allowFontScaling={false}>
+                  <Text
+                    style={[styles.walkChipText, { color: c.secondary }]}
+                    maxFontSizeMultiplier={TextScale.compact}
+                  >
                     {Math.max(1, Math.round(walkS / 60))} min
                   </Text>
                 </View>
@@ -177,19 +195,29 @@ export function ItineraryCard({
               </View>
             ))}
           </View>
-        </View>
+        </Pressable>
 
-        <GoButton onPress={onPress} size={68} />
+        <GoButton
+          onPress={onPress}
+          accessibilityLabel={`Go, show route to ${legs[legs.length - 1]?.toStopName ?? 'destination'} on map`}
+          size={68}
+        />
       </View>
 
       {/* Walk-aware leave-by line (existing behavior). */}
       {walkS != null && leaveByMs != null && departureMs != null && (
         <View style={styles.leaveRow}>
-          <SymbolView name="figure.walk" size={12} tintColor={Apple.blue} />
-          <Text style={[styles.leaveText, { color: c.text }]} allowFontScaling={false}>
+          <SymbolView name="figure.walk" size={12} tintColor={c.blue} />
+          <Text
+            style={[styles.leaveText, { color: c.text }]}
+            maxFontSizeMultiplier={TextScale.compact}
+          >
             {leaveByMs <= now ? 'Leave now' : `Leave by ${formatPragueClock(leaveByMs)}`}
           </Text>
-          <Text style={[styles.leaveWalk, { color: c.secondary }]} allowFontScaling={false}>
+          <Text
+            style={[styles.leaveWalk, { color: c.secondary }]}
+            maxFontSizeMultiplier={TextScale.compact}
+          >
             {Math.max(1, Math.round(walkS / 60))} min walk to the stop
           </Text>
         </View>
@@ -201,19 +229,23 @@ export function ItineraryCard({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={expanded ? 'Hide details' : 'Show details'}
+          accessibilityState={{ expanded }}
           hitSlop={8}
           onPress={() => setExpanded((x) => !x)}
           style={({ pressed }) => [styles.detailsToggle, pressed && styles.pressed]}
         >
-          <Text style={[styles.detailsText, { color: Apple.blue }]}>Details</Text>
+          <Text style={[styles.detailsText, { color: c.blue }]}>Details</Text>
           <SymbolView
             name={expanded ? 'chevron.up' : 'chevron.down'}
             size={12}
             weight="semibold"
-            tintColor={Apple.blue}
+            tintColor={c.blue}
           />
         </Pressable>
-        <Text style={[styles.totals, { color: c.secondary }]} allowFontScaling={false}>
+        <Text
+          style={[styles.totals, { color: c.secondary }]}
+          maxFontSizeMultiplier={TextScale.compact}
+        >
           {totalStops} {totalStops === 1 ? 'stop' : 'stops'} ·{' '}
           {transferCount === 0
             ? 'Direct'
@@ -229,7 +261,10 @@ export function ItineraryCard({
               accessibilityRole="button"
               accessibilityLabel="Start journey guidance on this route"
               onPress={onStart}
-              style={({ pressed }) => [styles.startButton, { opacity: pressed ? 0.8 : 1 }]}
+              style={({ pressed }) => [
+                styles.startButton,
+                { backgroundColor: c.blue, opacity: pressed ? 0.8 : 1 },
+              ]}
             >
               <SymbolView name="location.north.line.fill" size={15} weight="semibold" tintColor="#FFFFFF" />
               <Text style={styles.startButtonText}>Start Guidance</Text>
@@ -263,7 +298,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.4,
   },
   schedule: {
-    fontSize: 14,
+    fontSize: 13,
     lineHeight: 18,
     fontVariant: ['tabular-nums'],
   },
@@ -316,12 +351,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingTop: 10,
+    paddingTop: 2,
   },
+  // 44 pt minimum target; the shortfall used to come out of footerRow's padding.
   detailsToggle: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 4,
+    justifyContent: 'center',
+    minHeight: 44,
   },
   detailsText: {
     fontSize: 15,
@@ -338,7 +376,6 @@ const styles = StyleSheet.create({
   startButton: {
     alignItems: 'center',
     alignSelf: 'stretch',
-    backgroundColor: Apple.blue,
     borderCurve: 'continuous',
     borderRadius: Radii.field,
     flexDirection: 'row',

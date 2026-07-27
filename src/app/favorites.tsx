@@ -5,9 +5,10 @@
 // Apple-Maps re-skin: a SheetSurface scaffold with a large-title SheetHeader and
 // home-sheet-style grouped inset sections (uppercase section labels + rounded
 // inset cards with hairline separators). Live-status data flows are unchanged.
-import { SymbolView } from 'expo-symbols';
+import { Host } from '@expo/ui';
+import { ContentUnavailableView } from '@expo/ui/swift-ui';
 import { Fragment, useMemo } from 'react';
-import { StyleSheet, Text, useColorScheme, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, useColorScheme, useWindowDimensions, View } from 'react-native';
 
 import {
   FavoriteLineRow,
@@ -26,7 +27,7 @@ import {
 import { SheetHeader } from '@/components/ui/SheetHeader';
 import { SheetSurface } from '@/components/ui/SheetSurface';
 import { SHEET_CONTENT_MAX_WIDTH } from '@/components/ui/SheetContent';
-import { appleScheme, Tram } from '@/constants/theme';
+import { appleScheme } from '@/constants/theme';
 import { useAllTramStates } from '@/hooks/tramData';
 import { useFavoritesStore } from '@/stores/favorites';
 
@@ -58,18 +59,23 @@ export default function FavoritesScreen() {
   }, [states]);
 
   const nothingStarred = trams.length === 0 && lines.length === 0;
+  /** First index of the grid's last row — cells at or after it get no hairline. */
+  const lastGridRowStart = Math.floor((lines.length - 1) / 2) * 2;
 
   return (
     <SheetSurface header={<SheetHeader title="Favorites" />}>
+      {/* Empty state hosts SwiftUI with matchContents VERTICAL ONLY: with both
+          axes the host adopts the view's "natural" width and lays out offset to
+          the right, clipping the glyph and copy at the sheet edge (verified in
+          dark mode). Width must come from the RN column so it centres. */}
       {nothingStarred ? (
-        <View style={styles.empty}>
-          <SymbolView name="star" size={46} weight="light" tintColor={Tram.gold} />
-          <Text style={[styles.emptyTitle, { color: c.text }]}>No favorites yet</Text>
-          <Text style={[styles.emptyHint, { color: c.secondary }]}>
-            Spot a tram on the map and star it — your trams and lines will keep
-            their place here, live status included.
-          </Text>
-        </View>
+        <Host matchContents={{ vertical: true }} style={styles.empty}>
+          <ContentUnavailableView
+            systemImage="star"
+            title="No favorites yet"
+            description="Spot a tram on the map and star it — your trams and lines will keep their place here, live status included."
+          />
+        </Host>
       ) : (
         <>
           <View style={styles.section}>
@@ -98,8 +104,25 @@ export default function FavoritesScreen() {
                 />
               ) : gridLines ? (
                 <View style={styles.lineGrid}>
-                  {lines.map((line) => (
-                    <View key={line} style={styles.lineGridCell}>
+                  {lines.map((line, i) => (
+                    <View
+                      key={line}
+                      style={[
+                        styles.lineGridCell,
+                        // Grouped-card hairlines: a rule between the columns
+                        // (only where there IS a right neighbour) and one under
+                        // every row but the last.
+                        i % 2 === 0 &&
+                          i + 1 < lines.length && {
+                          borderRightWidth: StyleSheet.hairlineWidth,
+                          borderRightColor: c.separator,
+                        },
+                        i < lastGridRowStart && {
+                          borderBottomWidth: StyleSheet.hairlineWidth,
+                          borderBottomColor: c.separator,
+                        },
+                      ]}
+                    >
                       <FavoriteLineRow line={line} activeCount={lineCounts.get(line) ?? 0} />
                     </View>
                   ))}
@@ -129,20 +152,5 @@ const styles = StyleSheet.create({
   lineGridCell: {
     width: '50%',
   },
-  empty: {
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 32,
-    paddingVertical: 56,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginTop: 6,
-  },
-  emptyHint: {
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
-  },
+  empty: { paddingVertical: 56 },
 });

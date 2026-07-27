@@ -32,7 +32,7 @@ import {
 import { SegmentedPills } from '@/components/ui/SegmentedPills';
 import { SheetHeader } from '@/components/ui/SheetHeader';
 import { SheetSurface } from '@/components/ui/SheetSurface';
-import { appleScheme, Apple, Tram, Type } from '@/constants/theme';
+import { appleScheme, Tram, Type } from '@/constants/theme';
 import { ICON_PACKS, ICON_PACK_IDS } from '@/lib/fleet/iconPacks';
 import { useMotionLog, type MotionFileInfo } from '@/lib/motionlog';
 import type { TramModelId } from '@/lib/types';
@@ -80,14 +80,19 @@ function Footnote({ children }: { children: string }) {
 }
 
 function ThemedSwitch({
+  label,
   value,
   onValueChange,
 }: {
+  /** Accessible name — InsetRow's trailing slot is its own a11y element, so an
+   *  unlabeled switch would announce as a bare "Switch, on". */
+  label: string;
   value: boolean;
   onValueChange: (v: boolean) => void;
 }) {
   return (
     <Switch
+      accessibilityLabel={label}
       value={value}
       onValueChange={(v) => {
         void Haptics.selectionAsync();
@@ -166,7 +171,13 @@ function MapSection() {
           icon="point.topleft.down.to.point.bottomright.curvepath.fill"
           iconTint={Tram.pidRed}
           title="Route lines"
-          trailing={<ThemedSwitch value={showRouteLines} onValueChange={setShowRouteLines} />}
+          trailing={
+            <ThemedSwitch
+              label="Route lines"
+              value={showRouteLines}
+              onValueChange={setShowRouteLines}
+            />
+          }
         />
         <RowSeparator inset={16 + 29 + 12} />
         <InsetRow
@@ -174,7 +185,11 @@ function MapSection() {
           iconTint={Tram.night}
           title="Follow locks heading"
           trailing={
-            <ThemedSwitch value={followHeadingLock} onValueChange={setFollowHeadingLock} />
+            <ThemedSwitch
+              label="Follow locks heading"
+              value={followHeadingLock}
+              onValueChange={setFollowHeadingLock}
+            />
           }
         />
       </InsetGroup>
@@ -186,6 +201,9 @@ function MapSection() {
 
 /** Models shown in each pack's live preview strip (varied silhouettes). */
 const PACK_PREVIEW_MODELS: TramModelId[] = ['t3', '15t', '52t'];
+
+/** VoiceOver route to the magnifier — the pack row is one a11y element. */
+const PACK_ACTIONS = [{ name: 'preview', label: 'Preview icons up close' }];
 
 function IconPackSection() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
@@ -200,6 +218,10 @@ function IconPackSection() {
         {ICON_PACK_IDS.map((packId, i) => {
           const meta = ICON_PACKS[packId].meta;
           const selected = packId === iconPack;
+          const onPreview = () => {
+            void Haptics.selectionAsync();
+            router.push(`/icon-preview/${packId}` as Href);
+          };
           return (
             <Fragment key={packId}>
               {i > 0 && <RowSeparator inset={16} />}
@@ -207,6 +229,10 @@ function IconPackSection() {
                 accessibilityRole="button"
                 accessibilityState={{ selected }}
                 accessibilityLabel={meta.name}
+                accessibilityActions={PACK_ACTIONS}
+                onAccessibilityAction={({ nativeEvent }) => {
+                  if (nativeEvent.actionName === 'preview') onPreview();
+                }}
                 onPress={() => {
                   if (selected) return;
                   void Haptics.selectionAsync();
@@ -230,14 +256,12 @@ function IconPackSection() {
                     {meta.description}
                   </Text>
                 </View>
+                {/* Reachable in VoiceOver through the row's 'preview' action. */}
                 <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Preview ${meta.name} icons up close`}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
                   hitSlop={8}
-                  onPress={() => {
-                    void Haptics.selectionAsync();
-                    router.push(`/icon-preview/${packId}` as Href);
-                  }}
+                  onPress={onPreview}
                   style={({ pressed }) => [
                     styles.previewButton,
                     { backgroundColor: c.fillSecondary },
@@ -252,7 +276,7 @@ function IconPackSection() {
                   />
                 </Pressable>
                 {selected && (
-                  <SymbolView name="checkmark" size={16} weight="semibold" tintColor={Apple.blue} />
+                  <SymbolView name="checkmark" size={16} weight="semibold" tintColor={c.blue} />
                 )}
               </Pressable>
             </Fragment>
@@ -353,7 +377,11 @@ function MotionDataSection() {
           iconTint={Tram.onTime}
           title="Passive fleet logging"
           trailing={
-            <ThemedSwitch value={passiveFleetLogging} onValueChange={setPassiveFleetLogging} />
+            <ThemedSwitch
+              label="Passive fleet logging"
+              value={passiveFleetLogging}
+              onValueChange={setPassiveFleetLogging}
+            />
           }
         />
         <RowSeparator inset={SEPARATOR_INSET} />
@@ -398,7 +426,7 @@ function MotionDataSection() {
             <RowSeparator inset={SEPARATOR_INSET} />
             <InsetRow
               icon="trash.fill"
-              iconTint={Apple.red}
+              iconTint={c.red}
               title="Clear motion data"
               destructive
               onPress={onClear}
@@ -429,7 +457,7 @@ function DeveloperSection() {
           icon="ladybug.fill"
           iconTint={Tram.veryLate}
           title="Debug mode"
-          trailing={<ThemedSwitch value={debugMode} onValueChange={setDebugMode} />}
+          trailing={<ThemedSwitch label="Debug mode" value={debugMode} onValueChange={setDebugMode} />}
         />
       </InsetGroup>
       <Footnote>
@@ -508,10 +536,11 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   section: { gap: 8 },
+  // A group FOOTER: same edge as the SectionLabel that opens the group, which
+  // is the sheet's content edge now (see Inset.tsx). Was indented 16 past it.
   footnote: {
     fontSize: 13,
     lineHeight: 18,
-    marginHorizontal: 16,
     marginTop: 2,
   },
   pressed: { opacity: 0.55 },

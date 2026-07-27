@@ -1,14 +1,15 @@
 // Recent journey searches as an Apple Maps inset group (IMG_0072/80): rounded
 // glass card, each row a clock-circle icon over "from → to", tapping the row
-// prefills + plans, a trailing minus button forgets it. Visual only — onPick /
-// onRemove semantics are unchanged.
+// prefills + plans, a trailing button forgets it. That button is a NEUTRAL
+// xmark, not the red minus: on iOS the filled red minus is the list editing-
+// mode delete control and never appears at rest.
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
 import { Fragment } from 'react';
 import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
 import { InsetGroup, RowSeparator, SectionLabel } from '@/components/ui/Inset';
-import { appleScheme, Apple } from '@/constants/theme';
+import { appleScheme } from '@/constants/theme';
 import type { RecentRoute } from '@/stores/planner';
 
 export interface RecentRoutesProps {
@@ -61,7 +62,7 @@ export function RecentRoutes({ recents, onPick, onRemove }: RecentRoutesProps) {
                 accessibilityLabel={`Remove ${r.from} to ${r.to} from recents`}
                 style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}
               >
-                <SymbolView name="minus.circle.fill" size={22} type="hierarchical" tintColor={Apple.red} />
+                <SymbolView name="xmark.circle.fill" size={22} type="hierarchical" tintColor={c.secondary} />
               </Pressable>
             </View>
           </Fragment>

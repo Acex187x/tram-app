@@ -9,6 +9,8 @@ import { useRouter } from 'expo-router';
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, useColorScheme, View } from 'react-native';
 
+import { HEADER_PAD_TOP } from '@/components/maps-kit/mapSheetLayout';
+import { SHEET_H_PAD } from '@/components/maps-kit/sheetLook';
 import { CloseCircle } from '@/components/ui/CloseCircle';
 import { appleScheme, Type } from '@/constants/theme';
 
@@ -43,7 +45,11 @@ export function SheetHeader({
       <View style={styles.compactRow}>
         <View style={styles.side}>{leading}</View>
         <View style={styles.compactTitleCol}>
-          <Text style={[styles.compactTitle, { color: c.text }]} numberOfLines={1}>
+          <Text
+            accessibilityRole="header"
+            style={[styles.compactTitle, { color: c.text }]}
+            numberOfLines={1}
+          >
             {title}
           </Text>
           {subtitle != null && (
@@ -69,6 +75,7 @@ export function SheetHeader({
       {leading != null && <View style={styles.side}>{leading}</View>}
       <View style={[styles.titleCol, centered && styles.titleColCentered]}>
         <Text
+          accessibilityRole="header"
           style={[Type.largeTitle, { color: c.text }, centered && styles.textCenter]}
           numberOfLines={1}
         >
@@ -97,15 +104,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     paddingBottom: 8,
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    // Neither of these is a free number. SHEET_H_PAD is THE sheet content edge,
+    // so the title starts exactly where the body's cards and section labels do;
+    // HEADER_PAD_TOP is the grabber band (gap + pill + clearance), the same
+    // padding the OWNED sheets put above their header row. Hard-coding 20 here
+    // is what made a route sheet's title sit lower than the tram card's while
+    // both drew the same pill in the same place — and, once the body settled on
+    // 16, what left the title 4 pt outboard of the list under it.
+    paddingHorizontal: SHEET_H_PAD,
+    paddingTop: HEADER_PAD_TOP,
   },
   compactRow: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    // Was 16 while `row` above was 20 — the same component disagreeing with
+    // itself across its two variants. Both are the one edge now.
+    paddingHorizontal: SHEET_H_PAD,
+    paddingTop: HEADER_PAD_TOP,
+    paddingBottom: 12,
   },
   side: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   titleCol: { flex: 1, gap: 2 },

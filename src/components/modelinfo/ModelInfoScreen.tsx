@@ -36,13 +36,11 @@ import {
   multilineTextAlignment,
   tint,
 } from '@expo/ui/swift-ui/modifiers';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StyleSheet, useColorScheme, View } from 'react-native';
 
 import { TramFace } from '@/components/tram/TramFace';
-import { CloseCircle } from '@/components/ui/CloseCircle';
 import { Colors, Tram } from '@/constants/theme';
 import {
   MODEL_HISTORY,
@@ -52,14 +50,12 @@ import {
 } from '@/lib/fleet/modelHistory';
 import { MODEL_SPECS } from '@/lib/fleet/modelSpecs';
 import type { TramModelId } from '@/lib/types';
-import { useColorScheme } from 'react-native';
 
 export default function ModelInfoScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const id = typeof params.id === 'string' ? params.id : '';
   const history: ModelHistory | undefined = MODEL_HISTORY[id as TramModelId];
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const background = Colors[scheme].background === '#000000' ? '#000000' : '#F2F2F7';
 
@@ -70,11 +66,6 @@ export default function ModelInfoScreen() {
       else router.replace('/');
     }
   }, [history, router]);
-
-  const onBack = () => {
-    if (router.canGoBack()) router.back();
-    else router.replace('/');
-  };
 
   if (!history) {
     return <View style={[styles.root, { backgroundColor: background }]} />;
@@ -87,6 +78,15 @@ export default function ModelInfoScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: background }]}>
+      {/* The system nav bar owns the title and the back button. It also gives
+          the List a real top inset, so rows no longer scroll under a floating
+          control. Regular (not large) title: the route is pushed INSIDE the
+          tram form sheet, where a large-title band reads as fallen-down. */}
+      <Stack.Screen
+        options={{ headerShown: true, headerLargeTitleEnabled: false, headerBackTitle: 'Tram' }}
+      />
+      <Stack.Title>{history.title}</Stack.Title>
+
       <Host style={styles.host} useViewportSizeMeasurement>
         <List modifiers={[listStyle('insetGrouped')]}>
           {/* ── Header: face + name + maker/years + View in 3D ───────────── */}
@@ -171,17 +171,11 @@ export default function ModelInfoScreen() {
           </Section>
         </List>
       </Host>
-
-      {/* Back — floats over the native list, top-left */}
-      <View style={[styles.backSlot, { top: insets.top + 8 }]}>
-        <CloseCircle onPress={onBack} label="Back" symbol="chevron.left" size={40} />
-      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  backSlot: { left: 16, position: 'absolute' },
   host: { flex: 1 },
   root: { flex: 1 },
 });

@@ -9,11 +9,41 @@ import { GLView, type ExpoWebGLRenderingContext } from 'expo-gl';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import {
+  AccessibilityInfo,
+  ActivityIndicator,
+  StyleSheet,
+  Text,
+  useColorScheme,
+  View,
+  type AccessibilityActionEvent,
+} from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+import {
+  fitRadius,
+  IDLE_SPIN_DEG_PER_S,
+  IDLE_SPIN_DELAY_MS,
+  INITIAL_AZIMUTH_DEG,
+  INITIAL_ELEVATION_DEG,
+  layoutSections,
+  normalizeAzimuthDeg,
+  orbitToPosition,
+  panOrbit,
+  pinchOrbit,
+  viewerBackgroundColor,
+  ZOOM_MAX_FACTOR,
+  ZOOM_MIN_FACTOR,
+  type OrbitState,
+} from '@/components/model/orbitMath';
+import { CircleControl } from '@/components/maps-kit/CircleControl';
+import { GlassPanel } from '@/components/ui/GlassPanel';
+import { Colors, TextScale } from '@/constants/theme';
+import { MODEL_ASSETS, MODEL_SPECS } from '@/lib/fleet/modelSpecs';
+import type { TramModelId, TramModelSpec } from '@/lib/types';
 
 // React Native defines `navigator` without `userAgent`; GLTFLoader (r162)
 // sniffs `navigator.userAgent.indexOf('Firefox')` and crashes on undefined.
@@ -26,30 +56,16 @@ if (nav && typeof nav.userAgent !== 'string') {
   }
 }
 
-import {
-  fitRadius,
-  IDLE_SPIN_DEG_PER_S,
-  IDLE_SPIN_DELAY_MS,
-  INITIAL_AZIMUTH_DEG,
-  INITIAL_ELEVATION_DEG,
-  layoutSections,
-  orbitToPosition,
-  panOrbit,
-  pinchOrbit,
-  viewerBackgroundColor,
-  ZOOM_MAX_FACTOR,
-  ZOOM_MIN_FACTOR,
-  type OrbitState,
-} from '@/components/model/orbitMath';
-import { CircleControl } from '@/components/maps-kit/CircleControl';
-import { GlassPanel } from '@/components/ui/GlassPanel';
-import { Colors } from '@/constants/theme';
-import { MODEL_ASSETS, MODEL_SPECS } from '@/lib/fleet/modelSpecs';
-import type { TramModelId, TramModelSpec } from '@/lib/types';
-
 const CAMERA_FOV_DEG = 40;
 /** Idle frame budget ≈ 30 fps; interacting renders at full rAF rate. */
 const IDLE_FRAME_MS = 33;
+
+/** VoiceOver intercepts pan/pinch, so orbiting is also offered as actions. */
+const ROTATE_ACTIONS = [
+  { name: 'increment', label: 'Rotate right' },
+  { name: 'decrement', label: 'Rotate left' },
+];
+const ROTATE_ACTION_DEG = 30;
 
 const INITIAL_ORBIT: OrbitState = {
   azimuthDeg: INITIAL_AZIMUTH_DEG,
@@ -70,6 +86,9 @@ interface GlSession {
   raf: number;
   lastRenderMs: number;
   disposed: boolean;
+  /** Drawing-buffer size the renderer/camera are currently fitted to. */
+  bufW: number;
+  bufH: number;
 }
 
 /**
@@ -161,7 +180,16 @@ function disposeSession(session: GlSession) {
 
 // ── UI bits ──────────────────────────────────────────────────────────────────
 
-function SpecChip({ icon, label }: { icon: SFSymbol; label: string }) {
+function SpecChip({
+  icon,
+  label,
+  a11yLabel,
+}: {
+  icon: SFSymbol;
+  label: string;
+  /** Spoken form, where the abbreviated `label` would be ambiguous ("30.3 m"). */
+  a11yLabel?: string;
+}) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const c = Colors[scheme];
   return (
@@ -170,9 +198,14 @@ function SpecChip({ icon, label }: { icon: SFSymbol; label: string }) {
         styles.chip,
         { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.06)' },
       ]}
+      accessible
+      accessibilityLabel={a11yLabel ?? label}
     >
       <SymbolView name={icon} size={12} tintColor={c.textSecondary} />
-      <Text style={[styles.chipText, { color: c.text }]} allowFontScaling={false}>
+      <Text
+        style={[styles.chipText, { color: c.text }]}
+        maxFontSizeMultiplier={TextScale.compact}
+      >
         {label}
       </Text>
     </View>
@@ -203,6 +236,25 @@ export default function ModelViewerScreen() {
   const backgroundRef = useRef(background);
   const sessionRef = useRef<GlSession | null>(null);
   const mountedRef = useRef(true);
+  const reduceMotionRef = useRef(false);
+
+  // Reduce Motion suppresses the endless turntable (the initial 3/4-front pose
+  // is kept — drag still works). A ref, so the render loop reads it for free.
+  useEffect(() => {
+    let alive = true;
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((v) => {
+        if (alive) reduceMotionRef.current = v;
+      })
+      .catch(() => {});
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', (v) => {
+      reduceMotionRef.current = v;
+    });
+    return () => {
+      alive = false;
+      sub.remove();
+    };
+  }, []);
 
   // Keep the render loop's background in sync with the system theme.
   useEffect(() => {
@@ -317,6 +369,8 @@ export default function ModelViewerScreen() {
           raf: 0,
           lastRenderMs: 0,
           disposed: false,
+          bufW: width,
+          bufH: height,
         };
         sessionRef.current = session;
 
@@ -324,6 +378,21 @@ export default function ModelViewerScreen() {
         const frame = () => {
           if (session.disposed) return;
           session.raf = requestAnimationFrame(frame);
+          // expo-gl reallocates the drawing buffer on every native layout pass
+          // (GLView.layoutSubviews), but three keeps the viewport and camera
+          // aspect it was built with — an iPad rotation or Stage Manager resize
+          // would stretch and clip the consist. Re-fit from expo-gl's own
+          // numbers, before the idle-throttle return so a resize is picked up
+          // even on a skipped frame.
+          const bw = session.gl.drawingBufferWidth;
+          const bh = session.gl.drawingBufferHeight;
+          if (bw > 0 && bh > 0 && (bw !== session.bufW || bh !== session.bufH)) {
+            session.bufW = bw;
+            session.bufH = bh;
+            session.renderer.setSize(bw, bh, false);
+            session.camera.aspect = bw / Math.max(1, bh);
+            session.camera.updateProjectionMatrix();
+          }
           const now = Date.now();
           const interacting =
             activeGesturesRef.current > 0 || now - lastInteractionRef.current < 250;
@@ -331,7 +400,11 @@ export default function ModelViewerScreen() {
           const dtS = Math.min(now - session.lastRenderMs, 100) / 1000;
           session.lastRenderMs = now;
 
-          if (!interacting && now - lastInteractionRef.current > IDLE_SPIN_DELAY_MS) {
+          if (
+            !reduceMotionRef.current &&
+            !interacting &&
+            now - lastInteractionRef.current > IDLE_SPIN_DELAY_MS
+          ) {
             const o = orbitRef.current;
             orbitRef.current = { ...o, azimuthDeg: o.azimuthDeg + IDLE_SPIN_DEG_PER_S * dtS };
           }
@@ -363,14 +436,20 @@ export default function ModelViewerScreen() {
   // ── gestures: pan = orbit, pinch = dolly (simultaneous, JS thread). Each
   // gesture owns its start state and merges only its own axes into the shared
   // orbit, so a two-finger orbit-while-zooming doesn't fight itself. ─────────
-  const noteInteraction = () => {
+  const noteInteraction = useCallback(() => {
     lastInteractionRef.current = Date.now();
-  };
-  const endGesture = () => {
+  }, []);
+  const endGesture = useCallback(() => {
     activeGesturesRef.current = Math.max(0, activeGesturesRef.current - 1);
     noteInteraction();
-  };
+  }, [noteInteraction]);
 
+  /* eslint-disable react-hooks/refs -- the builder callbacks below are DEFERRED
+     (they fire on touch, never during render), but the rule only sees closures
+     handed to a function that IS called during render and has to assume the
+     worst. The orbit deliberately lives in refs: the 60 fps GL loop reads it, so
+     holding it in state would re-render the tree on every finger move (perf
+     invariant #1). */
   const panGesture = Gesture.Pan()
     .runOnJS(true)
     .maxPointers(1)
@@ -404,6 +483,16 @@ export default function ModelViewerScreen() {
     .onFinalize(endGesture);
 
   const gesture = Gesture.Simultaneous(panGesture, pinchGesture);
+  /* eslint-enable react-hooks/refs */
+
+  // Non-gesture orbiting for VoiceOver. Touching lastInteractionRef makes the
+  // loop render at full rate for 250 ms so the nudge is actually drawn.
+  const onRotateAction = (e: AccessibilityActionEvent) => {
+    const o = orbitRef.current;
+    const delta = e.nativeEvent.actionName === 'increment' ? ROTATE_ACTION_DEG : -ROTATE_ACTION_DEG;
+    orbitRef.current = { ...o, azimuthDeg: normalizeAzimuthDeg(o.azimuthDeg + delta) };
+    lastInteractionRef.current = Date.now();
+  };
 
   const onClose = () => {
     if (router.canGoBack()) router.back();
@@ -418,9 +507,20 @@ export default function ModelViewerScreen() {
   return (
     <GestureHandlerRootView style={[styles.root, { backgroundColor: background }]}>
       {status !== 'error' && (
-        <GestureDetector gesture={gesture}>
-          <GLView style={styles.gl} msaaSamples={4} onContextCreate={onContextCreate} />
-        </GestureDetector>
+        // The label/actions live on a plain View wrapper: props set directly on
+        // the GLView are swallowed by the native GL surface.
+        <View
+          style={styles.gl}
+          accessible
+          accessibilityRole="image"
+          accessibilityLabel={`3D model of ${spec.name}, ${spec.manufacturer}, ${spec.totalLengthM.toFixed(1)} metres long`}
+          accessibilityActions={ROTATE_ACTIONS}
+          onAccessibilityAction={onRotateAction}
+        >
+          <GestureDetector gesture={gesture}>
+            <GLView style={styles.gl} msaaSamples={4} onContextCreate={onContextCreate} />
+          </GestureDetector>
+        </View>
       )}
 
       {status === 'loading' && (
@@ -460,13 +560,26 @@ export default function ModelViewerScreen() {
             {spec.manufacturer} · {spec.yearsBuilt}
           </Text>
           <View style={styles.chipsRow}>
-            <SpecChip icon="ruler" label={`${spec.totalLengthM.toFixed(1)} m`} />
+            <SpecChip
+              icon="ruler"
+              label={`${spec.totalLengthM.toFixed(1)} m`}
+              a11yLabel={`${spec.totalLengthM.toFixed(1)} metres long`}
+            />
             <SpecChip icon="arrow.left.and.right" label={`${spec.widthM.toFixed(2)} m wide`} />
             <SpecChip icon="gauge.with.needle" label={`${spec.maxSpeedKmh} km/h`} />
           </View>
-          <View style={styles.hintRow}>
+          {/* Gesture-only hint: hidden from VoiceOver, which orbits via the
+              rotate actions on the model instead. */}
+          <View
+            style={styles.hintRow}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
             <SymbolView name="hand.draw" size={11} tintColor={c.textSecondary} />
-            <Text style={[styles.hintText, { color: c.textSecondary }]} allowFontScaling={false}>
+            <Text
+              style={[styles.hintText, { color: c.textSecondary }]}
+              maxFontSizeMultiplier={TextScale.compact}
+            >
               Drag to rotate · pinch to zoom
             </Text>
           </View>

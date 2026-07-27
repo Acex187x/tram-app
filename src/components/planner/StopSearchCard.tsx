@@ -1,8 +1,8 @@
 // From/To stop pickers as Apple Maps' Directions endpoint card (IMG_0080): a
-// grouped glass card with two rows — a blue origin dot and a blue destination
-// pin joined by a connecting line, reorder drag glyphs on the right, and a
-// circular swap button. Inline stop-name suggestions (with the serving lines)
-// drop below. Purely visual: every prop and interaction is unchanged.
+// grouped card with two rows — a blue origin dot and a blue destination pin
+// joined by a connecting line — and a circular swap button. Inline stop-name
+// suggestions (with the serving lines) drop below. A content-layer card on a
+// glass sheet, so it takes the standard grouped fill, not Liquid Glass.
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
 import { useMemo, useRef, useState } from 'react';
@@ -17,9 +17,9 @@ import {
   View,
 } from 'react-native';
 
-import { GlassPanel } from '@/components/ui/GlassPanel';
+import { InsetGroup } from '@/components/ui/Inset';
 import { LineBadge } from '@/components/ui/LineBadge';
-import { Apple, appleScheme, Radii } from '@/constants/theme';
+import { appleScheme, Radii } from '@/constants/theme';
 
 type Field = 'from' | 'to';
 
@@ -103,13 +103,19 @@ export function StopSearchCard({
           ) : (
             <SymbolView name="mappin" size={13} tintColor="#FFFFFF" style={styles.dotGlyph} />
           )}
-          <View style={[styles.dot, { backgroundColor: Apple.blue }]} />
+          <View style={[styles.dot, { backgroundColor: c.blue }]} />
         </View>
         <TextInput
           ref={isFrom ? fromRef : toRef}
           value={isFrom ? from : to}
           onChangeText={isFrom ? onChangeFrom : onChangeTo}
           onFocus={() => setActiveField(field)}
+          // Without this the suggestion list stays wedged open after any
+          // dismissal that doesn't run through pickSuggestion/onSubmitEditing
+          // (Find Routes, keyboardDismissMode, locate, swap). The functional
+          // update keeps the From→To handoff safe when the new field's onFocus
+          // lands before the old field's onBlur.
+          onBlur={() => setActiveField((f) => (f === field ? null : f))}
           placeholder={isFrom ? 'My Location' : 'Choose destination'}
           placeholderTextColor={c.secondary}
           style={[styles.input, { color: c.text }]}
@@ -142,19 +148,18 @@ export function StopSearchCard({
             style={({ pressed }) => [styles.locateButton, { opacity: pressed || locating ? 0.6 : 1 }]}
           >
             {locating ? (
-              <ActivityIndicator size="small" color={Apple.blue} />
+              <ActivityIndicator size="small" color={c.blue} />
             ) : (
-              <SymbolView name="location" size={17} weight="semibold" tintColor={Apple.blue} />
+              <SymbolView name="location" size={17} weight="semibold" tintColor={c.blue} />
             )}
           </Pressable>
         )}
-        <SymbolView name="line.3.horizontal" size={16} tintColor={c.secondary} style={styles.dragGlyph} />
       </View>
     );
   };
 
   return (
-    <GlassPanel variant="clear" style={styles.card}>
+    <InsetGroup style={styles.card}>
       <View style={styles.fieldsBlock}>
         <View style={styles.fieldsCol}>
           {renderField('from')}
@@ -168,13 +173,14 @@ export function StopSearchCard({
         <Pressable
           onPress={handleSwap}
           hitSlop={8}
+          accessibilityRole="button"
           accessibilityLabel="Swap stops"
           style={({ pressed }) => [
             styles.swapButton,
             { backgroundColor: c.fillTertiary, opacity: pressed ? 0.6 : 1 },
           ]}
         >
-          <SymbolView name="arrow.up.arrow.down" size={15} weight="semibold" tintColor={Apple.blue} />
+          <SymbolView name="arrow.up.arrow.down" size={15} weight="semibold" tintColor={c.blue} />
         </Pressable>
       </View>
 
@@ -213,7 +219,7 @@ export function StopSearchCard({
           })}
         </View>
       )}
-    </GlassPanel>
+    </InsetGroup>
   );
 }
 
@@ -277,10 +283,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     height: 30,
     width: 30,
-  },
-  dragGlyph: {
-    marginLeft: 2,
-    opacity: 0.7,
   },
   swapButton: {
     alignItems: 'center',

@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 
 import { TramModelImage, tramModelImageSource } from '@/components/tram/TramModelImage';
-import { Colors } from '@/constants/theme';
+import { Colors, TextScale } from '@/constants/theme';
 import type { TramModelId } from '@/lib/types';
 
 export interface ModelPreviewButtonProps {
@@ -73,7 +73,10 @@ export function ModelPreviewButton({ modelId, height = 104, style }: ModelPrevie
               />
             }
           />
-          <Text style={[styles.captionText, { color: c.textSecondary }]} allowFontScaling={false}>
+          <Text
+            style={[styles.captionText, { color: c.textSecondary }]}
+            maxFontSizeMultiplier={TextScale.compact}
+          >
             View in 3D
           </Text>
         </Animated.View>

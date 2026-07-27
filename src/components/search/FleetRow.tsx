@@ -1,6 +1,6 @@
 // One fleet-browser row, Apple-Maps inset-row grammar: a leading line badge,
 // a reg + model title over the live status line, and right-aligned live glyphs
-// (speed, delay pill, AC + fix age). Memoized: all display props are primitives
+// (delay pill, AC + fix age). Memoized: all display props are primitives
 // (FleetRowData) and the press callback is key-based + stable, so the 1 Hz
 // states refresh re-renders a row only when a value it shows actually changed
 // (in practice the ticking updated-age). Kept deliberately cheap — plain Views,
@@ -8,10 +8,10 @@
 import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { AcSnowflake } from '@/components/tram/TramModelImage';
+import { AcSnowflake, acTint } from '@/components/tram/TramModelImage';
 import { DelayPill } from '@/components/ui/DelayPill';
 import { LineBadge } from '@/components/ui/LineBadge';
-import { appleScheme, Fonts } from '@/constants/theme';
+import { appleScheme, Fonts, TabularNums, TextScale, Type } from '@/constants/theme';
 
 import type { FleetRowData } from './fleetFilter';
 
@@ -21,14 +21,17 @@ export interface FleetRowProps extends FleetRowData {
 }
 
 function FleetRowInner(props: FleetRowProps) {
-  const c = appleScheme(props.dark ? 'dark' : 'light');
+  const scheme = props.dark ? 'dark' : 'light';
+  const c = appleScheme(scheme);
 
   return (
     <Pressable
       onPress={() => props.onPress(props.tramKey)}
       accessibilityRole="button"
-      accessibilityLabel={`Tram ${props.tramKey}, line ${props.line}, ${props.modelShort}, ${props.status}`}
-      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+      accessibilityLabel={`Tram ${props.tramKey}, line ${props.line}, ${props.modelShort}, ${props.status}${
+        props.airConditioned ? ', air conditioned' : ''
+      }`}
+      style={({ pressed }) => [styles.row, pressed && { backgroundColor: c.fillHighlight }]}
     >
       <LineBadge line={props.line} size="md" />
 
@@ -43,13 +46,13 @@ function FleetRowInner(props: FleetRowProps) {
       </View>
 
       <View style={styles.trailing}>
-        <Text allowFontScaling={false} style={[styles.speed, { color: c.text }]}>
-          {props.speedText ?? '—'}
-        </Text>
         <DelayPill delaySeconds={props.delaySeconds} style={styles.delay} />
         <View style={styles.metaRow}>
-          <AcSnowflake airConditioned={props.airConditioned} size={10} />
-          <Text allowFontScaling={false} style={[styles.age, { color: c.secondary }]}>
+          <AcSnowflake airConditioned={props.airConditioned} size={10} tint={acTint(scheme)} decorative />
+          <Text
+            maxFontSizeMultiplier={TextScale.compact}
+            style={[styles.age, { color: c.secondary }]}
+          >
             {props.ageText}
           </Text>
         </View>
@@ -69,19 +72,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
-  rowPressed: { opacity: 0.55 },
   body: { flex: 1, gap: 2 },
   title: { fontSize: 16, fontWeight: '600' },
-  reg: { fontFamily: Fonts?.rounded, fontVariant: ['tabular-nums'] },
+  reg: { fontFamily: Fonts?.rounded, ...TabularNums },
   status: { fontSize: 13 },
   trailing: {
     alignItems: 'flex-end',
     gap: 3,
-  },
-  speed: {
-    fontSize: 12.5,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
   },
   delay: { paddingHorizontal: 7, paddingVertical: 1 },
   metaRow: {
@@ -90,7 +87,7 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   age: {
-    fontSize: 10.5,
-    fontVariant: ['tabular-nums'],
+    ...Type.caption1,
+    ...TabularNums,
   },
 });

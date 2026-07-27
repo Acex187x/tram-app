@@ -7,8 +7,16 @@
 // Apple-Maps re-skin: SheetHeader-style large title + CloseCircle, SegmentedPills
 // direction selector, and an Apple dotted transit timeline. The headsign-STRING
 // direction tracking and the shapeId interleaving rule are unchanged.
+//
+// Surface: <SheetSurface scrollable={false}/> — the shared route-sheet scaffold,
+// with the timeline FlatList as a bare child so it stays a DIRECT subview of the
+// screen (rn-screens needs that to wire drag-to-expand). The root used to be a
+// GlassPanel, which is glass-on-glass over the system formSheet's own Liquid
+// Glass: the system flattens the inner effect and stops resolving its light/dark
+// with the app, while the JS children keep painting from useColorScheme(). See
+// the rule in src/components/maps-kit/sheetLook.ts.
 import * as Haptics from 'expo-haptics';
-import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -22,14 +30,15 @@ import {
   View,
 } from 'react-native';
 
-import { AcSnowflake } from '@/components/tram/TramModelImage';
+import { AcSnowflake, acTint } from '@/components/tram/TramModelImage';
+import { HEADER_PAD_TOP } from '@/components/maps-kit/mapSheetLayout';
 import { CloseCircle } from '@/components/ui/CloseCircle';
 import { DelayPill } from '@/components/ui/DelayPill';
-import { GlassPanel } from '@/components/ui/GlassPanel';
 import { isNightLine, LineBadge } from '@/components/ui/LineBadge';
 import { SegmentedPills } from '@/components/ui/SegmentedPills';
 import { SHEET_CONTENT_MAX_WIDTH } from '@/components/ui/SheetContent';
-import { appleScheme, Fonts, Spacing, Tram, Type } from '@/constants/theme';
+import { SheetSurface } from '@/components/ui/SheetSurface';
+import { appleScheme, Fonts, Spacing, TextScale, Tram, Type } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
 import { useFavoritesStore } from '@/stores/favorites';
 import { useSelectionStore } from '@/stores/selection';
@@ -160,10 +169,14 @@ export default function LineSheet() {
     router.back();
   };
 
+  // The tram card is an owned sheet on the MAP screen: present it and dismiss
+  // this sheet back to the map. `openTram` also claims the gold halo, which this
+  // call site used to forget entirely (it only pushed the route) — that is why a
+  // tram opened from the line sheet had no selection ring on the map.
   const onTramPress = (state: TramPublicState): void => {
     void Haptics.selectionAsync();
-    // Encode: keys can fall back to trip ids with URL-hostile characters.
-    router.push(`/tram/${encodeURIComponent(state.key)}` as Href);
+    useSelectionStore.getState().openTram(state.key);
+    router.dismissAll();
   };
 
   const header = (
@@ -171,7 +184,10 @@ export default function LineSheet() {
       <View style={styles.titleRow}>
         <LineBadge line={lineId} size="lg" />
         <View style={styles.titleText}>
-          <Text style={[Type.largeTitle, styles.title, { color: c.text }]} allowFontScaling={false}>
+          <Text
+            style={[Type.largeTitle, styles.title, { color: c.text }]}
+            maxFontSizeMultiplier={TextScale.content}
+          >
             Line {lineId}
           </Text>
           <View style={styles.subtitleRow}>
@@ -182,7 +198,7 @@ export default function LineSheet() {
             {isNightLine(lineId) && (
               <View style={styles.nightPill}>
                 <SymbolView name="moon.fill" size={9} tintColor="#FFFFFF" />
-                <Text style={styles.nightPillText} allowFontScaling={false}>
+                <Text style={styles.nightPillText} maxFontSizeMultiplier={TextScale.badge}>
                   NIGHT
                 </Text>
               </View>
@@ -191,7 +207,7 @@ export default function LineSheet() {
         </View>
         <Pressable
           onPress={onToggleFavorite}
-          hitSlop={8}
+          hitSlop={11}
           accessibilityRole="button"
           accessibilityLabel={isFavorite ? `Unfavorite line ${lineId}` : `Favorite line ${lineId}`}
           accessibilityState={{ selected: isFavorite }}
@@ -245,7 +261,7 @@ export default function LineSheet() {
   );
 
   return (
-    <GlassPanel style={styles.root}>
+    <SheetSurface scrollable={false}>
       <FlatList
         data={rows}
         keyExtractor={(row) =>
@@ -283,7 +299,7 @@ export default function LineSheet() {
         ]}
         showsVerticalScrollIndicator={false}
       />
-    </GlassPanel>
+    </SheetSurface>
   );
 }
 
@@ -382,13 +398,13 @@ function TramRow({
           pressed && styles.pressed,
         ]}
       >
-        <Text style={[styles.tramReg, { color: c.text }]} allowFontScaling={false}>
+        <Text style={[styles.tramReg, { color: c.text }]} maxFontSizeMultiplier={TextScale.compact}>
           {state.key}
         </Text>
         <Text numberOfLines={1} style={[styles.tramModel, { color: c.secondary }]}>
           {shortModelName(state.model.name)}
         </Text>
-        <AcSnowflake airConditioned={state.snapshot.airConditioned} />
+        <AcSnowflake airConditioned={state.snapshot.airConditioned} tint={acTint(scheme)} />
         <DelayPill delaySeconds={state.snapshot.delaySeconds} />
         <SymbolView name="chevron.right" size={11} tintColor={c.secondary} />
       </Pressable>
@@ -397,13 +413,14 @@ function TramRow({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
   listContent: {
     paddingBottom: Spacing.six,
   },
   header: {
     paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.four,
+    // The grabber band (gap + pill + clearance), the same inset every other
+    // sheet's header carries — see SheetHeader / HEADER_PAD_TOP.
+    paddingTop: HEADER_PAD_TOP,
     paddingBottom: Spacing.two,
     gap: Spacing.three,
   },
@@ -428,7 +445,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: Tram.onTime,
   },
-  subtitle: { fontSize: 14, fontWeight: '500' },
+  subtitle: { fontSize: 15, fontWeight: '500' },
   nightPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -440,10 +457,11 @@ const styles = StyleSheet.create({
   },
   nightPillText: {
     color: '#FFFFFF',
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.6,
   },
+  /** 26 pt frame + hitSlop 11 = a 48 pt target (HIG minimum is 44). */
   starButton: { padding: 2 },
   row: {
     flexDirection: 'row',

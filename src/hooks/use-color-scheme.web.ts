@@ -7,7 +7,11 @@ import { useColorScheme as useRNColorScheme } from 'react-native';
 export function useColorScheme() {
   const [hasHydrated, setHasHydrated] = useState(false);
 
+  // The whole point is to re-render exactly once AFTER hydration (the server
+  // pass must return 'light'), so the one-shot setState in an effect is the
+  // mechanism, not an accident. Web-only file; the app ships iOS.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHasHydrated(true);
   }, []);
 

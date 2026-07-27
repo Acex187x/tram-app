@@ -11,7 +11,7 @@ import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native'
 
 import { LineBadge } from '@/components/ui/LineBadge';
 import { RowSeparator } from '@/components/ui/Inset';
-import { appleScheme, Apple, Radii, Tram, Type } from '@/constants/theme';
+import { appleScheme, Radii, TextScale, Tram, Type } from '@/constants/theme';
 import {
   computeItineraryTiming,
   computeLeaveByMs,
@@ -72,7 +72,10 @@ export function GuidanceStepper({
       <View style={styles.headerRow}>
         <SymbolView name="location.north.line.fill" size={17} weight="semibold" tintColor={accent} />
         <Text style={[Type.title3, styles.headerText, { color: c.text }]}>Journey guidance</Text>
-        <Text style={[styles.headerStep, { color: c.secondary }]} allowFontScaling={false}>
+        <Text
+          style={[styles.headerStep, { color: c.secondary }]}
+          maxFontSizeMultiplier={TextScale.content}
+        >
           Step {Math.min(activeIdx + 1, steps.length)} of {steps.length}
         </Text>
       </View>
@@ -105,7 +108,10 @@ export function GuidanceStepper({
           void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           onEnd();
         }}
-        style={({ pressed }) => [styles.endButton, { opacity: pressed ? 0.75 : 1 }]}
+        style={({ pressed }) => [
+          styles.endButton,
+          { backgroundColor: c.red, opacity: pressed ? 0.75 : 1 },
+        ]}
       >
         <SymbolView name="xmark" size={13} weight="semibold" tintColor="#FFFFFF" />
         <Text style={styles.endButtonText}>End Guidance</Text>
@@ -201,7 +207,7 @@ function StepRow({
     <View style={styles.row}>
       <View style={styles.gutter}>
         {status === 'done' ? (
-          <SymbolView name="checkmark.circle.fill" size={24} tintColor={Apple.green} />
+          <SymbolView name="checkmark.circle.fill" size={24} tintColor={c.green} />
         ) : step.kind === 'board' || step.kind === 'ride' ? (
           <LineBadge line={step.line} size="md" />
         ) : (
@@ -218,13 +224,19 @@ function StepRow({
           {title}
         </Text>
         {detail != null && (
-          <Text style={[styles.rowDetail, { color: c.secondary }]} allowFontScaling={false}>
+          <Text
+            style={[styles.rowDetail, { color: c.secondary }]}
+            maxFontSizeMultiplier={TextScale.content}
+          >
             {detail}
           </Text>
         )}
       </View>
       {liveNote != null && (
-        <Text style={[styles.liveNote, { color: accent }]} allowFontScaling={false}>
+        <Text
+          style={[styles.liveNote, { color: accent }]}
+          maxFontSizeMultiplier={TextScale.content}
+        >
           {liveNote}
         </Text>
       )}
@@ -282,7 +294,6 @@ const styles = StyleSheet.create({
   endButton: {
     alignItems: 'center',
     alignSelf: 'stretch',
-    backgroundColor: Apple.red,
     borderCurve: 'continuous',
     borderRadius: Radii.field,
     flexDirection: 'row',

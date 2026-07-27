@@ -5,12 +5,16 @@
 // Preview/Export menu. Tapping a row still parses the ride's JSONL and previews
 // it on the MAIN map (RideOverlay draws GPS vs sim; the RideChip clears it),
 // dismissing the sheets — every data flow is unchanged, this is chrome only.
+import { Host } from '@expo/ui';
+import { ContentUnavailableView } from '@expo/ui/swift-ui';
+import { File } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { Fragment, useMemo } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   ActionSheetIOS,
+  ActivityIndicator,
   Pressable,
   Share,
   StyleSheet,
@@ -31,6 +35,37 @@ import { useRidePreviewStore } from '@/stores/ridePreview';
 interface RideEntry {
   file: MotionFileInfo;
   ride: ParsedRide;
+}
+
+/** VoiceOver route to the ellipsis menu — the row itself is one a11y element. */
+const ROW_ACTIONS = [{ name: 'more', label: 'Ride options' }];
+
+/**
+ * Parsed rides keyed by relPath, stamped with `size:modifiedMs`. Ride files are
+ * append-only, so that stamp identifies content exactly: only the file being
+ * recorded into is ever re-parsed, instead of the whole directory on every
+ * MotionLog version bump (~1 Hz while a ride records).
+ */
+const parseCache = new Map<string, { stamp: string; ride: ParsedRide }>();
+
+/**
+ * `MotionLog.readRideFile` bottoms out in `File.textSync()`, which would block
+ * the JS thread while this sheet animates up — read the uri asynchronously.
+ */
+async function loadRide(file: MotionFileInfo): Promise<ParsedRide> {
+  const stamp = `${file.size}:${file.modifiedMs}`;
+  const hit = parseCache.get(file.relPath);
+  if (hit != null && hit.stamp === stamp) return hit.ride;
+  let text = '';
+  try {
+    const handle = new File(file.uri);
+    if (handle.exists) text = await handle.text();
+  } catch {
+    // unreadable file — the row still renders from its metadata
+  }
+  const ride = parseRideFile(text);
+  parseCache.set(file.relPath, { stamp, ride });
+  return ride;
 }
 
 function fmtBytes(n: number): string {
@@ -97,8 +132,12 @@ function RideRow({ entry }: { entry: RideEntry }) {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Preview ride ${file.name} on the map`}
+      accessibilityActions={ROW_ACTIONS}
+      onAccessibilityAction={({ nativeEvent }) => {
+        if (nativeEvent.actionName === 'more') onMore();
+      }}
       onPress={onPreview}
-      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.row, pressed && { backgroundColor: c.fillHighlight }]}
     >
       <LineBadge line={ride.line ?? '?'} size="sm" />
       <View style={styles.rowText}>
@@ -117,9 +156,10 @@ function RideRow({ entry }: { entry: RideEntry }) {
           {fmtWhen(ride.startedMs)} · {fmtDuration(ride)} · {ride.points} pts · {fmtBytes(file.size)}
         </Text>
       </View>
+      {/* Reachable in VoiceOver through the row's 'more' action, not directly. */}
       <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Ride ${file.name} options`}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
         hitSlop={8}
         onPress={onMore}
         style={({ pressed }) => [
@@ -139,30 +179,52 @@ export default function RidesScreen() {
   const log = useMotionLog(); // re-renders on ride/file changes
   const version = log.getVersion(); // cache key: files changed -> reparse
 
-  const entries = useMemo<RideEntry[]>(
-    () =>
-      log.listRideFiles().map((file) => ({
-        file,
-        ride: parseRideFile(log.readRideFile(file.relPath)),
-      })),
+  const files = useMemo<MotionFileInfo[]>(
+    () => log.listRideFiles(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [log, version],
   );
+  // null until the first hydration lands — reading + parsing happens off the
+  // render pass so the sheet presentation animation is never blocked.
+  const [entries, setEntries] = useState<RideEntry[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const loaded: RideEntry[] = [];
+      for (const file of files) loaded.push({ file, ride: await loadRide(file) });
+      if (cancelled) return;
+      for (const relPath of parseCache.keys()) {
+        if (!files.some((f) => f.relPath === relPath)) parseCache.delete(relPath);
+      }
+      setEntries(loaded);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [files]);
 
   return (
     <SheetSurface header={<SheetHeader title="Recorded rides" />}>
-      {entries.length === 0 ? (
+      {entries == null ? (
         <View style={styles.empty}>
-          <SymbolView name="record.circle" size={46} weight="light" tintColor={Tram.veryLate} />
-          <Text style={[styles.emptyTitle, { color: c.text }]}>No rides recorded</Text>
-          <Text style={[styles.emptyHint, { color: c.secondary }]}>
-            Open a tram you are riding and tap Record ride — the GPS vs. simulation track will be
-            stored here, safe across restarts.
-          </Text>
+          <ActivityIndicator color={Tram.veryLate} />
+          <Text style={[styles.emptyHint, { color: c.secondary }]}>Reading recorded rides…</Text>
         </View>
+      ) : entries.length === 0 ? (
+        // matchContents VERTICAL ONLY — same defect and fix as favorites.tsx: a
+        // both-axes matchContents host lays the empty state out offset to the
+        // right and it clips at the sheet edge.
+        <Host matchContents={{ vertical: true }} style={styles.empty}>
+          <ContentUnavailableView
+            systemImage="record.circle"
+            title="No rides recorded"
+            description="Open a tram you are riding and tap Record ride — the GPS vs. simulation track will be stored here, safe across restarts."
+          />
+        </Host>
       ) : (
         <View style={styles.section}>
-          <SectionLabel>Tap a ride to preview it on the map</SectionLabel>
+          <SectionLabel>Rides</SectionLabel>
           <InsetGroup>
             {entries.map((entry, i) => (
               <Fragment key={entry.file.relPath}>
@@ -171,22 +233,39 @@ export default function RidesScreen() {
               </Fragment>
             ))}
           </InsetGroup>
+          <Text style={[styles.footnote, { color: c.secondary }]}>
+            Tap a ride to preview it on the map.
+          </Text>
         </View>
       )}
     </SheetSurface>
   );
 }
 
-const SEPARATOR_INSET = 58;
+/** Row padding (16) + the sm LineBadge (30) + the row gap (12) — i.e. the
+ *  separator starts where the row's TEXT does, as in every iOS list. Tracks the
+ *  row's padding: it was 58 while that padding was 14. */
+const SEPARATOR_INSET = 58 + 2;
 
 const styles = StyleSheet.create({
   section: { gap: 8 },
+  // A group FOOTER: it sits on the same edge as the SectionLabel above the
+  // group, which is now the sheet's content edge (see Inset.tsx). The old
+  // marginHorizontal 16 indented it past both the label and the card.
+  footnote: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 2,
+  },
   pressed: { opacity: 0.55 },
   row: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 12,
-    paddingHorizontal: 14,
+    // 16, not 14: every other row card in the app (InsetRow, FavoriteTramRow,
+    // FavoriteLineRow, FleetRow, RecentRoutes) pads 16, so a ride row was the
+    // one list whose content sat 2 pt left of the rest.
+    paddingHorizontal: 16,
     paddingVertical: 11,
   },
   rowText: { flex: 1, gap: 2 },
@@ -202,7 +281,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
-  orphanLabel: { color: '#FFFFFF', fontSize: 10, fontWeight: '700' },
+  orphanLabel: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
   moreBtn: {
     alignItems: 'center',
     borderRadius: 15,
@@ -216,6 +295,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     paddingVertical: 56,
   },
-  emptyTitle: { fontSize: 22, fontWeight: '700', marginTop: 6 },
   emptyHint: { fontSize: 15, lineHeight: 21, textAlign: 'center' },
 });

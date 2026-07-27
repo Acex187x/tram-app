@@ -14,12 +14,14 @@ import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { resolveLightPreset } from '@/components/map/mapStyle';
+import { DOCK_INSET, DOCK_WIDTH, isDocked } from '@/components/maps-kit/mapSheetLayout';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
-import { appleScheme, Colors, Spacing, Tram } from '@/constants/theme';
+import { appleScheme, Colors, Spacing, TextScale, Tram } from '@/constants/theme';
 import { useAllTramStates, useLoadedGeometries } from '@/hooks/tramData';
 import { formatCountdown, formatEtaMinutes } from '@/lib/arrivals';
 import { formatPragueClock } from '@/lib/format/pragueTime';
@@ -30,6 +32,7 @@ import {
   type GuidanceProgress,
 } from '@/lib/planner/guidance';
 import { usePlannerStore, type GuidanceSession } from '@/stores/planner';
+import { useSettingsStore } from '@/stores/settings';
 
 export function GuidanceBanner() {
   const session = usePlannerStore((s) => s.guidance);
@@ -46,10 +49,11 @@ function ActiveBanner({
   progress: GuidanceProgress;
 }) {
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const palette = Colors[scheme];
-  const c = appleScheme(scheme);
-  const accent = scheme === 'dark' ? Tram.gold : Tram.pidRed;
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  // On iPad / landscape the home sheet is a docked left column; clear it exactly
+  // like the status tile and contextual chips do (index.tsx's mapLeftInset).
+  const docked = isDocked({ windowWidth, windowHeight });
+  const leftInset = docked ? DOCK_INSET * 2 + DOCK_WIDTH : Spacing.three;
 
   // Live inputs — ~1 Hz runtime states + a 1 s wall clock for countdowns.
   const states = useAllTramStates();
@@ -59,6 +63,20 @@ function ActiveBanner({
     const id = setInterval(() => setNowMs(Date.now()), 1_000);
     return () => clearInterval(id);
   }, []);
+
+  // This card floats over the BASEMAP, so its appearance follows the map's
+  // resolved light preset, never the system scheme (MapChrome.tsx's rule; see
+  // docs/decisions/ux-screens.md §3.1a) — otherwise a dark-mode phone over a
+  // daytime map renders dark glass right next to the light status tile. The
+  // rest of the chrome reads this from MapChromeSchemeContext, but the banner
+  // is mounted inside the MapView via PlannerOverlay, outside that provider, so
+  // it resolves the preset itself off the 1 Hz clock it already keeps.
+  const lightPresetSetting = useSettingsStore((s) => s.lightPreset);
+  const lightPreset = resolveLightPreset(lightPresetSetting, nowMs);
+  const scheme = lightPreset === 'dusk' || lightPreset === 'night' ? 'dark' : 'light';
+  const palette = Colors[scheme];
+  const c = appleScheme(scheme);
+  const accent = scheme === 'dark' ? Tram.gold : Tram.pidRed;
 
   const walkUntilMs = session.startedAtMs + session.accessWalkS * 1_000;
   const tick = useMemo(
@@ -162,10 +180,10 @@ function ActiveBanner({
 
   return (
     <View
-      style={[styles.wrap, { top: insets.top + 54 }]}
+      style={[styles.wrap, { top: insets.top + 54, left: leftInset }]}
       pointerEvents="box-none"
     >
-      <GlassPanel variant="regular" interactive style={styles.card}>
+      <GlassPanel variant="regular" interactive appearance={scheme} style={styles.card}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Journey guidance: ${title}. Open planner.`}
@@ -189,7 +207,7 @@ function ActiveBanner({
               <Text
                 numberOfLines={1}
                 style={[styles.title, { color: highlight ? Tram.veryLate : palette.text }]}
-                allowFontScaling={false}
+                maxFontSizeMultiplier={TextScale.chrome}
               >
                 {title}
               </Text>
@@ -197,12 +215,15 @@ function ActiveBanner({
             <Text
               numberOfLines={1}
               style={[styles.subtitle, { color: palette.textSecondary }]}
-              allowFontScaling={false}
+              maxFontSizeMultiplier={TextScale.chrome}
             >
               {subtitle}
             </Text>
           </View>
-          <Text style={[styles.counter, { color: palette.textSecondary }]} allowFontScaling={false}>
+          <Text
+            style={[styles.counter, { color: palette.textSecondary }]}
+            maxFontSizeMultiplier={TextScale.chrome}
+          >
             {Math.min(stepIdx + 1, steps.length)}/{steps.length}
           </Text>
         </Pressable>
@@ -224,11 +245,12 @@ function ActiveBanner({
 }
 
 const styles = StyleSheet.create({
-  // Left-anchored under the status chip; right margin clears the control stack.
+  // Left-anchored under the status tile. Nothing occupies the top-right any
+  // more (the control stack and the chips are both bottom-anchored), so the
+  // card runs to the right margin and is bounded by its own maxWidth.
   wrap: {
     position: 'absolute',
-    left: Spacing.three,
-    right: 76,
+    right: Spacing.three,
     alignItems: 'flex-start',
   },
   card: {

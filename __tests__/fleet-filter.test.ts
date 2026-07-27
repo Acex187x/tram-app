@@ -234,14 +234,13 @@ describe('fleetRowData', () => {
       modelShort: '15T',
       headsign: 'Bílá Hora',
       status: '→ Muzeum · 25 s',
-      speedText: '≈42 km/h',
       delaySeconds: 90,
       airConditioned: true,
       ageText: '12 s',
     });
   });
 
-  it('names the dwell stop from the trip stops and hides speed without geometry', () => {
+  it('names the dwell stop from the trip stops', () => {
     const dwelling = tram({
       key: '8300',
       line: '22',
@@ -266,7 +265,6 @@ describe('fleetRowData', () => {
       observedAtMs: 0,
     });
     const row = fleetRowData(noGeo, undefined, 3_000);
-    expect(row.speedText).toBeNull();
     expect(row.status).toBe('Tracking');
     expect(row.ageText).toBe('3 s');
   });
