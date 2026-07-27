@@ -6,12 +6,14 @@ import { SymbolView } from 'expo-symbols';
 import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
 import { isNightLine, LineBadge } from '@/components/ui/LineBadge';
-import { Apple, appleScheme, Tram } from '@/constants/theme';
+import { appleScheme, Tram } from '@/constants/theme';
 import { useFavoritesStore } from '@/stores/favorites';
 import { useSelectionStore } from '@/stores/selection';
 
 /** Left inset that aligns separators with the row text (padding + leading + gap). */
 export const LINE_ROW_SEPARATOR_INSET = 16 + 44 + 12;
+
+const UNSTAR_ACTIONS = [{ name: 'unstar', label: 'Remove from favorites' }];
 
 export function FavoriteLineRow({
   line,
@@ -45,13 +47,14 @@ export function FavoriteLineRow({
       accessibilityRole="button"
       accessibilityLabel={`Line ${line}, ${
         activeCount > 0 ? `${activeCount} trams in service` : 'no trams right now'
-      }`}
-      style={({ pressed }) => [
-        styles.row,
-        pressed && {
-          backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
-        },
-      ]}
+      }, favorited`}
+      // VoiceOver never focuses an element nested inside an accessible one, so
+      // the inline star is unreachable — unstarring lives on the row instead.
+      accessibilityActions={UNSTAR_ACTIONS}
+      onAccessibilityAction={(e) => {
+        if (e.nativeEvent.actionName === 'unstar') unstar();
+      }}
+      style={({ pressed }) => [styles.row, pressed && { backgroundColor: palette.fillHighlight }]}
     >
       <View style={styles.leading}>
         <LineBadge line={line} size="md" />
@@ -65,7 +68,7 @@ export function FavoriteLineRow({
           <View
             style={[
               styles.dot,
-              { backgroundColor: activeCount > 0 ? Apple.green : palette.secondary },
+              { backgroundColor: activeCount > 0 ? palette.green : palette.secondary },
             ]}
           />
           <Text style={[styles.subtitle, { color: palette.secondary }]}>
@@ -77,8 +80,8 @@ export function FavoriteLineRow({
       </View>
 
       <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Remove line ${line} from favorites`}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
         hitSlop={10}
         onPress={unstar}
         style={({ pressed }) => [styles.star, pressed && styles.pressedIcon]}
@@ -91,6 +94,8 @@ export function FavoriteLineRow({
         size={13}
         weight="semibold"
         tintColor={palette.secondary}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
       />
     </Pressable>
   );

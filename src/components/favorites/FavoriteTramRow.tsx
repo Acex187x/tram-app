@@ -1,16 +1,17 @@
 // One starred tram row. Live status comes from useTramState (~1 Hz): when the
 // car is in service we show its line badge, headsign and delay and the row
 // navigates to /tram/[key]; otherwise it renders greyed as "Not in service".
-// The minus button unfavorites in place.
+// The gold star unfavorites in place — same affordance as FavoriteLineRow, and
+// a toggle rather than UITableView's edit-mode minus glyph.
 import * as Haptics from 'expo-haptics';
-import { useRouter, type Href } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
-import { AcSnowflake } from '@/components/tram/TramModelImage';
+import { AcSnowflake, acTint } from '@/components/tram/TramModelImage';
 import { DelayPill } from '@/components/ui/DelayPill';
 import { LineBadge } from '@/components/ui/LineBadge';
-import { appleScheme, Tram } from '@/constants/theme';
+import { appleScheme, TabularNums, TextScale, Tram } from '@/constants/theme';
 import { getRuntime, useTramState } from '@/hooks/tramData';
 import { getModelSpec, regNumberToModelId } from '@/lib/fleet/registry';
 import { useFavoritesStore } from '@/stores/favorites';
@@ -19,26 +20,30 @@ import { useSelectionStore } from '@/stores/selection';
 /** Left inset that aligns separators with the row text (padding + leading + gap). */
 export const TRAM_ROW_SEPARATOR_INSET = 16 + 44 + 12;
 
+const UNSTAR_ACTIONS = [{ name: 'unstar', label: 'Remove from favorites' }];
+
 export function FavoriteTramRow({ regKey }: { regKey: string }) {
   const router = useRouter();
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = appleScheme(scheme);
   const state = useTramState(regKey);
   const toggleTram = useFavoritesStore((s) => s.toggleTram);
-  const setSelectedTramKey = useSelectionStore((s) => s.setSelectedTramKey);
+  const openTram = useSelectionStore((s) => s.openTram);
 
   const spec = getModelSpec(regNumberToModelId(Number(regKey)));
   const inService = state != null;
 
+  // The tram card is an owned sheet on the MAP screen, so opening one from here
+  // means: present it, then get out of the way. `dismissAll()` pops this
+  // favorites sheet (and anything under it) back to the map in one call. The
+  // store write goes FIRST so the card is already mounted as the sheet animates
+  // away — the two motions read as a hand-off rather than a blank beat.
   const open = (): void => {
     if (!state) return;
     void Haptics.selectionAsync();
-    setSelectedTramKey(regKey);
     getRuntime().prioritizeTrip(state.snapshot.tripId);
-    // Keys are usually registration numbers but can fall back to trip ids with
-    // URL-hostile characters — encode like the map does. Cast: typed-routes
-    // d.ts regenerates on the next `expo start`.
-    router.push(('/tram/' + encodeURIComponent(regKey)) as Href);
+    openTram(regKey);
+    router.dismissAll();
   };
 
   const remove = (): void => {
@@ -49,16 +54,23 @@ export function FavoriteTramRow({ regKey }: { regKey: string }) {
   return (
     <Pressable
       onPress={open}
-      disabled={!inService}
       accessibilityRole="button"
+      // NOT `disabled` when out of service: that would also strip the custom
+      // action below, and unstarring is then the row's only remaining action.
+      // `open` no-ops without a live state.
+      accessibilityState={{ disabled: !inService }}
       accessibilityLabel={`Tram ${regKey}, ${spec.name}, ${
         state ? `line ${state.snapshot.line} to ${state.snapshot.headsign}` : 'not in service'
-      }`}
+      }, favorited`}
+      // VoiceOver never focuses an element nested inside an accessible one, so
+      // the inline star is unreachable — unstarring lives on the row instead.
+      accessibilityActions={UNSTAR_ACTIONS}
+      onAccessibilityAction={(e) => {
+        if (e.nativeEvent.actionName === 'unstar') remove();
+      }}
       style={({ pressed }) => [
         styles.row,
-        pressed && {
-          backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
-        },
+        pressed && inService && { backgroundColor: palette.fillHighlight },
       ]}
     >
       <View style={styles.leading}>
@@ -81,7 +93,10 @@ export function FavoriteTramRow({ regKey }: { regKey: string }) {
 
       <View style={[styles.body, !inService && styles.dimmed]}>
         <View style={styles.titleRow}>
-          <Text style={[styles.reg, { color: palette.text }]} allowFontScaling={false}>
+          <Text
+            style={[styles.reg, { color: palette.text }]}
+            maxFontSizeMultiplier={TextScale.compact}
+          >
             {regKey}
           </Text>
           <Text
@@ -90,7 +105,9 @@ export function FavoriteTramRow({ regKey }: { regKey: string }) {
           >
             {spec.name}
           </Text>
-          {state ? <AcSnowflake airConditioned={state.snapshot.airConditioned} size={11} /> : null}
+          {state ? (
+            <AcSnowflake airConditioned={state.snapshot.airConditioned} size={11} tint={acTint(scheme)} />
+          ) : null}
         </View>
         <Text
           style={[styles.subtitle, { color: palette.secondary }]}
@@ -103,13 +120,13 @@ export function FavoriteTramRow({ regKey }: { regKey: string }) {
       {state ? <DelayPill delaySeconds={state.snapshot.delaySeconds} /> : null}
 
       <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Remove tram ${regKey} from favorites`}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
         hitSlop={10}
         onPress={remove}
         style={({ pressed }) => [styles.remove, pressed && styles.pressedIcon]}
       >
-        <SymbolView name="minus.circle.fill" size={22} tintColor={Tram.veryLate} />
+        <SymbolView name="star.fill" size={20} tintColor={Tram.gold} />
       </Pressable>
 
       {inService ? (
@@ -118,6 +135,8 @@ export function FavoriteTramRow({ regKey }: { regKey: string }) {
           size={13}
           weight="semibold"
           tintColor={palette.secondary}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
         />
       ) : null}
     </Pressable>
@@ -158,7 +177,7 @@ const styles = StyleSheet.create({
   },
   reg: {
     fontSize: 17,
-    fontVariant: ['tabular-nums'],
+    ...TabularNums,
     fontWeight: '600',
   },
   model: {
