@@ -1,7 +1,7 @@
 /// <reference types="jest" />
 
 import { QUEUE_GAP_M, TramEngine } from '@/lib/engine/engine';
-import { A_ACC, A_BRK, buildSpeedProfile, V_MAX_MS } from '@/lib/engine/speedProfile';
+import { A_ACC, A_BRK, buildSpeedProfile, V_CRUISE_REF_MS, V_MAX_MS } from '@/lib/engine/speedProfile';
 import {
   AHEAD_SLOW_MIN_V_MS,
   applySnapshot,
@@ -18,11 +18,16 @@ import {
   DWELL_SKIP_ZONE_M,
   evalScheduleAnchor,
   HARD_BRAKE_ENTER_M,
+  maxAdvanceM,
   observedDistAt,
   OBS_BLEND_WEIGHT,
   STOP_REACH_M,
   targetDistAt,
   tick,
+  TELEPORT_GAP_MARGIN,
+  TELEPORT_GAP_MIN_S,
+  TELEPORT_THRESHOLD_MAX_M,
+  teleportThresholdM,
   TRAIL_M,
   type TramSim,
 } from '@/lib/engine/tramSim';
@@ -623,6 +628,53 @@ describe('teleport on large observation error', () => {
     expect(sim.sM).toBe(0);
     expect(sim.lastTeleportMs).toBe(0);
   });
+
+
+  // ── Gap-aware teleports (feed-degradation defense, 2026-07-27) ─────────────
+  // Measured live: the feed intermittently delivers fixes 65-134 s apart, in
+  // which time a tram honestly covers 600-950 m. The flat 500 m check turned
+  // every such fix into a hard snap — fleet-wide forward AND backward jerks.
+
+  it('scales the teleport threshold with the observed fix gap (slow feed is not desync)', () => {
+    const geo = makeGeo(200_000);
+    const sim = makeSim(geo); // fix @ 0 m, T0
+    // 90 s later the tram is 810 m ahead: over the flat 500, but honest travel
+    // for the gap — MUST converge smoothly, not teleport.
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 810, observedAtMs: T0 + 90_000 }), T0 + 90_000);
+    expect(sim.lastTeleportMs).toBe(0);
+  });
+
+  it('still hard-teleports on true desync regardless of the gap', () => {
+    const geo = makeGeo(200_000);
+    const sim = makeSim(geo);
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 2000, observedAtMs: T0 + 90_000 }), T0 + 90_000);
+    expect(sim.lastTeleportMs).toBe(T0 + 90_000);
+    expect(sim.sM).toBeCloseTo(2000, 0);
+  });
+
+  it('teleportThresholdM: gap-scaled between the calibrated floor and the desync cap', () => {
+    const floor = TELEPORT_GAP_MIN_S * V_CRUISE_REF_MS * TELEPORT_GAP_MARGIN;
+    expect(teleportThresholdM(0)).toBeCloseTo(floor, 5); // cold start clamps up
+    expect(teleportThresholdM(100)).toBeCloseTo(
+      Math.min(TELEPORT_THRESHOLD_MAX_M, 100 * V_CRUISE_REF_MS * TELEPORT_GAP_MARGIN),
+      5,
+    );
+    expect(teleportThresholdM(600)).toBe(TELEPORT_THRESHOLD_MAX_M);
+    // Monotone in the gap up to the cap.
+    expect(teleportThresholdM(80)).toBeGreaterThan(teleportThresholdM(50));
+  });
+
+  it('caps a stale fix\'s forward projection at cruise-reference pace x its age', () => {
+    const geo = makeGeo(200_000);
+    const sim = makeSim(geo); // fix @ 0 m, T0 - the schedule runs ahead of it
+    for (const ageS of [30, 60, 120, 300]) {
+      const sObs = observedDistAt(sim, T0 + ageS * 1000);
+      // However fast the timetable races, the anchor may not claim more unseen
+      // progress than the real tram could physically have driven.
+      expect(sObs).toBeLessThanOrEqual(maxAdvanceM(ageS) + 1e-6);
+    }
+  });
+
 });
 
 describe('terminal un-latch (fresh observation far behind the latched position)', () => {

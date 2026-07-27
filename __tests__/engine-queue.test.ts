@@ -323,7 +323,10 @@ describe('cross-shape car-following (brake-only — never rewrites the follower 
     engine.ingest(
       [
         makeSnapshot({ key: 'B', shapeDistM: 300, observedAtMs: T0 }),
-        makeSnapshot({ key: 'A', shapeDistM: 900, observedAtMs: T0, tripId: 'trip-fast', line: '22' }),
+        // 1100: the later backward fix (to ~B+295) must exceed the GAP-AWARE
+        // teleport floor (~658 m at the clamped minimum gap), not the old flat
+        // 500 — the point of the test is what happens ON a hard re-anchor.
+        makeSnapshot({ key: 'A', shapeDistM: 1100, observedAtMs: T0, tripId: 'trip-fast', line: '22' }),
       ],
       resolve,
       T0,
@@ -545,14 +548,18 @@ describe('teleports / re-anchors compress the queue instead of overlapping', () 
     const engine = makeEngine();
     const snapB = makeSnapshot({ key: 'B', shapeDistM: 300, observedAtMs: T0 });
     engine.ingest(
-      [makeSnapshot({ key: 'A', shapeDistM: 850, observedAtMs: T0 }), snapB],
+      // 1100 (was 850): the drop onto B must clear the GAP-AWARE teleport
+      // floor (~658 m at the clamped minimum gap), or it converges smoothly
+      // instead of hard-teleporting — and this test is about the teleport path.
+      [makeSnapshot({ key: 'A', shapeDistM: 1100, observedAtMs: T0 }), snapB],
       () => geo,
       T0,
     );
     engine.tick(T0);
     let now = run(engine, T0, 2);
 
-    // Fresh AVL fix drops A right on top of B (> 500 m error → hard teleport).
+    // Fresh AVL fix drops A right on top of B (error > the gap-aware teleport
+    // threshold → hard teleport).
     const bAt = state(engine, 'B', now).simDistM;
     engine.ingest(
       [makeSnapshot({ key: 'A', shapeDistM: bAt - 5, observedAtMs: now })],

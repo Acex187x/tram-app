@@ -21,6 +21,51 @@ export type SimPhase = 'cruise' | 'dwell' | 'terminal';
 
 /** Hard-teleport threshold: |projected observation − s| above this snaps position. */
 export const TELEPORT_THRESHOLD_M = 500;
+/**
+ * GAP-AWARE teleport threshold (feed-degradation defense, 2026-07-27).
+ *
+ * 500 m was tuned for the calibrated fix cadence (p50 ≈ 45 s), where normal
+ * inter-fix travel stays well under it. Measured live today the feed delivered
+ * fixes 65–134 s apart, in which time a tram legitimately covers 600–950 m —
+ * so EVERY fix tripped the 500 m check and the whole fleet hard-snapped
+ * forward (dwell-pinned sims falling behind) and back (schedule-projected
+ * anchors overshooting reality), several times a minute: the user-visible
+ * "trams randomly jerk backward" report.
+ *
+ * A teleport should mean "true desync", not "the feed got slow". The threshold
+ * therefore scales with the OBSERVED gap between consecutive fixes — the error
+ * a correct sim can honestly accumulate while blind — at cruise-reference pace
+ * with margin, floored at the calibrated 500 and capped at
+ * TELEPORT_THRESHOLD_MAX_M (beyond which it is desync no matter the gap).
+ * Everything under the threshold converges through the existing catch-up /
+ * crawl regimes, which are smooth by construction.
+ */
+export const TELEPORT_THRESHOLD_MAX_M = 1500;
+/** Margin over cruise-reference pace when scaling the threshold by fix gap. */
+export const TELEPORT_GAP_MARGIN = 1.25;
+/** Fix-gap clamp for the threshold scale (s) — cold starts and dead feeds. */
+export const TELEPORT_GAP_MIN_S = 45;
+export const TELEPORT_GAP_MAX_S = 240;
+
+/** The gap-aware threshold for one ingest (see TELEPORT_THRESHOLD_MAX_M). */
+export function teleportThresholdM(fixGapS: number): number {
+  const gap = Math.min(TELEPORT_GAP_MAX_S, Math.max(TELEPORT_GAP_MIN_S, fixGapS));
+  return Math.min(
+    TELEPORT_THRESHOLD_MAX_M,
+    Math.max(TELEPORT_THRESHOLD_M, gap * V_CRUISE_REF_MS * TELEPORT_GAP_MARGIN),
+  );
+}
+/**
+ * Physical bound on how far a stale fix may be PROJECTED FORWARD (observedDistAt
+ * / targetDistAt `advance`): the unseen tram cannot have travelled further than
+ * cruise-reference pace × the fix's age. The schedule projection is a GUESS
+ * that must never outrun physics — an uncapped anchor racing a fast timetable
+ * while reality stalls is what dragged sims ~1 km ahead during today's feed
+ * degradation and then yanked them back on the next fix.
+ */
+export function maxAdvanceM(fixAgeS: number): number {
+  return Math.max(0, fixAgeS) * V_CRUISE_REF_MS;
+}
 /** A stop is "reached" when s is within this many meters of its distM. */
 export const STOP_REACH_M = 2;
 /** Fallback dwell when the feed gives none, seconds (jittered ±0..8 s). */
@@ -499,7 +544,13 @@ function fixPinActive(sim: TramSim, nowMs: number): boolean {
  */
 export function observedDistAt(sim: TramSim, nowMs: number): number {
   if (fixPinActive(sim, nowMs)) return clampS(sim.geometry, sim.obsDistM);
-  const advance = Math.max(0, evalScheduleAnchor(sim.lastAnchor, nowMs) - sim.obsSchedDistM);
+  // Physically capped: a stale fix may claim at most cruise-reference pace ×
+  // its age of unseen progress (see maxAdvanceM) — the schedule projection is
+  // a guess and must never outrun what the real tram could have driven.
+  const advance = Math.min(
+    maxAdvanceM((nowMs - sim.obsAtMs) / 1000),
+    Math.max(0, evalScheduleAnchor(sim.lastAnchor, nowMs) - sim.obsSchedDistM),
+  );
   return clampS(sim.geometry, sim.obsDistM + advance);
 }
 
@@ -517,9 +568,16 @@ export function observedDistAt(sim: TramSim, nowMs: number): number {
 export function targetDistAt(sim: TramSim, nowMs: number): number {
   const sSched = evalScheduleAnchor(sim.lastAnchor, nowMs);
   const pinned = fixPinActive(sim, nowMs);
+  // Same physical advance cap as observedDistAt — the two MUST agree, or the
+  // teleport check (against observedDistAt) and the pace target would chase
+  // different anchors while a fix is stale.
   const sObs = pinned
     ? clampS(sim.geometry, sim.obsDistM)
-    : clampS(sim.geometry, sim.obsDistM + Math.max(0, sSched - sim.obsSchedDistM));
+    : clampS(
+        sim.geometry,
+        sim.obsDistM +
+          Math.min(maxAdvanceM((nowMs - sim.obsAtMs) / 1000), Math.max(0, sSched - sim.obsSchedDistM)),
+      );
   const t = Math.max(0, OBS_BLEND_WEIGHT * sObs + (1 - OBS_BLEND_WEIGHT) * sSched - TRAIL_M);
   return pinned ? Math.min(t, sim.fixStopDistM as number) : t;
 }
@@ -1056,7 +1114,11 @@ export function applySnapshot(sim: TramSim, snapshot: TramSnapshot, nowMs: numbe
   sim.obsAtMs = snapshot.observedAtMs;
   sim.obsSchedDistM = evalScheduleAnchor(sim.lastAnchor, snapshot.observedAtMs);
   const sObs = observedDistAt(sim, nowMs);
-  if (Math.abs(sObs - sim.sM) > TELEPORT_THRESHOLD_M) {
+  // Gap-aware: with sparse fixes (measured 65-134 s gaps, 2026-07-27) the
+  // honest inter-fix travel exceeds the flat 500 m, so the threshold scales
+  // with the observed gap — a teleport must mean desync, not a slow feed.
+  const fixGapS = prevObsAtMs > 0 ? (snapshot.observedAtMs - prevObsAtMs) / 1000 : 0;
+  if (Math.abs(sObs - sim.sM) > teleportThresholdM(fixGapS)) {
     // Hard teleport: no pace sample (the jump is not motion), bias inherited.
     snapTo(sim, sObs, nowMs);
     // The teleporting fix may itself pin a platform (at_stop across a trip

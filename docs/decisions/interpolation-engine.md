@@ -457,6 +457,38 @@ re-anchoring (`engine.ts:210-227`) reuses this budget: keep smooth position only
 world point projects within `REANCHOR_MAX_OFFSET_M = 100 m` of the new shape **and** within 500 m
 of the new target; else `createSim` fresh. Tests: "teleport on large observation error" (`:416`).
 
+### 10.1 Gap-aware threshold + physical advance cap (2026-07-27 feed degradation)
+
+**Problem (measured live).** The 500 m constant assumes the calibrated fix cadence
+(p50 ≈ 45 s). On 2026-07-27 Golemio delivered fixes **65–134 s apart fleet-wide**
+(spot gaps to 250 s), in which time a tram honestly covers 600–950 m — so nearly
+every fix tripped the flat threshold and the whole fleet hard-snapped several
+times a minute, forward (dwell-pinned sims falling behind) **and backward**
+(schedule-projected anchors overshooting stalled reality, then collapsing on the
+next fix; the same car measured +1035 m then −537 m minutes apart). User-visible
+as "trams randomly jerk backward while moving".
+
+**Decision — two coupled changes (`tramSim.ts`):**
+1. `teleportThresholdM(fixGapS)` — the ingest threshold scales with the observed
+   gap between consecutive fixes at cruise-reference pace with margin
+   (`gap × V_CRUISE_REF_MS × 1.25`), clamped to `[45 s, 240 s]` of gap and capped
+   at `TELEPORT_THRESHOLD_MAX_M = 1500` (beyond that it is desync no matter the
+   gap). A teleport now means *desync*, not *slow feed*; everything under the
+   threshold converges through the existing catch-up/crawl regimes.
+2. `maxAdvanceM(fixAgeS) = fixAgeS × V_CRUISE_REF_MS` — the schedule-pace
+   forward projection of a stale fix (`observedDistAt` / `targetDistAt`) is
+   bounded by what the real tram could physically have driven since the fix.
+   An uncapped anchor racing a fast timetable while reality stalls is what
+   manufactured the backward half of the oscillation.
+
+**Effect (measured, same feed conditions):** steady-state teleports fell from
+~12–15/min fleet-wide to ~1–2/min, and **backward teleports to zero**; the
+remainder are honest catch-ups after genuinely large gaps. Tests: the gap-aware
+block in "teleport on large observation error" (tram-sim) pins the formula, the
+no-teleport-at-90 s-gap case, the true-desync case, and the advance cap
+invariant; two engine-queue fixtures were raised over the new floor since their
+subject is the post-teleport queue behavior itself.
+
 ---
 
 ## 11. Dual-sim: smooth mode vs live projection (`projSim`)
@@ -856,7 +888,7 @@ last-viewport fallback, per-poll re-assertion of the split).
 | `PACE_BIAS_MIN/MAX_RATIO` | 0.4 / 1.6 | tramSim.ts | per-sample ratio clamp (and seed clamp) |
 | `PACE_BIAS_MIN_DT_S` / `MIN_DS_M` | 8 s / 15 m | tramSim.ts | degenerate-sample floor |
 | `TERMINAL_UNLATCH_BEHIND_M` | 150 m | tramSim.ts | terminal un-latch tolerance (round 1 R2) |
-| `TELEPORT_THRESHOLD_M` | 500 m | tramSim.ts | hard-teleport trigger |
+| `TELEPORT_THRESHOLD_M` | 500 m | tramSim.ts | hard-teleport floor — scaled by fix gap, see §10.1 |
 | `DEFAULT_DWELL_S` | 18 s ±0–8 | tramSim.ts | fallback dwell |
 | `QUEUE_GAP_M` | 3 m | engine.ts | follower clearance |
 | `COUPLED_TRAILER_OFFSET_M` | 14.5 m | engine.ts | coupled-set extra length |
