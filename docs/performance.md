@@ -61,6 +61,13 @@ Key insights behind it:
 
 1. **No React state per frame.** Anything at > 1 Hz lives in refs/imperative pushes.
    React subscribers use the 1 Hz hooks; `subscribeFrame` is for the map push loop only.
+   **One sanctioned exception:** `DebugLive` in `src/components/debug/DebugOverlay.tsx`
+   drives its own rAF loop and `setState`s the engine snapshot every frame — the readout
+   exists to judge the physics at 60 Hz, and any throttle would lie about it. It is gated
+   to Settings ▸ Developer ▸ **Debug mode** *and* an expanded panel *and* a non-guide screen
+   *and* a followed tram; unmounting cancels the rAF and releases the GPS locator, and the
+   collapsed one-liner runs at 1 Hz. No production path mounts it. Nothing else may use a
+   per-frame `setState` — and shipping UI never may.
 2. **New map layers use the imperative pattern** (stable props, `setNativeProps`, `slot:'top'`),
    and are fed at the *slowest cadence that looks right* — justify anything above 1 Hz.
 3. **Every timer/subscription registers with the runtime lifecycle** (created in `resume()`,

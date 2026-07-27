@@ -25,15 +25,17 @@ interface EngineModules {
   ts: TramSimModule;
 }
 
-const ENV_KEY = 'EXPO_PUBLIC_ZONAL_DWELL_AB';
 const T0 = 1_000_000_000_000;
 const DT = 0.1;
 
 /** Load fresh speedProfile+tramSim instances with the flag env set/unset. */
+// EXPO_PUBLIC_ZONAL_DWELL_AB is spelled out on every access (no `env[KEY]`
+// indirection): expo/no-dynamic-env-var wants it statically visible, because
+// that is what Metro's production inliner can see.
 function loadEngine(flagValue: string | undefined): EngineModules {
-  const prev = process.env[ENV_KEY];
-  if (flagValue === undefined) delete process.env[ENV_KEY];
-  else process.env[ENV_KEY] = flagValue;
+  const prev = process.env.EXPO_PUBLIC_ZONAL_DWELL_AB;
+  if (flagValue === undefined) delete process.env.EXPO_PUBLIC_ZONAL_DWELL_AB;
+  else process.env.EXPO_PUBLIC_ZONAL_DWELL_AB = flagValue;
   let mods: EngineModules | undefined;
   jest.isolateModules(() => {
     mods = {
@@ -41,8 +43,8 @@ function loadEngine(flagValue: string | undefined): EngineModules {
       ts: jest.requireActual<TramSimModule>('@/lib/engine/tramSim'),
     };
   });
-  if (prev === undefined) delete process.env[ENV_KEY];
-  else process.env[ENV_KEY] = prev;
+  if (prev === undefined) delete process.env.EXPO_PUBLIC_ZONAL_DWELL_AB;
+  else process.env.EXPO_PUBLIC_ZONAL_DWELL_AB = prev;
   return mods!;
 }
 
