@@ -29,6 +29,11 @@ export interface TramFaceProps {
  */
 export function TramFace({ modelId, size = 64, pack }: TramFaceProps): ReactElement {
   const selectedPack = useSettingsStore((s) => s.iconPack);
+  // getFace is a LOOKUP in a static registry (ICON_PACKS), not a component
+  // factory: every pack/model pair resolves to the same module-level component
+  // for the life of the app, so there is no per-render identity to reset. It
+  // changes only when the user switches pack — a remount we want.
   const Face = getFace(pack ?? selectedPack, modelId);
+  // eslint-disable-next-line react-hooks/static-components
   return <Face size={size} />;
 }

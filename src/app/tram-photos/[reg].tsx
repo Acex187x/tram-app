@@ -1,8 +1,9 @@
 // Historical photos of one physical tram car, by DPP registration number —
 // full-screen push registered in _layout as tram-photos/[reg]; navigate with
 // router.push('/tram-photos/' + registrationNumber). Re-skinned to Apple Maps:
-// circular translucent header controls (CloseCircle), a big rounded photo-band
-// container framing the gallery, and Apple typography for the empty/error states.
+// the system navigation bar (title + back + Safari toolbar item), a big rounded
+// photo-band container framing the gallery, and Apple typography for the
+// empty/error states.
 //
 // Source: TransPhoto (transphoto.org — "Urban Electric Transit", ex-СТТС), the
 // community archive with a page per physical vehicle. We resolve reg → vehicle
@@ -10,7 +11,7 @@
 // '@/lib/photos/transphoto'), then render the ORIGINAL page in a WebView so
 // photographer credits, watermarks and site branding stay intact — photos are
 // never scraped or re-hosted. Attribution footer links to transphoto.org.
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useEffect, useState } from 'react';
@@ -25,9 +26,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 
-import { CloseCircle } from '@/components/ui/CloseCircle';
 import { GlassPanel } from '@/components/ui/GlassPanel';
-import { appleScheme, Apple, Radii } from '@/constants/theme';
+import { appleScheme, Radii, TextScale } from '@/constants/theme';
 import {
   PRAGUE_CITY_URL,
   resolveVehiclePageUrl,
@@ -65,6 +65,7 @@ function CenterState({
 
 /** Prominent blue-tinted pill action for the empty/error states. */
 function GlassAction({ label, onPress }: { label: string; onPress: () => void }) {
+  const c = appleScheme(useColorScheme() === 'dark' ? 'dark' : 'light');
   return (
     <GlassPanel variant="clear" interactive style={styles.actionGlass}>
       <Pressable
@@ -73,7 +74,12 @@ function GlassAction({ label, onPress }: { label: string; onPress: () => void })
         accessibilityRole="button"
         accessibilityLabel={label}
       >
-        <Text style={[styles.actionText, { color: Apple.blue }]}>{label}</Text>
+        <Text
+          style={[styles.actionText, { color: c.blue }]}
+          maxFontSizeMultiplier={TextScale.compact}
+        >
+          {label}
+        </Text>
       </Pressable>
     </GlassPanel>
   );
@@ -84,25 +90,27 @@ export default function TramPhotosScreen() {
   const regRaw = typeof params.reg === 'string' ? params.reg : '';
   const reg = /^\d+$/.test(regRaw) ? Number(regRaw) : null;
 
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const c = appleScheme(scheme);
   const background = scheme === 'dark' ? '#0B0B0D' : '#F2F2F6';
 
-  const [phase, setPhase] = useState<Phase>({ kind: 'resolving' });
+  // A non-numeric `reg` route param is decided at mount, so it is the INITIAL
+  // phase — pushing it from the effect below would render 'resolving' for a
+  // frame and then cascade a second render.
+  const [phase, setPhase] = useState<Phase>(() =>
+    reg == null ? { kind: 'not-found' } : { kind: 'resolving' },
+  );
   const [attempt, setAttempt] = useState(0);
   const [pageLoading, setPageLoading] = useState(true);
 
   // Resolve reg number → TransPhoto vehicle page (re-runs on Retry).
   useEffect(() => {
-    if (reg == null) {
-      setPhase({ kind: 'not-found' });
-      return;
-    }
+    if (reg == null) return; // handled by the initial phase above
     let cancelled = false;
-    setPhase({ kind: 'resolving' });
-    setPageLoading(true);
+    // The spinner is set by whoever triggers a run (mount = initial state,
+    // Retry = the `retry` handler), so this effect only talks to the network —
+    // no synchronous setState cascading a second render on every run.
     resolveVehiclePageUrl(reg).then((result) => {
       if (cancelled) return;
       if (result.status === 'found') setPhase({ kind: 'found', url: result.url });
@@ -114,30 +122,35 @@ export default function TramPhotosScreen() {
     };
   }, [reg, attempt]);
 
-  const onBack = useCallback(() => {
-    if (router.canGoBack()) router.back();
-    else router.replace('/');
-  }, [router]);
-
   const openInBrowser = useCallback(() => {
     const url = phase.kind === 'found' ? phase.url : PRAGUE_CITY_URL;
     void WebBrowser.openBrowserAsync(url);
   }, [phase]);
 
-  const retry = useCallback(() => setAttempt((a) => a + 1), []);
+  const retry = useCallback(() => {
+    setPhase({ kind: 'resolving' });
+    setPageLoading(true);
+    setAttempt((a) => a + 1);
+  }, []);
 
   return (
     <View style={[styles.root, { backgroundColor: background }]}>
-      {/* ── Header: back · title · open-in-browser (Apple circular controls) ─ */}
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <CloseCircle onPress={onBack} label="Back" symbol="chevron.left" size={38} />
-        <View style={styles.headerTitleWrap}>
-          <Text style={[styles.headerTitle, { color: c.text }]} numberOfLines={1}>
-            {reg != null ? `Photos · #${reg}` : 'Photos'}
-          </Text>
-        </View>
-        <CloseCircle onPress={openInBrowser} label="Open in browser" symbol="safari" size={38} />
-      </View>
+      {/* The system nav bar owns the back button (with its stack menu and
+          swipe-back label) and the title; the Safari hand-off is a real header
+          item. Regular (not large) title: this route is pushed from the tram
+          card's floating ⋯ menu and presents as a plain stack screen, where a
+          large-title band reads as fallen-down. */}
+      <Stack.Screen
+        options={{ headerShown: true, headerLargeTitleEnabled: false, headerBackTitle: 'Tram' }}
+      />
+      <Stack.Title>{reg != null ? `Photos · #${reg}` : 'Photos'}</Stack.Title>
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Button
+          icon="safari"
+          accessibilityLabel="Open in browser"
+          onPress={openInBrowser}
+        />
+      </Stack.Toolbar>
 
       {/* ── Body ───────────────────────────────────────────────────────── */}
       <View style={styles.body}>
@@ -190,6 +203,18 @@ export default function TramPhotosScreen() {
                 // (ads, trackers) must not nuke the gallery.
                 if (e.nativeEvent.url === phase.url) setPhase({ kind: 'error' });
               }}
+              onShouldStartLoadWithRequest={(req) => {
+                // Keep this bar-less WebView on transphoto.org: a tapped banner
+                // or outbound link would otherwise take over the screen with no
+                // address, no reload and no in-app back. Anything off-site is
+                // handed to Safari View Controller, which shows the real domain.
+                // Only user clicks are filtered — redirects and the initial load
+                // must pass through untouched.
+                if (req.navigationType !== 'click') return true;
+                const stay = req.url.startsWith(TRANSPHOTO_BASE);
+                if (!stay) void WebBrowser.openBrowserAsync(req.url);
+                return stay;
+              }}
               allowsBackForwardNavigationGestures
               decelerationRate="normal"
             />
@@ -214,7 +239,10 @@ export default function TramPhotosScreen() {
         accessibilityLabel="Photos from TransPhoto, opens transphoto.org"
       >
         <SymbolView name="camera.fill" size={11} tintColor={c.secondary} />
-        <Text style={[styles.attributionText, { color: c.secondary }]}>
+        <Text
+          style={[styles.attributionText, { color: c.secondary }]}
+          maxFontSizeMultiplier={TextScale.compact}
+        >
           Photos from TransPhoto · transphoto.org — © their photographers
         </Text>
       </Pressable>
@@ -232,6 +260,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 5,
     justifyContent: 'center',
+    // 44 pt floor for the tap target: with no home indicator the safe-area
+    // padding is 10 and the row would otherwise measure ~31 pt. No upward
+    // hitSlop — the photo band sits directly above it.
+    minHeight: 44,
     paddingHorizontal: 16,
     paddingTop: 8,
   },
@@ -246,21 +278,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 32,
   },
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-    paddingBottom: 10,
-    paddingHorizontal: 16,
-  },
-  headerTitle: { fontSize: 17, fontWeight: '700', letterSpacing: -0.2 },
-  headerTitleWrap: { alignItems: 'center', flex: 1 },
   photoBand: {
     borderCurve: 'continuous',
     borderRadius: Radii.card,
     flex: 1,
     marginBottom: 8,
     marginHorizontal: 12,
+    // Air under the native nav bar, which the removed custom header used to give.
+    marginTop: 8,
     overflow: 'hidden',
   },
   root: { flex: 1 },

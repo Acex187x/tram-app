@@ -1,7 +1,7 @@
 // Delay indicator: green ≤60s, amber ≤180s, red beyond; shows early state too.
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
-import { Tram } from '@/constants/theme';
+import { TextScale, Tram, Type } from '@/constants/theme';
 
 export function delayColor(delaySeconds: number): string {
   if (delaySeconds <= 60) return Tram.onTime;
@@ -9,10 +9,28 @@ export function delayColor(delaySeconds: number): string {
   return Tram.veryLate;
 }
 
+/**
+ * Pill FILL, not the same as `delayColor`. The pill carries white text, so it
+ * needs the darker variants to clear 4.5:1 — `delayColor` stays as it is for
+ * its dot/glyph/coloured-text consumers, which were tuned for glance legibility
+ * against the sheet and the map.
+ */
+function delayFill(delaySeconds: number): string {
+  if (delaySeconds <= 60) return Tram.onTimeFill;
+  if (delaySeconds <= 180) return Tram.lateFill;
+  return Tram.veryLateFill;
+}
+
 export function delayLabel(delaySeconds: number): string {
   if (delaySeconds < -30) return `${Math.round(-delaySeconds / 60)} min early`;
   if (delaySeconds <= 60) return 'on time';
   return `+${Math.round(delaySeconds / 60)} min`;
+}
+
+export function delayA11yLabel(delaySeconds: number): string {
+  if (delaySeconds < -30) return `${Math.round(-delaySeconds / 60)} minutes early`;
+  if (delaySeconds <= 60) return 'on time';
+  return `${Math.round(delaySeconds / 60)} minutes late`;
 }
 
 export interface DelayPillProps {
@@ -29,16 +47,19 @@ export interface DelayPillProps {
 export function DelayPill({ delaySeconds, size = 'sm', style }: DelayPillProps) {
   return (
     <View
+      accessible
+      accessibilityRole="text"
+      accessibilityLabel={delayA11yLabel(delaySeconds)}
       style={[
         styles.pill,
         size === 'md' && styles.pillMd,
-        { backgroundColor: delayColor(delaySeconds) },
+        { backgroundColor: delayFill(delaySeconds) },
         style,
       ]}
     >
       <Text
         style={[styles.text, size === 'md' && styles.textMd]}
-        allowFontScaling={false}
+        maxFontSizeMultiplier={TextScale.chrome}
       >
         {delayLabel(delaySeconds)}
       </Text>
@@ -55,17 +76,17 @@ const styles = StyleSheet.create({
   },
   pillMd: {
     alignSelf: 'center',
-    height: 30,
+    minHeight: 30,
     paddingVertical: 0,
     paddingHorizontal: 11,
     justifyContent: 'center',
   },
   text: {
+    ...Type.caption1,
     color: '#FFFFFF',
-    fontSize: 12,
     fontWeight: '600',
   },
   textMd: {
-    fontSize: 13,
+    fontSize: Type.footnote.fontSize,
   },
 });

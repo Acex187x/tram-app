@@ -592,6 +592,10 @@ export function useAllTramStates(): TramPublicState[] {
 export function useTramState(key: string | null | undefined): TramPublicState | undefined {
   const rt = getRuntime();
   useSyncExternalStore(rt.subscribeUi, rt.getUiVersion);
+  // The wall clock IS the datum here — the engine extrapolates the state to
+  // "now", sampled once per 1 Hz notification (same sanctioned pattern as
+  // usePollModel in components/map/PollIndicator).
+  // eslint-disable-next-line react-hooks/purity
   return key ? rt.engine.getState(key, Date.now()) : undefined;
 }
 

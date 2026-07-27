@@ -1,7 +1,7 @@
 // PID line number badge — red square with rounded corners (dark blue for night lines 91–99).
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
-import { Fonts, Tram } from '@/constants/theme';
+import { Fonts, TextScale, Tram } from '@/constants/theme';
 
 const SIZES = { sm: 22, md: 30, lg: 42 } as const;
 
@@ -31,7 +31,7 @@ export function LineBadge({ line, size = 'md', style }: LineBadgeProps) {
         style,
       ]}
     >
-      <Text style={[styles.text, { fontSize: s * 0.55 }]} allowFontScaling={false}>
+      <Text style={[styles.text, { fontSize: s * 0.55 }]} maxFontSizeMultiplier={TextScale.badge}>
         {line}
       </Text>
     </View>

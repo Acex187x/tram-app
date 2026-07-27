@@ -9,6 +9,7 @@ import { Image, type ImageStyle } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
+import { AppleAccent } from '@/constants/theme';
 import * as fleetSpecs from '@/lib/fleet/modelSpecs';
 import type { TramModelId } from '@/lib/types';
 
@@ -50,26 +51,50 @@ export function TramModelImage({ modelId, height, style }: TramModelImageProps) 
   );
 }
 
-/** Snowflake color — a cool blue that reads on both schemes. */
+/** Snowflake color on the DARK schemes (5.9:1 on the dark sheet fill). */
 export const AC_TINT = '#3E9FD8';
+
+/**
+ * Snowflake tint per appearance. AC_TINT measures 2.9:1 on the light sheet —
+ * under the 3:1 floor for a glyph that carries meaning on its own — so light
+ * mode uses systemBlue (4.0:1) instead. Passed in by callers rather than read
+ * from a `useColorScheme()` here: this glyph renders inside memoized list rows
+ * that re-render ~1 Hz, so it must not add a subscription of its own.
+ */
+export function acTint(scheme: 'light' | 'dark'): string {
+  return scheme === 'dark' ? AC_TINT : AppleAccent.blue.light;
+}
 
 /** Small snowflake shown next to a tram wherever it appears, when it has AC. */
 export function AcSnowflake({
   airConditioned,
   size = 12,
+  tint = AC_TINT,
+  decorative = false,
   style,
 }: {
   airConditioned: boolean | null | undefined;
   size?: number;
+  /** Appearance-aware tint — pass `acTint(scheme)`. */
+  tint?: string;
+  /** Set when the surrounding row already speaks "air conditioned" in its own
+   *  label, so the glyph is not announced twice. */
+  decorative?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
   if (airConditioned !== true) return null;
+  // A bare SymbolView is not an accessibility element until `accessible` is set,
+  // so without it the label below is inert and the AC fact is never announced.
   return (
     <SymbolView
       name="snowflake"
       size={size}
-      tintColor={AC_TINT}
+      tintColor={tint}
       style={[styles.snowflake, style]}
+      accessible={!decorative}
+      accessibilityElementsHidden={decorative}
+      importantForAccessibility={decorative ? 'no-hide-descendants' : 'yes'}
+      accessibilityRole="image"
       accessibilityLabel="Air conditioned"
     />
   );

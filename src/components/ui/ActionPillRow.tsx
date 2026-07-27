@@ -5,7 +5,7 @@
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
-import { Apple, appleScheme, Radii } from '@/constants/theme';
+import { appleScheme, Radii, TextScale } from '@/constants/theme';
 
 export interface PillAction {
   key: string;
@@ -14,7 +14,7 @@ export interface PillAction {
   onPress: () => void;
   /** Filled tint pill (like the blue walk-time pill). */
   prominent?: boolean;
-  /** Accent color — defaults to Apple.blue. */
+  /** Accent color — defaults to the scheme's system blue. */
   tint?: string;
   disabled?: boolean;
 }
@@ -32,7 +32,7 @@ export function ActionPillRow({ actions, appearance }: ActionPillRowProps) {
   return (
     <View style={styles.row}>
       {actions.map((a) => {
-        const tint = a.tint ?? Apple.blue;
+        const tint = a.tint ?? c.blue;
         const fg = a.prominent ? '#FFFFFF' : tint;
         const bg = a.prominent ? tint : c.fillTertiary;
         return (
@@ -49,7 +49,11 @@ export function ActionPillRow({ actions, appearance }: ActionPillRowProps) {
             ]}
           >
             <SymbolView name={a.symbol} size={20} weight="semibold" tintColor={fg} />
-            <Text style={[styles.label, { color: fg }]} numberOfLines={1} allowFontScaling={false}>
+            <Text
+              style={[styles.label, { color: fg }]}
+              numberOfLines={1}
+              maxFontSizeMultiplier={TextScale.compact}
+            >
               {a.label}
             </Text>
           </Pressable>
