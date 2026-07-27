@@ -1,7 +1,21 @@
 // THE MAP SCREEN — heart of the app. Full-bleed 3D Mapbox Standard map of
 // Prague with the live tram fleet, route network, planner overlay and Liquid
-// Glass chrome. Sheets (tram/line/favorites/planner/search/settings) float
-// over this screen as formSheets; the map keeps rendering beneath them.
+// Glass chrome. Sheets (line/favorites/planner/search/settings) float over this
+// screen as router formSheets; the map keeps rendering beneath them.
+//
+// TWO OWNED SHEETS, ONE AT A TIME. The home surface (`MapSheet` + search row)
+// and the TRAM CARD (`TramSheet`) are both plain views on this screen, built
+// from the same component. Exactly one is on stage: presenting a tram slides the
+// home sheet off the bottom (`hidden`, a transform — it is never unmounted, so
+// the search row keeps its identity and the return trip is a morph) and mounts
+// the tram card in its place. Which tram, if any, is presented is store state
+// (`presentedTramKey`), not a route — `/tram/[key]` is now a deep-link shim that
+// dismisses back to this screen and writes that field.
+//
+// The map chrome rides whichever sheet is on stage: the ride is a worklet over a
+// SharedValue, and this screen simply hands the chrome the ACTIVE sheet's shared
+// value + snap table. That switch happens once per present/close (a React
+// commit), never per frame — docs/performance.md invariant #1 is untouched.
 
 import Mapbox, {
   Camera,
@@ -13,9 +27,16 @@ import Mapbox, {
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
 import * as SplashScreen from 'expo-splash-screen';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { StatusBar } from 'expo-status-bar';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
-import { useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import {
+  runOnJS,
+  useAnimatedReaction,
+  useReducedMotion,
+  useSharedValue,
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { resolveLightPreset, STANDARD_CONFIG } from '@/components/map/mapStyle';
 import {
@@ -27,13 +48,19 @@ import {
   MapStatusTile,
 } from '@/components/map/MapChrome';
 import { DebugOverlay } from '@/components/debug/DebugOverlay';
-import { HomeSheetNative } from '@/components/maps-kit/HomeSheetNative';
+import { MapSheet } from '@/components/maps-kit/MapSheet';
 import {
-  chromeLayoutForDetent,
-  classifyDetent,
-  type NativeDetent,
-} from '@/components/maps-kit/sheetDetent';
-import { HomeSheetContent, HomeSheetHeader } from '@/components/home/HomeSheetContent';
+  CARD_DETENT,
+  DOCK_INSET,
+  DOCK_WIDTH,
+  isDocked,
+  peekHeight,
+  PEEK_FLOAT,
+  snapHeights,
+} from '@/components/maps-kit/mapSheetLayout';
+import { HomeSearchRow } from '@/components/home/HomeSearchRow';
+import { HomeSheetContent } from '@/components/home/HomeSheetContent';
+import { TramSheet } from '@/components/tram/TramSheet';
 import { PlannerOverlay } from '@/components/map/PlannerOverlay';
 import { RideOverlay } from '@/components/map/RideOverlay';
 import { SpotterController } from '@/components/map/SpotterController';
@@ -45,6 +72,7 @@ import { getRuntime, useTramRuntime } from '@/hooks/tramData';
 import type { Viewport } from '@/lib/types';
 import { useSelectionStore } from '@/stores/selection';
 import { useSettingsStore } from '@/stores/settings';
+import { Spacing } from '@/constants/theme';
 
 Mapbox.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_KEY ?? null);
 
@@ -57,17 +85,15 @@ const INITIAL_VIEWPORT: Viewport = {
 };
 /** Re-evaluate the 'auto' light preset this often. */
 const LIGHT_REFRESH_MS = 5 * 60 * 1000;
-/**
- * Peek height (px) of the home sheet — trimmed to reveal ONLY the search bar +
- * grabber (Apple Maps). The header block is grabber/top-pad (10) + row pad (6) +
- * search field (46) + row pad (12) ≈ 74; +12 lets the field clear the home
- * indicator without leaving a tall empty gap of sheet below it (the old
- * window-fraction peek was ~header + full safe-area = too tall, so the grouped
- * body edge peeked under the bar). Medium + large detents are owned natively.
- */
-const PEEK_HEIGHT = 86;
 /** Never leave the user stuck on the splash if the map fails to load. */
 const SPLASH_FAILSAFE_MS = 8_000;
+/**
+ * Upward travel past the peek detent before the home sheet's body counts as
+ * OPEN (see `homeOpen`). Hysteresis, not taste: a bare `> peek` would flap the
+ * flag — and mount/unmount the live sections — while a finger rests on the
+ * capsule, and 8 pt is still inside the first frames of a real drag.
+ */
+const LIVE_GATE_SLOP = 8;
 
 export default function MapScreen() {
   useTramRuntime(); // keeps polling + simulation alive while the map lives
@@ -75,31 +101,182 @@ export default function MapScreen() {
   const cameraRef = useRef<Camera>(null);
   const viewportRef = useRef<Viewport>({ ...INITIAL_VIEWPORT });
   const splashHiddenRef = useRef(false);
-  // Peek height (px) of the native home sheet. The map chrome (bottom-right
-  // control column + contextual chips) is pinned just above this so the whole
-  // cluster rides over the sheet's resting edge.
-  const peekPx = PEEK_HEIGHT;
-  const { height: windowHeight } = useWindowDimensions();
-  // Map chrome (control column + contextual chips) rides UP with the home sheet
-  // and fades out at the large detent — Apple Maps behaviour. The native sheet
-  // exposes only its resting detent (no continuous position), so we spring these
-  // two shared values on each discrete detent change: zero per-frame React, all
-  // animation on the UI thread (docs/performance.md invariant #1).
-  const chromeShift = useSharedValue(0);
-  const chromeOpacity = useSharedValue(1);
-  const onSheetDetentChange = useCallback(
-    (detent: NativeDetent) => {
-      const layout = chromeLayoutForDetent(classifyDetent(detent, PEEK_HEIGHT), {
-        peekPx: PEEK_HEIGHT,
-        windowHeight,
-      });
-      chromeShift.value = withSpring(layout.shift, { damping: 26, stiffness: 240, mass: 0.9 });
-      chromeOpacity.value = withTiming(layout.opacity, { duration: 220 });
-    },
-    // Shared values are stable refs; only the window height affects the math.
-    [windowHeight, chromeShift, chromeOpacity],
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+
+  // ── Sheet geometry ─────────────────────────────────────────────────────────
+  // The home sheet's pinned header is ALWAYS the search row now. It used to swap
+  // to a follow mini-card while a tram was followed, which is the approach the
+  // user rejected: the tram's identity lived in the HOME sheet's header, so
+  // "minimizing" the tram card meant dismissing one surface and revealing a
+  // different one. The tram card owns its own bar detent instead.
+  const followTramKey = useSelectionStore((s) => s.followTramKey);
+  /**
+   * Which tram (if any) has its OWNED card on stage. One store subscription that
+   * fires on present/close only, never per frame. The home sheet is translucent
+   * Liquid Glass, so a card over it would show the search row straight through —
+   * the home sheet is slid off screen (a transform, not an unmount) instead.
+   */
+  const presentedTramKey = useSelectionStore((s) => s.presentedTramKey);
+  const sheetEnv = useMemo(
+    () => ({
+      windowWidth,
+      windowHeight,
+      insetTop: insets.top,
+      insetBottom: insets.bottom,
+    }),
+    [windowWidth, windowHeight, insets.top, insets.bottom],
   );
+  const sheetDocked = isDocked(sheetEnv);
+  /**
+   * Left edge of the usable MAP area. On iPad the sheet is a docked column over
+   * the map's left side, so the status tile and the contextual chips have to
+   * start to its right — anchored at the default gutter they sat behind it.
+   */
+  const mapLeftInset = sheetDocked ? DOCK_INSET * 2 + DOCK_WIDTH : Spacing.three;
+  // The sheet MEASURES its header and reports the resulting snap table back, so
+  // the chrome and the Mapbox compass ornament are anchored to the sheet's real
+  // edges rather than to a hand-maintained header-height constant. Seeded with
+  // the estimate so the first frame is already correct.
+  const [sheetSnaps, setSheetSnaps] = useState<number[]>(() => snapHeights(sheetEnv));
+  // The tram card's own snap table, reported up the same way. Seeded with the
+  // home sheet's so the chrome never reads an empty table on the frame a card is
+  // presented (an empty table parks the chrome at the dock offset — a visible
+  // jump to the bottom of the screen).
+  const [tramSnaps, setTramSnaps] = useState<number[]>(() =>
+    snapHeights(sheetEnv, undefined, CARD_DETENT),
+  );
+  /**
+   * LIVE sheet heights in px, written by each sheet's pan worklet every frame.
+   * The chrome (bottom-right control column + contextual chips) reads ONE of
+   * them directly, so the whole cluster travels WITH the sheet on stage instead
+   * of springing to a new offset only once a detent settles
+   * (docs/performance.md invariant #1: the whole path is UI-thread, zero
+   * per-frame React). Two shared values rather than one shared between the
+   * sheets: the home sheet keeps its own drag position while it is parked off
+   * screen, so returning from a tram card is a morph back to where it was.
+   */
+  const sheetHeight = useSharedValue(0);
+  const tramHeight = useSharedValue(0);
+  // The chrome follows whatever surface is visible. A React-level switch, once
+  // per present/close — the ride itself stays a worklet over whichever shared
+  // value it was handed.
+  const chromeHeight = presentedTramKey ? tramHeight : sheetHeight;
+  const chromeSnaps = presentedTramKey ? tramSnaps : sheetSnaps;
+  const peekPx = chromeSnaps[0] ?? peekHeight(sheetEnv);
+  /**
+   * Bottom offset of the required Mapbox ornaments (logo + attribution) — see
+   * logoPosition below.
+   *
+   * The band is the collapsed bar's own bottom float, mirrored above it: the bar
+   * rests PEEK_FLOAT (22) clear of the screen bottom, so the ornaments sit
+   * PEEK_FLOAT clear of the bar's TOP edge and the capsule reads as floating in
+   * an even margin rather than pinched between the map furniture and the screen.
+   * `peekPx` is the peek detent — card height PLUS that float — so the bar's top
+   * edge is exactly `peekPx` off the window bottom and the ornaments belong at
+   * `peekPx + PEEK_FLOAT`.
+   *
+   * The safe-area subtraction is the same correction `compassBottom` documents:
+   * Mapbox iOS lays its ornaments out inside the safe-area layout guide, so a
+   * margin of N puts them N pt above the HOME INDICATOR, not above the window
+   * bottom. Uncompensated, the intended 22 pt gap rendered as 22 + 34 = 56 (the
+   * "they sit too high" report; the previous +8 rendered as 42). Clamped at 0 so
+   * a tall inset can never push them below the safe area.
+   */
+  const ornamentBottom = sheetDocked
+    ? 10
+    : Math.max(0, peekPx + PEEK_FLOAT - insets.bottom);
+  /**
+   * SETTLED height (px) of whichever owned sheet is on stage — the anchor for
+   * the Mapbox COMPASS ornament, which is a native ornament positioned by a
+   * React prop and therefore cannot ride the drag the way the JS chrome does
+   * (docs/performance.md invariant #1). Instead of pinning it to the peek band
+   * forever (where it stayed put while a card opened over it), it RELOCATES per
+   * detent: this value is written once per settle and the ornament jumps with it.
+   *
+   * 0 is the "nothing has settled yet" seed — `chromeRideFor` inside
+   * `compassBottom` clamps anything below the peek detent up to it.
+   */
+  const [settledHeight, setSettledHeight] = useState(0);
+  /**
+   * The settle detector. The prepared value is QUANTIZED — it is a snap height
+   * only while the sheet is actually resting on one, and -1 for every frame in
+   * between — so the reaction cannot fire per frame no matter how the sheet is
+   * dragged. In practice that is one React commit per detent the sheet lands on
+   * (plus one for a detent the spring decelerates through), which is the same
+   * cadence as the existing `onSnapsChange` / presentation commits.
+   *
+   * `chromeHeight`/`chromeSnaps` are dependencies for the reason the chrome's own
+   * animated style lists them: the map screen SWAPS which sheet's shared value it
+   * reads when a tram card is presented or closed, and a worklet that captured
+   * the old one would keep watching the hidden sheet.
+   *
+   * That swap is ALSO the reset. A mapper is registered dirty and Reanimated runs
+   * every dirty mapper on the next frame (mappers.ts: `start` sets `dirty`, and on
+   * native `scheduledMapperRun` re-arms itself each frame), so re-registering
+   * re-reads the newly active sheet straight away — which is what walks the
+   * compass back down when a card is closed onto a home sheet resting at peek,
+   * and what carries it to whatever detent the home sheet was left on if it was
+   * open when the card was raised.
+   */
+  useAnimatedReaction(
+    () => {
+      const h = chromeHeight.value;
+      for (let i = 0; i < chromeSnaps.length; i++) {
+        if (Math.abs(chromeSnaps[i] - h) < 0.5) return chromeSnaps[i];
+      }
+      return -1;
+    },
+    (settled, previous) => {
+      if (settled < 0 || settled === previous) return;
+      runOnJS(setSettledHeight)(settled);
+    },
+    [chromeHeight, chromeSnaps],
+  );
+  /**
+   * THE HOME SHEET'S LIVE GATE. Its body's top two sections (nearest stop with
+   * its arrivals board, favorites with per-tram live status) subscribe to the
+   * 1 Hz runtime and run `computeArrivals`, which is O(states × stops). None of
+   * that may run while the sheet is parked at peek over a hot basemap, so the
+   * sections are MOUNT-gated on this flag — at peek they do not exist and hold
+   * no subscriptions at all (verifiable, unlike a conditional inside a hook).
+   *
+   * Why a threshold reaction rather than `onSettle`: settle fires when a drag
+   * ENDS, i.e. while the sheet is still springing open with its body already
+   * partly revealed — the live rows would visibly pop in mid-animation. This
+   * flips at the FIRST few points of upward travel instead, so the real content
+   * is mounted before any of it is legible. It is still one React commit per
+   * crossing, never per frame: the worklet emits a BOOLEAN and `runOnJS` runs
+   * only when that boolean changes (invariant #1 holds, same discipline as the
+   * quantized `settledHeight` reaction above).
+   *
+   * The `presentedTramKey` term is not optional: `hidden` parks the home sheet
+   * off screen WITHOUT a height change, so without it the body would keep
+   * polling behind the tram card.
+   */
+  const [homeOpen, setHomeOpen] = useState(false);
+  useAnimatedReaction(
+    () => sheetHeight.value > (sheetSnaps[0] ?? 0) + LIVE_GATE_SLOP,
+    (open, previous) => {
+      if (open === previous) return;
+      runOnJS(setHomeOpen)(open);
+    },
+    [sheetHeight, sheetSnaps],
+  );
+  const homeLive = homeOpen && presentedTramKey == null;
+
   const [is3D, setIs3D] = useState(true);
+  // Locate button's filled tracking state (Apple Maps idiom). Mirrored in a ref
+  // so onCameraChanged can clear it with a single guarded write per gesture,
+  // keeping that path ref-only (no React work per camera frame).
+  const [locating, setLocating] = useState(false);
+  const locatingRef = useRef(false);
+  /** Mirror of `is3D` so the pitch animation fires outside the state updater. */
+  const is3DRef = useRef(true);
+  // Reduce Motion: the one-shot camera flights below are exactly the zoom /
+  // z-axis motion the HIG asks us to drop. The follow retarget loop is not
+  // touched (it is continuous tracking, not a transition).
+  const reduceMotion = useReducedMotion();
   const [styleLoaded, setStyleLoaded] = useState(false);
   const [locationGranted, setLocationGranted] = useState(false);
   const modelUris = useTramModels();
@@ -166,6 +343,12 @@ export default function MapScreen() {
     ) {
       selection.setFollowPaused(true);
     }
+    // A user gesture ends locate tracking. Guarded by the ref so this stays one
+    // React write per gesture, not one per camera frame.
+    if (state.gestures.isGestureActive && locatingRef.current) {
+      locatingRef.current = false;
+      setLocating(false);
+    }
   }, []);
 
   // ── One-shot fly-to requests from search/line/favorites sheets ─────────────
@@ -177,18 +360,18 @@ export default function MapScreen() {
     cameraRef.current?.setCamera({
       centerCoordinate: flyToTarget.coordinates,
       zoomLevel: flyToTarget.zoom ?? 15.5,
-      animationMode: 'flyTo',
-      animationDuration: 1300,
+      animationMode: reduceMotion ? 'none' : 'flyTo',
+      animationDuration: reduceMotion ? 0 : 1300,
     });
     selection.requestFlyTo(null);
-  }, [flyToTarget]);
+  }, [flyToTarget, reduceMotion]);
 
   // Engaging follow snapshots the CURRENT camera orientation as the fixed
   // follow angle: the camera keeps the tram centered under exactly this
   // zoom/pitch/heading and never rotates toward the tram's bearing. Nothing
   // about the view changes on engage — only the center starts tracking. The
   // followed tram's geometry is prioritized so on-shape follow is smooth ASAP.
-  const followTramKey = useSelectionStore((s) => s.followTramKey);
+  // (`followTramKey` is read once at the top — it also drives the sheet header.)
   useEffect(() => {
     if (!followTramKey) {
       followGestureRef.current = { orientation: null };
@@ -226,31 +409,39 @@ export default function MapScreen() {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== Location.PermissionStatus.GRANTED) return;
       setLocationGranted(true);
+      // High (±10 m), not Balanced (±100 m): at zoom 15.5 a hundred metres of
+      // error lands the camera visibly off the puck, which keeps tracking at
+      // the provider's real accuracy. One-shot fix, so no battery cost.
       const pos = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
+        accuracy: Location.Accuracy.High,
       });
       useSelectionStore.getState().setFollowTramKey(null);
       cameraRef.current?.setCamera({
         centerCoordinate: [pos.coords.longitude, pos.coords.latitude],
         zoomLevel: 15.5,
-        animationMode: 'flyTo',
-        animationDuration: 1200,
+        animationMode: reduceMotion ? 'none' : 'flyTo',
+        animationDuration: reduceMotion ? 0 : 1200,
       });
+      locatingRef.current = true;
+      setLocating(true);
     } catch {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
-  }, []);
+  }, [reduceMotion]);
 
+  // The camera animation is fired from the callback, not from inside the
+  // setIs3D updater: React may run an updater more than once per dispatch, and
+  // an updater must stay pure.
   const onTogglePitch = useCallback(() => {
-    setIs3D((current) => {
-      cameraRef.current?.setCamera({
-        pitch: current ? 0 : 55,
-        animationMode: 'easeTo',
-        animationDuration: 550,
-      });
-      return !current;
+    const next = !is3DRef.current;
+    is3DRef.current = next;
+    cameraRef.current?.setCamera({
+      pitch: next ? 55 : 0,
+      animationMode: reduceMotion ? 'none' : 'easeTo',
+      animationDuration: reduceMotion ? 0 : 550,
     });
-  }, []);
+    setIs3D(next);
+  }, [reduceMotion]);
 
   return (
     <View style={styles.container}>
@@ -261,16 +452,30 @@ export default function MapScreen() {
         // Keep required Mapbox ornaments clear of the BottomDock (centre) and
         // the bottom cluster (chips + locate): pin both to the bottom-left corner.
         // iOS ornament offsets are already safe-area-relative.
-        logoPosition={{ bottom: 10, left: 12 }}
-        attributionPosition={{ bottom: 10, left: 106 }}
+        // Lifted clear of the floating peek capsule: at bottom:10 the required
+        // Mapbox ornaments sat UNDER it and showed through the glass as noise.
+        // Not when docked — there the sheet is a side column, the map area runs
+        // to the bottom, and lifting by the column's height threw them to the top.
+        logoPosition={{ bottom: ornamentBottom, left: mapLeftInset - 4 }}
+        attributionPosition={{ bottom: ornamentBottom, left: mapLeftInset + 90 }}
         compassEnabled
         // Apple shows the compass only once the map is rotated off north; at
         // north-up it fades away instead of sitting there permanently.
         compassFadeWhenNorth
         // Apple pins the compass bottom-right, floating just above the map
-        // control column (which sits over the home sheet's peek edge). Ornament
-        // offsets are safe-area-relative on iOS.
-        compassPosition={{ bottom: compassBottom(peekPx), right: COMPASS_RIGHT }}
+        // control column — so it takes the column's OWN band, straight from the
+        // `chromeRideFor` worklet, at whichever detent the active sheet last
+        // settled on. It cannot ride the drag frame by frame (a native ornament
+        // is positioned by a prop), so it RELOCATES on settle instead: opening
+        // the tram card lifts it above the 2D button with the buttons rather
+        // than stranding it at the old bar's band. Mapbox lays ornaments out
+        // INSIDE the safe area while the JS chrome is placed from the window
+        // bottom, so the inset is handed to `compassBottom` to subtract —
+        // without it the disc hovered an inset (34 pt) too high.
+        compassPosition={{
+          bottom: compassBottom(settledHeight, chromeSnaps, sheetDocked, insets.bottom),
+          right: COMPASS_RIGHT,
+        }}
         pitchEnabled
         onDidFinishLoadingMap={hideSplash}
         onDidFinishLoadingStyle={() => setStyleLoaded(true)}
@@ -308,36 +513,64 @@ export default function MapScreen() {
         {locationGranted && <LocationPuck puckBearingEnabled puckBearing="heading" />}
       </MapView>
 
+      {/* The clock/battery glyphs float over the raw basemap (the map is
+          full-bleed), so they follow the light preset like the rest of the
+          over-basemap chrome — not the system scheme, which would put white
+          glyphs on a daytime map for a dark-mode phone. */}
+      <StatusBar style={chromeScheme === 'dark' ? 'light' : 'dark'} animated />
+
       <MapChromeSchemeContext.Provider value={chromeScheme}>
-        <MapStatusTile />
+        <MapStatusTile leftInset={mapLeftInset} />
         <MapControlStack
           is3D={is3D}
           onTogglePitch={onTogglePitch}
           onLocate={() => void onLocate()}
-          peekPx={peekPx}
-          chromeShift={chromeShift}
-          chromeOpacity={chromeOpacity}
+          locating={locating}
+          sheetHeight={chromeHeight}
+          sheetSnaps={chromeSnaps}
+          sheetDocked={sheetDocked}
         />
-        <MapChips peekPx={peekPx} chromeShift={chromeShift} chromeOpacity={chromeOpacity} />
+        <MapChips
+          leftInset={mapLeftInset}
+          sheetHeight={chromeHeight}
+          sheetSnaps={chromeSnaps}
+          sheetDocked={sheetDocked}
+        />
       </MapChromeSchemeContext.Provider>
 
-      {/* The persistent home surface — a REAL native iOS sheet (device-matched
-          corners, native grabber/detents, map interactive behind it). Pinned
-          search + account header; our own grouped-list body (favorites, planner,
-          fleet, rides, recents) revealed on drag. Follows the system scheme;
-          the map chrome above follows the map light preset. */}
-      <HomeSheetNative
-        peekPx={peekPx}
-        // The peek search bar floats over the basemap at the sheet's resting
-        // edge, on the SAME visual band as the map chrome — so it follows the map
-        // light preset (day → light glass, night → dark glass), NOT the system
-        // scheme, or it read as a lone dark slab beside the light StatusTile /
-        // control column over a daytime map.
-        header={<HomeSheetHeader chromeScheme={chromeScheme} />}
-        onDetentChange={onSheetDetentChange}
+      {/* The persistent home surface. An OWNED Liquid Glass sheet, not a native
+          modal one: that is what lets the map read through it, lets the chrome
+          ride with the drag frame-by-frame, lets Settings/search present
+          instantly over it, and lets it dock as a column on iPad. Its pinned
+          header is ALWAYS the search row. The sheet is an app surface, so it
+          follows the SYSTEM scheme; only the chrome floating over the basemap
+          follows the map light preset. */}
+      <MapSheet
+        heightSV={sheetHeight}
+        onSnapsChange={setSheetSnaps}
+        // Parked off screen while a tram card is on stage — it is translucent,
+        // so leaving it up would show the search row through the card's glass.
+        // A transform, not an unmount: the return trip is a morph.
+        hidden={presentedTramKey != null}
+        header={<HomeSearchRow />}
       >
-        <HomeSheetContent />
-      </HomeSheetNative>
+        <HomeSheetContent live={homeLive} />
+      </MapSheet>
+
+      {/* THE TRAM CARD — the same owned sheet, with the tram's identity as its
+          pinned header and a 0.42 middle detent. Dragging it down does not
+          dismiss it onto some other surface: its smallest detent IS the bar, so
+          the header settles in place at the same size. Keyed on the tram so
+          switching trams re-seeds the card (live subscriptions, lastSeen and the
+          open-at-card-detent spring all belong to one key). */}
+      {presentedTramKey != null && (
+        <TramSheet
+          key={presentedTramKey}
+          tramKey={presentedTramKey}
+          heightSV={tramHeight}
+          onSnapsChange={setTramSnaps}
+        />
+      )}
 
       {/* Invisible: while stop-spotting is active, drives the follow camera
           through the trams arriving at the spotted stop (1 Hz; renders null

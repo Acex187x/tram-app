@@ -160,11 +160,17 @@ export function RouteNetwork({ stopTotemReady = false }: RouteNetworkProps) {
 
   // Defer totem-layer mount until after the commit that registered the model.
   const [totemMounted, setTotemMounted] = useState(false);
+  // Un-mounting on deregister is adjusted DURING render off the remembered prop
+  // (the documented React pattern) — a synchronous setState in the effect below
+  // would commit the stale layer for a frame and cascade a second render. Only
+  // the mount is deferred, because it must land after the GLB registration.
+  const [prevTotemReady, setPrevTotemReady] = useState(stopTotemReady);
+  if (stopTotemReady !== prevTotemReady) {
+    setPrevTotemReady(stopTotemReady);
+    if (!stopTotemReady) setTotemMounted(false);
+  }
   useEffect(() => {
-    if (!stopTotemReady) {
-      setTotemMounted(false);
-      return;
-    }
+    if (!stopTotemReady) return;
     const t = setTimeout(() => setTotemMounted(true), 150);
     return () => clearTimeout(t);
   }, [stopTotemReady]);

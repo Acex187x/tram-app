@@ -57,7 +57,6 @@ import {
 } from '@rnmapbox/maps';
 import { Asset } from 'expo-asset';
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
 import {
   useCallback,
   useEffect,
@@ -600,9 +599,11 @@ export function TramLayers({
     };
   }, [cameraRef, viewportRef, followGestureRef]);
 
-  // Tap ANY tram feature (badge/dot or any 3D body section): light haptic,
-  // select + follow IMMEDIATELY, then open the sheet (its low detent keeps the
-  // follow camera visible).
+  // Tap ANY tram feature (badge/dot or any 3D body section): light haptic, then
+  // present the tram card. `openTram` is ONE store write that selects (gold
+  // halo), engages follow and presents — no router involved, because the card is
+  // an owned sheet on the map screen, not a route. The card opens on its 0.42
+  // detent, which keeps the followed tram visible.
   const onPressTram = useCallback((event: { features: GeoJSON.Feature[] }) => {
     const key = event.features[0]?.properties?.key as string | undefined;
     if (!key) return;
@@ -610,12 +611,7 @@ export function TramLayers({
     const rt = getRuntime();
     const state = rt.engine.getState(key);
     if (state) rt.prioritizeTrip(state.snapshot.tripId);
-    const selection = useSelectionStore.getState();
-    selection.setSelectedTramKey(key);
-    selection.setFollowTramKey(key);
-    // Keys are usually registration numbers but can fall back to trip ids
-    // containing URL-hostile characters — encode for the route param.
-    router.push(`/tram/${encodeURIComponent(key)}`);
+    useSelectionStore.getState().openTram(key);
   }, []);
 
   // ShapeSource children must be a plain element array (no false/undefined

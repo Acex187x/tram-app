@@ -13,7 +13,7 @@ import Animated, { type AnimatedStyle } from 'react-native-reanimated';
 import type { StyleProp, ViewStyle } from 'react-native';
 
 import { GlassPanel } from '@/components/ui/GlassPanel';
-import { Apple, appleScheme } from '@/constants/theme';
+import { appleScheme } from '@/constants/theme';
 
 /** Default control diameter — one shared axis with the native compass ornament. */
 export const CONTROL_SIZE = 46;
@@ -33,6 +33,8 @@ export interface CircleControlProps {
   onPress: () => void;
   /** Blue-filled active state (e.g. locate while following the user). */
   active?: boolean;
+  /** Announces a menu/popover this button owns as expanded or collapsed. */
+  expanded?: boolean;
   /** Diameter — defaults to 46 (ignored inside a ControlCapsule, which sets it). */
   size?: number;
   appearance?: 'light' | 'dark';
@@ -43,6 +45,7 @@ export function CircleControl({
   label,
   onPress,
   active,
+  expanded,
   size,
   appearance,
 }: CircleControlProps) {
@@ -57,7 +60,7 @@ export function CircleControl({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ selected: !!active }}
+      accessibilityState={{ selected: !!active, expanded }}
       hitSlop={4}
       onPress={onPress}
       style={({ pressed }) => [
@@ -69,7 +72,12 @@ export function CircleControl({
         <View
           style={[
             styles.activeFill,
-            { width: dim - 8, height: dim - 8, borderRadius: (dim - 8) / 2 },
+            {
+              width: dim - 8,
+              height: dim - 8,
+              borderRadius: (dim - 8) / 2,
+              backgroundColor: c.blue,
+            },
           ]}
         />
       )}
@@ -157,10 +165,7 @@ export function ControlStack({ children, topInset, bottom, right = 12, animatedS
 
 const styles = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center' },
-  activeFill: {
-    position: 'absolute',
-    backgroundColor: Apple.blue,
-  },
+  activeFill: { position: 'absolute' },
   capsule: { overflow: 'hidden' },
   capsuleSep: { height: StyleSheet.hairlineWidth, width: '100%' },
   stack: { position: 'absolute', alignItems: 'center' },

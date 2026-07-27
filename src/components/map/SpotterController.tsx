@@ -40,7 +40,13 @@ function SpotterEngine({ station }: { station: SpotterStation }) {
   const trackingRef = useRef<SpotterTracking | null>(null);
   /** The follow key THIS controller last set (null = we expect no follow). */
   const expectedFollowRef = useRef<string | null>(null);
-  const mountedAtMsRef = useRef(Date.now());
+  // Stamped in a mount effect, not `useRef(Date.now())`: reading the wall clock
+  // during render is impure (React Compiler is on). Effects run in declaration
+  // order, so this lands before the 1 Hz step below ever reads it.
+  const mountedAtMsRef = useRef(0);
+  useEffect(() => {
+    mountedAtMsRef.current = Date.now();
+  }, []);
   const firstReconcileRef = useRef(true);
 
   // ── User-takeover reconciliation ────────────────────────────────────────
