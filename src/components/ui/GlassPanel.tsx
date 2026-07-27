@@ -2,7 +2,7 @@
 // iOS 26+ → real glass (expo-glass-effect); older iOS → blur; last resort → solid.
 import { BlurView } from 'expo-blur';
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from 'expo-glass-effect';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, type Ref, useEffect, useState } from 'react';
 import {
   AccessibilityInfo,
   StyleSheet,
@@ -36,6 +36,16 @@ export interface GlassPanelProps {
    * must still get LIGHT glass with dark content (and vice versa at night).
    */
   appearance?: 'light' | 'dark';
+  /**
+   * Forwarded to whichever native view this panel resolves to.
+   *
+   * Load-bearing for `Animated.createAnimatedComponent(GlassPanel)`: Reanimated
+   * attaches its per-frame prop updates to the HOST instance it gets through the
+   * ref, so a wrapper that swallows the ref animates NOTHING (silently — no
+   * warning, the style simply never lands). The map sheet animates this panel's
+   * corner radii every frame of a drag, which is the only reason it exists.
+   */
+  ref?: Ref<View>;
 }
 
 export function GlassPanel({
@@ -45,9 +55,13 @@ export function GlassPanel({
   interactive,
   tintColor,
   appearance,
+  ref,
 }: GlassPanelProps) {
   const systemScheme = useColorScheme();
   const scheme = appearance ?? (systemScheme === 'dark' ? 'dark' : 'light');
+  /** What the NATIVE glass is told. See the `colorScheme` prop below. */
+  const glassScheme: 'light' | 'dark' | 'auto' =
+    appearance ?? (systemScheme === 'dark' || systemScheme === 'light' ? systemScheme : 'auto');
   const [reduceTransparency, setReduceTransparency] = useState(reduceTransparencyCache);
 
   useEffect(() => {
@@ -77,7 +91,19 @@ export function GlassPanel({
         glassEffectStyle={variant}
         isInteractive={interactive}
         tintColor={tintColor}
-        colorScheme={appearance ?? 'auto'}
+        // PIN the appearance, never 'auto'. 'auto' maps to
+        // UIUserInterfaceStyle.unspecified, i.e. "resolve light/dark yourself"
+        // — from the inherited trait collection, which a Fabric-recycled
+        // instance or a forced-.light ancestor (the map chrome is the only
+        // place that forces one) can poison. The panel's children are painted
+        // from `useColorScheme()` regardless, so any divergence lands on screen
+        // as a MIXED light/dark surface. Passing the system scheme explicitly
+        // is the same intent the prop doc states ("follow the system scheme"),
+        // just asserted instead of inferred. 'auto' survives only for the case
+        // where the platform reports no scheme at all (null), where letting
+        // UIKit resolve beats guessing light.
+        colorScheme={glassScheme}
+        ref={ref}
         style={[styles.rounded, style]}
       >
         {children}
@@ -89,6 +115,11 @@ export function GlassPanel({
       <BlurView
         intensity={variant === 'clear' ? 35 : 60}
         tint={scheme === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
+        // BlurView is a class component, so the ref is its instance rather than
+        // a View — Reanimated handles exactly that (it calls the class's own
+        // `getAnimatableRef` to reach the native blur view). The cast is only
+        // about the two ref TYPES; the value is the one Reanimated expects.
+        ref={ref as Ref<BlurView>}
         style={[styles.rounded, styles.clipped, style]}
       >
         {children}
@@ -97,6 +128,7 @@ export function GlassPanel({
   }
   return (
     <View
+      ref={ref}
       style={[
         styles.rounded,
         { backgroundColor: scheme === 'dark' ? 'rgba(28,28,30,0.94)' : 'rgba(248,248,250,0.96)' },
