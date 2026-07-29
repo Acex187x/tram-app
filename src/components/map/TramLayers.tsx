@@ -1,4 +1,4 @@
-// Live fleet rendering: two ShapeSources fed imperatively per engine frame
+// Live fleet rendering: ShapeSources fed directly on the native side per engine frame
 // (no React state per frame), zoom-banded layers per architecture.md:
 //   <13.2 direction teardrops (bearing-rotated SymbolLayer) ·
 //   13.2–14.8 model FACE badges (per-model face sprite + line number) floating
@@ -377,7 +377,7 @@ export function TramLayers({
     set: Set<string> | null;
   }>({ source: null, set: null });
 
-  // Per-frame push: engine states → GeoJSON → setNativeProps. Refs only.
+  // Per-frame push: engine states → GeoJSON → direct native update. Refs only.
   useEffect(() => {
     const rt = getRuntime();
     const getGeometry = (key: string) => rt.engine.getGeometry(key);
@@ -406,7 +406,7 @@ export function TramLayers({
       if (!wantSections && sectionsFedRef.current) {
         sectionsFedRef.current = false;
         sectionsEmptyRef.current = true;
-        sectionsRef.current?.setNativeProps({ id: 'trams-sections', shape: EMPTY_FC_STRING });
+        void sectionsRef.current?.updateShape(EMPTY_FC_STRING);
       }
 
       if (wantPoints || wantSections) {
@@ -443,10 +443,7 @@ export function TramLayers({
 
         if (wantPoints) {
           lastPointsPushMsRef.current = nowMs;
-          pointsRef.current?.setNativeProps({
-            id: 'trams-points',
-            shape: JSON.stringify(frame.points),
-          });
+          void pointsRef.current?.updateShape(JSON.stringify(frame.points));
           // Decluttered badge anchors + leaders, same cadence as the points.
           // Empty outside the badge band (stringify+push skipped while it
           // STAYS empty; the one clearing push stops stale badges — the badge
@@ -454,10 +451,9 @@ export function TramLayers({
           const badgesFC = (frame.badges ?? EMPTY_FC) as GeoJSON.FeatureCollection;
           const badgesEmpty = badgesFC.features.length === 0;
           if (!badgesEmpty || !badgesEmptyRef.current) {
-            badgesRef.current?.setNativeProps({
-              id: 'trams-badges',
-              shape: badgesEmpty ? EMPTY_FC_STRING : JSON.stringify(badgesFC),
-            });
+            void badgesRef.current?.updateShape(
+              badgesEmpty ? EMPTY_FC_STRING : JSON.stringify(badgesFC),
+            );
           }
           badgesEmptyRef.current = badgesEmpty;
         }
@@ -467,10 +463,9 @@ export function TramLayers({
         if (wantSections) {
           const isEmpty = frame.sections.features.length === 0;
           if (!isEmpty || !sectionsEmptyRef.current) {
-            sectionsRef.current?.setNativeProps({
-              id: 'trams-sections',
-              shape: isEmpty ? EMPTY_FC_STRING : JSON.stringify(frame.sections),
-            });
+            void sectionsRef.current?.updateShape(
+              isEmpty ? EMPTY_FC_STRING : JSON.stringify(frame.sections),
+            );
           }
           sectionsEmptyRef.current = isEmpty;
           sectionsFedRef.current = true;
@@ -482,10 +477,9 @@ export function TramLayers({
         const fixFC = (frame.fixOverlay ?? EMPTY_FC) as GeoJSON.FeatureCollection;
         const fixEmpty = fixFC.features.length === 0;
         if (!fixEmpty || !fixEmptyRef.current) {
-          fixOverlayRef.current?.setNativeProps({
-            id: 'tram-fix-overlay',
-            shape: fixEmpty ? EMPTY_FC_STRING : JSON.stringify(fixFC),
-          });
+          void fixOverlayRef.current?.updateShape(
+            fixEmpty ? EMPTY_FC_STRING : JSON.stringify(fixFC),
+          );
         }
         fixEmptyRef.current = fixEmpty;
       }
@@ -927,19 +921,24 @@ export function TramLayers({
       {modelUris != null && <Models models={modelUris} />}
       {iconImages != null && <Images images={iconImages} />}
 
-      {/* Decluttered bulk badges + leaders (band 2). Mounted first so the
+      {/* Every live source deliberately omits the React `shape` prop and is fed
+          by the patched direct-native updateShape command. It must never use
+          setNativeProps: that writes the new frame into Fabric's ShadowTree,
+          where a concurrent UI commit can later replay an older frame.
+
+          Decluttered bulk badges + leaders (band 2). Mounted first so the
           points-source layers (markers at true positions, pinned badges,
           fav stars) draw over it. Tapping a displaced badge still selects
           its tram — features carry the tram key. */}
-      <ShapeSource id="trams-badges" ref={badgesRef} shape={EMPTY_FC} onPress={onPressTram}>
+      <ShapeSource id="trams-badges" ref={badgesRef} onPress={onPressTram}>
         {badgeLayers}
       </ShapeSource>
 
-      <ShapeSource id="trams-points" ref={pointsRef} shape={EMPTY_FC} onPress={onPressTram}>
+      <ShapeSource id="trams-points" ref={pointsRef} onPress={onPressTram}>
         {pointLayers}
       </ShapeSource>
 
-      <ShapeSource id="trams-sections" ref={sectionsRef} shape={EMPTY_FC} onPress={onPressTram}>
+      <ShapeSource id="trams-sections" ref={sectionsRef} onPress={onPressTram}>
         {sectionLayers}
       </ShapeSource>
 
@@ -947,7 +946,7 @@ export function TramLayers({
           connector from the rendered position to the raw AVL fix + a small
           white/gold fix dot. Fed imperatively at the sections cadence; the FC
           is empty for everything but the selected tram. */}
-      <ShapeSource id="tram-fix-overlay" ref={fixOverlayRef} shape={EMPTY_FC}>
+      <ShapeSource id="tram-fix-overlay" ref={fixOverlayRef}>
         <LineLayer
           id="tram-fix-connector"
           slot="top"

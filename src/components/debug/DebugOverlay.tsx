@@ -28,6 +28,7 @@
 //
 // Diffs are signed: POSITIVE lag = the SIM is AHEAD of the real tram.
 import { createContext, useContext, useEffect, useState } from 'react';
+import Constants from 'expo-constants';
 import {
   Pressable,
   ScrollView,
@@ -380,6 +381,8 @@ export function DebugOverlay() {
   const [mode, setMode] = useState<DebugMode>('live');
   const collapsed = mode === 'collapsed';
   const guide = mode === 'guide';
+  // Native CFBundleVersion proves which binary is installed on the device.
+  const buildNumber = Constants.platform?.ios?.buildNumber ?? '?';
 
   const header = key
     ? `DBG ${key}${state ? ` · L${state.snapshot.line} · ${state.model.id}` : ''}`
@@ -412,6 +415,7 @@ export function DebugOverlay() {
               {header}
             </Text>
           </Pressable>
+          <Text style={styles.buildNumber}>B{buildNumber}</Text>
           {/* Guide mode: swaps every live value for a sentence explaining what
               that variable means, plus a primer on how the engine works. */}
           <Pressable
@@ -732,6 +736,13 @@ const styles = StyleSheet.create({
   guideLabel: { color: '#6BE6A6', fontFamily: MONO, fontSize: 10.5, fontWeight: '700' },
   guideHelp: { color: '#C6D2DE', fontFamily: MONO, fontSize: 10, lineHeight: 13.5, marginTop: 1 },
   header: { color: '#6BE6A6', flex: 1, fontFamily: MONO, fontSize: 11, fontWeight: '700' },
+  buildNumber: {
+    color: '#FFD479',
+    fontFamily: MONO,
+    fontSize: 11,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '800',
+  },
   hint: { color: '#7FB2D9', fontFamily: MONO, fontSize: 11 },
   collapsed: { color: '#DDE6EE', fontFamily: MONO, fontSize: 10.5, marginTop: 3 },
   phase: { color: '#FFD479', fontFamily: MONO, fontSize: 11, fontWeight: '700', marginTop: 4 },

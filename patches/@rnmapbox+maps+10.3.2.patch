@@ -1,0 +1,115 @@
+diff --git a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSource.swift b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSource.swift
+index 5f6a0c0..27e30bc 100644
+--- a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSource.swift
++++ b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSource.swift
+@@ -171,6 +171,28 @@ public class RNMBXShapeSource : RNMBXSource {
+     }
+   }
+ 
++  /** Update GeoJSON without changing the React/Fabric `shape` prop. */
++  @objc public func updateShape(
++    shapeJSON: String,
++    resolver: @escaping RCTPromiseResolveBlock,
++    rejecter: @escaping RCTPromiseRejectBlock
++  ) {
++    do {
++      let obj: GeoJSONObject = try parse(shapeJSON)
++      shapeObject = obj
++      guard let map = self.map,
++            self.source != nil,
++            map.mapboxMap.style.sourceExists(withId: id) else {
++        resolver(false)
++        return
++      }
++      try map.mapboxMap.style.updateGeoJSONSource(withId: id, geoJSON: obj)
++      resolver(true)
++    } catch {
++      rejecter(error.localizedDescription, "Error.updateShape", error)
++    }
++  }
++
+   deinit {
+     shapeAnimator?.unsubscribe(consumer: self)
+   }
+diff --git a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSourceModule.mm b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSourceModule.mm
+index 11a7d70..74ef317 100644
+--- a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSourceModule.mm
++++ b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSourceModule.mm
+@@ -41,6 +41,13 @@ - (void)withShapeSource:(nonnull NSNumber*)viewRef block:(void (^)(RNMBXShapeSou
+     } reject:reject methodName:@"getClusterChildren"];
+ }
+ 
++RCT_EXPORT_METHOD(updateShape:(nonnull NSNumber *)viewRef shapeJSON:(NSString *)shapeJSON resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject)
++{
++    [self withShapeSource:viewRef block:^(RNMBXShapeSource *view) {
++        [view updateShapeWithShapeJSON:shapeJSON resolver:resolve rejecter:reject];
++    } reject:reject methodName:@"updateShape"];
++}
++
+ RCT_EXPORT_METHOD(getClusterLeaves:(nonnull NSNumber *)viewRef featureJSON:(NSString *)featureJSON number:(NSInteger)number offset:(NSInteger)offset resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject)
+ {
+  [self withShapeSource:viewRef block:^(RNMBXShapeSource *view) {
+diff --git a/node_modules/@rnmapbox/maps/lib/module/components/ShapeSource.js b/node_modules/@rnmapbox/maps/lib/module/components/ShapeSource.js
+index 8ebd274..140d99c 100644
+--- a/node_modules/@rnmapbox/maps/lib/module/components/ShapeSource.js
++++ b/node_modules/@rnmapbox/maps/lib/module/components/ShapeSource.js
+@@ -76,6 +76,10 @@ export class ShapeSource extends NativeBridgeComponent(AbstractSource, NativeRNM
+     }
+     return res.data;
+   }
++  /** Update Mapbox directly without writing the shape into Fabric's ShadowTree. */
++  updateShape(shape) {
++    return this._runNativeMethod('updateShape', this._nativeRef, [typeof shape === 'string' ? shape : JSON.stringify(shape)]);
++  }
+   setNativeProps(props) {
+     const shallowProps = Object.assign({}, props);
+ 
+diff --git a/node_modules/@rnmapbox/maps/lib/typescript/src/components/ShapeSource.d.ts b/node_modules/@rnmapbox/maps/lib/typescript/src/components/ShapeSource.d.ts
+index b2f165c..9e5bcb2 100644
+--- a/node_modules/@rnmapbox/maps/lib/typescript/src/components/ShapeSource.d.ts
++++ b/node_modules/@rnmapbox/maps/lib/typescript/src/components/ShapeSource.d.ts
+@@ -186,6 +186,8 @@ export declare class ShapeSource extends ShapeSource_base {
+      * @return {FeatureCollection}
+      */
+     getClusterChildren(feature: number | GeoJSON.Feature): Promise<any>;
++    /** Update Mapbox directly without writing the shape into Fabric's ShadowTree. */
++    updateShape(shape: GeoJSON.Geometry | GeoJSON.Feature | GeoJSON.FeatureCollection | string): Promise<void>;
+     setNativeProps(props: NativeProps): void;
+     _getShape(): string | undefined;
+     _decodePayload(payload: OnPressEvent | string): OnPressEvent;
+diff --git a/node_modules/@rnmapbox/maps/src/components/ShapeSource.tsx b/node_modules/@rnmapbox/maps/src/components/ShapeSource.tsx
+index 31a185a..34b8944 100644
+--- a/node_modules/@rnmapbox/maps/src/components/ShapeSource.tsx
++++ b/node_modules/@rnmapbox/maps/src/components/ShapeSource.tsx
+@@ -245,6 +245,19 @@ export class ShapeSource extends NativeBridgeComponent(
+     return res.data;
+   }
+ 
++  /**
++   * Update the native GeoJSON source directly, without writing the shape into
++   * Fabric's ShadowTree. This is intentionally separate from setNativeProps:
++   * concurrent React/Reanimated commits can otherwise replay an older shape.
++   */
++  updateShape(
++    shape: GeoJSON.Geometry | GeoJSON.Feature | GeoJSON.FeatureCollection | string,
++  ): Promise<void> {
++    return this._runNativeMethod('updateShape', this._nativeRef, [
++      typeof shape === 'string' ? shape : JSON.stringify(shape),
++    ]);
++  }
++
+   setNativeProps(props: NativeProps) {
+     const shallowProps = Object.assign({}, props);
+ 
+diff --git a/node_modules/@rnmapbox/maps/src/specs/NativeRNMBXShapeSourceModule.ts b/node_modules/@rnmapbox/maps/src/specs/NativeRNMBXShapeSourceModule.ts
+index cd921a8..a94c833 100644
+--- a/node_modules/@rnmapbox/maps/src/specs/NativeRNMBXShapeSourceModule.ts
++++ b/node_modules/@rnmapbox/maps/src/specs/NativeRNMBXShapeSourceModule.ts
+@@ -4,6 +4,7 @@ import { Int32 } from 'react-native/Libraries/Types/CodegenTypes';
+ import { TurboModuleRegistry } from 'react-native';
+ 
+ export interface Spec extends TurboModule {
++  updateShape: (viewRef: Int32 | null, shapeJSON: string) => Promise<void>;
+   getClusterExpansionZoom: (
+     viewRef: Int32 | null,
+     featureJSON: string,

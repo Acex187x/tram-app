@@ -5,10 +5,9 @@
 // combined bounds once.
 //
 // IMPORTANT (verified on-device — see the note atop RouteNetwork.tsx): the
-// ShapeSource is mounted ONCE with a stable empty FeatureCollection and
-// receives geometry ONLY via setNativeProps. React must never commit a
-// changing `shape` prop, or the native source reverts / never applies
-// (Fabric + rnmapbox quirk).
+// ShapeSource is mounted WITHOUT a declarative `shape` and receives geometry
+// through rnmapbox's patched direct-native `updateShape` command. Do not use
+// `setNativeProps`: it writes through Fabric and can race unrelated UI commits.
 
 import { Camera, CircleLayer, LineLayer, ShapeSource } from '@rnmapbox/maps';
 import { useEffect, useRef, type RefObject } from 'react';
@@ -78,7 +77,7 @@ export function RideOverlay({ cameraRef }: RideOverlayProps) {
     const fc: RideFC = features.length > 0 ? { type: 'FeatureCollection', features } : EMPTY_FC;
     // Push imperatively, exactly once per preview change; clearing the preview
     // pushes the empty collection.
-    sourceRef.current?.setNativeProps({ id: 'ride-preview', shape: JSON.stringify(fc) });
+    void sourceRef.current?.updateShape(JSON.stringify(fc));
 
     if (features.length === 0) return;
 
@@ -102,7 +101,7 @@ export function RideOverlay({ cameraRef }: RideOverlayProps) {
   }, [preview, cameraRef]);
 
   return (
-    <ShapeSource ref={sourceRef} id="ride-preview" shape={EMPTY_FC}>
+    <ShapeSource ref={sourceRef} id="ride-preview">
       <LineLayer
         id="ride-track-sim"
         slot="top"

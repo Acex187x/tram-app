@@ -65,12 +65,15 @@ untouched — see `decisions/backend-plan.md`.
    stop_times.shape_dist_traveled (number, km) + arrival/departure + dwell). Disk-cache by
    `shape_id`; stop-times cache by `trip_id` (TTL 24h — trip_ids roll over ~12 days).
 4. `TramEngine.ingest(snapshots, tripDetails)` updates per-tram anchors; `tick(now)` advances
-   physics; `featureBuilder` emits GeoJSON → `ShapeSource.setNativeProps`. **Thermal-adaptive
+   physics; `featureBuilder` emits GeoJSON → the patched direct-native
+   `ShapeSource.updateShape` command (outside Fabric). **Thermal-adaptive
    cadence** (`tramData.ts`, iteration 4 — iPad ran hot after an hour): the sim ticks at 60 Hz
    (`TICK_MS` 16) ONLY while the 3D model band is on screen (`setDetailMode` from camera events),
    ~10 Hz (`TICK_IDLE_MS` 100) otherwise. The whole-fleet points FC is pushed at a zoom-dependent
    rate (`pointsPushIntervalMs`: ~15 Hz close, 1 s mid, 5 s far); the sections FC only while the
-   band is visible; empty FCs skip stringify+push entirely.
+   band is visible; empty FCs skip stringify+push entirely. Live sources omit the
+   React `shape` prop and never use `setNativeProps`, so unrelated Fabric commits cannot replay
+   an older source frame.
 
 ## Interpolation engine (the heart)
 
@@ -175,11 +178,12 @@ is in TramLayers).
   `onDidFinishLoadingStyle`** — applying config before the style loads logs "Import basemap does
   not exist" and is silently dropped. (`buildMapStyleJSON` in `mapStyle.ts` is the abandoned
   styleJSON path, kept for reference; it is not mounted.)
-- **Sources are imperative-push-only (Fabric + rnmapbox quirk).** Every data ShapeSource
+- **Live sources bypass Fabric (rnmapbox patch).** Every data ShapeSource
   (`trams-points`, `trams-sections`, `route-network`, `route-stops`, planner overlay) is mounted
-  ONCE with a stable empty FeatureCollection and receives data ONLY via `setNativeProps` on a
-  timer/frame. If React ever commits a changing `shape` prop the native source reverts or never
-  applies. Layer STYLE props may still change through React freely.
+  once without a `shape` prop and receives data only via the patched direct-native
+  `ShapeSource.updateShape` command. `setNativeProps` is not safe for moving data on Fabric:
+  concurrent UI commits can replay an older ShadowTree source value, visible as a rewind.
+  Layer style props may still change through React freely.
 - **ShapeSource children must be a plain element array** — no `false`/`undefined` holes. rnmapbox
   clones each child to inject `sourceID`; a hole crashes it. Optional layers (3D totem, extra model
   layer) are pushed into an array conditionally, never rendered as `{cond && <Layer/>}` inline.

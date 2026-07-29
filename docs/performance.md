@@ -7,10 +7,10 @@ did, (B) the **invariants that must not be broken**, and (C) how to verify befor
 ## A. What was done (chronological)
 
 ### Rendering architecture (foundation)
-- **Imperative source pushes.** All live GeoJSON flows through
-  `ShapeSource.setNativeProps({id, shape})` with *stable* React props (module-const empty FC).
-  React never re-commits map data — reconciliation cost is zero per frame, and it dodges the
-  Fabric bug where prop-driven shape updates don't apply (`docs/decisions/map-rendering.md`).
+- **Direct-native source pushes.** All live GeoJSON flows through the patched
+  `ShapeSource.updateShape(shape)` TurboModule command. It updates Mapbox's GeoJSON source
+  without changing Fabric's ShadowTree; React reconciliation cost remains zero per frame and
+  concurrent UI commits cannot replay an older source frame.
 - **Viewport culling by whole tram** (+300 m margin) — the 3D sections FC contains only
   what's on screen; typically 3–30 trams × sections, a few KB per push.
 - **Zoom banding** — dots / badges / 3D models are separate layers gated by zoom, so the GPU
@@ -63,13 +63,16 @@ Key insights behind it:
    React subscribers use the 1 Hz hooks; `subscribeFrame` is for the map push loop only.
    **One sanctioned exception:** `DebugLive` in `src/components/debug/DebugOverlay.tsx`
    drives its own rAF loop and `setState`s the engine snapshot every frame — the readout
-   exists to judge the physics at 60 Hz, and any throttle would lie about it. It is gated
-   to Settings ▸ Developer ▸ **Debug mode** *and* an expanded panel *and* a non-guide screen
-   *and* a followed tram; unmounting cancels the rAF and releases the GPS locator, and the
-   collapsed one-liner runs at 1 Hz. No production path mounts it. Nothing else may use a
-   per-frame `setState` — and shipping UI never may.
-2. **New map layers use the imperative pattern** (stable props, `setNativeProps`, `slot:'top'`),
-   and are fed at the *slowest cadence that looks right* — justify anything above 1 Hz.
+   exists to judge the physics at 60 Hz. It is gated to debug mode, an expanded panel,
+   a non-guide screen and a followed tram; unmounting cancels rAF and releases GPS. This
+   is safe for map motion because live ShapeSources bypass Fabric via `updateShape`.
+   Nothing else may use per-frame `setState`, and shipping UI remains ≤1 Hz.
+2. **New live map layers use direct-native updates** (`updateShape`, stable React props,
+   `slot:'top'`) and are fed at the slowest cadence that looks right. They must mount without
+   a React `shape` prop and must never use `setNativeProps` for moving GeoJSON. On Fabric,
+   `setNativeProps` itself creates a ShadowTree commit; a concurrent menu/text commit based on
+   an older tree may land afterward and replay the previous tram positions. The custom
+   rnmapbox patch intentionally bypasses that tree. Covered by `imperative-shape-source.test`.
 3. **Every timer/subscription registers with the runtime lifecycle** (created in `resume()`,
    cleared in `pause()`, guarded by the generation counter). Nothing may tick in background.
    Test: background the app, verify zero log output / network until foregrounded.

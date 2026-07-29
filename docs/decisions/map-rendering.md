@@ -115,35 +115,34 @@ tick behind registration (§10).
 
 ---
 
-## 5. Imperative `ShapeSource.setNativeProps` with STABLE React props — the Fabric quirk
+## 5. Direct-native ShapeSource updates — bypass Fabric for moving GeoJSON
 
 **Problem.** The fleet is 200–500 features updated ~15–60 Hz. Committing a new
 `shape` React prop each frame reconciles the whole tree — untenable.
 
-**SPIKE-VERIFIED gotcha (cost hours).** With Fabric + rnmapbox, a `ShapeSource`
-must be mounted **once** with a *stable* empty `FeatureCollection` and receive
-data **only** via `setNativeProps`. If React ever commits a *changing* `shape`
-prop, the native source **reverts / never applies** the imperative push. Layer
-*style* props may change freely; only the source `shape` is the trap.
+**DEVICE-VERIFIED gotcha.** A high-frequency `setNativeProps({shape})` call is
+not outside React under Fabric: it creates a ShadowTree commit. A concurrent
+menu/Reanimated commit can be based on an older tree and land afterward,
+replaying the preceding tram positions. On physical Metal hardware this appears
+as markers and 3D models blinking/rewinding; its frequency follows UI commits.
 
-**Decision.** Every live source (`trams-points`, `trams-sections`,
-`tram-fix-overlay`, `route-network`, `route-stops`, `planner-legs`) is mounted
-with a constant `EMPTY_FC` and fed exclusively through `ref.setNativeProps({ id,
-shape })`.
+**Decision.** `patches/@rnmapbox+maps+10.3.2.patch` adds
+`ShapeSource.updateShape(shape)`, a TurboModule command that resolves the native
+source view and calls Mapbox `style.updateGeoJSONSource` directly. Every live
+source is mounted without a React `shape` prop and fed only through that method.
 
-**Why.** One serialized FeatureCollection per frame over the bridge is the only
-cost; rendering (layer draw, model instancing) stays on the native UI/GPU thread.
+**Why.** The serialized FeatureCollection still crosses once per due frame, but
+its value never enters Fabric's ShadowTree, so unrelated UI commits cannot
+overwrite or rewind it.
 
 **How.**
-- Fleet: `TramLayers.tsx` subscribes to the engine frame loop
-  (`rt.subscribeFrame`, `:153`) and pushes `pointsRef`/`sectionsRef`
-  imperatively. The `shape={EMPTY_FC}` props on the `<ShapeSource>` never change.
+- Fleet: `TramLayers.tsx` subscribes to the engine frame loop and calls
+  `updateShape` on `pointsRef`/`sectionsRef` at their existing cadences.
 - Network: `RouteNetwork.tsx:135` pushes on an interval; the on-device note atop
   the file (`:12`) spells out the quirk. Layer *style* props (opacity, filter)
   DO change with React state — that's allowed.
 - Planner: `PlannerOverlay.tsx:45` pushes the legs FC (or empty on clear).
-- Each `id` is passed to `setNativeProps` because rnmapbox needs the source id on
-  the payload.
+- The patch is reapplied by `patch-package` after dependency installation.
 
 **Related SPIKE rule.** `<ShapeSource>` children must be a plain array of
 elements with **no `false`/`undefined` holes** — rnmapbox clones each child to
@@ -396,7 +395,7 @@ zero visible benefit when nothing on screen is moving fast.
    — far-zoom badges are near-static, and re-pushing GeoJSON 15×/s forces Mapbox
    to re-render constantly (GPU heat for no visible change). The sections FC is
    pushed every tick but **only** while in-band; on leaving the band it's cleared
-   once so stale models never linger (`TramLayers.tsx:169`).
+   once so stale models never linger.
 
 3. **Empty-frame short-circuits.** Stringify+push is skipped entirely while a FC
    stays empty (`sectionsEmptyRef`/`fixEmptyRef`), and frames that would push
@@ -569,7 +568,7 @@ dot, `TramLayers.tsx:518`), pushed at the sections cadence.
 ## Quick reference — the SPIKE-VERIFIED conventions that must not regress
 
 1. GLB via `Asset...downloadAsync()` → `localUri`, not `require()` URLs. §4
-2. `ShapeSource` mounted with a STABLE empty FC, fed only by `setNativeProps`.
+2. `ShapeSource` mounted without `shape`, fed only by direct-native `updateShape`.
    Changing the React `shape` prop breaks the source. §5
 3. `ShapeSource` children = plain element array, no false/undefined holes. §5
 4. `slot="top"` on all custom layers. §5

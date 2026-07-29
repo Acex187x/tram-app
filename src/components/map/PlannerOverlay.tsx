@@ -3,9 +3,10 @@
 // the camera fits its bounds once.
 //
 // IMPORTANT (verified on-device — see the note atop RouteNetwork.tsx): the
-// ShapeSource is mounted ONCE with a stable empty FeatureCollection and receives
-// geometry ONLY via setNativeProps. React must never commit a changing `shape`
-// prop, or the native source reverts / never applies (Fabric + rnmapbox quirk).
+// ShapeSource is mounted WITHOUT a declarative `shape` and receives geometry
+// through rnmapbox's patched direct-native `updateShape` command. Do not use
+// `setNativeProps`: under Fabric it participates in concurrent ShadowTree
+// commits, allowing an older UI commit to replay an older map frame.
 
 import { Camera, LineLayer, ShapeSource } from '@rnmapbox/maps';
 import { useEffect, useRef, type RefObject } from 'react';
@@ -43,7 +44,7 @@ export function PlannerOverlay({ cameraRef }: PlannerOverlayProps) {
 
     const fc: LegFC = features.length > 0 ? { type: 'FeatureCollection', features } : EMPTY_FC;
     // Push imperatively; clearing an itinerary pushes the empty collection.
-    sourceRef.current?.setNativeProps({ id: 'planner-legs', shape: JSON.stringify(fc) });
+    void sourceRef.current?.updateShape(JSON.stringify(fc));
 
     if (features.length === 0) return;
 
@@ -70,7 +71,7 @@ export function PlannerOverlay({ cameraRef }: PlannerOverlayProps) {
 
   return (
     <>
-      <ShapeSource ref={sourceRef} id="planner-legs" shape={EMPTY_FC}>
+      <ShapeSource ref={sourceRef} id="planner-legs">
         <LineLayer
           id="planner-leg-casing"
           slot="top"

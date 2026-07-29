@@ -111,7 +111,11 @@ SHIP = dict(
     bias_hi=1.6,           # PACE_BIAS_MAX_RATIO
     bias_min_dt=8.0,       # PACE_BIAS_MIN_DT_S
     bias_min_ds=15.0,      # PACE_BIAS_MIN_DS_M
-    teleport=500.0,        # TELEPORT_THRESHOLD_M
+    teleport=500.0,        # TELEPORT_THRESHOLD_M floor
+    teleport_max=1500.0,   # TELEPORT_THRESHOLD_MAX_M
+    teleport_gap_margin=1.25, # TELEPORT_GAP_MARGIN
+    teleport_gap_min=45.0, # TELEPORT_GAP_MIN_S
+    teleport_gap_max=240.0,# TELEPORT_GAP_MAX_S
     stop_reach=2.0,        # STOP_REACH_M
     tod_pace=1.0,          # todPaceFactor over the ride window
     lookahead=400.0,       # DEFAULT_LOOKAHEAD_M
@@ -384,9 +388,20 @@ def replay(ride, cfg):
             fi += 1
             ds_f = fx["dist"] - prev_fx["dist"]
             dt_f = (fx["at"] - prev_fx["at"]) / 1000.0
-            # teleport
-            if abs(fx["dist"] - s) > cfg["teleport"]:
-                s = fx["dist"]
+            # 2026-07-27 engine parity: a slow feed must not turn honest
+            # inter-fix travel into a hard snap. The threshold scales with the
+            # observed gap, and the candidate observation is projected only as
+            # far as cruise-reference physics permits.
+            gap = min(cfg["teleport_gap_max"], max(cfg["teleport_gap_min"], dt_f))
+            teleport_threshold = min(
+                cfg["teleport_max"],
+                max(cfg["teleport"], gap * cfg["cruise_ref"] * cfg["teleport_gap_margin"]),
+            )
+            seen_age = max(0.0, (t - fx["at"]) / 1000.0)
+            ingest_advance = min(v_proj * seen_age, cfg["cruise_ref"] * seen_age)
+            s_ingest_obs = fx["dist"] + ingest_advance
+            if abs(s_ingest_obs - s) > teleport_threshold:
+                s = s_ingest_obs
                 v = cruise_product(s)
                 phase = "cruise"
                 crawling = deep = False
@@ -452,11 +467,13 @@ def replay(ride, cfg):
         eff_age = fix_age + cfg["feed_latency"]
         pin_active = fix_pin is not None and eff_age <= cfg["stop_hold_age"]
 
-        # target: obs projected forward at the schedule-pace proxy.
+        # target: obs projected forward at the schedule-pace proxy, capped by
+        # cruise-reference pace exactly like tramSim.maxAdvanceM().
         if pin_active:
             s_obs = fx["dist"]
         else:
-            s_obs = fx["dist"] + v_proj * max(0.0, fix_age)
+            age = max(0.0, fix_age)
+            s_obs = fx["dist"] + min(v_proj * age, cfg["cruise_ref"] * age)
         target = s_obs - cfg["trail"]
         if pin_active:
             target = min(target, fix_pin)

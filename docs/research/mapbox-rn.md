@@ -300,21 +300,23 @@ animator.moveTo({ coordinate: [lng, lat], durationMs: 1200 });
   animator ⇒ one ShapeSource ⇒ one feature. It does NOT animate a whole FeatureCollection. So it's
   ideal for **the single selected/followed tram**, not for 200–500 at once.
 
-### 4.2 Fleet updates — JS interpolation + `ShapeSource` imperative update
+### 4.2 Fleet updates — JS interpolation + direct native `ShapeSource` update
 
 For the whole fleet (~200–500 features) at 10–30 fps, keep **one** `ShapeSource` holding a
-FeatureCollection and push new geometry each frame **imperatively** to avoid React reconciliation:
+FeatureCollection and push new geometry each frame **directly to the native source**, outside
+Fabric's ShadowTree:
 
 ```tsx
 const src = useRef<ShapeSource>(null);
 // in a requestAnimationFrame / setInterval loop (throttled to ~15–20fps):
-src.current?.setNativeProps({ shape: interpolatedFeatureCollection });
+src.current?.updateShape(interpolatedFeatureCollection);
 ```
 
-`ShapeSource.setNativeProps({ shape })` exists on the component (verified in `src/components/ShapeSource.tsx`,
-line ~248) and updates the native source without a full re-render — the standard rnmapbox pattern for
-live GeoJSON. Passing `shape` as a React prop also works but re-renders the tree; `setNativeProps` is
-cheaper for high-frequency updates.
+The app carries a `patch-package` addition to `@rnmapbox/maps` that exposes `updateShape`. It invokes
+the existing native `updateShape` command without first committing `shape` through Fabric. Do not
+pass live geometry as the declarative `shape` prop and do not use `setNativeProps({ shape })`: both
+put frame data in the ShadowTree, so an unrelated concurrent UI commit can replay an older geometry
+frame and visibly rewind models and indicators.
 
 **What runs where:**
 - Interpolation math (lerp/slerp position + bearing between server samples) runs in **JS**. Do it in a
@@ -328,7 +330,7 @@ cheaper for high-frequency updates.
    polyline (GTFS shape) so motion is smooth, not teleporting.
 2. Run the interpolation loop at **15–20 fps** (not 60) — visually smooth for slow trams, ~⅓ the bridge
    traffic of 60fps. `requestAnimationFrame` + a time accumulator; skip frames when the app backgrounds.
-3. Push via `setNativeProps({ shape })` to **one** ShapeSource feeding both the ModelLayer and the
+3. Push via `updateShape(featureCollection)` to **one** ShapeSource feeding both the ModelLayer and the
    circle/symbol fallback layers.
 4. Only render **on-screen** trams as 3D: keep the FeatureCollection full but let `ModelLayer` +
    `minZoomLevel`/`maxZoomLevel` and expressions cull; or pre-filter to viewport bbox in JS.
@@ -460,7 +462,7 @@ location, not an arbitrary feature — for a **tram** you own the coordinate, so
 
 - Standard style + 3D config: §2.1 (`StyleImport existing config`).
 - 3D model rendering: §3.1 (`Models` + `ModelLayer`, verified against `SimpleModelLayer.js`).
-- Fleet high-freq update: §4.2 (`ShapeSource.setNativeProps({ shape })`).
+- Fleet high-freq update: §4.2 (`ShapeSource.updateShape(featureCollection)`).
 - Single-tram native tween: §4.1 (`Mapbox.__experimental.MovePointShapeAnimator`).
 - Zoom-banded layers + taps: §5.
 - Follow camera: §6.1.

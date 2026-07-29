@@ -9,11 +9,10 @@
 // While a planner itinerary is shown, the whole network (lines + stops) hides
 // so ONLY the planned route + its trams remain readable; restored on clear.
 //
-// IMPORTANT (verified on-device): the sources are mounted ONCE with a stable
-// empty FeatureCollection and receive data ONLY via setNativeProps on an
-// interval — React must never commit a changing `shape` prop, or the native
-// source reverts/never applies (Fabric + rnmapbox quirk). This mirrors how the
-// tram layers push per-frame updates. (Layer STYLE props may change freely.)
+// IMPORTANT (verified on-device): these sources are mounted WITHOUT a `shape`
+// prop and receive data through rnmapbox's patched direct-native `updateShape`
+// command. `setNativeProps` is forbidden here: it creates a Fabric ShadowTree
+// commit, which can race another UI commit and replay an older map frame.
 
 import { CircleLayer, LineLayer, ModelLayer, ShapeSource, SymbolLayer } from '@rnmapbox/maps';
 import * as Haptics from 'expo-haptics';
@@ -47,8 +46,6 @@ const TOTEM_RIGHT_OFFSET_M = 2.2;
 const DEG2RAD = Math.PI / 180;
 /** Meters per degree of latitude (WGS84, good enough at a 2 m scale). */
 const M_PER_DEG_LAT = 111_320;
-
-const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 /**
  * Cheap growth detector so the expensive feature build + stringify only runs
@@ -181,10 +178,7 @@ export function RouteNetwork({ stopTotemReady = false }: RouteNetworkProps) {
     if (!totemMounted) return;
     const t = setTimeout(() => {
       if (lastTotemsRef.current) {
-        totemsRef.current?.setNativeProps({
-          id: 'route-stop-totems-src',
-          shape: lastTotemsRef.current,
-        });
+        void totemsRef.current?.updateShape(lastTotemsRef.current);
       }
     }, 60);
     return () => clearTimeout(t);
@@ -201,9 +195,9 @@ export function RouteNetwork({ stopTotemReady = false }: RouteNetworkProps) {
       fingerprintRef.current = fingerprint;
       const { routes, stops, totems } = buildFCs(geometries);
       lastTotemsRef.current = totems;
-      routesRef.current?.setNativeProps({ id: 'route-network', shape: routes });
-      stopsRef.current?.setNativeProps({ id: 'route-stops', shape: stops });
-      totemsRef.current?.setNativeProps({ id: 'route-stop-totems-src', shape: totems });
+      void routesRef.current?.updateShape(routes);
+      void stopsRef.current?.updateShape(stops);
+      void totemsRef.current?.updateShape(totems);
     };
     // First push soon after mount (cache warm from disk), then poll for growth.
     const first = setTimeout(push, 800);
@@ -302,7 +296,7 @@ export function RouteNetwork({ stopTotemReady = false }: RouteNetworkProps) {
   ];
   return (
     <>
-      <ShapeSource ref={routesRef} id="route-network" shape={EMPTY_FC}>
+      <ShapeSource ref={routesRef} id="route-network">
         <LineLayer
           id="route-lines"
           slot="top"
@@ -330,7 +324,7 @@ export function RouteNetwork({ stopTotemReady = false }: RouteNetworkProps) {
         />
       </ShapeSource>
 
-      <ShapeSource ref={stopsRef} id="route-stops" shape={EMPTY_FC} onPress={onPressStop}>
+      <ShapeSource ref={stopsRef} id="route-stops" onPress={onPressStop}>
         {stopLayers}
       </ShapeSource>
 
@@ -339,7 +333,7 @@ export function RouteNetwork({ stopTotemReady = false }: RouteNetworkProps) {
           markers above stay at the true stop coords. Mounted only once the GLB
           is registered — skipped entirely if the asset isn't shipped. */}
       {totemMounted && (
-        <ShapeSource ref={totemsRef} id="route-stop-totems-src" shape={EMPTY_FC}>
+        <ShapeSource ref={totemsRef} id="route-stop-totems-src">
           {[
             <ModelLayer
               key="route-stop-totems"
