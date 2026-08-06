@@ -1,0 +1,38 @@
+{
+  /* This TypeScript project config describes the environment that
+   * Convex functions run in and is used to typecheck them.
+   * You can modify it, but some settings required to use Convex.
+   */
+  "compilerOptions": {
+    /* These settings are not required by Convex and can be modified. */
+    "allowJs": true,
+    "strict": true,
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+    "allowSyntheticDefaultImports": true,
+
+    /* These compiler options are required by Convex */
+    "target": "ESNext",
+    "lib": ["ES2021", "dom", "dom.iterable"],
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "isolatedModules": true,
+    "noEmit": true,
+
+    /* `node` for `process.env` (how Convex exposes deployment env vars) and
+     * `geojson` because the shared `src/lib/types.ts` references the GeoJSON
+     * namespace. Neither is auto-included here the way it is in the app
+     * project, which sets its own types via expo/tsconfig.base. */
+    "types": ["node", "geojson"],
+
+    /* The shared pure modules under src/lib use the app's `@/` alias for their
+     * TYPE-ONLY imports (erased at bundle time). Mapping it here is what lets
+     * `tsc -p convex` follow them without forking the code. */
+    "paths": {
+      "@/*": ["../src/*"]
+    }
+  },
+  "include": ["./**/*"],
+  "exclude": ["./_generated"]
+}
