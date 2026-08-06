@@ -53,3 +53,7 @@ docs/calibration/sim-sessions/
 /build/
 *.ipa
 __pycache__/
+
+# Skill-installer duplicate copies (the tracked convention is .claude/skills/)
+/agent/
+/.agents/
