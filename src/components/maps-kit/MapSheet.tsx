@@ -97,7 +97,6 @@ import {
   DOCK_RADIUS,
   DOCK_WIDTH,
   cardShapeFor,
-  DOCK_TOP_EXTRA,
   FLOAT_FADE,
   GRABBER_TOP_GAP,
   HEADER_PAD_BOTTOM,
@@ -277,13 +276,13 @@ export const MapSheet = forwardRef<MapSheetHandle, MapSheetProps>(function MapSh
     [windowWidth, windowHeight, insets.top, insets.bottom],
   );
   const docked = isDockedFor(env);
-  // A DOCKED column is never hidden: on iPad/landscape a router formSheet is a
-  // centered card that does not sit over the column, so there is nothing behind
-  // anything — and sliding the column away would just delete the home surface.
-  const offstage = hidden && !docked;
+  // Both compact and regular-width sheets leave the stage when another owned
+  // sheet replaces them. The old iPad exception left two translucent panels
+  // stacked in the same side column.
+  const offstage = hidden;
   // Padding the header wrapper adds around the header itself — subtracted from
   // the onLayout height so `measuredHeaderH` stays the ROW's height.
-  const headerPadTotal = HEADER_PAD_TOP + HEADER_PAD_BOTTOM + (docked ? DOCK_TOP_EXTRA : 0);
+  const headerPadTotal = HEADER_PAD_TOP + HEADER_PAD_BOTTOM;
   // Measured height of the pinned header. Seeded from the caller's estimate so
   // the first frame is right, then corrected by onLayout — see `headerHeight`.
   const [measuredHeaderH, setMeasuredHeaderH] = useState(headerHeight);
@@ -394,13 +393,9 @@ export const MapSheet = forwardRef<MapSheetHandle, MapSheetProps>(function MapSh
   const pan = useMemo(
     () =>
       Gesture.Pan()
-        // A docked column is a fixed side panel — it has a single snap and its
-        // animated style is not even applied. Leaving the pan live only killed
-        // the list's native overscroll bounce and cancelled its scroll for the
-        // rest of the touch.
         // A hidden sheet is parked off screen — nothing under the presented
         // formSheet may still be grabbing touches.
-        .enabled(!docked && !offstage)
+        .enabled(!offstage)
         // The body ScrollView and this pan must be allowed to run at the same
         // time: which one actually moves is decided per frame in onUpdate.
         .simultaneousWithExternalGesture(nativeScroll)
@@ -442,7 +437,6 @@ export const MapSheet = forwardRef<MapSheetHandle, MapSheetProps>(function MapSh
           runOnJS(settle)(index);
         }),
     [
-      docked,
       offstage,
       nativeScroll,
       scrollRef,
@@ -512,6 +506,18 @@ export const MapSheet = forwardRef<MapSheetHandle, MapSheetProps>(function MapSh
       borderBottomRightRadius: bottomRadius,
     };
   }, [peekCardH]);
+
+  // Regular-width layout keeps the card a fixed 375 pt side sheet, but its
+  // height and dismissal travel are every bit as interactive as on iPhone.
+  // Width/radius stay static so a vertical drag never makes the side rail
+  // breathe horizontally.
+  const dockCardStyle = useAnimatedStyle(() => {
+    const travel = heightSV.value + HIDE_CLEARANCE;
+    return {
+      height: Math.max(0, heightSV.value),
+      transform: [{ translateY: travel * hideSV.value }],
+    };
+  });
 
   // THE GLASS'S OWN SHAPE — the same radii the card clips at, on the same frame.
   //
@@ -633,9 +639,8 @@ export const MapSheet = forwardRef<MapSheetHandle, MapSheetProps>(function MapSh
   // that, a drag anywhere in the sheet must move the SHEET. Applied as an
   // animated prop so the flip stays on the UI thread (no React state per
   // detent, and no stale-state window mid-drag).
-  // A docked column never resizes, so its list is an ordinary scroll view.
   const scrollProps = useAnimatedProps(
-    () => ({ scrollEnabled: docked || heightSV.value >= maxSnap - 0.5 }),
+    () => ({ scrollEnabled: heightSV.value >= maxSnap - 0.5 }),
     [maxSnap, docked],
   );
 
@@ -687,15 +692,15 @@ export const MapSheet = forwardRef<MapSheetHandle, MapSheetProps>(function MapSh
         pointerEvents={offstage ? 'none' : 'auto'}
         accessibilityElementsHidden={offstage}
         importantForAccessibility={offstage ? 'no-hide-descendants' : 'auto'}
-        style={[styles.card, docked ? styles.cardDocked : null, docked ? null : cardStyle]}
+        style={[styles.card, docked ? styles.cardDocked : null, docked ? dockCardStyle : cardStyle]}
       >
         {/* Liquid Glass surface. A sibling behind the content (not a wrapper) so
             the body ScrollView stays a plain, cheap subtree. */}
         {/* Its radii TRACK THE CARD's, frame by frame — see `glassStyle`. The
             glass is the visible surface at every detent below full, and on a
             shared box the larger radius is the tighter shape, so a glass rounder
-            than the card owns the silhouette outright. A docked column never
-            morphs, so it just takes the column's own static radius. */}
+            than the card owns the silhouette outright. The iPad rail changes
+            height but keeps one static outline radius. */}
         <AnimatedGlassPanel
           variant="regular"
           appearance={appearance}
@@ -707,7 +712,12 @@ export const MapSheet = forwardRef<MapSheetHandle, MapSheetProps>(function MapSh
             everything else in here. */}
         <Animated.View
           pointerEvents="none"
-          style={[styles.solid, { backgroundColor: solidColor }, solidStyle]}
+          style={[
+            styles.solid,
+            { backgroundColor: solidColor },
+            solidStyle,
+            docked ? styles.solidDocked : null,
+          ]}
         />
 
         {/* Content block: FIXED height, anchored to the card's top. The card box
@@ -720,11 +730,10 @@ export const MapSheet = forwardRef<MapSheetHandle, MapSheetProps>(function MapSh
             the ScrollView. `onUpdate` decides per frame which one moves, so
             content still scrolls normally once the sheet is fully open. */}
         <GestureDetector gesture={pan}>
-          <View style={[styles.content, docked ? { bottom: 0 } : { height: maxSnap }]}>
+          <View style={[styles.content, { height: maxSnap }]}>
             <View
               style={[
                 styles.headerWrap,
-                docked ? styles.headerWrapDocked : null,
                 // Floor at the caller's estimate: even if the row mismeasures to
                 // zero (the observed mount race — see styles.headerWrap), the
                 // column still reserves the header band, so the body can never
@@ -746,8 +755,7 @@ export const MapSheet = forwardRef<MapSheetHandle, MapSheetProps>(function MapSh
                   `userInteractionEnabled`, which UIAccessibility ignores, so the
                   row is still focusable and still actionable while the pan (and
                   the search field GRABBER_TO_FIELD below it) keep every touch. */}
-              {!docked && (
-                <View
+              <View
                   pointerEvents="none"
                   accessible
                   accessibilityRole="adjustable"
@@ -768,7 +776,6 @@ export const MapSheet = forwardRef<MapSheetHandle, MapSheetProps>(function MapSh
                       families cannot disagree about its size or tint. */}
                   <GrabberPill />
                 </View>
-              )}
               {header}
             </View>
 
@@ -831,7 +838,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: SHEET_RADIUS,
     overflow: 'hidden',
   },
-  cardDocked: { top: 0, left: 0, right: 0, borderRadius: DOCK_RADIUS },
+  cardDocked: { left: 0, right: 0, borderRadius: DOCK_RADIUS },
   // NO radius here — `glassStyle` supplies all four, per frame, from the same
   // `cardShapeFor` the card clips with. Every static value that was tried in this
   // slot was wrong at one end of the drag or the other:
@@ -844,12 +851,14 @@ const styles = StyleSheet.create({
   //    the card asked for 38 / 52.5). It only looked right at the bar, where
   //    CALayer clamps it to h/2 and the card is a capsule anyway.
   glass: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  // A docked column has one static shape; `cardDocked` clips at the same value.
+  // The iPad rail changes height but keeps one static shape; `cardDocked` clips
+  // at the same value.
   glassDocked: { borderRadius: DOCK_RADIUS },
   // The opaque page fill for the largest detent, over the glass and under the
   // content. Its colour is per-appearance (a render-time prop) and its opacity is
   // a worklet of the drag — see `solidStyle`.
   solid: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  solidDocked: { opacity: 0 },
   content: { position: 'absolute', top: 0, left: 0, right: 0 },
   // Padding around the header row: at the peek detent this block is EXACTLY the
   // visible card (15 + row + 14), so no body content peeks out under the search
@@ -865,9 +874,6 @@ const styles = StyleSheet.create({
   // overlapping body can never take the header's touches, and an inline
   // minHeight (see the JSX) keeps the column from ever collapsing the band.
   headerWrap: { paddingTop: HEADER_PAD_TOP, paddingBottom: HEADER_PAD_BOTTOM, zIndex: 2 },
-  // A docked column has no grabber above the row, so it needs that inset back —
-  // otherwise the search field sits flush against the column's rounded top edge.
-  headerWrapDocked: { paddingTop: HEADER_PAD_TOP + DOCK_TOP_EXTRA },
   // Full-width row so the pill is centred by ordinary flex layout — `alignSelf`
   // on an absolutely positioned child is not a reliable way to centre it.
   grabberRow: {

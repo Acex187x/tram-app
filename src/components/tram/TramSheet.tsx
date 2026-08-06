@@ -234,12 +234,8 @@ function TramHeader({ state, onClose }: { state: TramPublicState; onClose: () =>
  * it has itself gone solid and a glass capsule reads as the floating layer
  * again).
  *
- * The gray was BLACK until this pass, and the user's report of it was blunt:
- * "сильно чёрный, надо сделать серый как в эпл картах". Sampling Apple's own
- * pill agreed — ours measured a flat luma 0.00, Apple's 33–42 over the same
- * kind of content. `ACTION_PILL.fill` carries the measured replacement, and it
- * stays translucent, so the timeline still reads faintly through the capsule
- * exactly as the photos do through Apple's.
+ * The overlay uses an adaptive system gray rather than black. It stays
+ * translucent so the timeline remains faintly visible beneath the capsule.
  *
  * The glass NEVER changes alpha — that is the UIVisualEffectView hazard
  * documented in `sheetLook.ts` (a round trip through fractional alpha loses the
@@ -247,10 +243,8 @@ function TramHeader({ state, onClose }: { state: TramPublicState; onClose: () =>
  * `MapSheet` does it for the sheet surface, and the whole thing is one worklet
  * over `heightSV` with zero React per frame (perf invariant #1).
  *
- * The glass is pinned to the DARK appearance rather than the system scheme:
- * the glyphs are white at both ends of the crossfade (they have to be — they are
- * white on the black capsule), and white on LIGHT glass over the light-mode
- * solid page fill would be invisible.
+ * Both glass and glyphs follow the system scheme. The animated gray sibling
+ * uses the matching light/dark fill, so the crossfade cannot mix appearances.
  */
 function ActionPill({
   isFavorite,
@@ -268,6 +262,8 @@ function ActionPill({
   heightSV: SharedValue<number>;
   snapsSV: SharedValue<number[]>;
 }) {
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const c = appleScheme(scheme);
   // 1 = the gray fill showing (bar / card detents), 0 = pure glass (fully open).
   const grayStyle = useAnimatedStyle(() => ({
     opacity: 1 - lastLegFor(heightSV.value, snapsSV.value),
@@ -289,14 +285,24 @@ function ActionPill({
       onPress={onPress}
       style={({ pressed }) => [styles.pillButton, { opacity: pressed ? 0.55 : 1 }]}
     >
-      <SymbolView name={symbol} size={ACTION_PILL.glyph} weight="medium" tintColor="#FFFFFF" />
+      <SymbolView name={symbol} size={ACTION_PILL.glyph} weight="medium" tintColor={c.text} />
     </Pressable>
   );
 
   return (
     <View style={styles.pill}>
-      <GlassPanel variant="regular" interactive appearance="dark" style={styles.pillFill} />
-      <Animated.View pointerEvents="none" style={[styles.pillFill, styles.pillFillGray, grayStyle]} />
+      <GlassPanel variant="regular" interactive style={styles.pillFill} />
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.pillFill,
+          {
+            backgroundColor:
+              scheme === 'dark' ? 'rgba(44,44,46,0.88)' : 'rgba(242,242,247,0.88)',
+          },
+          grayStyle,
+        ]}
+      />
       <View style={styles.pillRow}>
         {button(
           'favorite',
@@ -401,12 +407,17 @@ function HonestyLine({
   const c = appleScheme(scheme);
   const debugMode = useSettingsStore((s) => s.debugMode);
 
+  // Three-way per engine-v2.md §2.7: raw = the fix itself, live = the
+  // engine's estimate of the real tram, smooth = the cinematic sim (which is
+  // the only synthesized quantity worth quantifying against the fix).
   const text =
-    positionMode === 'live'
+    positionMode === 'raw'
       ? 'Showing raw reported position'
-      : deviationM != null
-        ? `Sim offset ±${Math.round(deviationM)} m from last fix`
-        : null;
+      : positionMode === 'live'
+        ? 'Showing estimated real-time position'
+        : deviationM != null
+          ? `Sim offset ±${Math.round(deviationM)} m from last fix`
+          : null;
 
   if (!debugMode || text == null) return null;
   return (
@@ -743,7 +754,6 @@ const styles = StyleSheet.create({
    * slab where Apple has a translucent gray one. `ACTION_PILL.fill` is the
    * measured replacement; see `sheetLook.ts` for the samples.
    */
-  pillFillGray: { backgroundColor: ACTION_PILL.fill },
   pillRow: {
     flexDirection: 'row',
     alignItems: 'center',

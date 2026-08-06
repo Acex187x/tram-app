@@ -14,10 +14,9 @@ import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, StyleSheet, Text, useColorScheme, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { resolveLightPreset } from '@/components/map/mapStyle';
 import { DOCK_INSET, DOCK_WIDTH, isDocked } from '@/components/maps-kit/mapSheetLayout';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { LineBadge } from '@/components/ui/LineBadge';
@@ -32,7 +31,6 @@ import {
   type GuidanceProgress,
 } from '@/lib/planner/guidance';
 import { usePlannerStore, type GuidanceSession } from '@/stores/planner';
-import { useSettingsStore } from '@/stores/settings';
 
 export function GuidanceBanner() {
   const session = usePlannerStore((s) => s.guidance);
@@ -64,16 +62,7 @@ function ActiveBanner({
     return () => clearInterval(id);
   }, []);
 
-  // This card floats over the BASEMAP, so its appearance follows the map's
-  // resolved light preset, never the system scheme (MapChrome.tsx's rule; see
-  // docs/decisions/ux-screens.md §3.1a) — otherwise a dark-mode phone over a
-  // daytime map renders dark glass right next to the light status tile. The
-  // rest of the chrome reads this from MapChromeSchemeContext, but the banner
-  // is mounted inside the MapView via PlannerOverlay, outside that provider, so
-  // it resolves the preset itself off the 1 Hz clock it already keeps.
-  const lightPresetSetting = useSettingsStore((s) => s.lightPreset);
-  const lightPreset = resolveLightPreset(lightPresetSetting, nowMs);
-  const scheme = lightPreset === 'dusk' || lightPreset === 'night' ? 'dark' : 'light';
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = Colors[scheme];
   const c = appleScheme(scheme);
   const accent = scheme === 'dark' ? Tram.gold : Tram.pidRed;
@@ -183,7 +172,13 @@ function ActiveBanner({
       style={[styles.wrap, { top: insets.top + 54, left: leftInset }]}
       pointerEvents="box-none"
     >
-      <GlassPanel variant="regular" interactive appearance={scheme} style={styles.card}>
+      <GlassPanel
+        variant="regular"
+        interactive
+        readableOverContent
+        appearance={scheme}
+        style={styles.card}
+      >
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Journey guidance: ${title}. Open planner.`}

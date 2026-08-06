@@ -139,7 +139,7 @@ export interface TramPublicState {
 
 /**
  * Additive, on-demand debug view of one tram's INTERNAL sim state
- * (engine.getDebugInfo — debug overlay only, ~1 Hz, never the frame path).
+ * (engine.getDebugInfo — debug overlay only, 10 Hz, never the map frame path).
  * Diagnostics only; nothing here feeds rendering. All distances are
  * along-shape meters; speeds km/h.
  */
@@ -149,11 +149,15 @@ export interface SimDebugInfo {
   phase: 'cruise' | 'dwell' | 'terminal' | 'unknown';
   simDistM: number;
   simSpeedKmh: number;
-  /** Pace-controller target (obs-primary blend − trail bias), m. null w/o sim. */
+  /** The smoother's reference (sPred − active trail), m. null w/o sim. */
   targetDistM: number | null;
-  /** e = target − simDist, m. POSITIVE = sim BEHIND target (catching up),
-   *  NEGATIVE = sim AHEAD of reality (easing off). null w/o sim. */
-  errorM: number | null;
+  /** errPred = (sPred − trail) − simDist, m. POSITIVE = smoother BEHIND the
+   *  predictor (catching up), NEGATIVE = smoother ahead (yielding). null w/o
+   *  sim. Replaces v1's schedule-blend-target errorM. */
+  errPredM: number | null;
+  /** Smoother regime chosen by the last tick (engine-v2.md §2.3 table).
+   *  Replaces v1's crawling/deepCrawl/burstActive/skipRollActive latches. */
+  regime: 'hold-follow' | 'track' | 'catchup' | 'yield' | null;
   /** Learned per-tram pace multiplier (1 = profile pace). null w/o sim. */
   paceBias: number | null;
   /** Braking-envelope/curve/stop speed cap at the current position, km/h
@@ -162,23 +166,15 @@ export interface SimDebugInfo {
   /** Zone/curve cruise cap at the current position, km/h (what open-track
    *  cruising aims at). vAllowed < cruiseCap ⇒ braking for a curve/stop. */
   cruiseCapKmh: number | null;
-  /** Ahead-regime soft-yield latch active (sim ran ahead of reality). */
-  crawling: boolean;
-  /** Deep-ahead walking-pace backstop latch active. */
-  deepCrawl: boolean;
-  /** Stuck-hold anchor (jam/light), m along shape, or null. */
+  /** Predictor stuck-hold anchor (jam/light), m along shape, or null. */
   stuckAtM: number | null;
-  /** Junction-yield hold point, m along shape, or null. */
+  /** Junction-yield hold point on the RENDERED layer, m along shape, or null. */
   yieldHoldM: number | null;
   /** Platform the latest fix pins the tram at, m along shape, or null. */
   fixStopDistM: number | null;
   /** Whether that fix-pin is still fresh enough to be authoritative. */
   fixPinActive: boolean;
-  /** Inside a post-dwell departure burst. */
-  burstActive: boolean;
-  /** Rolling through a skipped stop's zone. */
-  skipRollActive: boolean;
-  /** Wall-clock ms the current dwell ends (0 outside 'dwell'). */
+  /** Wall-clock ms the current dwell may release (0 outside 'dwell'). */
   dwellUntilMs: number;
   /** Latest raw AVL fix distance along shape, m. */
   obsDistM: number;
@@ -191,16 +187,16 @@ export interface SimDebugInfo {
   /** Live-projection (dead-reckoned raw fix) distance, m, or null. */
   projDistM: number | null;
 
-  // ── additive raw-internals extensions (60 fps debug overlay) ───────────────
+  // ── additive raw-internals extensions (10 Hz debug overlay) ────────────────
   // Diagnostics only — nothing below influences rendering or the simulation.
   // Appended so existing consumers (and the on-disk debug shape) stay valid.
 
   /** Sim speed, m/s (simSpeedKmh / 3.6, exposed raw alongside km/h). */
   simSpeedMs: number;
   /**
-   * Cruise AIM before the catch-up factor/burst, km/h:
-   * min(cruiseCap, V_CRUISE_REF) · paceBias · todPace — the speed a normally
-   * tracking sim cruises toward (still clamped by vAllowed). null w/o sim.
+   * The PREDICTOR's cruise product, km/h: min(cruiseCap, V_CRUISE_REF) ·
+   * paceBias · todPace — the pace reality is estimated to move at (still
+   * clamped by vAllowed). null w/o sim.
    */
   cruiseTargetKmh: number | null;
   /** Zone speed cap at the current position (centre 31 vs network 50), km/h. null w/o sim. */
@@ -217,8 +213,6 @@ export interface SimDebugInfo {
   staleFixAgeMs: number;
   /** Distance below which stops are ignored as 0-limits (served/passed), m. null w/o sim. */
   minStopDistM: number | null;
-  /** Departure-burst end along shape, m (0 = none). */
-  burstUntilM: number;
   /** Skip-roll zone end along shape, m (0 = none). */
   skipRollUntilM: number;
   /** Physical tram length incl. any coupled trailer, m. null w/o sim. */

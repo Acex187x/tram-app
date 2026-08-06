@@ -1,8 +1,7 @@
-// /planner — journey planner form sheet floating over the live map.
-// Pick two stops (or a recent pair / your nearest stop), plan over the tram
-// network graph built from loaded geometries, then hand the chosen itinerary to
-// the map via usePlannerStore. Google-Maps-style: recent searches, nearest-stop
-// fill, live departure/arrival wall times with a 1 Hz 'in N min' countdown.
+// /planner — Tram Spotter's route-and-vehicle matcher. Pick two stops (or a
+// recent pair / your nearest stop), plan over the loaded tram graph, then show
+// the exact live vehicle assigned to every leg before handing the route to the
+// map via usePlannerStore.
 //
 // Surface: <SheetSurface/>, the shared route-sheet scaffold. The root used to be
 // a GlassPanel with its own hand-coded borderRadius: 24 — glass-on-glass over
@@ -29,10 +28,9 @@ import {
 } from 'react-native';
 
 import { GuidanceStepper } from '@/components/planner/GuidanceStepper';
-import { ItineraryCard } from '@/components/planner/ItineraryCard';
+import { ItineraryCard, RouteVehicleRoster } from '@/components/planner/ItineraryCard';
 import { RecentRoutes } from '@/components/planner/RecentRoutes';
 import { StopSearchCard } from '@/components/planner/StopSearchCard';
-import { SegmentedPills, type PillSegment } from '@/components/ui/SegmentedPills';
 import { SheetHeader } from '@/components/ui/SheetHeader';
 import { SheetSurface } from '@/components/ui/SheetSurface';
 import { appleScheme, Radii, Spacing, TextScale, Tram } from '@/constants/theme';
@@ -54,16 +52,6 @@ import { usePlannerStore } from '@/stores/planner';
 type PlanError =
   | { type: 'same' }
   | { type: 'unknown'; field: 'from' | 'to'; name: string };
-
-// Transport-mode selector (IMG_0080). Only tram is real; the rest are display-
-// only flavor (greyed), matching Apple's mode row.
-const MODE_SEGMENTS: PillSegment[] = [
-  { key: 'drive', symbol: 'car.fill', disabled: true },
-  { key: 'walk', symbol: 'figure.walk', disabled: true },
-  { key: 'tram', symbol: 'tram.fill', label: 'Transit' },
-  { key: 'bike', symbol: 'bicycle', disabled: true },
-  { key: 'ride', symbol: 'figure.wave', disabled: true },
-];
 
 interface RankedResult {
   itinerary: PlannerItinerary;
@@ -452,7 +440,7 @@ export default function PlannerScreen() {
 
   return (
     <SheetSurface
-      header={<SheetHeader title="Directions" onClose={handleClose} />}
+      header={<SheetHeader title="Find your tram" onClose={handleClose} />}
       contentContainerStyle={styles.scrollContent}
       scrollProps={SCROLL_PROPS}
     >
@@ -475,6 +463,7 @@ export default function PlannerScreen() {
                   </Text>
                 </View>
               </View>
+              <RouteVehicleRoster itinerary={itinerary} timing={activeTiming} nowMs={nowMs} />
               <View style={styles.activeActions}>
                 {!guidance && (
                   <Pressable
@@ -518,8 +507,6 @@ export default function PlannerScreen() {
             />
           ) : (
             <>
-              <SegmentedPills segments={MODE_SEGMENTS} selectedKey="tram" onChange={() => {}} size="lg" />
-
               <StopSearchCard
                 from={from}
                 to={to}
@@ -538,16 +525,16 @@ export default function PlannerScreen() {
                 onPress={handlePlan}
                 disabled={!canPlan}
                 accessibilityRole="button"
-                accessibilityLabel="Plan route"
+                accessibilityLabel="Match trams for this route"
                 accessibilityState={{ disabled: !canPlan }}
                 style={({ pressed }) => [
                   styles.planButton,
                   { backgroundColor: c.blue, opacity: !canPlan ? 0.4 : pressed ? 0.82 : 1 },
                 ]}
               >
-                <SymbolView name="arrow.triangle.turn.up.right.diamond.fill" size={17} weight="semibold" tintColor="#FFFFFF" />
+                <SymbolView name="tram.fill" size={17} weight="semibold" tintColor="#FFFFFF" />
                 <Text style={styles.planButtonText}>
-                  {results && results.length > 0 ? 'Update Route' : 'Find Routes'}
+                  {results && results.length > 0 ? 'Rematch Trams' : 'Match Trams'}
                 </Text>
               </Pressable>
 
@@ -593,7 +580,7 @@ export default function PlannerScreen() {
               ) : (
                 <View style={styles.results}>
                   <Text style={[styles.sectionLabel, { color: c.secondary }]}>
-                    ROUTES · EARLIEST ARRIVAL FIRST
+                    YOUR TRAMS · EARLIEST ARRIVAL FIRST
                   </Text>
                   {ranked.map(({ itinerary: it, timing, walkS, leaveByMs }, i) => (
                     <ItineraryCard

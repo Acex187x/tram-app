@@ -521,17 +521,20 @@ describe('snapHeights', () => {
     expect([...snaps].sort((a, b) => a - b)).toEqual(snaps);
   });
 
-  it('collapses to a single fixed height when docked', () => {
-    expect(snapHeights(PAD)).toHaveLength(1);
+  it('keeps all three detents in the regular-width side sheet', () => {
+    expect(snapHeights(PAD)).toHaveLength(3);
   });
 
-  it('docks to a column inset from the top and bottom, ignoring the header', () => {
-    // The column has one height, so the sheet never drags — which is why the pan
-    // is disabled while docked. Neither a different header nor the tram card's
-    // middle detent may move it.
-    expect(snapHeights(PAD)).toEqual([PAD.windowHeight - PAD.insetTop - DOCK_INSET * 2]);
-    expect(snapHeights(PAD, 52)).toEqual(snapHeights(PAD, SEARCH_H));
-    expect(snapHeights(PAD, 52, CARD_DETENT)).toEqual(snapHeights(PAD, SEARCH_H));
+  it('caps the side sheet at its inset container and still reacts to header/detent inputs', () => {
+    const snaps = snapHeights(PAD);
+    expect(snaps[0]).toBe(peekHeight(PAD));
+    expect(snaps[1]).toBeCloseTo(PAD.windowHeight * HOME_DETENT, 5);
+    expect(snaps[2]).toBe(PAD.windowHeight - PAD.insetTop - DOCK_INSET * 2);
+    expect(snapHeights(PAD, 52)[0]).toBe(peekHeight(PAD, 52));
+    expect(snapHeights(PAD, 52, CARD_DETENT)[1]).toBeCloseTo(
+      PAD.windowHeight * CARD_DETENT,
+      5,
+    );
   });
 
   it('never emits duplicate or unsorted snaps on a very short window', () => {

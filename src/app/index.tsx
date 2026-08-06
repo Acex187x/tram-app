@@ -29,7 +29,7 @@ import * as Location from 'expo-location';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Settings, StyleSheet, useColorScheme, useWindowDimensions, View } from 'react-native';
 import {
   runOnJS,
   useAnimatedReaction,
@@ -48,6 +48,7 @@ import {
   MapStatusTile,
 } from '@/components/map/MapChrome';
 import { DebugOverlay } from '@/components/debug/DebugOverlay';
+import { DebugMapTraces } from '@/components/debug/DebugMapTraces';
 import { MapSheet } from '@/components/maps-kit/MapSheet';
 import {
   CARD_DETENT,
@@ -69,6 +70,7 @@ import { TramLayers, type FollowGestureState } from '@/components/map/TramLayers
 import { orientationFromCamera, shouldPauseFollow } from '@/components/map/followCamera';
 import { useTramModels } from '@/components/map/useTramModels';
 import { getRuntime, useTramRuntime } from '@/hooks/tramData';
+import { simulatorPerfScenario } from '@/lib/performance/simulatorScenario';
 import type { Viewport } from '@/lib/types';
 import { useSelectionStore } from '@/stores/selection';
 import { useSettingsStore } from '@/stores/settings';
@@ -79,6 +81,13 @@ Mapbox.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_KEY ?? null);
 const PRAGUE_CENTER: [number, number] = [14.42, 50.082];
 const INITIAL_ZOOM = 13.8;
 const INITIAL_PITCH = 45;
+/**
+ * Mapbox otherwise selects an adaptive ceiling up to the device's ProMotion
+ * refresh rate. Fleet geometry only changes at <=30 Hz; keeping native map
+ * gestures/camera animations at 60 Hz preserves fluid interaction without
+ * paying for 120 Metal draws per second on Pro devices.
+ */
+const MAP_MAX_FPS = 60;
 const INITIAL_VIEWPORT: Viewport = {
   bbox: [14.32, 50.03, 14.52, 50.14],
   zoom: INITIAL_ZOOM,
@@ -280,6 +289,7 @@ export default function MapScreen() {
   const [styleLoaded, setStyleLoaded] = useState(false);
   const [locationGranted, setLocationGranted] = useState(false);
   const modelUris = useTramModels();
+  const systemScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
 
   // ── Light preset: settings override or Prague time-of-day, refreshed 5-min ─
   const lightPresetSetting = useSettingsStore((s) => s.lightPreset);
@@ -291,10 +301,10 @@ export default function MapScreen() {
     return () => clearInterval(iv);
   }, []);
   const lightPreset = resolveLightPreset(lightPresetSetting, lightClock);
-  // The chrome floats over the BASEMAP, so its light/dark appearance follows
-  // the map's light preset — NOT the system scheme (a dark-mode phone over a
-  // daytime map used to render white icons on white glass).
-  const chromeScheme = lightPreset === 'dusk' || lightPreset === 'night' ? 'dark' : 'light';
+  // UI chrome always follows the device appearance. The basemap may keep its
+  // independent time-of-day lighting, but it must never silently flip buttons,
+  // sheets or status glyphs into another theme.
+  const chromeScheme = systemScheme;
 
   // ── Splash: hide when the base map is in, failsafe either way ──────────────
   const hideSplash = useCallback(() => {
@@ -325,7 +335,7 @@ export default function MapScreen() {
       pitch: state.properties.pitch,
       heading: state.properties.heading,
     };
-    // Zoom-adaptive simulation rate (thermal): 60 Hz in the glide band
+    // Zoom-adaptive simulation rate (thermal): 30 Hz in the glide band
     // (hysteresis inside setDetailZoom), ~10 Hz at far zooms.
     getRuntime().setDetailZoom(zoom);
 
@@ -350,6 +360,31 @@ export default function MapScreen() {
       setLocating(false);
     }
   }, []);
+
+  // CLI-only deterministic camera setup. `simctl launch` writes its `-key
+  // value` arguments into the process's NSUserDefaults argument domain, which
+  // React Native exposes through Settings. This stays fully mouse-free and
+  // avoids iOS's custom-URL confirmation alert. Production ignores the hook.
+  useEffect(() => {
+    // Camera commands sent before the native style is ready are dropped. Do
+    // not switch the runtime cadence early either: the measured zoom and the
+    // simulated workload must always describe the same scenario.
+    if (!__DEV__ || !styleLoaded) return;
+    const scenario = simulatorPerfScenario(Settings.get('TramPerfScenario'));
+    if (!scenario) return;
+    cameraRef.current?.setCamera({
+      centerCoordinate: scenario.centerCoordinate,
+      zoomLevel: scenario.zoomLevel,
+      pitch: scenario.pitch,
+      heading: scenario.heading,
+      animationMode: 'none',
+      animationDuration: 0,
+    });
+    getRuntime().setDetailZoom(scenario.zoomLevel);
+    console.info(
+      `[perf-benchmark] scenario=${scenario.id} zoom=${scenario.zoomLevel} pitch=${scenario.pitch}`,
+    );
+  }, [styleLoaded]);
 
   // ── One-shot fly-to requests from search/line/favorites sheets ─────────────
   const flyToTarget = useSelectionStore((s) => s.flyToTarget);
@@ -448,6 +483,7 @@ export default function MapScreen() {
       <MapView
         style={styles.map}
         styleURL="mapbox://styles/mapbox/standard"
+        preferredFramesPerSecond={MAP_MAX_FPS}
         scaleBarEnabled={false}
         // Keep required Mapbox ornaments clear of the BottomDock (centre) and
         // the bottom cluster (chips + locate): pin both to the bottom-left corner.
@@ -510,13 +546,14 @@ export default function MapScreen() {
           followGestureRef={followGestureRef}
           modelUris={modelUris}
         />
+        {/* Game-style in-world diagnostics: raw AVL fix, projected live and
+            smooth physics positions with short motion trails. Native source
+            updates keep this out of Fabric's frame history. */}
+        {debugMode && <DebugMapTraces />}
         {locationGranted && <LocationPuck puckBearingEnabled puckBearing="heading" />}
       </MapView>
 
-      {/* The clock/battery glyphs float over the raw basemap (the map is
-          full-bleed), so they follow the light preset like the rest of the
-          over-basemap chrome — not the system scheme, which would put white
-          glyphs on a daytime map for a dark-mode phone. */}
+      {/* Status and every other UI surface follow the device theme. */}
       <StatusBar style={chromeScheme === 'dark' ? 'light' : 'dark'} animated />
 
       <MapChromeSchemeContext.Provider value={chromeScheme}>
@@ -542,12 +579,15 @@ export default function MapScreen() {
           modal one: that is what lets the map read through it, lets the chrome
           ride with the drag frame-by-frame, lets Settings/search present
           instantly over it, and lets it dock as a column on iPad. Its pinned
-          header is ALWAYS the search row. The sheet is an app surface, so it
-          follows the SYSTEM scheme; only the chrome floating over the basemap
-          follows the map light preset. */}
+          header is ALWAYS the compact product/search row. Every UI surface,
+          including floating map chrome, follows the SYSTEM scheme. */}
       <MapSheet
         heightSV={sheetHeight}
         onSnapsChange={setSheetSnaps}
+        // The regular-width workspace opens tall, but remains a real sheet: the
+        // grabber can pull it through medium down to the compact product bar.
+        // Phones keep their compact launch state.
+        initialSnapIndex={sheetDocked ? 2 : 0}
         // Parked off screen while a tram card is on stage — it is translucent,
         // so leaving it up would show the search row through the card's glass.
         // A transform, not an unmount: the return trip is a morph.

@@ -1,0 +1,289 @@
+{
+  "generatedAt": "2026-08-01T18:04:24.163Z",
+  "engineGitDescribe": "332ad73-dirty",
+  "engine": "v2 (predictor + smoother)",
+  "runner": {
+    "script": "scripts/calibration/replay-v2.ts",
+    "tickMs": 250,
+    "pollMs": 5000,
+    "projectionCadence": "full",
+    "offGateM": 30,
+    "resampleM": 8,
+    "delaySecondsForcedZero": true
+  },
+  "perRide": {
+    "20260720-193029-9097.jsonl": {
+      "meta": {
+        "file": "20260720-193029-9097.jsonl",
+        "line": "17",
+        "model": "kt8d5",
+        "tramKey": "9097",
+        "tripId": "17_37561_260713",
+        "points": 2240,
+        "truthPoints": 2219,
+        "stops": 24,
+        "fixes": 51,
+        "spanM": [
+          9708,
+          22984
+        ]
+      },
+      "sim": {
+        "n": 2219,
+        "meanAbs": 134.66,
+        "p50Abs": 123.83,
+        "p90Abs": 264.87,
+        "signedMean": -79.31,
+        "pctAhead": 19.83
+      },
+      "proj": {
+        "n": 2219,
+        "meanAbs": 93.87,
+        "p50Abs": 83.1,
+        "p90Abs": 188.38,
+        "signedMean": -44.18,
+        "pctAhead": 34.97
+      },
+      "halves": {
+        "sim": {
+          "first": {
+            "n": 1109,
+            "meanAbs": 144.88,
+            "p50Abs": 127.34,
+            "p90Abs": 301.06,
+            "signedMean": -43.2,
+            "pctAhead": 24.35
+          },
+          "second": {
+            "n": 1110,
+            "meanAbs": 124.46,
+            "p50Abs": 120.26,
+            "p90Abs": 229.82,
+            "signedMean": -115.39,
+            "pctAhead": 15.32
+          }
+        }
+      }
+    },
+    "20260728-172812-9507.jsonl": {
+      "meta": {
+        "file": "20260728-172812-9507.jsonl",
+        "line": "12",
+        "model": "52t",
+        "tramKey": "9507",
+        "tripId": "12_21031_260713",
+        "points": 1079,
+        "truthPoints": 1066,
+        "stops": 14,
+        "fixes": 30,
+        "spanM": [
+          3300,
+          9843
+        ]
+      },
+      "sim": {
+        "n": 1065,
+        "meanAbs": 137.83,
+        "p50Abs": 110.73,
+        "p90Abs": 311.76,
+        "signedMean": -105.16,
+        "pctAhead": 24.98
+      },
+      "proj": {
+        "n": 1065,
+        "meanAbs": 117.56,
+        "p50Abs": 94.19,
+        "p90Abs": 291.63,
+        "signedMean": -73.96,
+        "pctAhead": 39.81
+      },
+      "halves": {
+        "sim": {
+          "first": {
+            "n": 532,
+            "meanAbs": 96.05,
+            "p50Abs": 91.32,
+            "p90Abs": 193.31,
+            "signedMean": -36.24,
+            "pctAhead": 41.17
+          },
+          "second": {
+            "n": 533,
+            "meanAbs": 179.54,
+            "p50Abs": 161.55,
+            "p90Abs": 380.96,
+            "signedMean": -173.95,
+            "pctAhead": 8.82
+          }
+        }
+      }
+    },
+    "20260728-182204-9506.jsonl": {
+      "meta": {
+        "file": "20260728-182204-9506.jsonl",
+        "line": "12",
+        "model": "52t",
+        "tramKey": "9506",
+        "tripId": "12_21079_260713",
+        "points": 551,
+        "truthPoints": 551,
+        "stops": 7,
+        "fixes": 16,
+        "spanM": [
+          3715,
+          6829
+        ]
+      },
+      "sim": {
+        "n": 550,
+        "meanAbs": 157.82,
+        "p50Abs": 118.85,
+        "p90Abs": 341.42,
+        "signedMean": -155.03,
+        "pctAhead": 7.45
+      },
+      "proj": {
+        "n": 550,
+        "meanAbs": 142.31,
+        "p50Abs": 111.33,
+        "p90Abs": 382.55,
+        "signedMean": -67.87,
+        "pctAhead": 52.73
+      },
+      "halves": {
+        "sim": {
+          "first": {
+            "n": 275,
+            "meanAbs": 201.74,
+            "p50Abs": 202.9,
+            "p90Abs": 335.7,
+            "signedMean": -198.87,
+            "pctAhead": 6.18
+          },
+          "second": {
+            "n": 275,
+            "meanAbs": 113.89,
+            "p50Abs": 70.4,
+            "p90Abs": 399.56,
+            "signedMean": -111.19,
+            "pctAhead": 8.73
+          }
+        }
+      }
+    }
+  },
+  "aggregate": {
+    "sim": {
+      "n": 3834,
+      "meanAbs": 138.87,
+      "p50Abs": 118.5,
+      "p90Abs": 293.28,
+      "signedMean": -97.36,
+      "pctAhead": 19.48
+    },
+    "proj": {
+      "n": 3834,
+      "meanAbs": 107.4,
+      "p50Abs": 86.9,
+      "p90Abs": 223.01,
+      "signedMean": -55.85,
+      "pctAhead": 38.86
+    },
+    "halves": {
+      "sim": {
+        "first": {
+          "n": 1916,
+          "meanAbs": 139.48,
+          "p50Abs": 121.71,
+          "p90Abs": 296.29,
+          "signedMean": -63.61,
+          "pctAhead": 26.41
+        },
+        "second": {
+          "n": 1918,
+          "meanAbs": 138.25,
+          "p50Abs": 116.03,
+          "p90Abs": 285.32,
+          "signedMean": -131.06,
+          "pctAhead": 12.57
+        }
+      }
+    }
+  },
+  "atFix": {
+    "perRide": {
+      "20260720-193029-9097.jsonl": {
+        "sim": {
+          "n": 50,
+          "meanAbs": 103.64,
+          "p50Abs": 79.52,
+          "p90Abs": 187.85,
+          "signedMean": -31.53,
+          "pctAhead": 26
+        },
+        "proj": {
+          "n": 50,
+          "meanAbs": 94.44,
+          "p50Abs": 74.43,
+          "p90Abs": 198.64,
+          "signedMean": 4.67,
+          "pctAhead": 36
+        }
+      },
+      "20260728-172812-9507.jsonl": {
+        "sim": {
+          "n": 29,
+          "meanAbs": 141.28,
+          "p50Abs": 112.24,
+          "p90Abs": 316.31,
+          "signedMean": -61.2,
+          "pctAhead": 34.48
+        },
+        "proj": {
+          "n": 29,
+          "meanAbs": 113.52,
+          "p50Abs": 93.76,
+          "p90Abs": 314.29,
+          "signedMean": -46.92,
+          "pctAhead": 27.59
+        }
+      },
+      "20260728-182204-9506.jsonl": {
+        "sim": {
+          "n": 15,
+          "meanAbs": 143.19,
+          "p50Abs": 66.9,
+          "p90Abs": 332.82,
+          "signedMean": -114.24,
+          "pctAhead": 26.67
+        },
+        "proj": {
+          "n": 15,
+          "meanAbs": 164.41,
+          "p50Abs": 119,
+          "p90Abs": 385.5,
+          "signedMean": -67.97,
+          "pctAhead": 46.67
+        }
+      }
+    },
+    "aggregate": {
+      "sim": {
+        "n": 94,
+        "meanAbs": 121.56,
+        "p50Abs": 88.16,
+        "p90Abs": 314.23,
+        "signedMean": -53.88,
+        "pctAhead": 28.72
+      },
+      "proj": {
+        "n": 94,
+        "meanAbs": 111.49,
+        "p50Abs": 84.68,
+        "p90Abs": 291.64,
+        "signedMean": -22.84,
+        "pctAhead": 35.11
+      }
+    }
+  }
+}

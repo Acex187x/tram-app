@@ -6,7 +6,7 @@
 // tick loop, engine ingest, and exposes:
 //   • imperative frame access for the map (getRuntime().engine / subscribeFrame)
 //   • React hooks (1 Hz) for screens/lists — useAllTramStates, useTramState, …
-// The map screen renders frames imperatively via ShapeSource.setNativeProps;
+// The map screen renders frames imperatively via ShapeSource.updateShape;
 // React re-renders are throttled to UI_NOTIFY_MS to keep the JS thread free.
 import { useEffect, useSyncExternalStore } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
@@ -21,7 +21,12 @@ import type { RouteGeometry, TramPublicState, TramSnapshot, Viewport } from '@/l
 import { useSettingsStore, type PositionMode } from '@/stores/settings';
 
 export { POLL_MS } from '@/lib/feed/localGolemioFeed';
-export const TICK_MS = 16; // ~60 fps simulation while trams visibly glide (zoom ≥ 14)
+/**
+ * Near-map simulation cadence. Map points are pushed at 15 Hz and follow-camera
+ * updates at ~12 Hz, so 30 Hz gives every visible push two fresh physics steps
+ * without paying for four whole-fleet passes per Mapbox update.
+ */
+export const TICK_MS = 33; // ~30 fps simulation while trams visibly glide (zoom ≥ 14)
 /**
  * Idle tick (~10 Hz): at far zooms nothing on screen moves faster than
  * badge/dot updates, so full-rate simulation only burns CPU (thermal: iPad ran
@@ -88,16 +93,38 @@ export function pointsPushIntervalMs(zoom: number): number {
 }
 
 /**
- * Detail-mode (60 Hz tick) zoom band, with hysteresis so hovering at the
+ * Points-push gate shared by the map layer's per-frame due-check
+ * (engine-v2.md §2.7). Smooth/live keep today's semantics: push whenever the
+ * zoom-banded interval elapsed. Raw frames change ONLY when a fix changes, so
+ * raw pushes additionally require the runtime's ingest-set dirty flag — no new
+ * timer, the existing due-check simply stays silent while nothing changed. A
+ * position-mode switch forces an immediate push in every mode (bypassing the
+ * interval) so the rendered anchor changes the moment the setting does, even
+ * at the 5 s city-scale cadence.
+ */
+export function pointsPushWanted(
+  mode: PositionMode,
+  elapsedMs: number,
+  zoom: number,
+  rawDirty: boolean,
+  modeChanged: boolean,
+): boolean {
+  if (modeChanged) return true;
+  if (elapsedMs < pointsPushIntervalMs(zoom)) return false;
+  return mode !== 'raw' || rawDirty;
+}
+
+/**
+ * Detail-mode (30 Hz tick) zoom band, with hysteresis so hovering at the
  * boundary doesn't thrash the tick timer. ENTER is aligned with the fast
  * points cadence above: everywhere badges are pushed at ~15 Hz the engine also
- * ticks at 60 Hz — ticking at 10 Hz under 15 Hz pushes aliased badge motion
+ * ticks at 30 Hz — ticking at 10 Hz under 15 Hz pushes aliased badge motion
  * into visible 0-0-jump stutter (the iteration-4 smoothness regression).
  */
 export const DETAIL_ENTER_ZOOM = 14.0;
 export const DETAIL_EXIT_ZOOM = 13.7;
 
-/** Pure hysteresis step: enter 60 Hz at ≥ 14.0, drop to 10 Hz only below 13.7. */
+/** Pure hysteresis step: enter 30 Hz at ≥ 14.0, drop to 10 Hz only below 13.7. */
 export function detailModeForZoom(zoom: number, current: boolean): boolean {
   if (zoom >= DETAIL_ENTER_ZOOM) return true;
   if (zoom < DETAIL_EXIT_ZOOM) return false;
@@ -157,7 +184,7 @@ export class TramRuntime {
    * poll (keys absent from the batch are dropped) so it can't grow unbounded.
    */
   private lastTripByKey = new Map<string, string>();
-  /** True while the map is in the glide band (see detailModeForZoom) → 60 Hz tick. */
+  /** True while the map is in the glide band (see detailModeForZoom) → 30 Hz tick. */
   private detailMode = false;
   /**
    * Runtime activity mode: 'active' (foreground, full cadence), 'rideBackground'
@@ -165,6 +192,8 @@ export class TramRuntime {
    * rendering), 'paused' (backgrounded/released — nothing ticks; invariant #3).
    */
   private runMode: 'paused' | 'active' | 'rideBackground' = 'paused';
+  /** Wall clock captured for a true full pause; null on cold start / rideBackground. */
+  private pausedAtMs: number | null = null;
   /**
    * Injected by src/lib/motionlog (never imported from here — that would be a
    * module cycle): reports whether a GPS ride recording is active. null until
@@ -178,6 +207,13 @@ export class TramRuntime {
   private uiListeners = new Set<() => void>();
   private uiVersion = 0;
   private uiStatesCache: { version: number; states: TramPublicState[] } | null = null;
+  /**
+   * Raw-mode render dirty flag (engine-v2.md §2.7): set on every engine ingest
+   * (a raw frame can only change when a fix — or an adopted geometry — does),
+   * consumed by the map layer's points-push due-check via takeRawFrameDirty().
+   * Starts true so the first raw frame after mount always renders.
+   */
+  private rawFrameDirty = true;
 
   constructor(feed: TramFeed = new LocalGolemioFeed()) {
     this.feed = feed;
@@ -248,8 +284,24 @@ export class TramRuntime {
   }
 
   private applyPositionMode(mode: PositionMode): void {
+    // 'full' only while 'live' renders the predictor every frame. 'smooth'
+    // consumes it as the smoother's interpolated reference (coarse batches);
+    // 'raw' renders the fix itself — the predictor stays on the coarse batch
+    // cadence there too (both layers keep ticking so all three anchors stay
+    // populated for debug traces and instant mode switches — §2.7).
     const cadence: ProjectionCadence = mode === 'live' ? 'full' : 'coarse';
     this.engine.setProjectionCadence(cadence);
+  }
+
+  /**
+   * Read-and-clear the raw-mode dirty flag (see rawFrameDirty). Called by the
+   * map layer only when a raw-mode points push is due; consuming it outside a
+   * push frame would silently swallow a fix update.
+   */
+  takeRawFrameDirty(): boolean {
+    const dirty = this.rawFrameDirty;
+    this.rawFrameDirty = false;
+    return dirty;
   }
 
   /** Start the timer loops + the feed (which polls immediately). Idempotent. */
@@ -258,6 +310,17 @@ export class TramRuntime {
     // Leaving rideBackground: clear its slow timers/feed first. From 'paused'
     // everything is already stopped — halting again would double feed.stop().
     if (this.runMode === 'rideBackground') this.halt();
+    const nowMs = Date.now();
+    if (this.pausedAtMs !== null) {
+      // Timers intentionally stop in background, but vehicle time does not.
+      // Seek once from absolute timetable/AVL anchors instead of replaying a
+      // potentially minute-long physics loop or waiting for the next poll.
+      this.engine.resyncAfterSuspension(nowMs);
+      // Positions may have re-anchored during the seek — let the next raw-mode
+      // points push render immediately instead of waiting for the first poll.
+      this.rawFrameDirty = true;
+      this.pausedAtMs = null;
+    }
     this.runMode = 'active';
     this.startTickTimer();
     this.uiNotifyTimer = setInterval(() => this.bumpUi(), UI_NOTIFY_MS);
@@ -294,7 +357,7 @@ export class TramRuntime {
   }
 
   /**
-   * Zoom-adaptive simulation rate (thermal): 60 Hz while zoomed into the glide
+   * Zoom-adaptive simulation rate (thermal): 30 Hz while zoomed into the glide
    * band (badges pushed at ~15 Hz and/or 3D models on screen), ~10 Hz at far
    * zooms — with hysteresis (enter ≥ 14.0, exit < 13.7) so camera drift at the
    * boundary can't thrash the timer. Called by the map screen from camera
@@ -305,7 +368,7 @@ export class TramRuntime {
     const on = detailModeForZoom(zoom, this.detailMode);
     if (this.detailMode === on) return;
     this.detailMode = on;
-    if (__DEV__) console.log(`[tram-runtime] tick rate → ${on ? '60 Hz (glide band)' : '10 Hz (idle)'}`);
+    if (__DEV__) console.log(`[tram-runtime] tick rate → ${on ? '30 Hz (glide band)' : '10 Hz (idle)'}`);
     if (this.runMode !== 'active' || !this.tickTimer) return; // resume() picks up the new rate
     clearInterval(this.tickTimer);
     this.startTickTimer();
@@ -317,6 +380,7 @@ export class TramRuntime {
    * subscriptions (used on background/release).
    */
   private pause(): void {
+    if (this.runMode !== 'paused') this.pausedAtMs = Date.now();
     this.halt();
     this.runMode = 'paused';
   }
@@ -341,9 +405,9 @@ export class TramRuntime {
       this.adoptTimer = null;
     }
     this.feed.stop();
-    // Every mode transition is a tick-clock boundary: the first tick of the
-    // next mode must anchor, never integrate (or budget-drop) the gap the
-    // stopped timers left behind — minutes of suspension are NOT replayed.
+    // Every mode transition is a tick-clock boundary. Full pause → foreground
+    // performs an absolute wall-clock seek in resume(); rideBackground already
+    // advances continuously. In neither case is a long gap numerically replayed.
     this.engine.resetClock();
   }
 
@@ -411,6 +475,7 @@ export class TramRuntime {
 
     this.lastSnapshots = snapshots;
     this.engine.ingest(snapshots, (tripId) => this.feed.getGeometry(tripId), atMs);
+    this.rawFrameDirty = true;
     this.feed.reportCalibration(toCalibrationRecords(this.engine.getStates(atMs), atMs));
     // Warm geometries for trips we don't have yet, split by visibility: a
     // missing shape whose tram is ON SCREEN (viewport + margin) loads at
@@ -453,6 +518,7 @@ export class TramRuntime {
         this.nudgeTimer = null;
         if (gen !== this.generation) return;
         this.engine.ingest(this.lastSnapshots, (tripId) => this.feed.getGeometry(tripId), Date.now());
+        this.rawFrameDirty = true;
         this.bumpUi();
       }, GEOMETRY_NUDGE_MS);
     }
@@ -475,6 +541,7 @@ export class TramRuntime {
       this.adoptTimer = null;
       if (gen !== this.generation) return;
       this.engine.ingest(this.lastSnapshots, (tripId) => this.feed.getGeometry(tripId), Date.now());
+      this.rawFrameDirty = true;
       this.bumpUi();
     }, GEOMETRY_ADOPT_DEBOUNCE_MS);
   };
@@ -565,9 +632,33 @@ export class TramRuntime {
 
 let runtime: TramRuntime | null = null;
 
-/** The app-wide runtime singleton (created lazily, on the default local feed). */
+/**
+ * Feed selection (backend rollout, docs/decisions/backend-convex.md §3/§7).
+ * 'remote' requires EXPO_PUBLIC_CONVEX_URL; anything else — or a missing
+ * URL — falls back to LocalGolemioFeed. Read once at runtime construction:
+ * switching feeds mid-session is a restart-level operation by design (the
+ * runtime owns subscriptions/lifecycle against exactly one feed object).
+ */
+function constructFeed(): TramFeed {
+  try {
+    const source = useSettingsStore.getState().feedSource;
+    const url = process.env.EXPO_PUBLIC_CONVEX_URL;
+    if (source === 'remote' && typeof url === 'string' && url.length > 0) {
+      // Lazy require: keeps the convex client stack out of the module graph
+      // (and out of jest workers) unless the remote feed is actually selected.
+      const { RemoteFeed } = require('@/lib/feed/remoteFeed') as typeof import('@/lib/feed/remoteFeed');
+      return new RemoteFeed({ url });
+    }
+  } catch {
+    // Settings store unavailable (bare tests) or remote feed failed to
+    // construct — the local feed is always a safe default.
+  }
+  return new LocalGolemioFeed();
+}
+
+/** The app-wide runtime singleton (created lazily; feed per constructFeed()). */
 export function getRuntime(): TramRuntime {
-  if (!runtime) runtime = new TramRuntime();
+  if (!runtime) runtime = new TramRuntime(constructFeed());
   return runtime;
 }
 

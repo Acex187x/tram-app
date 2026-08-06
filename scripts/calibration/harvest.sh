@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Harvest Tram Spotter motion logs from the simulator into the repo every 10 min.
-UDID=2AB8E802-E82C-4020-957B-27ACD6D56D73
+UDID="${HARVEST_UDID:-2AB8E802-E82C-4020-957B-27ACD6D56D73}"
 DEST=/Users/acex/git/fable-spots-the-tram/docs/calibration/sim-sessions
 while true; do
   C=$(xcrun simctl get_app_container $UDID cz.zabolotny.tramspotter data 2>/dev/null)

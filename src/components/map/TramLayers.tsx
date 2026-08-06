@@ -30,13 +30,14 @@
 // changes on a settings-store pack change (single re-render, no per-frame
 // React).
 //
-// Cadence (zoom-adaptive, thermal-aware): the engine ticks at TICK_MS (~16 ms)
+// Cadence (zoom-adaptive, thermal-aware): the engine ticks at TICK_MS (~33 ms)
 // while the map is in the glide band (zoom ≥ 14, hysteresis down to 13.7 —
 // aligned with the fast points cadence so 15 Hz pushes never sample 10 Hz
 // motion); at far zooms the runtime drops to ~10 Hz (see
 // tramData.setDetailZoom). Each tick pushes the sections
-// FC (small — viewport-culled) when the band is on screen; the points FC
-// (whole fleet, badges/dots) is pushed at a zoom-dependent cadence
+// FC (small — viewport-culled) when the band is on screen; the points FC is
+// viewport-culled before state allocation at close zoom and whole-fleet only
+// at the much slower city-scale cadence
 // (pointsPushIntervalMs: 15 Hz close, 1 s mid, 5 s far — far-zoom badges are
 // near-static and re-pushing burns GPU). The follow camera is retargeted at
 // ~12.5 Hz (CAMERA_RETARGET_MS) with overlapping linear glides, and a
@@ -68,7 +69,7 @@ import {
 } from 'react';
 
 import { Tram } from '@/constants/theme';
-import { getRuntime, pointsPushIntervalMs } from '@/hooks/tramData';
+import { DETAIL_ENTER_ZOOM, getRuntime, pointsPushIntervalMs, pointsPushWanted } from '@/hooks/tramData';
 import {
   FACE_SPRITE_SCALE,
   ICON_PACKS,
@@ -79,6 +80,8 @@ import { MAP_ICON_ASSETS, MAP_ICON_SCALE } from '@/lib/fleet/modelSpecs';
 import { bearingAt, pointAt } from '@/lib/geo/polyline';
 import {
   buildFrame,
+  BADGE_CULL_MARGIN_M,
+  expandBbox,
   FACE_GAP_PX,
   FACE_MAX_ICON_SIZE,
   FACE_MIN_RATIO,
@@ -91,13 +94,14 @@ import type { PlannerItinerary, Viewport } from '@/lib/types';
 import { useFavoritesStore } from '@/stores/favorites';
 import { usePlannerStore } from '@/stores/planner';
 import { useSelectionStore } from '@/stores/selection';
-import { useSettingsStore } from '@/stores/settings';
+import { useSettingsStore, type PositionMode } from '@/stores/settings';
 import {
   CAMERA_DWELL_EVAL_MS,
   CAMERA_DWELL_SPEED_KMH,
   CAMERA_GLIDE_MS,
   CAMERA_RETARGET_MS,
   CAMERA_RETURN_MS,
+  RAW_FIX_GLIDE_MS,
   leadTarget,
   withinDeadband,
   type FollowCameraTarget,
@@ -354,12 +358,23 @@ export function TramLayers({
   const badgesRef = useRef<ShapeSource>(null);
   const fixOverlayRef = useRef<ShapeSource>(null);
   const sectionsFedRef = useRef(false);
+  const pointsEmptyRef = useRef(true);
   const sectionsEmptyRef = useRef(true);
   const badgesEmptyRef = useRef(true);
   /** Push-to-push badge anchor-slot memory — keeps stacks from re-shuffling. */
   const badgeMemoryRef = useRef<BadgeAnchorMemory>(new Map());
   const fixEmptyRef = useRef(true);
   const lastPointsPushMsRef = useRef(0);
+  /** Position mode of the last points push — a switch forces an immediate
+   *  re-anchor push in every mode (even at the 5 s city-scale cadence). */
+  const lastPushedModeRef = useRef<PositionMode | null>(null);
+  /** Selection/follow keys of the last points push. Raw mode gates pushes on
+   *  fix ingests, but the selected halo + pinned badge ride the points FC — a
+   *  tap must not wait for the next poll to light up. */
+  const lastPushedSelectionRef = useRef<{ sel: string | null; fol: string | null }>({
+    sel: null,
+    fol: null,
+  });
   /** Next follow-camera evaluation is skipped until this timestamp. */
   const cameraEvalDueMsRef = useRef(0);
   /**
@@ -396,14 +411,43 @@ export function TramLayers({
       const positionMode = useSettingsStore.getState().positionMode;
 
       // Zoom-adaptive push cadences (thermal): sections every tick but ONLY
-      // inside the model band; points at pointsPushIntervalMs(zoom).
-      const wantSections = viewport.zoom >= SECTIONS_FEED_MIN_ZOOM;
-      const wantPoints =
+      // inside the model band; points at pointsPushIntervalMs(zoom). Raw mode
+      // (engine-v2.md §2.7): a raw frame changes only when a fix changes, so
+      // raw pushes ride the SAME due-check gated by the runtime's ingest-set
+      // dirty flag — no new timer, and identical frames are never re-pushed at
+      // 15 Hz. The flag is consumed only on due frames (consuming it early
+      // would swallow a fix update). A mode switch pushes immediately.
+      const isRaw = positionMode === 'raw';
+      // Forced pushes (bypass interval + dirty gate): a position-mode switch
+      // in any mode; a selection/follow change in raw mode (the halo, pinned
+      // badge and fix overlay ride the points FC — a tap must not wait ~5 s
+      // for the next poll's ingest to light up).
+      const lastSel = lastPushedSelectionRef.current;
+      const forcePush =
+        lastPushedModeRef.current !== positionMode ||
+        (isRaw &&
+          (lastSel.sel !== selection.selectedTramKey ||
+            lastSel.fol !== selection.followTramKey));
+      const pointsDue =
+        forcePush ||
         nowMs - lastPointsPushMsRef.current >= pointsPushIntervalMs(viewport.zoom);
+      const rawDirty = isRaw && pointsDue ? rt.takeRawFrameDirty() : false;
+      const wantPoints = pointsPushWanted(
+        positionMode,
+        nowMs - lastPointsPushMsRef.current,
+        viewport.zoom,
+        rawDirty,
+        forcePush,
+      );
+      // Raw sections are frozen between fixes too: push them on points frames
+      // (fix landed / mode switch) and on band entry, never every tick.
+      const inSectionsBand = viewport.zoom >= SECTIONS_FEED_MIN_ZOOM;
+      const wantSections =
+        inSectionsBand && (!isRaw || wantPoints || !sectionsFedRef.current);
 
       // On leaving the band the sections source is cleared once so stale
       // models never linger — no frame build needed for that.
-      if (!wantSections && sectionsFedRef.current) {
+      if (!inSectionsBand && sectionsFedRef.current) {
         sectionsFedRef.current = false;
         sectionsEmptyRef.current = true;
         void sectionsRef.current?.updateShape(EMPTY_FC_STRING);
@@ -425,7 +469,20 @@ export function TramLayers({
           };
         }
 
-        const frame = buildFrame(rt.engine.getStates(nowMs), viewport, {
+        // Above z14 Mapbox can only reveal the viewport plus the badge prefetch
+        // margin. Cull BEFORE public-state allocation/feature construction;
+        // city-scale frames stay whole-fleet but run only every 1–5 seconds.
+        const states =
+          viewport.zoom >= DETAIL_ENTER_ZOOM
+            ? rt.engine.getStatesInBounds(
+                nowMs,
+                expandBbox(viewport.bbox, BADGE_CULL_MARGIN_M),
+                selection.selectedTramKey,
+                selection.followTramKey,
+                positionMode,
+              )
+            : rt.engine.getStates(nowMs);
+        const frame = buildFrame(states, viewport, {
           selectedKey: selection.selectedTramKey,
           // The follow target gets selected:1 too — the declutter solve pins
           // it in place (never hidden, never displaced), and it keeps its
@@ -443,7 +500,24 @@ export function TramLayers({
 
         if (wantPoints) {
           lastPointsPushMsRef.current = nowMs;
-          void pointsRef.current?.updateShape(JSON.stringify(frame.points));
+          lastPushedModeRef.current = positionMode;
+          lastPushedSelectionRef.current = {
+            sel: selection.selectedTramKey,
+            fol: selection.followTramKey,
+          };
+          // At close zoom the pre-allocation viewport cull can legitimately
+          // produce an empty points FC (for example, a quiet block between
+          // tram corridors). Re-sending that identical empty payload at 15 Hz
+          // still wakes Mapbox's GeoJSON parser + Metal render loop. Push the
+          // empty FC once when the last visible tram leaves, then stay silent
+          // until a tram enters the viewport again.
+          const pointsEmpty = frame.points.features.length === 0;
+          if (!pointsEmpty || !pointsEmptyRef.current) {
+            void pointsRef.current?.updateShape(
+              pointsEmpty ? EMPTY_FC_STRING : JSON.stringify(frame.points),
+            );
+          }
+          pointsEmptyRef.current = pointsEmpty;
           // Decluttered badge anchors + leaders, same cadence as the points.
           // Empty outside the badge band (stringify+push skipped while it
           // STAYS empty; the one clearing push stops stale badges — the badge
@@ -520,13 +594,18 @@ export function TramLayers({
         wasPausedRef.current = false;
         return;
       }
-      // Track where the tram is RENDERED. In live mode that is the PROJECTED
-      // observation (the fix dead-reckoned to now) — anchoring to the raw fix
-      // left the camera parked while the tram drove away.
+      // Track where the tram is RENDERED. In live mode that is the predictor
+      // (the engine's estimate of the real tram now) — anchoring to the raw
+      // fix left the camera parked while the tram drove away. In raw mode the
+      // fix IS the rendered anchor: the camera sits on observedPosition and
+      // eases across each fix jump (see the send below).
       const isLive = positionMode === 'live';
       let anchor = state.position;
       let bearing = state.bearing;
-      if (isLive) {
+      if (isRaw) {
+        anchor = state.observedPosition;
+        bearing = state.observedBearing;
+      } else if (isLive) {
         const geometry = rt.engine.getGeometry(followKey);
         const projDist = state.projectedObservedDistM;
         if (geometry && projDist != null) {
@@ -543,7 +622,9 @@ export function TramLayers({
       const orientation = followGestureRef.current?.orientation ?? null;
       const target: FollowCameraTarget = {
         // Lead slightly toward where the tram will be at the next retarget.
-        center: leadTarget(anchor, bearing, state.simSpeedKmh),
+        // Raw anchors only move on fix jumps — zero lead (leading a parked
+        // point by a stale sim speed would aim the camera off the marker).
+        center: isRaw ? anchor : leadTarget(anchor, bearing, state.simSpeedKmh),
         zoom: orientation?.zoom ?? FOLLOW_ZOOM,
         pitch: orientation?.pitch ?? FOLLOW_PITCH,
         heading: orientation?.heading ?? (((bearing % 360) + 360) % 360),
@@ -583,7 +664,11 @@ export function TramLayers({
         pitch: target.pitch,
         heading: target.heading,
         animationMode: 'linearTo',
-        animationDuration: CAMERA_GLIDE_MS,
+        // Raw mode: between fixes the target is deadband-suppressed, so every
+        // actual send IS a fix jump (~45–95 s apart, possibly hundreds of
+        // meters) — glide it over RAW_FIX_GLIDE_MS instead of the 170 ms
+        // steady-state overlap glide, which would read as a hard snap (§2.7).
+        animationDuration: isRaw ? RAW_FIX_GLIDE_MS : CAMERA_GLIDE_MS,
       });
     });
 

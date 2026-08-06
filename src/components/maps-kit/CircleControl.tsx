@@ -5,7 +5,7 @@
 //   • ControlCapsule — one continuous glass capsule wrapping stacked
 //                      CircleControls, hairline-separated (the map+locate pill).
 //   • ControlStack   — the absolutely-positioned top-right column.
-// Chrome floats over the basemap, so appearance follows the MAP light preset.
+// Appearance follows the system theme through the shared chrome context.
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { createContext, useContext, type ReactNode } from 'react';
 import { Pressable, StyleSheet, useColorScheme, View } from 'react-native';
@@ -92,6 +92,7 @@ export function CircleControl({
     <GlassPanel
       variant="regular"
       interactive
+      readableOverContent
       appearance={scheme}
       style={{ borderRadius: dim / 2 }}
     >
@@ -118,6 +119,7 @@ export function ControlCapsule({ children, appearance, size = CONTROL_SIZE }: Co
       <GlassPanel
         variant="regular"
         interactive
+        readableOverContent
         appearance={scheme}
         style={[styles.capsule, { width: size, borderRadius: size / 2 }]}
       >

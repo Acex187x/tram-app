@@ -1,18 +1,24 @@
 /// <reference types="jest" />
 //
-// TramPublicState.projectedObservedDistM: the last AVL fix dead-reckoned
-// forward by the SAME physics as the main sim (speed profile, stops/dwell,
-// pace capped by the schedule-projected observation). It must ADVANCE smoothly
+// TramPublicState.projectedObservedDistM = the PREDICTOR's position (engine
+// v2): the last AVL fix reseeded with a closed-form advance over its TRUE age
+// (R12 hidden latency), then dead-reckoned at the learned pace under the same
+// physics (speed profile, stops, fixed dwells). It must ADVANCE smoothly
 // between polls and JUMP (forward or back) when a new fix arrives — that jump
-// is the accepted live-mode UX. Null without geometry.
+// is the accepted live-mode UX. Null without geometry. 'coarse' cadence
+// batches the predictor at ~500 ms while the smoother stays per-tick (§2.4).
 
 import { TramEngine } from '@/lib/engine/engine';
-import { V_MAX_MS } from '@/lib/engine/speedProfile';
+import { V_CRUISE_REF_MS, V_MAX_MS } from '@/lib/engine/speedProfile';
+import { FEED_LATENCY_S, PACE_BIAS_PRIOR } from '@/lib/engine/tramSim';
 import type { TramPublicState } from '@/lib/types';
 import { makeGeometry, makeSnapshot, makeSpec1 } from './helpers';
 
 const T0 = 1_000_000_000_000;
 const STEP_MS = 100;
+/** Closed-form advance of a just-observed fix (hidden latency only), m. */
+const LATENCY_ADVANCE_MAX_M = FEED_LATENCY_S * V_CRUISE_REF_MS;
+const PRIOR_CRUISE = PACE_BIAS_PRIOR * V_CRUISE_REF_MS;
 
 function makeEngine(): TramEngine {
   return new TramEngine({
@@ -64,14 +70,17 @@ describe('projectedObservedDistM', () => {
       ],
     );
 
-  it('seeds at the fresh fix and advances smoothly between polls', () => {
+  it('seeds at the fresh fix + the hidden-latency advance and advances smoothly between polls', () => {
     const engine = makeEngine();
     const geo = makeGeo();
     engine.ingest([makeSnapshot({ key: 't', shapeDistM: 100, observedAtMs: T0 })], () => geo, T0);
     engine.tick(T0);
 
-    // A fresh fix (observedAtMs == now) projects to itself.
-    expect(projected(engine, 't', T0)).toBeCloseTo(100, 0);
+    // A fresh fix (observedAtMs == now) is still FEED_LATENCY_S old (R12):
+    // the predictor seeds at the fix plus that bounded advance, never behind.
+    const p0 = projected(engine, 't', T0);
+    expect(p0).toBeGreaterThanOrEqual(100);
+    expect(p0).toBeLessThanOrEqual(100 + LATENCY_ADVANCE_MAX_M);
 
     // Between polls the projection integrates physics: monotone, per-tick
     // steps bounded by the network max speed — no jumps.
@@ -110,7 +119,8 @@ describe('projectedObservedDistM', () => {
     // Fresh fix says the tram is actually back at 450.
     engine.ingest([makeSnapshot({ key: 't', shapeDistM: 450, observedAtMs: now })], () => geo, now);
     const after = projected(engine, 't', now);
-    expect(after).toBeCloseTo(450, 0);
+    expect(after).toBeGreaterThanOrEqual(450);
+    expect(after).toBeLessThanOrEqual(450 + LATENCY_ADVANCE_MAX_M);
     expect(after).toBeLessThan(before); // jumped BACK — accepted live-mode UX
   });
 
@@ -127,7 +137,9 @@ describe('projectedObservedDistM', () => {
       () => geo,
       now,
     );
-    expect(projected(engine, 't', now)).toBeCloseTo(before + 300, 0);
+    const after = projected(engine, 't', now);
+    expect(after).toBeGreaterThanOrEqual(before + 300);
+    expect(after).toBeLessThanOrEqual(before + 300 + LATENCY_ADVANCE_MAX_M);
   });
 
   it('does NOT re-seed when the poll repeats the same (stale) fix', () => {

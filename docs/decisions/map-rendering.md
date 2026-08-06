@@ -376,18 +376,15 @@ second car of a coupled T3 pair.
 regardless of zoom made the **iPad run hot after ~an hour** (user-reported), for
 zero visible benefit when nothing on screen is moving fast.
 
-**Decision.** Everything scales down when detail isn't visible. Five levers:
+**Decision.** Everything scales down when detail isn't visible. Seven levers:
 
-1. **Zoom-gated sim tick with hysteresis.** The engine ticks at `TICK_MS = 16`
-   (~60 Hz) **only** while the map is in the 3D sections band; below it the
+1. **Zoom-gated sim tick with hysteresis.** The engine ticks at `TICK_MS = 33`
+   (~30 Hz) **only** while the map is in the 3D sections band; below it the
    runtime drops to `TICK_IDLE_MS = 100` (~10 Hz) — badges/dots don't move faster
-   than that (`src/hooks/tramData.ts:19`,`:26`). The map flips the rate via
-   `getRuntime().setDetailMode(zoom >= SECTIONS_FEED_MIN_ZOOM)` from its camera
-   events (`src/app/index.tsx:92`). `setDetailMode` restarts the tick timer only
-   on an actual change and only while running (`tramData.ts:157`). The band feed
-   threshold `SECTIONS_FEED_MIN_ZOOM = 14.6` is deliberately **below** the model
-   band `14.8` — it warms the sections source up slightly early so models don't
-   pop in cold; that 0.2 gap is the hysteresis.
+   than that. The map flips the rate via `setDetailZoom`; entering at 14.0 and
+   leaving below 13.7 provides the hysteresis. The close-map 15 Hz point push
+   therefore samples two fresh physics steps per frame without the old four
+   whole-fleet passes.
 
 2. **Zoom-based points cadence.** The whole-fleet points FC is pushed at
    `pointsPushIntervalMs(zoom)` (`tramData.ts:34`): ~15 Hz (66 ms) at zoom ≥14
@@ -398,10 +395,13 @@ zero visible benefit when nothing on screen is moving fast.
    once so stale models never linger.
 
 3. **Empty-frame short-circuits.** Stringify+push is skipped entirely while a FC
-   stays empty (`sectionsEmptyRef`/`fixEmptyRef`), and frames that would push
+   stays empty (`pointsEmptyRef`/`sectionsEmptyRef`/`fixEmptyRef`), and frames that would push
    nothing skip `buildFrame` altogether (`TramLayers.tsx:175`,`:214`).
    `skipPoints` lets `buildFrame` skip the points FC on frames that only need
-   sections (`featureBuilder.ts:352`).
+   sections (`featureBuilder.ts:352`). This matters at close zoom too: the
+   pre-allocation viewport cull can yield an empty points FC, which is sent once
+   on the nonempty→empty transition rather than waking Mapbox's GeoJSON parser
+   and render loop 15×/s with identical data.
 
 4. **Shadows off.** Per-model shadow passes are the biggest GPU cost at pitch, so
    `modelCastShadows`/`modelReceiveShadows` are **false**; ambient occlusion stays
@@ -413,6 +413,16 @@ zero visible benefit when nothing on screen is moving fast.
    bump is skipped entirely when there are no UI subscribers (`tramData.ts:253`);
    `RouteNetwork` does no work while backgrounded and only rebuilds when the
    loaded-geometry set actually grew (fingerprint check, `RouteNetwork.tsx:131`).
+
+6. **Native Mapbox render ceiling.** `MapView.preferredFramesPerSecond` is capped
+   at 60. Mapbox's adaptive default may select a 120 Hz ProMotion ceiling, but
+   fleet geometry changes at no more than 30 Hz. Sixty preserves fluid native
+   gestures/camera animation without paying for twice as many Metal draws.
+
+7. **Pre-allocation viewport culling.** Above z14, off-screen trams are rejected
+   from engine-internal coordinates before public-state objects and features are
+   allocated. Selected/followed trams remain included; city-scale frames retain
+   whole-fleet coverage at their 1–5 s cadence.
 
 ---
 

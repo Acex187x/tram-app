@@ -18,9 +18,9 @@ import {
 } from '@/lib/engine/speedProfile';
 import {
   applySnapshot,
-  CATCHUP_MAX_FACTOR,
   createSim,
   dwellDurationMs,
+  minStopDistOf,
   PACE_BIAS_HALF_LIFE_S,
   PACE_BIAS_PRIOR,
   tick,
@@ -117,12 +117,11 @@ describe('boundary blending', () => {
 
 /**
  * Long straight (night profile, cruise reference V_CRUISE_REF_MS everywhere),
- * sim chasing a target far ahead so the controller factor saturates at
- * CATCHUP_MAX_FACTOR in every compared run; paceBias is set below 1 so
- * ref*factor*bias stays UNDER the envelope and the time-of-day scaling is
- * directly observable.
+ * predictor cruising mid-segment far from any stop; paceBias is set below 1
+ * so ref·bias·tod stays UNDER the envelope and the time-of-day scaling is
+ * directly observable in the steady cruise speed.
  */
-function makeCatchupSim(): TramSim {
+function makeCruiseSim(): TramSim {
   const geo = makeGeometry(
     [
       [0, 0],
@@ -135,7 +134,6 @@ function makeCatchupSim(): TramSim {
   );
   const profile = buildSpeedProfile(geo, { daytime: false });
   const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 0, observedAtMs: T0 }), T0);
-  // Fresh fix 400 m ahead (< teleport threshold): bold catch-up regime.
   applySnapshot(sim, makeSnapshot({ shapeDistM: 400, observedAtMs: T0 }), T0);
   sim.paceBias = 0.6;
   return sim;
@@ -154,15 +152,15 @@ function runSeconds(sim: TramSim, fromMs: number, seconds: number, cb?: (now: nu
 
 describe('cruise pace composition', () => {
   it('a mocked 0.5 pace entry halves the steady cruise speed vs baseline', () => {
-    const base = makeCatchupSim();
+    const base = makeCruiseSim();
     runSeconds(base, T0, 20);
     const vBase = base.vMs;
-    // Steady state = cruise reference * CATCHUP_MAX_FACTOR * paceBias, under
-    // the envelope (the 13.9 m/s network cap bounds only vAllowed).
-    expect(vBase).toBeCloseTo(V_CRUISE_REF_MS * CATCHUP_MAX_FACTOR * 0.6, 9);
+    // Steady state = cruise reference × paceBias (the predictor's product),
+    // under the envelope (the 13.9 m/s network cap bounds only vAllowed).
+    expect(vBase).toBeCloseTo(V_CRUISE_REF_MS * 0.6, 9);
 
     TOD_PACE_TABLE.fill(0.5); // uniform so the current hour is irrelevant
-    const halved = makeCatchupSim();
+    const halved = makeCruiseSim();
     runSeconds(halved, T0, 20);
     expect(halved.vMs * 2).toBeCloseTo(vBase, 12);
     expect(halved.sM).toBeLessThan(base.sM);
@@ -199,7 +197,7 @@ describe('cruise pace composition', () => {
       // A_BRK*dt near the stop (~0.31 m/s observed at dt=0.1, pre-existing
       // discretization behavior, unrelated to the TOD factor). The hard
       // no-overrun guarantees are the sM/dwell assertions below.
-      const vAllowed = vAllowedAt(sim.profile, sim.geometry, sim.sM, sim.minStopDist);
+      const vAllowed = vAllowedAt(sim.profile, sim.geometry, sim.sM, minStopDistOf(sim));
       expect(sim.vMs).toBeLessThanOrEqual(vAllowed + 0.5);
       if (sim.phase === 'dwell') dwellNow = now;
       else expect(sim.sM).toBeLessThanOrEqual(700 + 1e-9); // never slides past the stop

@@ -1,15 +1,6 @@
-// The home sheet's scrollable body — FOUR categories, in the order a tram
-// spotter actually needs them:
-//
-//   1. NEAREST STOP (the hero, no caption — it is the top card and its own
-//      header row names it, exactly as Apple Maps treats its top card)
-//   2. FAVORITES — starred trams with live status, starred lines as badges
-//   3. TRIPS — recent routes AND the planner, one card (they are one intent)
-//   4. EXPLORE — the fleet browser, plus recorded rides in debug mode only
-//
-// It is deliberately NOT an Apple "Places circles / Guides" clone: the content
-// is ours (PID line badges, live tram status, the Prague network) and the only
-// thing borrowed is the grouped-inset idiom every iOS user already reads.
+// The home sheet starts with Tram Spotter's core promise: choose a journey and
+// see the exact physical cars to board. Nearby service, favorites, recent stop
+// pairs and fleet tools follow in that order.
 //
 // THE LIVE GATE (`live`) — the load-bearing perf decision on this surface.
 // Sections 1 and 2 subscribe to the 1 Hz runtime (`useAllTramStates`,
@@ -24,14 +15,15 @@
 // The pinned header above this body is ALWAYS `HomeSearchRow` — the tram card
 // owns its own collapsed bar, so the home sheet's identity never changes.
 import { router } from 'expo-router';
-import { StyleSheet, useColorScheme, View } from 'react-native';
+import { SymbolView } from 'expo-symbols';
+import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
 import { HomeFavorites } from '@/components/home/HomeFavorites';
 import { SHEET_H_PAD } from '@/components/home/homeMetrics';
 import { NearestStopCard, NearestStopPlaceholder } from '@/components/home/NearestStopCard';
 import { RecentRouteRows } from '@/components/home/HomeRecents';
 import { InsetGroup, InsetRow, RowSeparator, SectionLabel } from '@/components/ui/Inset';
-import { appleScheme, Tram } from '@/constants/theme';
+import { appleScheme, Radii, TextScale, Tram } from '@/constants/theme';
 import { useFavoritesStore } from '@/stores/favorites';
 import { usePlannerStore } from '@/stores/planner';
 import { useSettingsStore } from '@/stores/settings';
@@ -58,7 +50,33 @@ export function HomeSheetContent({ live = false }: HomeSheetContentProps) {
 
   return (
     <View style={styles.body}>
-      {/* ── 1. NEAREST STOP ─────────────────────────────────────────────── */}
+      {/* Product identity: the app starts with the journey and promises the
+          exact physical tram, rather than presenting a generic Maps menu. */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Plan a tram trip and see which vehicles to board"
+        onPress={() => router.push('/planner')}
+        style={({ pressed }) => [
+          styles.tripHero,
+          { backgroundColor: c.fillTertiary, opacity: pressed ? 0.72 : 1 },
+        ]}
+      >
+        <View style={styles.tripHeroTop}>
+          <View style={styles.tripMark}>
+            <SymbolView name="tram.fill" size={20} weight="semibold" tintColor="#FFFFFF" />
+          </View>
+          <View style={styles.tripHeroCopy}>
+            <Text style={[styles.tripEyebrow, { color: c.secondary }]}>TRAM ROUTE</Text>
+            <Text style={[styles.tripTitle, { color: c.text }]}>Where are you going?</Text>
+          </View>
+          <SymbolView name="arrow.up.right" size={17} weight="semibold" tintColor={c.blue} />
+        </View>
+        <Text style={[styles.tripPromise, { color: c.secondary }]} maxFontSizeMultiplier={TextScale.content}>
+          Get a route with the exact tram models and car numbers you should board.
+        </Text>
+      </Pressable>
+
+      {/* ── NEAREST STOP ───────────────────────────────────────────────── */}
       {live ? <NearestStopCard /> : <NearestStopPlaceholder />}
 
       {/* ── 2. FAVORITES ────────────────────────────────────────────────── */}
@@ -90,28 +108,19 @@ export function HomeSheetContent({ live = false }: HomeSheetContentProps) {
         </InsetGroup>
       )}
 
-      {/* ── 3. TRIPS — recents and the planner are ONE intent, one card ─── */}
-      <View>
-        <SectionLabel>Trips</SectionLabel>
-        <InsetGroup>
-          <RecentRouteRows limit={3} />
-          {hasRecents && <RowSeparator inset={ROW_INSET} />}
-          {/* A modest last row, not a big button: planning is what you do when
-              none of the routes above is the one you want. */}
-          <InsetRow
-            icon="arrow.triangle.swap"
-            iconTint={c.blue}
-            title="Plan a trip"
-            subtitle="Route between two stops"
-            chevron
-            onPress={() => router.push('/planner')}
-          />
-        </InsetGroup>
-      </View>
+      {/* Recent trips are shortcuts, not a second planner entry. */}
+      {hasRecents && (
+        <View>
+          <SectionLabel>Recent routes</SectionLabel>
+          <InsetGroup>
+            <RecentRouteRows limit={3} />
+          </InsetGroup>
+        </View>
+      )}
 
-      {/* ── 4. EXPLORE ──────────────────────────────────────────────────── */}
+      {/* Fleet utilities live together under a product-specific label. */}
       <View>
-        <SectionLabel>Explore</SectionLabel>
+        <SectionLabel>Tram desk</SectionLabel>
         <InsetGroup>
           <InsetRow
             icon="tram.fill"
@@ -153,4 +162,27 @@ const styles = StyleSheet.create({
     // The section rhythm, shared with the tram card.
     gap: 22,
   },
+  tripHero: {
+    borderCurve: 'continuous',
+    borderRadius: Radii.group,
+    gap: 10,
+    padding: 16,
+  },
+  tripHeroTop: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+  },
+  tripMark: {
+    alignItems: 'center',
+    backgroundColor: Tram.pidRed,
+    borderRadius: 18,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  tripHeroCopy: { flex: 1, gap: 1 },
+  tripEyebrow: { fontSize: 11, fontWeight: '700', letterSpacing: 0.8 },
+  tripTitle: { fontSize: 20, fontWeight: '700', letterSpacing: -0.2 },
+  tripPromise: { fontSize: 14, lineHeight: 19, paddingLeft: 48 },
 });

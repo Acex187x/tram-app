@@ -1,25 +1,115 @@
-// One planned itinerary as an Apple Maps transit result card (IMG_0080/81): a
-// big total-duration headline, a "Tram scheduled in … · ETA" secondary line, a
-// mini leg strip (walk ▸ line badge ▸ …), and a green GO button that hands the
-// itinerary to the map. A "Details" disclosure expands into the StepList
-// (Start / Walk / Board / dotted ride-timeline / Exit / Arrive), and Start
-// journey guidance lives at its foot. Data/handoff semantics unchanged: GO and
-// the card body both call onPress; onStart starts guidance.
+// One route proposal. Its visual hierarchy is deliberately Tram Spotter's own:
+// the assigned physical vehicles are the hero, not a generic duration + GO
+// clone. Every leg shows the actual model and registration number the user
+// should board; schedule-only fallback is explicit when live assignment is not
+// yet possible.
 import { SymbolView } from 'expo-symbols';
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
-import { GoButton } from '@/components/ui/GoButton';
+import { TramFace } from '@/components/tram/TramFace';
 import { LineBadge, isNightLine } from '@/components/ui/LineBadge';
 import { StepList, type Step } from '@/components/ui/StepList';
 import { appleScheme, Radii, TextScale, Tram } from '@/constants/theme';
-import { formatCountdown, type ItineraryTiming } from '@/lib/arrivals';
+import { formatCountdown, type ItineraryTiming, type LegTiming } from '@/lib/arrivals';
 import { useNowMs } from '@/hooks/uiClock';
 import { formatPragueClock } from '@/lib/format/pragueTime';
 import type { PlannerItinerary } from '@/lib/types';
 
 function fmtDurationMin(s: number): string {
   return `${Math.max(1, Math.round(s / 60))} min`;
+}
+
+function AssignedVehicle({
+  line,
+  timing,
+  nowMs,
+  transfer,
+  scheme,
+}: {
+  line: string;
+  timing: LegTiming | undefined;
+  nowMs: number;
+  transfer: boolean;
+  scheme: 'light' | 'dark';
+}) {
+  const c = appleScheme(scheme);
+  const tram = timing?.tram;
+  const departure = timing?.departureMs;
+
+  return (
+    <View
+      style={[styles.vehicle, { backgroundColor: c.fillSecondary }]}
+      accessible
+      accessibilityRole="text"
+      accessibilityLabel={
+        tram
+          ? `${transfer ? 'Transfer to' : 'Board'} line ${line}, ${tram.model.name}, tram ${tram.regNumber ?? tram.key}`
+          : `${transfer ? 'Transfer to' : 'Board'} line ${line}; live vehicle not assigned yet`
+      }
+    >
+      <View style={[styles.vehiclePortrait, { backgroundColor: c.fillTertiary }]}>
+        {tram ? (
+          <TramFace modelId={tram.model.id} size={46} />
+        ) : (
+          <SymbolView name="tram.fill" size={23} weight="semibold" tintColor={c.secondary} />
+        )}
+      </View>
+      <View style={styles.vehicleBody}>
+        <View style={styles.vehicleEyebrowRow}>
+          <Text style={[styles.vehicleAction, { color: c.secondary }]}>
+            {transfer ? 'TRANSFER' : 'BOARD'}
+          </Text>
+          <LineBadge line={line} size="sm" />
+        </View>
+        <Text style={[styles.vehicleTitle, { color: c.text }]} numberOfLines={1}>
+          {tram
+            ? `${tram.regNumber != null ? `#${tram.regNumber}` : tram.key} · ${tram.model.name}`
+            : 'Live vehicle not assigned yet'}
+        </Text>
+        <Text style={[styles.vehicleModel, { color: c.secondary }]} numberOfLines={1}>
+          {tram
+            ? `${tram.airConditioned === true ? 'Air-conditioned · ' : ''}live vehicle`
+            : 'This option is schedule-only for now'}
+        </Text>
+      </View>
+      <View style={styles.vehicleClock}>
+        <Text style={[styles.vehicleTime, { color: c.text }]}>
+          {departure != null ? formatPragueClock(departure) : '—'}
+        </Text>
+        <Text style={[styles.vehicleCountdown, { color: c.secondary }]}>
+          {departure != null ? formatCountdown(departure - nowMs) : 'pending'}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+export function RouteVehicleRoster({
+  itinerary,
+  timing,
+  nowMs,
+}: {
+  itinerary: PlannerItinerary;
+  timing: ItineraryTiming | null | undefined;
+  nowMs: number;
+}) {
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+
+  return (
+    <View style={styles.vehicleStack}>
+      {itinerary.legs.map((leg, i) => (
+        <AssignedVehicle
+          key={`${i}-${leg.line}-${leg.fromStopId}`}
+          line={leg.line}
+          timing={timing?.legs[i]}
+          nowMs={nowMs}
+          transfer={i > 0}
+          scheme={scheme}
+        />
+      ))}
+    </View>
+  );
 }
 
 export interface ItineraryCardProps {
@@ -69,15 +159,12 @@ export function ItineraryCard({
     return `${totalStops} ${totalStops === 1 ? 'stop' : 'stops'}`;
   }, [departureMs, arrivalMs, timing, totalStops]);
 
-  // formatCountdown already yields 'in N min' / 'now' — so the template must NOT
-  // add its own 'in' (that produced "Tram scheduled in in 6 min"). 'now' reads
-  // "Tram scheduled now".
-  const scheduleLine =
+  const routeSummary =
     departureMs != null && arrivalMs != null
-      ? `Tram scheduled ${formatCountdown(departureMs - now)} · ${formatPragueClock(arrivalMs)} ETA`
-      : 'Scheduled times — no live tram matched yet';
+      ? `${formatCountdown(departureMs - now)} · arrive ${formatPragueClock(arrivalMs)}`
+      : 'Waiting for live vehicle assignments';
 
-  // Steps for the expanded "Details" list (IMG_0081).
+  // Steps for the expanded journey breakdown.
   const steps = useMemo<Step[]>(() => {
     const out: Step[] = [];
     out.push({
@@ -134,75 +221,46 @@ export function ItineraryCard({
   }, [legs, timing, walkS, now, c.red, c.blue]);
 
   return (
-    // A plain grouping container: `accessible` would merge GO, Details and
+    // A plain grouping container: `accessible` would merge the map, Details and
     // Start Guidance into one element, leaving them unreachable by VoiceOver.
     // The summary block below carries the card's own tap target and label.
-    <Pressable
-      accessible={false}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.card,
-        {
-          backgroundColor: c.fillTertiary,
-          opacity: pressed ? 0.8 : 1,
-        },
-      ]}
-    >
-      <View style={styles.summaryRow}>
-        <Pressable
-          onPress={onPress}
-          accessibilityRole="button"
-          accessibilityLabel={`Route, ${durationLabel}${
-            departureMs != null && arrivalMs != null
-              ? `, departing ${formatPragueClock(departureMs)}, arriving ${formatPragueClock(arrivalMs)}`
-              : ''
-          }. Show on map.`}
-          style={styles.summaryText}
-        >
-          <Text style={[styles.duration, { color: c.text }]} maxFontSizeMultiplier={TextScale.content}>
-            {durationLabel}
-          </Text>
+    <View style={[styles.card, { backgroundColor: c.fillTertiary }]}>
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={`Route, ${durationLabel}${
+          departureMs != null && arrivalMs != null
+            ? `, departing ${formatPragueClock(departureMs)}, arriving ${formatPragueClock(arrivalMs)}`
+            : ''
+        }. Show on map.`}
+        style={({ pressed }) => [styles.summaryRow, { opacity: pressed ? 0.65 : 1 }]}
+      >
+        <View style={styles.summaryText}>
+          <View style={styles.routeHeadline}>
+            <Text
+              style={[styles.duration, { color: c.text }]}
+              maxFontSizeMultiplier={TextScale.content}
+            >
+              {durationLabel}
+            </Text>
+            <Text style={[styles.routeName, { color: c.secondary }]} numberOfLines={1}>
+              {legs[0]?.fromStopName} → {legs[legs.length - 1]?.toStopName}
+            </Text>
+          </View>
           <Text
             style={[styles.schedule, { color: c.secondary }]}
             numberOfLines={2}
             maxFontSizeMultiplier={TextScale.content}
           >
-            {scheduleLine}
+            {routeSummary}
           </Text>
+        </View>
+        <View style={[styles.routeArrow, { backgroundColor: c.fillSecondary }]}>
+          <SymbolView name="map.fill" size={17} weight="semibold" tintColor={c.blue} />
+        </View>
+      </Pressable>
 
-          {/* Mini leg strip: walk ▸ badge ▸ badge … */}
-          <View style={styles.legStrip}>
-            {walkS != null && walkS > 0 && (
-              <>
-                <View style={[styles.walkChip, { backgroundColor: c.fillSecondary }]}>
-                  <SymbolView name="figure.walk" size={12} tintColor={c.secondary} />
-                  <Text
-                    style={[styles.walkChipText, { color: c.secondary }]}
-                    maxFontSizeMultiplier={TextScale.compact}
-                  >
-                    {Math.max(1, Math.round(walkS / 60))} min
-                  </Text>
-                </View>
-                <SymbolView name="chevron.right" size={9} weight="semibold" tintColor={c.secondary} />
-              </>
-            )}
-            {legs.map((leg, i) => (
-              <View key={`${i}-${leg.line}-${leg.fromStopId}`} style={styles.stripSeg}>
-                {i > 0 && (
-                  <SymbolView name="chevron.right" size={9} weight="semibold" tintColor={c.secondary} />
-                )}
-                <LineBadge line={leg.line} size="sm" />
-              </View>
-            ))}
-          </View>
-        </Pressable>
-
-        <GoButton
-          onPress={onPress}
-          accessibilityLabel={`Go, show route to ${legs[legs.length - 1]?.toStopName ?? 'destination'} on map`}
-          size={68}
-        />
-      </View>
+      <RouteVehicleRoster itinerary={itinerary} timing={timing} nowMs={now} />
 
       {/* Walk-aware leave-by line (existing behavior). */}
       {walkS != null && leaveByMs != null && departureMs != null && (
@@ -272,7 +330,7 @@ export function ItineraryCard({
           )}
         </View>
       )}
-    </Pressable>
+    </View>
   );
 }
 
@@ -292,37 +350,67 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 4,
   },
+  routeHeadline: {
+    alignItems: 'baseline',
+    flexDirection: 'row',
+    gap: 10,
+  },
   duration: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '700',
     letterSpacing: -0.4,
+  },
+  routeName: {
+    flex: 1,
+    fontSize: 13,
   },
   schedule: {
     fontSize: 13,
     lineHeight: 18,
     fontVariant: ['tabular-nums'],
   },
-  legStrip: {
+  routeArrow: {
     alignItems: 'center',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 5,
-    marginTop: 4,
+    borderRadius: 18,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
   },
-  stripSeg: {
+  vehicleStack: {
+    gap: 8,
+    marginTop: 12,
+  },
+  vehicle: {
     alignItems: 'center',
+    borderCurve: 'continuous',
+    borderRadius: 14,
     flexDirection: 'row',
-    gap: 5,
+    gap: 10,
+    minHeight: 62,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
-  walkChip: {
+  vehiclePortrait: {
     alignItems: 'center',
-    borderRadius: 999,
-    flexDirection: 'row',
-    gap: 3,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    borderCurve: 'continuous',
+    borderRadius: 12,
+    height: 46,
+    justifyContent: 'center',
+    overflow: 'hidden',
+    width: 46,
   },
-  walkChipText: {
+  vehicleBody: { flex: 1, gap: 2 },
+  vehicleEyebrowRow: { alignItems: 'center', flexDirection: 'row', gap: 7 },
+  vehicleAction: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
+  vehicleTitle: { fontSize: 15, fontWeight: '600' },
+  vehicleModel: { fontSize: 11.5 },
+  vehicleClock: { alignItems: 'flex-end', gap: 1 },
+  vehicleTime: {
+    fontSize: 14,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '600',
+  },
+  vehicleCountdown: {
     fontSize: 12,
     fontVariant: ['tabular-nums'],
     fontWeight: '500',

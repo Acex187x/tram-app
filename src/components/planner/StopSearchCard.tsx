@@ -1,8 +1,5 @@
-// From/To stop pickers as Apple Maps' Directions endpoint card (IMG_0080): a
-// grouped card with two rows — a blue origin dot and a blue destination pin
-// joined by a connecting line — and a circular swap button. Inline stop-name
-// suggestions (with the serving lines) drop below. A content-layer card on a
-// glass sheet, so it takes the standard grouped fill, not Liquid Glass.
+// Compact stop-pair editor for Tram Spotter's vehicle matcher. Suggestions show
+// serving line badges, making the tram network visible before a route is run.
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
 import { useMemo, useRef, useState } from 'react';
@@ -116,7 +113,7 @@ export function StopSearchCard({
           // update keeps the From→To handoff safe when the new field's onFocus
           // lands before the old field's onBlur.
           onBlur={() => setActiveField((f) => (f === field ? null : f))}
-          placeholder={isFrom ? 'My Location' : 'Choose destination'}
+          placeholder={isFrom ? 'Starting stop' : 'Destination stop'}
           placeholderTextColor={c.secondary}
           style={[styles.input, { color: c.text }]}
           autoFocus={!isFrom && autoFocusTo}

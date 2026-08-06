@@ -198,32 +198,20 @@ export const TOD_DWELL_TABLE: number[] = [
   1.0, // 23 — night: expect ~0.8
 ];
 
-// ── R8 gate-2: zonal default-dwell A/B (live experiment, dev flag only) ─────
+// ── zonal default-dwell factors (measured; NOT wired into the engine yet) ────
 // 24 consecutive zonal reproductions (docs/calibration/analysis-2026-07-13.md,
 // rounds ≤ 30) put centre-stop dwell cost at ~x1.3 of the 18 s default and
 // outskirts at ~x0.9, while fleet-level TOD stays honestly neutral
 // (0.30×1.30 + 0.70×0.90 ≈ 1.02 at the measured 30.3–30.7% centre stop
-// share). The A/B applies the factor to DEFAULT dwells only (scheduled
-// computed_dwell is never scaled) and only to the treatment parity group
-// (even registration numbers — gating lives in tramSim's
-// zonalDwellTreatmentFactor). This flag exists solely to collect the live
-// evidence leg: shipping zonal dwell permanently still requires the standard
-// double gate + replay + full suite.
+// share). Engine v2 removed the dormant dev-flag A/B threading
+// (docs/decisions/engine-v2.md §2.6); zonal dwell ships as a separate FLAGGED
+// commit gated by its own replay comparison. The factors stay exported so
+// that commit only has to wire them into dwellDurationMs.
 
-/** Treatment DEFAULT-dwell factor for stops inside CENTER_BBOX (x1.30). */
+/** DEFAULT-dwell factor for stops inside CENTER_BBOX (x1.30). */
 export const ZONAL_DWELL_CENTRE = 1.3;
-/** Treatment DEFAULT-dwell factor for stops outside CENTER_BBOX (x0.90). */
+/** DEFAULT-dwell factor for stops outside CENTER_BBOX (x0.90). */
 export const ZONAL_DWELL_OUT = 0.9;
-
-/**
- * R8 gate-2 experiment flag: dev builds only (`__DEV__` makes release/device
- * builds structurally OFF) and only when Metro runs with
- * EXPO_PUBLIC_ZONAL_DWELL_AB=1. Default OFF — with the flag off the engine is
- * bit-identical to the pre-experiment behavior (the treatment factor is
- * exactly 1). Disable = unset the env var + reload; no code revert.
- */
-export const ZONAL_DWELL_AB: boolean =
-  __DEV__ && process.env.EXPO_PUBLIC_ZONAL_DWELL_AB === '1';
 
 /** Zonal DEFAULT-dwell factor at a stop coordinate (same bbox test as zoneCapAt). */
 export function zonalDwellFactor(coord: [number, number]): number {
@@ -360,6 +348,17 @@ export function meanCruiseCapOver(
 }
 
 /**
+ * THE brake-to-a-point primitive: max speed at which a stand exactly at
+ * `distM` ahead is still reachable with deceleration `aBrk` — √(2·a·d), 0 at
+ * or past the point. v1 had four inlined copies of this arithmetic
+ * (stuck-hold, junction yield, envelope stop terms, car-following); v2 keeps
+ * exactly one (engine-v2.md §2.6).
+ */
+export function brakeTowards(distM: number, aBrk: number = A_BRK): number {
+  return distM > 0 ? Math.sqrt(2 * aBrk * distM) : 0;
+}
+
+/**
  * Braking envelope: the max speed permitted at sM so that every upcoming limit
  * within lookaheadM can be met with deceleration aBrk:
  *
@@ -376,6 +375,7 @@ export function vAllowedAt(
   minStopDist = 0,
   lookaheadM: number = DEFAULT_LOOKAHEAD_M,
   aBrk: number = A_BRK,
+  stopStartIdx = 0,
 ): number {
   const cum = geometry.cumDistM;
   const n = cum.length;
@@ -404,7 +404,12 @@ export function vAllowedAt(
   // Upcoming stops = 0-limit points (skipping already-dwelled/passed ones).
   // stops are ordered by distM (RouteGeometry invariant, enforced by the GTFS
   // builder's monotonic clamp) — past the horizon nothing closer can follow.
-  for (const stop of geometry.stops) {
+  // TramSim carries a monotonic next-stop hint. Engine callers pass it here so
+  // a late-route tram does not rescan dozens of permanently served stops on
+  // every 30 Hz tick; standalone callers retain the historic start-at-zero
+  // behavior through the default argument.
+  for (let i = Math.max(0, stopStartIdx); i < geometry.stops.length; i++) {
+    const stop = geometry.stops[i];
     const d = stop.distM;
     if (d > horizon) break;
     if (d < minStopDist || d < s) continue;

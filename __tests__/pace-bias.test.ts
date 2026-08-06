@@ -1,15 +1,16 @@
 /// <reference types="jest" />
 //
-// Per-tram adaptive pace calibration (TramSim.paceBias): on each genuinely-new
-// AVL fix the sim compares the real inter-fix average speed against the
-// expected average speed over the same span (cruise caps bounded by the
-// V_CRUISE_REF_MS cruise reference) and folds the clamped ratio into a
-// recency-weighted EWMA (half-life 150 s). The bias then scales the pace
-// controller's cruise target so a consistently-slow tram is simulated at its
-// own pace between fixes instead of sprint-and-crawl. Round 1 calibration:
-// new vehicles start at PACE_BIAS_PRIOR (fleet median), and the learned value
-// is INHERITED across hard teleports and (via TramEngine's per-key memory)
-// across trip changes for the same vehicle.
+// Per-tram adaptive pace calibration (TramSim.paceBias, engine v2): on each
+// genuinely-new AVL fix the predictor compares the real inter-fix average
+// MOTION speed against the expected average speed over the same span (cruise
+// caps bounded by V_CRUISE_REF_MS) and folds the clamped ratio into a
+// recency-weighted EWMA (half-life 150 s). R13 clip-not-drop
+// (engine-v2.md §2.2): the STANDING portion of the span — scheduled dwells of
+// stops strictly inside it PLUS observed pin/stuck-active time — is deducted
+// so the sample measures motion pace; the span is dropped only when no
+// confident moving remainder survives. New vehicles start at PACE_BIAS_PRIOR;
+// the learned value is inherited across teleports and (via TramEngine's
+// per-key memory) across trip changes.
 
 import { TramEngine, PACE_BIAS_MEMORY_TTL_MS } from '@/lib/engine/engine';
 import {
@@ -21,12 +22,12 @@ import {
 import {
   applySnapshot,
   createSim,
-  HARD_BRAKE_ENTER_M,
   PACE_BIAS_HALF_LIFE_S,
   PACE_BIAS_MAX_RATIO,
   PACE_BIAS_MIN_RATIO,
   PACE_BIAS_PRIOR,
-  targetDistAt,
+  STOP_HOLD_MAX_FIX_AGE_S,
+  FEED_LATENCY_S,
   tick,
   type TramSim,
 } from '@/lib/engine/tramSim';
@@ -35,8 +36,8 @@ import { makeGeometry, makeSnapshot, makeSpec1 } from './helpers';
 
 const T0 = 1_000_000_000_000;
 
-/** Straight shape, no intermediate stops, schedule pace `paceMs` m/s. */
-function straightGeo(lengthM: number, paceMs: number): RouteGeometry {
+/** Straight shape, no intermediate stops, generous timetable. */
+function straightGeo(lengthM: number): RouteGeometry {
   return makeGeometry(
     [
       [0, 0],
@@ -44,7 +45,7 @@ function straightGeo(lengthM: number, paceMs: number): RouteGeometry {
     ],
     [
       { atM: 0, arrivalMs: T0 },
-      { atM: lengthM, arrivalMs: T0 + Math.round((lengthM / paceMs) * 1000) },
+      { atM: lengthM, arrivalMs: T0 + 3_600_000 },
     ],
   );
 }
@@ -54,15 +55,6 @@ function makeSim(geo: RouteGeometry, shapeDistM: number, nowMs = T0): TramSim {
   return createSim(geo, profile, makeSnapshot({ shapeDistM, observedAtMs: nowMs }), nowMs);
 }
 
-/**
- * Feed a fix and pin the sim position onto it, so a fix sequence can be
- * applied without ticking physics in between (no teleport interference).
- */
-function applyFixPinned(sim: TramSim, shapeDistM: number, atMs: number): void {
-  sim.sM = Math.min(Math.max(shapeDistM, sim.sM), sim.geometry.totalM);
-  applySnapshot(sim, makeSnapshot({ shapeDistM, observedAtMs: atMs }), atMs);
-}
-
 /** Expected EWMA value after samples of `ratio` totalling `totalS` seconds. */
 function ewma(from: number, ratio: number, totalS: number): number {
   return ratio + (from - ratio) * Math.pow(0.5, totalS / PACE_BIAS_HALF_LIFE_S);
@@ -70,20 +62,19 @@ function ewma(from: number, ratio: number, totalS: number): number {
 
 describe('paceBias calibration (applySnapshot)', () => {
   it('starts at the fleet prior and converges to ~0.9 for a tram at 90% of reference speed', () => {
-    // 0.9 is ABOVE the 0.62 prior, so convergence is observable as monotone
-    // upward learning (a fresh sim no longer assumes profile pace).
     const vReal = 0.9 * V_CRUISE_REF_MS;
-    const sim = makeSim(straightGeo(6000, vReal), 100);
+    const sim = makeSim(straightGeo(6000), 100);
     expect(sim.paceBias).toBe(PACE_BIAS_PRIOR);
 
-    // 3 fixes, 100 s apart, each advancing at exactly 90% of the reference.
+    // 3 fixes, 100 s apart, each advancing at exactly 90% of the reference —
+    // honest travel for the gap, so no reseed classifies as a teleport.
     let t = T0;
     let d = 100;
     let prevBias = sim.paceBias;
     for (let k = 0; k < 3; k++) {
       t += 100_000;
       d += vReal * 100;
-      applyFixPinned(sim, d, t);
+      applySnapshot(sim, makeSnapshot({ shapeDistM: d, observedAtMs: t }), t);
       expect(sim.paceBias).toBeGreaterThan(prevBias); // monotone toward 0.9
       prevBias = sim.paceBias;
     }
@@ -95,7 +86,7 @@ describe('paceBias calibration (applySnapshot)', () => {
 
   it('recency: after a step change to 120% pace, the bias crosses 1.0 within ~3.5 min', () => {
     const vFast = 1.2 * V_CRUISE_REF_MS; // ratio sample = 1.2 exactly
-    const sim = makeSim(straightGeo(6000, vFast), 100);
+    const sim = makeSim(straightGeo(6000), 100);
     sim.paceBias = 0.7; // previously-learned slow driver
 
     let t = T0;
@@ -104,7 +95,7 @@ describe('paceBias calibration (applySnapshot)', () => {
     for (let k = 1; k <= 7; k++) {
       t += 30_000;
       d += vFast * 30;
-      applyFixPinned(sim, d, t);
+      applySnapshot(sim, makeSnapshot({ shapeDistM: d, observedAtMs: t }), t);
       if (crossedAfterS === null && sim.paceBias >= 1.0) crossedAfterS = k * 30;
     }
     expect(crossedAfterS).not.toBeNull();
@@ -113,17 +104,20 @@ describe('paceBias calibration (applySnapshot)', () => {
   });
 
   it('clamps each ratio sample to [0.4, 1.6]', () => {
-    // Absurdly fast: 3× the network cap → the sample is used as 1.6, not ~3.6.
-    const fast = makeSim(straightGeo(20_000, V_MAX_MS), 0);
-    applyFixPinned(fast, 3 * V_MAX_MS * PACE_BIAS_HALF_LIFE_S, T0 + PACE_BIAS_HALF_LIFE_S * 1000);
-    expect(fast.paceBias).toBeCloseTo(
-      ewma(PACE_BIAS_PRIOR, PACE_BIAS_MAX_RATIO, PACE_BIAS_HALF_LIFE_S),
-      6,
-    );
+    // Fast outlier: 450 m in 20 s (raw ratio ≈ 1.92) — under the gap-aware
+    // teleport floor, so the sample is taken and clamped at 1.6.
+    const fast = makeSim(straightGeo(6000), 0);
+    applySnapshot(fast, makeSnapshot({ shapeDistM: 450, observedAtMs: T0 + 20_000 }), T0 + 20_000);
+    expect(fast.lastTeleportMs).toBe(0);
+    expect(fast.paceBias).toBeCloseTo(ewma(PACE_BIAS_PRIOR, PACE_BIAS_MAX_RATIO, 20), 6);
 
     // Absurdly slow: 20 m in 150 s → the sample is used as 0.4.
-    const slow = makeSim(straightGeo(6000, V_MAX_MS), 0);
-    applyFixPinned(slow, 20, T0 + PACE_BIAS_HALF_LIFE_S * 1000);
+    const slow = makeSim(straightGeo(6000), 0);
+    applySnapshot(
+      slow,
+      makeSnapshot({ shapeDistM: 20, observedAtMs: T0 + PACE_BIAS_HALF_LIFE_S * 1000 }),
+      T0 + PACE_BIAS_HALF_LIFE_S * 1000,
+    );
     expect(slow.paceBias).toBeCloseTo(
       ewma(PACE_BIAS_PRIOR, PACE_BIAS_MIN_RATIO, PACE_BIAS_HALF_LIFE_S),
       6,
@@ -135,20 +129,20 @@ describe('paceBias calibration (applySnapshot)', () => {
     for (let k = 0; k < 20; k++) {
       t += 60_000;
       d += 16;
-      applyFixPinned(slow, d, t);
+      applySnapshot(slow, makeSnapshot({ shapeDistM: d, observedAtMs: t }), t);
       expect(slow.paceBias).toBeGreaterThanOrEqual(PACE_BIAS_MIN_RATIO);
     }
     expect(slow.paceBias).toBeCloseTo(PACE_BIAS_MIN_RATIO, 1);
   });
 
   it('skips degenerate samples (Δt < 8 s, Δs < 15 m, backwards fixes, stale fixes)', () => {
-    const sim = makeSim(straightGeo(6000, V_MAX_MS), 500);
+    const sim = makeSim(straightGeo(6000), 500);
     sim.paceBias = 0.8;
 
-    applyFixPinned(sim, 600, T0 + 5_000); // Δt = 5 s
-    expect(sim.paceBias).toBe(0.8);
-    applyFixPinned(sim, 610, T0 + 35_000); // Δs = 10 m
-    expect(sim.paceBias).toBe(0.8);
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 600, observedAtMs: T0 + 5_000 }), T0 + 5_000);
+    expect(sim.paceBias).toBe(0.8); // Δt = 5 s
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 610, observedAtMs: T0 + 35_000 }), T0 + 35_000);
+    expect(sim.paceBias).toBe(0.8); // Δs = 10 m
     // Backwards fix (GPS glitch): never a pace sample.
     applySnapshot(sim, makeSnapshot({ shapeDistM: 550, observedAtMs: T0 + 65_000 }), T0 + 65_000);
     expect(sim.paceBias).toBe(0.8);
@@ -172,7 +166,7 @@ describe('paceBias calibration (applySnapshot)', () => {
     );
     const sim = makeSim(geo, 100);
     // 400 m in 60 s including the 20 s dwell → motion speed 10 m/s, not 6.67.
-    applyFixPinned(sim, 500, T0 + 60_000);
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 500, observedAtMs: T0 + 60_000 }), T0 + 60_000);
     const motionRatio = 400 / 40 / V_CRUISE_REF_MS; // ≈ 0.855
     expect(sim.paceBias).toBeCloseTo(ewma(PACE_BIAS_PRIOR, motionRatio, 60), 3);
     // Sanity: clearly above what the raw (dwell-polluted) ratio would give.
@@ -181,12 +175,60 @@ describe('paceBias calibration (applySnapshot)', () => {
     );
   });
 
+  it('R13 clip-not-drop: pin-active standing time is deducted from the span', () => {
+    // Predictor pinned at a platform by an at_stop fix; the pin holds ~42 s
+    // (45 s staleness on the TRUE age), then the tram departs unseen; the next
+    // fix lands 300 m on. The 42 s of observed standing must NOT contaminate
+    // the pace sample — the moving remainder is the sample (R13).
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [2000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 300_000 },
+        { atM: 500, arrivalMs: T0 - 10_000, departureMs: T0 + 600_000 },
+        { atM: 2000, arrivalMs: T0 + 900_000 },
+      ],
+    );
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const sim = createSim(
+      geo,
+      profile,
+      makeSnapshot({
+        shapeDistM: 500,
+        observedAtMs: T0,
+        statePosition: 'at_stop',
+        lastStopSequence: geo.stops[1].sequence,
+      }),
+      T0,
+    );
+    expect(sim.phase).toBe('dwell'); // pinned ON the platform
+    // Tick through the pin window and beyond (60 s of wall time).
+    let now = T0;
+    for (let i = 0; i < 240; i++) {
+      now += 250;
+      tick(sim, now, 0.25);
+    }
+    const heldS = STOP_HOLD_MAX_FIX_AGE_S - FEED_LATENCY_S; // 42 s of pin time
+    expect(sim.holdAccumMs / 1000).toBeCloseTo(heldS, 0);
+
+    const t1 = T0 + 60_000;
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 800, observedAtMs: t1 }), t1);
+    // effDt = 60 − 42 = 18 s → the sample measures the MOTION pace.
+    const motionRatio = Math.min(PACE_BIAS_MAX_RATIO, 300 / (60 - heldS) / V_CRUISE_REF_MS);
+    expect(sim.paceBias).toBeCloseTo(ewma(PACE_BIAS_PRIOR, motionRatio, 60), 3);
+    // Clearly above the naive standing-contaminated ratio (~0.43).
+    expect(sim.paceBias).toBeGreaterThan(ewma(PACE_BIAS_PRIOR, 300 / 60 / V_CRUISE_REF_MS, 60));
+    // …and the accumulator resets for the next span.
+    expect(sim.holdAccumMs).toBe(0);
+  });
+
   it('INHERITS the learned bias across a hard teleport, without a pace sample from the jump', () => {
-    // Round 1 R1: the vehicle and driver don't change at a teleport — the
-    // learned pace was the one thing the old sim got right. The teleporting
-    // fix itself must NOT feed the EWMA (a 1.9 km re-anchor is not motion —
-    // pre-round-1 it fed a clamped 1.6 sample and then reset to 1.0).
-    const sim = makeSim(straightGeo(6000, V_MAX_MS), 100);
+    // The vehicle and driver don't change at a teleport — the learned pace was
+    // the one thing the old estimate got right. The teleporting fix itself
+    // must NOT feed the EWMA (a 1.9 km re-anchor is not motion).
+    const sim = makeSim(straightGeo(6000), 100);
     sim.paceBias = 0.7;
     applySnapshot(sim, makeSnapshot({ shapeDistM: 2000, observedAtMs: T0 + 30_000 }), T0 + 30_000);
     expect(sim.lastTeleportMs).toBe(T0 + 30_000);
@@ -194,13 +236,12 @@ describe('paceBias calibration (applySnapshot)', () => {
   });
 
   it('createSim seeds paceBias from initialPaceBias (clamped) when provided', () => {
-    const geo = straightGeo(6000, V_CRUISE_REF_MS);
+    const geo = straightGeo(6000);
     const profile = buildSpeedProfile(geo, { daytime: false });
     const snap = makeSnapshot({ shapeDistM: 0, observedAtMs: T0 });
     expect(createSim(geo, profile, snap, T0, undefined, { initialPaceBias: 0.8 }).paceBias).toBe(
       0.8,
     );
-    // Out-of-range seeds clamp to the sample bounds.
     expect(createSim(geo, profile, snap, T0, undefined, { initialPaceBias: 3 }).paceBias).toBe(
       PACE_BIAS_MAX_RATIO,
     );
@@ -212,11 +253,10 @@ describe('paceBias calibration (applySnapshot)', () => {
 
 describe('meanCruiseCapOver', () => {
   it('is the flat cap on a straight and length-weights mixed-cap spans', () => {
-    const geo = straightGeo(1000, V_MAX_MS);
+    const geo = straightGeo(1000);
     const profile = buildSpeedProfile(geo, { daytime: false });
     expect(meanCruiseCapOver(profile, geo, 100, 900)).toBeCloseTo(V_MAX_MS, 6);
 
-    // Synthetic profile: first half capped at 5 m/s, second at 10 m/s.
     const geo2 = makeGeometry(
       [
         [0, 0],
@@ -235,21 +275,17 @@ describe('meanCruiseCapOver', () => {
     expect(meanCruiseCapOver(profile2, geo2, 0, 1000)).toBeCloseTo(7.5, 3);
     expect(meanCruiseCapOver(profile2, geo2, 0, 500)).toBeCloseTo(5, 3);
     expect(meanCruiseCapOver(profile2, geo2, 500, 1000)).toBeCloseTo(10, 3);
-    // 750 m span: 500 m at 5 + 250 m at 10 → 6.67.
     expect(meanCruiseCapOver(profile2, geo2, 0, 750)).toBeCloseTo((500 * 5 + 250 * 10) / 750, 3);
-    // Degenerate span falls back to the point cap.
     expect(meanCruiseCapOver(profile2, geo2, 250, 250)).toBeCloseTo(5, 6);
   });
 
   it('bounds per-segment caps by refCapMs (the cruise-reference semantics)', () => {
-    const geo = straightGeo(1000, V_MAX_MS);
+    const geo = straightGeo(1000);
     const profile = buildSpeedProfile(geo, { daytime: false });
-    // Straight at the 13.9 network cap → reference-capped mean is the ref.
     expect(meanCruiseCapOver(profile, geo, 100, 900, V_CRUISE_REF_MS)).toBeCloseTo(
       V_CRUISE_REF_MS,
       6,
     );
-    // Caps BELOW the reference are untouched (curve/zone caps still bind).
     const geo2 = makeGeometry(
       [
         [0, 0],
@@ -269,7 +305,6 @@ describe('meanCruiseCapOver', () => {
       (500 * 5 + 500 * V_CRUISE_REF_MS) / 1000,
       3,
     );
-    // Degenerate span is reference-capped too.
     expect(meanCruiseCapOver(profile2, geo2, 750, 750, V_CRUISE_REF_MS)).toBeCloseTo(
       V_CRUISE_REF_MS,
       6,
@@ -277,10 +312,10 @@ describe('meanCruiseCapOver', () => {
   });
 });
 
-describe('paceBias applied to the pace controller (integration)', () => {
-  it('a 70%-pace tram stops sprint-and-crawl oscillating once calibrated', () => {
-    const vReal = 0.7 * V_MAX_MS; // ≈ 9.73 m/s ≈ 0.83× reference, the schedule pace
-    const geo = straightGeo(6000, vReal);
+describe('paceBias applied to the predictor (integration)', () => {
+  it('a slower-than-reference tram converges and stops sprint-and-reseed oscillating', () => {
+    const vReal = 0.7 * V_MAX_MS; // ≈ 9.73 m/s ≈ 0.83× reference
+    const geo = straightGeo(6000);
     const profile = buildSpeedProfile(geo, { daytime: false });
     const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 0, observedAtMs: T0 }), T0);
 
@@ -288,34 +323,29 @@ describe('paceBias applied to the pace controller (integration)', () => {
     const DT = 0.1;
     let now = T0;
     let obsD = 0;
-    let minE = Infinity;
     let vMax = 0;
-    let crawled = false;
+    let maxReseedJump = 0;
     for (let step = 1; step <= 4000; step++) {
       now += DT * 1000;
       if (step % 200 === 0) {
         obsD += vReal * 20;
+        const before = sim.sM;
         applySnapshot(sim, makeSnapshot({ shapeDistM: obsD, observedAtMs: now }), now);
+        if (step > 3000) maxReseedJump = Math.max(maxReseedJump, Math.abs(sim.sM - before));
       }
       tick(sim, now, DT);
-      if (step > 3000) {
-        // Converged window (t > 300 s): measure tracking quality.
-        minE = Math.min(minE, targetDistAt(sim, now) - sim.sM);
-        vMax = Math.max(vMax, sim.vMs);
-        if (sim.crawling) crawled = true;
-      }
+      if (step > 3000) vMax = Math.max(vMax, sim.vMs);
     }
 
     expect(sim.lastTeleportMs).toBe(0);
-    // Converging from the 0.62 prior toward vReal / V_CRUISE_REF_MS ≈ 0.83.
-    expect(sim.paceBias).toBeGreaterThan(0.7);
-    expect(sim.paceBias).toBeLessThan(0.85);
-    // Calibrated: cruises near the tram's real pace instead of sprinting to
-    // the cap and then hard-brake crawling.
-    expect(crawled).toBe(false);
-    expect(minE).toBeGreaterThan(-HARD_BRAKE_ENTER_M);
-    expect(vMax).toBeLessThan(12.5);
-    expect(vMax).toBeGreaterThan(0.8 * vReal); // still actually moving at pace
+    // Converged from the 0.62 prior toward vReal / V_CRUISE_REF_MS ≈ 0.83.
+    expect(sim.paceBias).toBeGreaterThan(0.75);
+    expect(sim.paceBias).toBeLessThan(0.9);
+    // Calibrated: cruises near the tram's real pace…
+    expect(vMax).toBeLessThan(11);
+    expect(vMax).toBeGreaterThan(0.8 * vReal);
+    // …so consecutive reseeds land nearly in place (no sprint-and-yank).
+    expect(maxReseedJump).toBeLessThan(45);
   });
 });
 
@@ -348,11 +378,8 @@ describe('paceBias inheritance across trips and respawns (TramEngine per-key mem
     return { ...geo, tripId, shapeId: `shape-${tripId}` };
   }
 
-  /**
-   * Ingest a learning sequence of fixes at 90% of reference pace, ticking the
-   * engine between polls so the sim tracks the fixes (no teleports — a
-   * teleporting fix would be excluded from calibration by design).
-   */
+  /** Ingest a learning sequence of fixes at 90% of reference pace, ticking the
+   *  engine between polls (no teleports — jumps stay well under threshold). */
   function learn(engine: TramEngine, geo: RouteGeometry, fixes: number): number {
     let t = T0;
     let d = 0;
@@ -414,12 +441,10 @@ describe('paceBias inheritance across trips and respawns (TramEngine per-key mem
     const tEnd = learn(engine, tripA, 6);
     const learned = bias(engine, tEnd);
 
-    // Feed gap of 2 min (> STALE_AFTER_MS): an ingest without the tram drops it.
     const tGap = tEnd + 120_000;
     engine.ingest([], () => tripA, tGap);
     expect(engine.getState(KEY, tGap)).toBeUndefined();
 
-    // …but the vehicle returns within the memory TTL: bias inherited.
     const tBack = tEnd + 180_000;
     engine.ingest(
       [makeSnapshot({ key: KEY, tripId: 'trip-A', shapeDistM: 3000, observedAtMs: tBack })],
@@ -435,12 +460,9 @@ describe('paceBias inheritance across trips and respawns (TramEngine per-key mem
     const tEnd = learn(engine, tripA, 6);
     expect(bias(engine, tEnd)).toBeGreaterThan(PACE_BIAS_PRIOR + 0.1);
 
-    // Drop the entry (feed gap > STALE_AFTER_MS)…
     engine.ingest([], () => tripA, tEnd + 120_000);
     expect(engine.getState(KEY, tEnd + 120_000)).toBeUndefined();
 
-    // …and return only after the memory TTL: the vehicle is treated as new
-    // (plausible driver/duty change after a long layover).
     const tLater = tEnd + PACE_BIAS_MEMORY_TTL_MS + 60_000;
     engine.ingest(
       [makeSnapshot({ key: KEY, tripId: 'trip-A', shapeDistM: 5000, observedAtMs: tLater })],

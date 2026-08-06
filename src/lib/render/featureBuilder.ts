@@ -230,14 +230,18 @@ export interface BuildFrameOptions {
    */
   badgeMemory?: BadgeAnchorMemory;
   /**
-   * 'smooth' (default): render at the simulated/interpolated position.
-   * 'live': render at the engine's projected observation — the last AVL fix
-   * dead-reckoned forward to now (TramPublicState.projectedObservedDistM),
-   * falling back to the raw fix (observedPosition / raw shape distance) when
-   * no projection exists. Advances smoothly between polls and jumps (forward
-   * or back) whenever a new fix arrives — accepted live-mode UX.
+   * Render anchor per engine-v2.md §2 (three render modes over one engine):
+   * 'smooth' (default): the smoother's cinematic position (simDistM).
+   * 'live': the predictor — the engine's best estimate of the REAL tram now
+   * (TramPublicState.projectedObservedDistM), falling back to the raw fix
+   * (observedPosition / raw shape distance) when no predictor exists.
+   * 'raw': the last AVL fix itself — head at clamp(snapshot.shapeDistM) on
+   * the shape (anchor/bearing evaluated on the same shared geometry), the
+   * plain observedPosition/observedBearing without geometry. A raw frame only
+   * changes when a fix does, so it jumps on every update (~45–95 s cadence);
+   * the follow camera eases those jumps (§2.7).
    */
-  positionMode?: 'smooth' | 'live';
+  positionMode?: 'smooth' | 'live' | 'raw';
   /** Frame timestamp; defaults to Date.now(). */
   nowMs?: number;
 }
@@ -245,7 +249,7 @@ export interface BuildFrameOptions {
 type PointFeature = GeoJSON.Feature<GeoJSON.Point, PointFeatureProps>;
 type SectionFeature = GeoJSON.Feature<GeoJSON.Point, SectionFeatureProps>;
 
-function expandBbox(
+export function expandBbox(
   bbox: [number, number, number, number],
   marginM: number,
 ): [number, number, number, number] {
@@ -731,6 +735,7 @@ export function buildFrame(
   const cullBbox = sectionsEnabled ? expandBbox(viewport.bbox, CULL_MARGIN_M) : viewport.bbox;
   const lineFilter = opts.lineFilter ?? null;
   const live = opts.positionMode === 'live';
+  const raw = opts.positionMode === 'raw';
   const overlayKey = opts.followedKey ?? opts.selectedKey;
   let fixOverlay: GeoJSON.FeatureCollection | null = null;
   // Badge declutter runs only on points-push frames inside the badge band,
@@ -745,23 +750,27 @@ export function buildFrame(
     if (lineFilter && !lineFilter.has(state.snapshot.line)) continue;
 
     const isOverlayTarget = overlayKey !== null && state.key === overlayKey;
-    // Geometry is needed for sections, for live-mode anchoring at the
-    // projected observation, and for the fix-overlay connector slice.
+    // Geometry is needed for sections, for live/raw-mode anchoring along the
+    // shape, and for the fix-overlay connector slice.
     const geometry =
-      state.hasGeometry && (sectionsEnabled || live || isOverlayTarget)
+      state.hasGeometry && (sectionsEnabled || live || raw || isOverlayTarget)
         ? opts.getGeometry(state.key)
         : undefined;
 
-    // Rendered anchor: simulated position in smooth mode; in live mode the
-    // engine's projected observation (dead-reckoned fix), falling back to the
-    // raw fix distance / observed position when no projection exists.
+    // Rendered anchor: the smoother in smooth mode; the predictor
+    // (projectedObservedDistM) in live mode; the raw fix distance in raw mode
+    // — all evaluated on the SAME shared geometry, falling back to the plain
+    // observed position when none exists.
     let sHead = state.simDistM;
     let anchor = state.position;
     let bearing = state.bearing;
-    if (live) {
+    if (live || raw) {
       if (geometry) {
         sHead = Math.min(
-          Math.max(state.projectedObservedDistM ?? state.snapshot.shapeDistM, 0),
+          Math.max(
+            (live ? state.projectedObservedDistM : null) ?? state.snapshot.shapeDistM,
+            0,
+          ),
           geometry.totalM,
         );
         anchor = pointAt(geometry.coordinates, geometry.cumDistM, sHead);

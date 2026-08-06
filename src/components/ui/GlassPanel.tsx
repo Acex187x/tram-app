@@ -12,6 +12,11 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import {
+  contentBlurOverlayFor,
+  contentGlassTintFor,
+} from '@/components/ui/glass-appearance';
+
 const glassSupported = isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
 
 let reduceTransparencyCache = false;
@@ -30,10 +35,15 @@ export interface GlassPanelProps {
   interactive?: boolean;
   tintColor?: string;
   /**
-   * Force the panel's light/dark appearance instead of following the system
-   * scheme. The MAP chrome passes the map's resolved light preset here — the
-   * panels float over the basemap, so a dark-mode phone over a daytime map
-   * must still get LIGHT glass with dark content (and vice versa at night).
+   * Strengthen the material behind same-scheme foreground when this panel
+   * floats over high-contrast content such as a map or 3D scene. Ordinary
+   * sheet glass intentionally leaves this off.
+   */
+  readableOverContent?: boolean;
+  /**
+   * Pin a system-derived appearance when a parent already owns the scheme.
+   * Most callers should omit this and follow the device directly. Never derive
+   * this value from basemap lighting: map style and application UI are separate.
    */
   appearance?: 'light' | 'dark';
   /**
@@ -54,6 +64,7 @@ export function GlassPanel({
   variant = 'regular',
   interactive,
   tintColor,
+  readableOverContent = false,
   appearance,
   ref,
 }: GlassPanelProps) {
@@ -62,6 +73,8 @@ export function GlassPanel({
   /** What the NATIVE glass is told. See the `colorScheme` prop below. */
   const glassScheme: 'light' | 'dark' | 'auto' =
     appearance ?? (systemScheme === 'dark' || systemScheme === 'light' ? systemScheme : 'auto');
+  const resolvedTintColor =
+    tintColor ?? (readableOverContent ? contentGlassTintFor(scheme) : undefined);
   const [reduceTransparency, setReduceTransparency] = useState(reduceTransparencyCache);
 
   useEffect(() => {
@@ -90,14 +103,13 @@ export function GlassPanel({
       <GlassView
         glassEffectStyle={variant}
         isInteractive={interactive}
-        tintColor={tintColor}
+        tintColor={resolvedTintColor}
         // PIN the appearance, never 'auto'. 'auto' maps to
         // UIUserInterfaceStyle.unspecified, i.e. "resolve light/dark yourself"
-        // — from the inherited trait collection, which a Fabric-recycled
-        // instance or a forced-.light ancestor (the map chrome is the only
-        // place that forces one) can poison. The panel's children are painted
-        // from `useColorScheme()` regardless, so any divergence lands on screen
-        // as a MIXED light/dark surface. Passing the system scheme explicitly
+        // — from the inherited trait collection, which can briefly be stale on
+        // a recycled native view. The panel's children are painted from the
+        // same resolved scheme, so any divergence lands on screen as a MIXED
+        // light/dark surface. Passing the system scheme explicitly
         // is the same intent the prop doc states ("follow the system scheme"),
         // just asserted instead of inferred. 'auto' survives only for the case
         // where the platform reports no scheme at all (null), where letting
@@ -122,6 +134,15 @@ export function GlassPanel({
         ref={ref as Ref<BlurView>}
         style={[styles.rounded, styles.clipped, style]}
       >
+        {readableOverContent && (
+          <View
+            pointerEvents="none"
+            style={[
+              StyleSheet.absoluteFill,
+              { backgroundColor: contentBlurOverlayFor(scheme) },
+            ]}
+          />
+        )}
         {children}
       </BlurView>
     );

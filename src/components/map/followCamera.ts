@@ -25,6 +25,17 @@ export const CAMERA_GLIDE_MS = 170;
 export const CAMERA_RETURN_MS = 600;
 
 /**
+ * Raw-mode fix-jump glide (engine-v2.md §2.7). In raw position mode the
+ * follow target is the raw AVL fix, which is stationary between fixes (the
+ * deadband suppresses every retarget) and leaps tens-to-hundreds of meters
+ * when one lands (~45–95 s cadence). Each actual send therefore glides over
+ * this longer eased duration — a hard 170 ms snap across a fix jump is
+ * unacceptable at follow zoom. Shorter than CAMERA_RETURN_MS's cross-city
+ * ease; long enough that a ~100 m jump reads as motion, not a cut.
+ */
+export const RAW_FIX_GLIDE_MS = 800;
+
+/**
  * Stationary-target deadband (project-review P2 "follow camera never idles on
  * a dwell"): a retarget whose camera target is visually identical to the LAST
  * SENT one is suppressed entirely — every setCamera restarts a native

@@ -1,4 +1,4 @@
-// The itinerary "Details" step list from IMG_0081: SF-symbol / line-badge step
+// Tram Spotter journey details: SF-symbol / line-badge step
 // icons, a title + subtitle(s), an optional note row with a blue "More" link,
 // hairline separators, and the inline dotted stop-timeline segment (a tinted
 // dotted line joining fromStop → toStop with a "Ride k stops, m min" middle).

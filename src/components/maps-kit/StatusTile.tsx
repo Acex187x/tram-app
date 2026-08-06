@@ -1,8 +1,8 @@
 // The weather/AQI-style rounded-square glass tile top-left (all screenshots):
 // two stacked micro-rows on one small glass square. MapChrome's live-status chip
 // is rebuilt on it — tram.fill + count (top) over a LIVE/STALE dot (bottom) —
-// and tapping reveals the "updated N s ago" detail. Chrome floats over the
-// basemap, so appearance follows the MAP light preset (required, not optional).
+// and tapping reveals the "updated N s ago" detail. Appearance is supplied by
+// the system-themed map chrome context.
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -44,7 +44,13 @@ export function StatusTile({
   const [expanded, setExpanded] = useState(false);
   const disclosable = expandedDetail != null;
   return (
-    <GlassPanel variant="regular" interactive appearance={appearance} style={styles.tile}>
+    <GlassPanel
+      variant="regular"
+      interactive
+      readableOverContent
+      appearance={appearance}
+      style={styles.tile}
+    >
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={

@@ -1,14 +1,11 @@
-// Apple's segmented control:
+// System-themed segmented control:
 //  - `md` label row  = line-direction headsigns / Smooth-Live choice / icon packs.
 //    This is the REAL UISegmentedControl (@expo/ui `segmented-control`), so the
 //    selection pill slides, the labels take Dynamic Type, the drag-across-segments
 //    gesture works and VoiceOver announces the segmented traits.
-//  - `lg` symbol row = the Directions transport-mode selector (IMG_0080), still
-//    hand-rolled: the native control has no PER-SEGMENT `disabled` (only a
-//    whole-control `enabled`) and Apple Maps' own mode row is a custom capsule.
-//    Symbol segments and any `disabled` segment therefore stay on this path.
-// Follows the map light preset when `appearance` is passed (it floats over the
-// map in Directions), else the system scheme inside a sheet.
+//  - `lg` symbol row stays hand-rolled because the native control cannot disable
+//    individual segments. `appearance` may pin an already system-derived scheme;
+//    otherwise the component reads the system theme directly.
 // Named export (identical binding to the default one) — the default import
 // shadows it and trips import/no-named-as-default.
 import { SegmentedControl } from '@expo/ui/community/segmented-control';
@@ -147,7 +144,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   selected: {
-    // Subtle lift on the selected pill (Apple's segmented shadow).
+    // Subtle lift keeps the selected value distinct from the track.
     boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
   },
   label: { ...Type.subhead },

@@ -1,5 +1,14 @@
 # Interpolation Engine — Decision Record
 
+> **SUPERSEDED (2026-08-01) by [`engine-v2.md`](engine-v2.md).** The
+> dual-controller architecture this record describes (schedule-blend main sim
+> + independent projSim — §6/§11) was replaced wholesale by the v2
+> predictor + smoother stack; the mode-divergence defect it caused is
+> engine-v2.md §1a. Everything else here — the empirics, the field-fix
+> rationale, the calibration history and constants provenance — **remains the
+> evidence base** and is still cited by the v2 record. Gate results of the
+> replacement: `docs/calibration/baselines/gate-v2.md`.
+
 How a sparse, laggy AVL feed (Golemio polls every ~20 s, positions already seconds
 stale) becomes smooth 60 fps tram motion. The engine is pure, deterministic, timer-free
 TypeScript — the caller drives `ingest()` per poll and `tick()` per frame.

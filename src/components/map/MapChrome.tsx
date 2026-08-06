@@ -1,20 +1,25 @@
-// Apple-Maps map chrome floating over the basemap: the weather/AQI-style live
+// Product map chrome floating over the basemap: the live fleet status tile,
 // StatusTile (top-left), the right-edge control column (2D/3D circle + a fused
 // layers/locate capsule with a light-preset / route-lines quick menu), and the
 // bottom chip cluster (follow / spotter / ride / planner) that RIDES above the
 // home sheet — translating with the sheet's heightSV on the UI thread.
 //
-// APPEARANCE: the chrome floats over the BASEMAP, not over app UI — so its
-// light/dark styling follows the map's resolved light preset (day/dawn →
-// light glass + dark labels, dusk/night → dark glass + light labels) via
-// MapChromeSchemeContext, NOT the system color scheme. A dark-mode phone over
-// a daytime map previously rendered white icons on white glass.
+// APPEARANCE: MapChromeSchemeContext carries the system color scheme, so every
+// app surface changes together independently of the basemap's time preset.
 
 import * as Haptics from 'expo-haptics';
 import { router, type Href } from 'expo-router';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { createContext, useContext, useState } from 'react';
-import { Pressable, StyleSheet, Switch, Text, View, type ViewStyle } from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  Switch,
+  Text,
+  useColorScheme,
+  View,
+  type ViewStyle,
+} from 'react-native';
 import Animated, {
   ReduceMotion,
   useAnimatedStyle,
@@ -44,15 +49,17 @@ import { useSelectionStore } from '@/stores/selection';
 import { useSettingsStore, type LightPreset } from '@/stores/settings';
 import { useSpotterStore } from '@/stores/spotter';
 
-// ── Chrome appearance (follows the MAP light preset, not the system scheme) ──
+// ── Chrome appearance (follows the system scheme) ────────────────────────
 
 export type ChromeScheme = 'light' | 'dark';
 
-/** Provided by the map screen from the resolved basemap light preset. */
-export const MapChromeSchemeContext = createContext<ChromeScheme>('light');
+/** Provided by the map screen from the current system appearance. */
+export const MapChromeSchemeContext = createContext<ChromeScheme | null>(null);
 
 export function useChromeScheme(): ChromeScheme {
-  return useContext(MapChromeSchemeContext);
+  const provided = useContext(MapChromeSchemeContext);
+  const system = useColorScheme();
+  return provided ?? (system === 'dark' ? 'dark' : 'light');
 }
 
 /**
@@ -62,7 +69,7 @@ export function useChromeScheme(): ChromeScheme {
  */
 const LIVERY_RED_ON_DARK = '#FF6B63';
 
-/** Livery tint for a chrome glyph, per the MAP's resolved light preset. */
+/** Livery tint for a chrome glyph in the current system appearance. */
 function liveryTint(scheme: ChromeScheme): string {
   return scheme === 'dark' ? LIVERY_RED_ON_DARK : Tram.pidRed;
 }
@@ -432,7 +439,12 @@ function LayersMenu({
           entering={ZoomIn.duration(180).reduceMotion(ReduceMotion.System)}
           exiting={ZoomOut.duration(140).reduceMotion(ReduceMotion.System)}
         >
-          <GlassPanel variant="regular" appearance={scheme} style={styles.layersPanel}>
+          <GlassPanel
+            variant="regular"
+            readableOverContent
+            appearance={scheme}
+            style={styles.layersPanel}
+          >
             <Text style={[styles.layersLabel, { color: palette.textSecondary }]}>MAP LIGHTING</Text>
             {LIGHT_PRESETS.map((p) => (
               <Pressable
@@ -693,7 +705,13 @@ function SpotterChip() {
   const bottom = (plannerActive ? CHIP_STACK_H : 0) + (rideActive ? CHIP_STACK_H : 0);
   return (
     <View style={[styles.chipSlot, { bottom }]}>
-      <GlassPanel variant="regular" interactive appearance={colors.scheme} style={styles.chip}>
+      <GlassPanel
+        variant="regular"
+        interactive
+        readableOverContent
+        appearance={colors.scheme}
+        style={styles.chip}
+      >
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Spotting ${station.name}, ${detail}. Reopen stop details`}
@@ -762,7 +780,13 @@ function RideChip() {
   const bottom = plannerActive ? CHIP_STACK_H : 0;
   return (
     <View style={[styles.chipSlot, { bottom }]}>
-      <GlassPanel variant="regular" interactive appearance={colors.scheme} style={styles.chip}>
+      <GlassPanel
+        variant="regular"
+        interactive
+        readableOverContent
+        appearance={colors.scheme}
+        style={styles.chip}
+      >
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Reopen recorded rides"
@@ -808,7 +832,13 @@ function PlannerChip() {
 
   return (
     <View style={[styles.chipSlot, { bottom: 0 }]}>
-      <GlassPanel variant="regular" interactive appearance={colors.scheme} style={styles.chip}>
+      <GlassPanel
+        variant="regular"
+        interactive
+        readableOverContent
+        appearance={colors.scheme}
+        style={styles.chip}
+      >
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Reopen trip planner"

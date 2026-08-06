@@ -22,8 +22,10 @@ and HOW (with `src/…` references) for one subsystem.
 | Doc | Covers |
 |---|---|
 | [`decisions/data-pipeline.md`](decisions/data-pipeline.md) | Golemio polling, rate-limit queue, entity keying, GTFS/shape fetching + disk cache, `RouteGeometry` construction. |
-| [`decisions/interpolation-engine.md`](decisions/interpolation-engine.md) | The physics sim: speed-limit field, braking envelope, dwell, and the observation-primary pace controller with trail bias + crawl/catch-up regimes. |
-| [`decisions/backend-plan.md`](decisions/backend-plan.md) | The future backend (server-side 1–2 s Golemio polling, push stream, precomputed geometry, fleet-wide calibration priors) and the `TramFeed` client boundary that makes it a drop-in. |
+| [`decisions/engine-v2.md`](decisions/engine-v2.md) | **The current engine** (2026-08-01): the fix → predictor → smoother layer stack, three render modes (smooth/live/raw), why the dual-controller design was replaced, and the TS replay ship gate. Start here for physics. |
+| [`decisions/interpolation-engine.md`](decisions/interpolation-engine.md) | SUPERSEDED by engine-v2.md for the controller architecture; still the evidence base for the braking envelope, holds, queueing, and every field-fix's rationale. |
+| [`decisions/backend-convex.md`](decisions/backend-convex.md) | **The backend as built** (Convex): 24/7 self-rescheduling Golemio poller, diff-stream via reactive queries, server-side continuous calibration (segment/model/vehicle/stop EWMAs → client prior bundle), `RemoteFeed`. |
+| [`decisions/backend-plan.md`](decisions/backend-plan.md) | The original backend design record (generic WS/HTTP sketch) — motivation and the `TramFeed` seam; transport superseded by backend-convex.md. |
 | [`performance.md`](performance.md) | Performance & thermal playbook: everything done for perf (cadence system, GPU knobs, allocation discipline), the invariants that must not be broken, and the pre-ship verification checklist. |
 | [`decisions/map-rendering.md`](decisions/map-rendering.md) | Zoom bands, ModelLayer scaling, the imperative-push source pattern, the follow camera (80 ms retarget / 170 ms overlapping glide, persistent gestures), thermal cadences. |
 | [`decisions/3d-models.md`](decisions/3d-models.md) | Programmatic GLB authoring (`@gltf-transform/core`), the −Z front convention, per-type sections, and the expo-gl + three interactive viewer (WebGL1 chain). |

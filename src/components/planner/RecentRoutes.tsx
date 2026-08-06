@@ -1,8 +1,5 @@
-// Recent journey searches as an Apple Maps inset group (IMG_0072/80): rounded
-// glass card, each row a clock-circle icon over "from → to", tapping the row
-// prefills + plans, a trailing button forgets it. That button is a NEUTRAL
-// xmark, not the red minus: on iOS the filled red minus is the list editing-
-// mode delete control and never appears at rest.
+// Recent stop pairs are shortcuts back into the live vehicle matcher. The
+// trailing action forgets a pair without turning the whole list into edit mode.
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
 import { Fragment } from 'react';

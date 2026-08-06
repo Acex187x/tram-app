@@ -12,9 +12,14 @@
 //   • a pause gap beyond MAX_TICK_CATCHUP_MS is dropped, not replayed;
 //   • resetClock() makes the next tick an anchor (no integration at all).
 
-import { MAX_TICK_CATCHUP_MS, QUEUE_GAP_M, TramEngine } from '@/lib/engine/engine';
+import {
+  MAX_TICK_CATCHUP_MS,
+  QUEUE_GAP_M,
+  STALE_AFTER_MS,
+  TramEngine,
+} from '@/lib/engine/engine';
 import { V_MAX_MS } from '@/lib/engine/speedProfile';
-import type { RouteGeometry, TramPublicState, TramSnapshot } from '@/lib/types';
+import type { RouteGeometry, TramPublicState } from '@/lib/types';
 import { makeGeometry, makeSnapshot, makeSpec1 } from './helpers';
 
 const T0 = 1_000_000_000_000;
@@ -146,33 +151,32 @@ describe('tick cadence convergence (P0: no more quarter-speed background sim)', 
 });
 
 describe('queue constraints hold on a coarse cadence (whole-fleet substeps)', () => {
-  it('a fast follower never overlaps its slow leader at 1000 ms ticks', () => {
-    // Different trips on one shape: slow leader (~3 m/s schedule), fast
-    // follower (~13 m/s schedule) starting 400 m behind — same fixture family
-    // as engine-queue's catch-up test, but ticked at 1 Hz.
-    const line: [number, number][] = [
-      [0, 0],
-      [3000, 0],
-    ];
-    const slow = makeGeometry(line, [
-      { atM: 0, arrivalMs: T0 - 60_000 },
-      { atM: 3000, arrivalMs: T0 + 940_000, isTerminal: true },
-    ]);
-    const fast: RouteGeometry = {
-      ...makeGeometry(line, [
+  it('a cruising follower never overlaps a standing leader at 1000 ms ticks', () => {
+    // One shape: the leader is stuck mid-segment at 900 (repeated fixes — v2
+    // fixtures stand a tram via observation-pinned holds, not slow
+    // timetables); the follower cruises 800 m into it, ticked at 1 Hz.
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [3000, 0],
+      ],
+      [
         { atM: 0, arrivalMs: T0 - 60_000 },
-        { atM: 3000, arrivalMs: T0 + 165_000, isTerminal: true },
-      ]),
-      tripId: 'trip-fast',
-    };
-    const resolve = (tripId: string) => (tripId === 'trip-fast' ? fast : slow);
+        { atM: 3000, arrivalMs: T0 + 940_000, isTerminal: true },
+      ],
+    );
     const engine = makeEngine();
     engine.ingest(
+      [makeSnapshot({ key: 'slow', shapeDistM: 900, observedAtMs: T0 - 10_000 })],
+      () => geo,
+      T0 - 10_000,
+    );
+    engine.ingest(
       [
-        makeSnapshot({ key: 'slow', shapeDistM: 400, observedAtMs: T0 }),
-        makeSnapshot({ key: 'fast', shapeDistM: 0, observedAtMs: T0, tripId: 'trip-fast' }),
+        makeSnapshot({ key: 'slow', shapeDistM: 900, observedAtMs: T0 }),
+        makeSnapshot({ key: 'fast', shapeDistM: 100, observedAtMs: T0 }),
       ],
-      resolve,
+      () => geo,
       T0,
     );
     engine.tick(T0);
@@ -184,10 +188,16 @@ describe('queue constraints hold on a coarse cadence (whole-fleet substeps)', ()
       minGap = Math.min(minGap, gap);
       expect(gap).toBeGreaterThanOrEqual(clearance - EPS);
     });
-    // The constraint was binding (the fast tram actually attached to the queue).
-    const endGap = state(engine, 'slow', end).simDistM - state(engine, 'fast', end).simDistM;
+    // The constraint was binding: the follower attached to the queue limit
+    // behind the stuck anchor (the leader's rendered marker itself stands up
+    // to its braking-overshoot ahead of the anchor). The 1 Hz cadence runs
+    // 0.25 s substeps, so the explicit-Euler brake toward the hold point may
+    // overshoot it by a few meters — still safely inside the leader clearance
+    // (minGap above is the hard invariant).
+    const followerEnd = state(engine, 'fast', end).simDistM;
     expect(minGap).toBeGreaterThanOrEqual(clearance - EPS);
-    expect(endGap).toBeLessThan(clearance + 15);
+    expect(followerEnd).toBeGreaterThanOrEqual(900 - clearance - 5);
+    expect(followerEnd).toBeLessThanOrEqual(900 - clearance + 8);
   });
 });
 
@@ -224,5 +234,186 @@ describe('catch-up budget and clock reset (pause gaps are not replayed)', () => 
     const resumed = state(engine, 't', later + 1000).simDistM;
     expect(resumed).toBeGreaterThan(before);
     expect(resumed - before).toBeLessThanOrEqual(V_MAX_MS + EPS); // ~1 s of motion
+  });
+
+  it('foreground resync seeks forward to wall time without replaying the gap', () => {
+    const engine = makeEngine();
+    const geo = fixtureGeo();
+    seedOne(engine, geo);
+    engine.tick(T0 + 1_000);
+    const before = state(engine, 't', T0 + 1_000).simDistM;
+
+    engine.resetClock();
+    const foregroundAt = T0 + 61_000;
+    engine.resyncAfterSuspension(foregroundAt);
+    const synced = state(engine, 't', foregroundAt).simDistM;
+
+    // The tram is current immediately, before a new feed batch or timer tick.
+    expect(synced).toBeGreaterThan(before + 100);
+    // The seek is physically/schedule bounded, never an unbounded integration.
+    expect(synced).toBeLessThanOrEqual(geo.totalM);
+
+    engine.tick(foregroundAt + 33);
+    expect(state(engine, 't', foregroundAt + 33).simDistM).toBeGreaterThanOrEqual(synced);
+  });
+
+  it('keeps a fresh platform pin, then releases it after its fix becomes stale', () => {
+    const engine = makeEngine();
+    const geo = fixtureGeo();
+    engine.ingest(
+      [
+        makeSnapshot({
+          key: 'platform',
+          shapeDistM: 500,
+          observedAtMs: T0,
+          statePosition: 'at_stop',
+        }),
+      ],
+      () => geo,
+      T0,
+    );
+
+    engine.resyncAfterSuspension(T0 + 20_000);
+    const fresh = state(engine, 'platform', T0 + 20_000);
+    expect(fresh.simDistM).toBeCloseTo(500, 3);
+    expect(engine.getDebugInfo('platform', T0 + 20_000)?.fixPinActive).toBe(true);
+
+    engine.resyncAfterSuspension(T0 + 61_000);
+    const stale = state(engine, 'platform', T0 + 61_000);
+    expect(stale.simDistM).toBeGreaterThan(500);
+    expect(engine.getDebugInfo('platform', T0 + 61_000)?.fixPinActive).toBe(false);
+  });
+
+  it('does not invent movement through an explicit stuck hold', () => {
+    const engine = makeEngine();
+    const geo = fixtureGeo();
+    const stopped = makeSnapshot({ key: 'stuck', shapeDistM: 200, observedAtMs: T0 });
+    engine.ingest([stopped], () => geo, T0);
+    engine.ingest([{ ...stopped, observedAtMs: T0 + 20_000 }], () => geo, T0 + 20_000);
+    const held = state(engine, 'stuck', T0 + 20_000);
+    expect(engine.getDebugInfo('stuck', T0 + 20_000)?.stuckAtM).toBeCloseTo(200, 3);
+
+    engine.resyncAfterSuspension(T0 + 120_000);
+    expect(state(engine, 'stuck', T0 + 120_000).simDistM).toBeCloseTo(held.simDistM, 3);
+
+    // Only real movement in a genuinely newer fix releases the hold.
+    engine.ingest(
+      [{ ...stopped, shapeDistM: 230, observedAtMs: T0 + 120_000 }],
+      () => geo,
+      T0 + 120_000,
+    );
+    expect(engine.getDebugInfo('stuck', T0 + 120_000)?.stuckAtM).toBeNull();
+  });
+
+  it('re-applies same-shape queue clearance after every tram seeks independently', () => {
+    const engine = makeEngine();
+    const geo = fixtureGeo();
+    engine.ingest(
+      [
+        makeSnapshot({ key: 'leader', shapeDistM: 400, observedAtMs: T0 }),
+        makeSnapshot({ key: 'follower', shapeDistM: 390, observedAtMs: T0 }),
+      ],
+      () => geo,
+      T0,
+    );
+
+    engine.resyncAfterSuspension(T0 + 61_000);
+    const gap =
+      state(engine, 'leader', T0 + 61_000).simDistM -
+      state(engine, 'follower', T0 + 61_000).simDistM;
+    expect(gap).toBeGreaterThanOrEqual(LEN + QUEUE_GAP_M - EPS);
+  });
+});
+
+describe('viewport state reads (close-map allocation budget)', () => {
+  it('omits off-screen entries before public-state allocation while preserving a followed key', () => {
+    const engine = makeEngine();
+    const geo = fixtureGeo();
+    engine.ingest(
+      [
+        makeSnapshot({ key: 'near', shapeDistM: 100, observedAtMs: T0 }),
+        makeSnapshot({
+          key: 'far',
+          tripId: 'missing-shape',
+          coordinates: [0, 0],
+          observedAtMs: T0,
+        }),
+      ],
+      (tripId) => (tripId === geo.tripId ? geo : undefined),
+      T0,
+    );
+
+    const bbox: [number, number, number, number] = [14.5, 50, 14.7, 50.1];
+    const publicReads = jest.spyOn(
+      engine as unknown as { toPublicState: (...args: unknown[]) => TramPublicState },
+      'toPublicState',
+    );
+    expect(engine.getStatesInBounds(T0, bbox).map((s) => s.key)).toEqual(['near']);
+    expect(publicReads).toHaveBeenCalledTimes(1);
+    publicReads.mockClear();
+    expect(engine.getStatesInBounds(T0, bbox, 'far').map((s) => s.key)).toEqual([
+      'near',
+      'far',
+    ]);
+    expect(publicReads).toHaveBeenCalledTimes(2);
+  });
+
+  it("anchors culling per render mode: 'raw' culls by the fix, boolean stays live/smooth", () => {
+    const engine = makeEngine();
+    const geo = fixtureGeo();
+    // The tram's raw coordinate sits OUTSIDE the bbox while its sims (fix at
+    // 100 m along the shape near ORIGIN) are INSIDE — the raw anchor must
+    // exclude it, the smooth/live anchors must include it.
+    engine.ingest(
+      [
+        makeSnapshot({
+          key: 't',
+          shapeDistM: 100,
+          observedAtMs: T0,
+          coordinates: [14.9, 50.05],
+        }),
+      ],
+      () => geo,
+      T0,
+    );
+    engine.tick(T0);
+    const bbox: [number, number, number, number] = [14.5, 50, 14.7, 50.1];
+    expect(engine.getStatesInBounds(T0, bbox, null, null, 'smooth').map((s) => s.key)).toEqual(['t']);
+    expect(engine.getStatesInBounds(T0, bbox, null, null, 'live').map((s) => s.key)).toEqual(['t']);
+    expect(engine.getStatesInBounds(T0, bbox, null, null, true).map((s) => s.key)).toEqual(['t']);
+    expect(engine.getStatesInBounds(T0, bbox, null, null, 'raw')).toEqual([]);
+    // …and the raw anchor includes it when the bbox covers the raw coordinate.
+    const rawBbox: [number, number, number, number] = [14.8, 50, 15.0, 50.1];
+    expect(engine.getStatesInBounds(T0, rawBbox, null, null, 'raw').map((s) => s.key)).toEqual(['t']);
+  });
+});
+
+describe('long-uptime engine resource bounds', () => {
+  it('drops speed profiles after their last vehicle entry expires', () => {
+    const engine = makeEngine();
+    const first = fixtureGeo();
+    const second: RouteGeometry = {
+      ...fixtureGeo(),
+      shapeId: 'shape-next',
+      tripId: 'trip-next',
+    };
+    engine.ingest(
+      [makeSnapshot({ key: 'old', tripId: first.tripId, observedAtMs: T0 })],
+      () => first,
+      T0,
+    );
+
+    const profileCache = (engine as unknown as { profiles: Map<string, unknown> }).profiles;
+    expect([...profileCache.keys()]).toEqual([first.shapeId]);
+
+    const later = T0 + STALE_AFTER_MS + 1;
+    engine.ingest(
+      [makeSnapshot({ key: 'new', tripId: second.tripId, observedAtMs: later })],
+      () => second,
+      later,
+    );
+
+    expect([...profileCache.keys()]).toEqual([second.shapeId]);
+    expect(engine.getState('old', later)).toBeUndefined();
   });
 });

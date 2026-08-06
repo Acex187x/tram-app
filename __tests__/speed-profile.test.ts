@@ -6,6 +6,7 @@ import {
   cruiseCapAt,
   curveCap,
   CURVE_SLOW_FACTOR,
+  DEFAULT_LOOKAHEAD_M,
   V_CENTER_MS,
   V_CURVE_MIN_MS,
   V_MAX_MS,
@@ -150,6 +151,31 @@ describe('vAllowedAt (braking envelope)', () => {
 
   it('ignores stops behind minStopDist (already dwelled)', () => {
     expect(vAllowedAt(profile, geoWithStop, 450, 500.01)).toBeCloseTo(V_MAX_MS, 1);
+  });
+
+  it('the monotonic stop hint preserves the full-scan braking envelope', () => {
+    const manyStops = makeGeometry(
+      [
+        [0, 0],
+        [2000, 0],
+      ],
+      Array.from({ length: 20 }, (_, i) => ({ atM: (i + 1) * 100, arrivalMs: i * 10_000 })),
+    );
+    const manyProfile = buildSpeedProfile(manyStops, { daytime: false });
+    // stops[0..11] are permanently served; index 12 is the first candidate.
+    for (const s of [1201, 1250, 1299, 1350]) {
+      const fullScan = vAllowedAt(manyProfile, manyStops, s, 1200.01);
+      const hinted = vAllowedAt(
+        manyProfile,
+        manyStops,
+        s,
+        1200.01,
+        DEFAULT_LOOKAHEAD_M,
+        A_BRK,
+        12,
+      );
+      expect(hinted).toBeCloseTo(fullScan, 10);
+    }
   });
 
   it('ignores limits beyond the 400 m lookahead', () => {

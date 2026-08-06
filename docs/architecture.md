@@ -67,51 +67,65 @@ untouched — see `decisions/backend-plan.md`.
 4. `TramEngine.ingest(snapshots, tripDetails)` updates per-tram anchors; `tick(now)` advances
    physics; `featureBuilder` emits GeoJSON → the patched direct-native
    `ShapeSource.updateShape` command (outside Fabric). **Thermal-adaptive
-   cadence** (`tramData.ts`, iteration 4 — iPad ran hot after an hour): the sim ticks at 60 Hz
-   (`TICK_MS` 16) ONLY while the 3D model band is on screen (`setDetailMode` from camera events),
-   ~10 Hz (`TICK_IDLE_MS` 100) otherwise. The whole-fleet points FC is pushed at a zoom-dependent
-   rate (`pointsPushIntervalMs`: ~15 Hz close, 1 s mid, 5 s far); the sections FC only while the
+   cadence** (`tramData.ts`, iteration 4 — iPad ran hot after an hour): the sim ticks at 30 Hz
+   (`TICK_MS` 33) ONLY while the 3D model band is on screen (`setDetailZoom` from camera events),
+   ~10 Hz (`TICK_IDLE_MS` 100) otherwise. The points FC is pushed at a zoom-dependent
+   rate (`pointsPushIntervalMs`: ~15 Hz close, 1 s mid, 5 s far) and is culled before public-state
+   allocation at close zoom; the sections FC only while the
    band is visible; empty FCs skip stringify+push entirely. Live sources omit the
    React `shape` prop and never use `setNativeProps`, so unrelated Fabric commits cannot replay
    an older source frame.
+5. A true background pause records wall time and stops all work. Foregrounding calls
+   `TramEngine.resyncAfterSuspension(now)` once: sims seek forward to bounded absolute
+   timetable/AVL anchors before rendering resumes, rather than restarting at their old
+   position or synchronously replaying every missed physics step.
 
 ## Interpolation engine (the heart)
 
-Per tram: simulated distance-along-shape `s` (m) and speed `v` (m/s).
+**v2 — one predictor, one smoother, three render modes.** The full design
+record (rationale, regime table, review-mandated requirements) is
+`docs/decisions/engine-v2.md`; gate results vs the replaced dual-controller
+engine are `docs/calibration/baselines/gate-v2.md`. The layer stack per tram:
 
-Speed limit field, precomputed per shape (`speedProfile.ts`):
-- `vLimit[i]` per vertex = min(zone cap, curve cap). Curve cap = `sqrt(A_LAT / κ)` with
-  `A_LAT = 0.98 m/s²`, κ = |heading change|/meter smoothed over ±10 m window; clamp to [1.4, 13.9] m/s.
-- Zone cap: 13.9 m/s (50 km/h) default; 8.6 m/s (31 km/h) inside CENTER_BBOX
-  (lng 14.395–14.46, lat 50.068–50.096) between 07:00–19:00 Prague time.
-- Stops are `vLimit = 0` points at their `distM`; terminal = last stop.
+```
+fix       (layer 0)  last raw AVL fix on the shape           → "Raw" mode
+   ↓ seeds
+predictor (layer 1)  best estimate of the REAL tram now      → "Live" mode
+   ↓ is chased by
+smoother  (layer 2)  cinematic monotonic tracker             → "Smooth" mode
+```
 
-Runtime per tick (dt ≤ 100 ms):
-- Braking envelope: `vAllowed(s) = min over upcoming limits within 400 m of sqrt(vLim² + 2·A_BRK·(d−s))`,
-  `A_BRK = 1.2 m/s²`, `A_ACC = 1.0 m/s²`. → accelerates on straights, brakes before curves/stops.
-- Dwell: reaching a stop (within 2 m) → hold `v=0` for `computed_dwell_time_seconds` (fallback
-  18 s ± deterministic jitter by stop id hash). Terminal stop → hold until new trip data arrives.
-- Anchors (see `tramSim.ts` for the live constants): the pace controller is
-  **observation-primary**, not timetable-primary. Each poll re-anchors the raw AVL fix
-  (`obsDistM` @ `obsAtMs`). The schedule anchor `sSched(t)` (piecewise-linear dist-vs-time over
-  stops, shifted by `delay.actual`) is only a **low-gain reference** used to project the
-  observation forward: `sObs(now) = obsDistM + max(0, sSched(now) − sSched(obsAtMs))`.
-- Pace target = a blend that rides slightly BEHIND reality:
-  `target = OBS_BLEND_WEIGHT·sObs + (1−OBS_BLEND_WEIGHT)·sSched − TRAIL_M`
-  (`OBS_BLEND_WEIGHT = 0.75`, systematic `TRAIL_M = 10 m`). Error `e = target − s` drives an
-  **asymmetric three-regime** controller:
-  - `e < −HARD_BRAKE_ENTER_M` (40 m, sim overran reality) → **crawl regime**: `vTarget ≤ CRAWL_V_MS`
-    (1.0 m/s), latched with hysteresis until `e` recovers above `−HARD_BRAKE_EXIT_M` (12 m).
-  - `e > BOLD_CATCHUP_ERR_M` (40 m, sim behind) → **bold catch-up**: pace factor up to
-    `CATCHUP_MAX_FACTOR` (1.5).
-  - between → **gentle proportional**: factor `clamp(1 + e/PACE_GAIN_M, MIN_PACE_FACTOR, GENTLE_MAX_FACTOR)`
-    = `clamp(1 + e/120, 0.55, 1.35)`.
-  All regimes stay under the braking envelope (`vTarget ≤ vAllowed`) — catch-up can never overrun
-  a curve/stop. `s` NEVER decreases.
-- Hard teleport: only when the projected OBSERVATION (`sObs`, not the timetable) disagrees with `s`
-  by more than `TELEPORT_THRESHOLD_M` (500 m) → snap to `sObs`, reseed stop state, stamp
-  `lastTeleportMs` (renderer may dip opacity). New poll data otherwise converges via the pace
-  controller with no position jumps.
+- **Predictor** (`tramSim.ts`): reseeds on every genuinely-new fix — seed at
+  the fix, then a **closed-form segmented advance** over the fix's true age
+  (`(now − obsAt) + FEED_LATENCY_S`), walking stop-to-stop at the learned
+  pace and spending dwells, bounded by `maxAdvanceM`. Between fixes it
+  dead-reckons at `min(cruiseCap, V_CRUISE_REF)·paceBias·tod` under the
+  braking envelope. Owns every observation-pinned hold: arrival-fix pin,
+  stuck-hold, latency-aware staleness release. **No schedule pace reference
+  anywhere** — the schedule is demoted to dwell durations, terminal semantics
+  and UI ETAs. Its `sM` jumps on reseeds (that IS live mode's honest UX);
+  jumps past the gap-aware teleport threshold stamp a render fade.
+- **Smoother** (`smoother.ts`): a thin follower whose ONLY reference is the
+  predictor — the v1 smooth/live mode-divergence class is gone structurally.
+  Regime table: hold-follow (predictor standing → close onto the hold point,
+  join its dwell), track (`vPred · clamp(1 + err/120, 0.7, 1.35)`), catch-up
+  (continuous ramp to a ceiling anchored on observed free-running pace,
+  `CATCHUP_HEADROOM 1.9`), yield (hysteresis, 3 m/s floor), teleport
+  (gap-aware snap + fade). Per-stop-index dwell sync with a 75 s doors cap;
+  skip-roll through stops reality already served; `sM` monotonic except two
+  sanctioned fades (gap teleport, terminal un-latch propagation).
+- **Speed profile** (`speedProfile.ts`): per-vertex `vLimit` = min(zone cap,
+  curve cap); braking envelope `vAllowed(s)` over limits within 400 m;
+  `A_BRK 1.4`, `A_ACC 1.3` (real-ride IMU p90); `brakeTowards()` is the one
+  brake-to-a-point primitive. Stops are `vLimit = 0` points; terminal = last
+  stop; 8.6 m/s centre-zone cap 07:00–19:00 Prague time.
+- **Engine** (`engine.ts`): owns both fleets behind the unchanged public seam
+  (`ingest()` per poll, `tick()` per frame, `getStates*`). Queue /
+  cross-shape / junction constraints run on BOTH fleets (discovered per fleet
+  at ingest, O(1)/pair per substep); trip changes swap geometry for both
+  layers atomically; `'coarse'` cadence batches the predictor at 500 ms while
+  the smoother ticks every substep against an interpolated reference; the
+  culling/render anchor is tri-state (`'smooth' | 'live' | 'raw'`).
 
 Sections (articulated bending): model spec gives section lengths `L_i` and gaps. Head at `s`;
 section i center at `s − (Σ previous lengths + gaps) − L_i/2`; its position/bearing from
@@ -220,6 +234,18 @@ is in TramLayers).
 
 Theme: PID dark red `#7A0603`, cream `#F3E9D2`, asphalt. All chrome = GlassView (guarded by
 `isGlassEffectAPIAvailable()`, fallback expo-blur) floating over full-bleed map.
+
+The owned map sheet is a full-width bottom sheet on compact-width devices and a
+375 pt left side sheet on iPad/landscape. Regular width changes only its width
+and placement: it retains the same peek → medium → large detents, grabber and
+pan/scroll hand-off. It opens large on iPad and can be pulled down to the compact
+search capsule; replacing it with a tram sheet slides the home sheet offstage.
+
+Debug mode adds a compact horizontal command deck over the top of the app and
+an in-world comparison for the selected/followed tram: raw AVL fix (magenta),
+projected live position (lime), and smooth physics position (cyan), with
+20-second trails and a live↔smooth delta. The active render mode is marked with
+`*`; the trace GeoJSON uses direct-native `ShapeSource.updateShape` updates.
 
 Routes (expo-router Stack, map = root):
 - `/` map + glass chrome: top-right button stack (locate me, pitch 2D/3D, style), bottom glass

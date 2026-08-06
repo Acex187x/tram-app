@@ -48,6 +48,7 @@ const LIGHT_PRESETS: { value: LightPreset; label: string; icon: SFSymbol; tint: 
 const POSITION_SEGMENTS: { key: PositionMode; label: string }[] = [
   { key: 'smooth', label: 'Smooth' },
   { key: 'live', label: 'Live' },
+  { key: 'raw', label: 'Raw' },
 ];
 
 const ATTRIBUTIONS: { icon: SFSymbol; iconColor: string; label: string; url: string }[] = [
@@ -121,8 +122,8 @@ function PositionModeSection() {
         }}
       />
       <Footnote>
-        Smooth interpolates motion between updates. Live shows exact reported positions and jumps on
-        every update.
+        Smooth animates trams between updates. Live shows the best estimate of where each tram
+        really is right now. Raw shows the last reported position and jumps on every update.
       </Footnote>
     </View>
   );
@@ -449,6 +450,11 @@ function MotionDataSection() {
 function DeveloperSection() {
   const debugMode = useSettingsStore((s) => s.debugMode);
   const setDebugMode = useSettingsStore((s) => s.setDebugMode);
+  const feedSource = useSettingsStore((s) => s.feedSource);
+  const setFeedSource = useSettingsStore((s) => s.setFeedSource);
+  const remoteConfigured =
+    typeof process.env.EXPO_PUBLIC_CONVEX_URL === 'string' &&
+    process.env.EXPO_PUBLIC_CONVEX_URL.length > 0;
   return (
     <View style={styles.section}>
       <SectionLabel>Developer</SectionLabel>
@@ -459,10 +465,26 @@ function DeveloperSection() {
           title="Debug mode"
           trailing={<ThemedSwitch label="Debug mode" value={debugMode} onValueChange={setDebugMode} />}
         />
+        <InsetRow
+          icon="antenna.radiowaves.left.and.right"
+          iconTint={Tram.onTime}
+          title="Backend feed"
+          trailing={
+            <ThemedSwitch
+              label="Backend feed"
+              value={feedSource === 'remote'}
+              onValueChange={(on) => setFeedSource(on ? 'remote' : 'local')}
+            />
+          }
+        />
       </InsetGroup>
       <Footnote>
-        Overlays a live technical readout of the simulation (physics phase, speeds, holds, and the
-        real vs. simulated position) on the followed tram — for evaluating the physics while riding.
+        {'Debug mode overlays a live technical readout of the simulation on the followed tram. ' +
+          'Backend feed streams positions from the Tram Spotter server (fresher fixes, one shared ' +
+          'poller) instead of polling Golemio from the device; it takes effect on the next launch' +
+          (remoteConfigured
+            ? '.'
+            : ' and needs a configured server URL — without one the app stays on the device poller.')}
       </Footnote>
     </View>
   );

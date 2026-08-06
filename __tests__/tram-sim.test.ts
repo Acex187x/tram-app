@@ -1,45 +1,57 @@
 /// <reference types="jest" />
+//
+// Engine v2 core semantics (docs/decisions/engine-v2.md §2.2–§2.3):
+//  PREDICTOR (tramSim.ts) — reseeds on every genuinely-new fix with a
+//  closed-form segmented advance over the fix's TRUE age, cruises at the
+//  learned pace under the braking envelope, fixed dwells, terminal
+//  latch/un-latch, gap-aware teleport classification.
+//  SMOOTHER (smoother.ts, driven through TramEngine) — the r2 regime table:
+//  hold-follow platform capture, track band, continuous catch-up ramp, yield
+//  hysteresis, per-stop dwell sync, skip roll-through, monotonic sM.
 
-import { QUEUE_GAP_M, TramEngine } from '@/lib/engine/engine';
-import { A_ACC, A_BRK, buildSpeedProfile, V_CRUISE_REF_MS, V_MAX_MS } from '@/lib/engine/speedProfile';
+import { TramEngine } from '@/lib/engine/engine';
 import {
-  AHEAD_SLOW_MIN_V_MS,
+  A_ACC,
+  A_BRK,
+  buildSpeedProfile,
+  V_CRUISE_REF_MS,
+  V_MAX_MS,
+} from '@/lib/engine/speedProfile';
+import {
   applySnapshot,
-  buildScheduleAnchor,
-  CRAWL_V_MS,
   createSim,
-  DEEP_AHEAD_ENTER_M,
   dwellDurationMs,
-  DWELL_EXTEND_RELEASE_M,
-  DWELL_MAX_EXTEND_S,
-  DWELL_MIN_S,
-  DWELL_SKIP_ERR_M,
-  DWELL_SKIP_ROLL_V_MS,
-  DWELL_SKIP_ZONE_M,
-  evalScheduleAnchor,
-  HARD_BRAKE_ENTER_M,
+  FEED_LATENCY_S,
   maxAdvanceM,
-  observedDistAt,
-  OBS_BLEND_WEIGHT,
+  PACE_BIAS_PRIOR,
   STOP_REACH_M,
-  targetDistAt,
-  tick,
   TELEPORT_GAP_MARGIN,
   TELEPORT_GAP_MIN_S,
   TELEPORT_THRESHOLD_MAX_M,
   teleportThresholdM,
-  TRAIL_M,
+  TERMINAL_UNLATCH_BEHIND_M,
+  tick,
   type TramSim,
 } from '@/lib/engine/tramSim';
-import type { RouteGeometry, RouteStop } from '@/lib/types';
+import {
+  DWELL_MIN_S,
+  DWELL_SKIP_ROLL_V_MS,
+  DWELL_SKIP_ZONE_M,
+  TRAIL_M,
+} from '@/lib/engine/smoother';
+import type { RouteGeometry } from '@/lib/types';
 import { makeGeometry, makeSnapshot, makeSpec1 } from './helpers';
 
 const T0 = 1_000_000_000_000;
 const DT = 0.1;
+/** Fresh-sim cruise pace: prior × reference (flat straight, neutral TOD). */
+const PRIOR_CRUISE = PACE_BIAS_PRIOR * V_CRUISE_REF_MS; // ≈ 7.254 m/s
+/** Closed-form advance of a fix ingested at its own obsAt (latency only), m. */
+const LATENCY_ADVANCE_M = FEED_LATENCY_S * PRIOR_CRUISE; // ≈ 21.8 m
 
-function makeSim(geo: RouteGeometry, shapeDistM = 0, delaySeconds = 0, nowMs = T0): TramSim {
+function makeSim(geo: RouteGeometry, shapeDistM = 0, nowMs = T0): TramSim {
   const profile = buildSpeedProfile(geo, { daytime: false });
-  const snapshot = makeSnapshot({ shapeDistM, observedAtMs: nowMs, delaySeconds });
+  const snapshot = makeSnapshot({ shapeDistM, observedAtMs: nowMs });
   return createSim(geo, profile, snapshot, nowMs);
 }
 
@@ -55,38 +67,34 @@ function run(sim: TramSim, fromMs: number, seconds: number, cb?: (nowMs: number)
   return now;
 }
 
-describe('schedule anchor', () => {
-  const stops: RouteStop[] = makeGeometry(
-    [
-      [0, 0],
-      [1000, 0],
-    ],
-    [
-      { atM: 0, arrivalMs: T0, departureMs: T0 + 20_000 },
-      { atM: 1000, arrivalMs: T0 + 120_000 },
-    ],
-  ).stops;
-
-  it('is piecewise-linear between stops and flat during dwells', () => {
-    const anchor = buildScheduleAnchor(stops, 0);
-    expect(evalScheduleAnchor(anchor, T0 - 60_000)).toBe(0); // before departure
-    expect(evalScheduleAnchor(anchor, T0 + 10_000)).toBe(0); // dwelling at first stop
-    expect(evalScheduleAnchor(anchor, T0 + 70_000)).toBeCloseTo(500, 0); // halfway
-    expect(evalScheduleAnchor(anchor, T0 + 999_000)).toBeCloseTo(1000, 3); // after arrival
+function makeEngine(): TramEngine {
+  return new TramEngine({
+    resolveModel: () => makeSpec1(),
+    isDaytime: () => false,
+    isCoupled: () => false,
   });
+}
 
-  it('shifts by delaySeconds', () => {
-    const onTime = buildScheduleAnchor(stops, 0);
-    const late = buildScheduleAnchor(stops, 60);
-    expect(evalScheduleAnchor(late, T0 + 70_000 + 60_000)).toBeCloseTo(
-      evalScheduleAnchor(onTime, T0 + 70_000),
-      3,
-    );
-  });
-});
+function runEngine(
+  engine: TramEngine,
+  fromMs: number,
+  seconds: number,
+  cb?: (nowMs: number) => void,
+): number {
+  const steps = Math.round((seconds * 1000) / 100);
+  let now = fromMs;
+  for (let i = 0; i < steps; i++) {
+    now += 100;
+    engine.tick(now);
+    cb?.(now);
+  }
+  return now;
+}
 
-describe('straight-line acceleration', () => {
-  it('ramps up to vmax with accel ≤ 1.0 m/s² and never exceeds the hard cap', () => {
+// ── predictor: acceleration / envelope basics ────────────────────────────────
+
+describe('straight-line acceleration (predictor)', () => {
+  it('ramps up with accel ≤ A_ACC and never exceeds the hard cap', () => {
     const geo = makeGeometry(
       [
         [0, 0],
@@ -94,21 +102,18 @@ describe('straight-line acceleration', () => {
       ],
       [
         { atM: 0, arrivalMs: T0 },
-        { atM: 3000, arrivalMs: T0 + Math.round((3000 / V_MAX_MS) * 1000) },
+        { atM: 3000, arrivalMs: T0 + 300_000 },
       ],
     );
     const sim = makeSim(geo);
-    // A learned-fast tram (fresh sims start at the 0.62 prior and are
-    // deliberately pace-bounded below the cap — see paceBias tests); this
-    // test exercises the accel clamp and the hard V_MAX_MS cap.
+    // A learned-fast tram: the cruise product exceeds the envelope cap, so
+    // the run exercises the accel clamp and the hard V_MAX_MS bound.
     sim.paceBias = 1.3;
-    expect(sim.sM).toBe(0);
-    // Mid-segment spawns seed cruise speed (field feedback #2); force a
-    // standstill here to exercise the acceleration clamp from v = 0.
+    // Mid-segment reseeds seed cruise speed; force a standstill to observe
+    // the acceleration clamp from v = 0.
     expect(sim.vMs).toBeGreaterThan(0);
     sim.vMs = 0;
 
-    // Acceleration is clamped: after 1 s, v ≤ A_ACC (+ eps).
     run(sim, T0, 1);
     expect(sim.vMs).toBeLessThanOrEqual(A_ACC + 1e-6);
 
@@ -116,20 +121,16 @@ describe('straight-line acceleration', () => {
     let sPrev = sim.sM;
     run(sim, T0 + 1000, 39, () => {
       vMax = Math.max(vMax, sim.vMs);
-      expect(sim.sM).toBeGreaterThanOrEqual(sPrev); // monotone
+      expect(sim.sM).toBeGreaterThanOrEqual(sPrev); // monotone between fixes
       sPrev = sim.sM;
     });
-    expect(vMax).toBeGreaterThanOrEqual(13); // reached ~vmax
-    expect(vMax).toBeLessThanOrEqual(V_MAX_MS + 1e-6); // catch-up never exceeds the hard cap
+    expect(vMax).toBeGreaterThanOrEqual(13); // reached ~the envelope cap
+    expect(vMax).toBeLessThanOrEqual(V_MAX_MS + 1e-6);
   });
 });
 
-describe('braking before a sharp 90° curve', () => {
+describe('braking before a sharp 90° curve (predictor)', () => {
   it('crosses the corner below 30% of vmax and recovers after', () => {
-    // Schedule pace ≈ the fresh-sim cruise product (prior 0.62 × 11.7 ≈ 7.25
-    // m/s) so the controller tracks steadily in the gentle band — this test
-    // exercises the CURVE envelope, not the ahead-regime (which the smooth
-    // wave redesigned; see the soft-yield describe below).
     const geo = makeGeometry(
       [
         [0, 0],
@@ -138,31 +139,31 @@ describe('braking before a sharp 90° curve', () => {
       ],
       [
         { atM: 0, arrivalMs: T0 },
-        { atM: 1000, arrivalMs: T0 + Math.round((1000 / 7) * 1000) },
+        { atM: 1000, arrivalMs: T0 + 150_000 },
       ],
     );
     const sim = makeSim(geo);
     const cornerSpeeds: number[] = [];
     const afterSpeeds: number[] = [];
     let vBefore = 0;
-    run(sim, T0, 310, () => {
+    run(sim, T0, 200, () => {
       if (sim.sM > 300 && sim.sM < 400) vBefore = Math.max(vBefore, sim.vMs);
-      // Sample at/after the apex (incl. the trailing tram-length window): the
-      // envelope only requires reaching the curve cap AT the apex point.
       if (sim.sM >= 499 && sim.sM <= 512) cornerSpeeds.push(sim.vMs);
       if (sim.sM >= 700 && sim.sM <= 800) afterSpeeds.push(sim.vMs);
     });
 
     expect(vBefore).toBeGreaterThan(5); // cruising on the straight
-    expect(cornerSpeeds.length).toBeGreaterThan(0); // actually crossed the corner
+    expect(cornerSpeeds.length).toBeGreaterThan(0);
     expect(Math.max(...cornerSpeeds)).toBeLessThan(0.3 * V_MAX_MS);
-    expect(Math.max(...cornerSpeeds)).toBeGreaterThan(0.3); // still moving, no stall
+    expect(Math.max(...cornerSpeeds)).toBeGreaterThan(0.3); // no stall
     expect(afterSpeeds.length).toBeGreaterThan(0);
-    expect(Math.max(...afterSpeeds)).toBeGreaterThan(4); // accelerates out of the curve
+    expect(Math.max(...afterSpeeds)).toBeGreaterThan(4);
   });
 });
 
-describe('stop dwell + terminal hold', () => {
+// ── predictor: dwell + terminal ──────────────────────────────────────────────
+
+describe('stop dwell + terminal hold (predictor)', () => {
   const geo = makeGeometry(
     [
       [0, 0],
@@ -185,7 +186,7 @@ describe('stop dwell + terminal hold', () => {
     let sPrev = sim.sM;
 
     const end = run(sim, T0, 280, (now) => {
-      expect(sim.sM).toBeGreaterThanOrEqual(sPrev); // never reverses
+      expect(sim.sM).toBeGreaterThanOrEqual(sPrev); // never reverses between fixes
       sPrev = sim.sM;
       if (sim.phase === 'dwell' && prevPhase !== 'dwell') {
         dwellEntries++;
@@ -211,7 +212,6 @@ describe('stop dwell + terminal hold', () => {
     expect(sim.sM).toBeGreaterThanOrEqual(997.5);
     expect(sim.sM).toBeLessThanOrEqual(1000);
 
-    // Terminal hold: another minute of ticks moves nothing.
     const sAtTerminal = sim.sM;
     run(sim, end, 60, () => {
       expect(sim.phase).toBe('terminal');
@@ -234,7 +234,7 @@ describe('stop dwell + terminal hold', () => {
 
 describe('dwell duration fallback', () => {
   it('uses 18 s ± deterministic 0–8 s jitter when the feed gives none', () => {
-    const stop: RouteStop = { ...makeGeometry([[0, 0], [100, 0]], [{ atM: 50, arrivalMs: T0 }]).stops[0] };
+    const stop = { ...makeGeometry([[0, 0], [100, 0]], [{ atM: 50, arrivalMs: T0 }]).stops[0] };
     stop.dwellSeconds = 0;
     const d1 = dwellDurationMs(stop);
     const d2 = dwellDurationMs(stop);
@@ -244,412 +244,148 @@ describe('dwell duration fallback', () => {
   });
 });
 
-describe('pace controller', () => {
-  it('catches up boldly when behind and never reverses', () => {
-    // Departed 60 s ago at 5 m/s pace → sSched(T0) = 300, tram at 0 → e ≈ 290.
-    const geo = makeGeometry(
-      [
-        [0, 0],
-        [3000, 0],
-      ],
-      [
-        { atM: 0, arrivalMs: T0 - 60_000 },
-        { atM: 3000, arrivalMs: T0 - 60_000 + 600_000 },
-      ],
-    );
-    const sim = makeSim(geo);
-    // Learned-fast tram: catch-up must still reach the braking envelope /
-    // hard cap (the cruise reference only bounds FRESH sims' sprint).
-    sim.paceBias = 1.2;
-    const e0 = evalScheduleAnchor(sim.lastAnchor, T0) - sim.sM;
-    expect(e0).toBeCloseTo(300, 0);
+// ── predictor: reseed-on-fresh-fix (closed-form segmented advance) ───────────
 
-    let sPrev = sim.sM;
-    let vMax = 0;
-    let lastNow = T0;
-    run(sim, T0, 120, (now) => {
-      expect(sim.sM).toBeGreaterThanOrEqual(sPrev); // never reverses
-      expect(sim.vMs).toBeGreaterThanOrEqual(0);
-      vMax = Math.max(vMax, sim.vMs);
-      sPrev = sim.sM;
-      lastNow = now;
-    });
-
-    // Converged onto the (trail-biased) pace target. With the smooth-wave
-    // soft-yield (never below ~half own cruise) and this test's deliberately
-    // MIS-calibrated fast bias (1.2 against a 5 m/s schedule — a converged
-    // bias would be ~0.43), overshoot is bounded by the deep-ahead band
-    // rather than the hard-brake band: the walking-pace backstop only
-    // engages beyond DEEP_AHEAD_ENTER_M.
-    const eEnd = targetDistAt(sim, lastNow) - sim.sM;
-    expect(Math.abs(eEnd)).toBeLessThan(DEEP_AHEAD_ENTER_M + 25);
-    expect(vMax).toBeGreaterThan(13); // ran at (nearly) full allowed speed to catch up
-    expect(vMax).toBeLessThanOrEqual(V_MAX_MS + 1e-6); // …never above the hard cap
-  });
-
-  it('trail bias: the target rides TRAIL_M behind the projected observation', () => {
-    const geo = makeGeometry(
-      [
-        [0, 0],
-        [3000, 0],
-      ],
-      [
-        { atM: 0, arrivalMs: T0 - 100_000 },
-        { atM: 3000, arrivalMs: T0 + 200_000 }, // 10 m/s pace
-      ],
-    );
-    const sim = makeSim(geo, 800);
-    // Same trip/schedule: blend components coincide only when obs == sched;
-    // here obs (800) is behind sched (1000), so verify the exact blend − trail.
-    const sSched = evalScheduleAnchor(sim.lastAnchor, T0);
-    const expected = OBS_BLEND_WEIGHT * 800 + (1 - OBS_BLEND_WEIGHT) * sSched - TRAIL_M;
-    expect(targetDistAt(sim, T0)).toBeCloseTo(expected, 6);
-    // And 30 s later the projected observation has advanced at schedule pace.
-    const later = T0 + 30_000;
-    const sObs = observedDistAt(sim, later);
-    const sSchedLater = evalScheduleAnchor(sim.lastAnchor, later);
-    expect(targetDistAt(sim, later)).toBeCloseTo(
-      OBS_BLEND_WEIGHT * sObs + (1 - OBS_BLEND_WEIGHT) * sSchedLater - TRAIL_M,
-      6,
-    );
-  });
-});
-
-describe('soft-yield when the sim ran ahead of reality (smooth wave)', () => {
-  // The old hard-brake regime crawled at 1 m/s the moment the sim overran the
-  // target by 40 m — pedestrian-speed dips down open streets that read as a
-  // glitch. Moderate ahead-error now rides the soft-yield band (half the
-  // tram's own cruise product, floored at AHEAD_SLOW_MIN_V_MS); the walking
-  // backstop survives only beyond DEEP_AHEAD_ENTER_M (broken tracking).
-
-  it('sim ~100 m ahead → eases to the soft band (never a pedestrian stall), then resumes', () => {
-    // 6 m/s schedule: faster than the soft-yield speed (≈3.6 for a fresh
-    // 0.62-bias sim), so the projected observation genuinely catches up.
-    const geo = makeGeometry(
-      [
-        [0, 0],
-        [3000, 0],
-      ],
-      [
-        { atM: 0, arrivalMs: T0 - 50_000 },
-        { atM: 3000, arrivalMs: T0 - 50_000 + 500_000 },
-      ],
-    );
-    const profile = buildSpeedProfile(geo, { daytime: false });
-    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 200, observedAtMs: T0 }), T0);
-    expect(sim.sM).toBeCloseTo(200, 0);
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 100, observedAtMs: T0 }), T0);
-    expect(sim.lastTeleportMs).toBe(0); // 100 m error — no teleport
-
-    // e well past the ahead-regime threshold, but not deep.
-    const e0 = targetDistAt(sim, T0) - sim.sM;
-    expect(e0).toBeLessThan(-HARD_BRAKE_ENTER_M);
-    expect(e0).toBeGreaterThan(-DEEP_AHEAD_ENTER_M);
-
-    // Settle out of the cruise-seeded speed, then observe the yield band:
-    // clearly below cruise, NEVER below the soft floor — no walking pace.
-    let sPrev = sim.sM;
-    let now = run(sim, T0, 4, () => {
-      expect(sim.sM).toBeGreaterThanOrEqual(sPrev);
-      sPrev = sim.sM;
-    });
-    expect(sim.crawling).toBe(true);
-    let vYieldMin = Infinity;
-    let vYieldMax = 0;
-    now = run(sim, now, 12, () => {
-      expect(sim.sM).toBeGreaterThanOrEqual(sPrev);
-      sPrev = sim.sM;
-      vYieldMin = Math.min(vYieldMin, sim.vMs);
-      vYieldMax = Math.max(vYieldMax, sim.vMs);
-    });
-    expect(vYieldMin).toBeGreaterThanOrEqual(AHEAD_SLOW_MIN_V_MS - 0.1);
-    expect(vYieldMax).toBeLessThan(5); // visibly eased off vs the ~7.25 cruise
-    expect(sim.deepCrawl).toBe(false); // moderate ahead never hits the backstop
-
-    // Reality (6 m/s) overtakes the ~3.6 m/s yield: the regime exits and the
-    // tram accelerates back toward cruise.
-    let vMaxAfter = 0;
-    let exited = false;
-    run(sim, now, 40, () => {
-      expect(sim.sM).toBeGreaterThanOrEqual(sPrev);
-      sPrev = sim.sM;
-      if (!sim.crawling) exited = true;
-      if (exited) vMaxAfter = Math.max(vMaxAfter, sim.vMs);
-    });
-    expect(exited).toBe(true);
-    expect(vMaxAfter).toBeGreaterThan(AHEAD_SLOW_MIN_V_MS + 1.5);
-  });
-
-  it('deep runaway (beyond DEEP_AHEAD_ENTER_M) falls back to the walking backstop', () => {
-    // 2 m/s schedule — slower than the soft-yield floor, so only the deep
-    // backstop can stop the error from widening without bound.
-    const geo = makeGeometry(
-      [
-        [0, 0],
-        [3000, 0],
-      ],
-      [
-        { atM: 0, arrivalMs: T0 - 50_000 },
-        { atM: 3000, arrivalMs: T0 - 50_000 + 1_500_000 },
-      ],
-    );
-    const profile = buildSpeedProfile(geo, { daytime: false });
-    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 300, observedAtMs: T0 }), T0);
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 100, observedAtMs: T0 }), T0);
-    expect(sim.lastTeleportMs).toBe(0); // 200 m error — below the teleport budget
-    expect(targetDistAt(sim, T0) - sim.sM).toBeLessThan(-DEEP_AHEAD_ENTER_M);
-
-    let sPrev = sim.sM;
-    let now = run(sim, T0, 7, () => {
-      expect(sim.sM).toBeGreaterThanOrEqual(sPrev);
-      sPrev = sim.sM;
-    });
-    expect(sim.crawling).toBe(true);
-    expect(sim.deepCrawl).toBe(true);
-    let vCrawlMax = 0;
-    now = run(sim, now, 30, () => {
-      expect(sim.sM).toBeGreaterThanOrEqual(sPrev);
-      sPrev = sim.sM;
-      vCrawlMax = Math.max(vCrawlMax, sim.vMs);
-    });
-    expect(vCrawlMax).toBeLessThan(1.5); // the walking backstop, deep only
-    expect(vCrawlMax).toBeGreaterThan(0); // still creeping, never frozen/backwards
-
-    // A fresh fix at the sim's position clears the DEEP desync: the walking
-    // backstop releases and the tram accelerates back into the soft band (the
-    // 25% timetable blend still trails, so the yield latch itself may stay).
-    applySnapshot(sim, makeSnapshot({ shapeDistM: sim.sM, observedAtMs: now }), now);
-    let vMaxAfter = 0;
-    run(sim, now, 20, () => {
-      expect(sim.sM).toBeGreaterThanOrEqual(sPrev);
-      sPrev = sim.sM;
-      vMaxAfter = Math.max(vMaxAfter, sim.vMs);
-    });
-    expect(sim.deepCrawl).toBe(false);
-    expect(vMaxAfter).toBeGreaterThan(CRAWL_V_MS + 1);
-  });
-
-  it('never moves backwards through brake, yield and recovery', () => {
-    const geo = makeGeometry(
-      [
-        [0, 0],
-        [3000, 0],
-      ],
-      [
-        { atM: 0, arrivalMs: T0 - 50_000 },
-        { atM: 3000, arrivalMs: T0 - 50_000 + 1_500_000 },
-      ],
-    );
-    const profile = buildSpeedProfile(geo, { daytime: false });
-    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 100, observedAtMs: T0 }), T0);
-    run(sim, T0, 20); // pick up speed (and possibly already latch the yield)
-    const now0 = T0 + 20_000;
-    applySnapshot(sim, makeSnapshot({ shapeDistM: sim.sM - 150, observedAtMs: now0 }), now0);
-    let sPrev = sim.sM;
-    run(sim, now0, 180, () => {
-      expect(sim.sM).toBeGreaterThanOrEqual(sPrev); // s NEVER decreases
-      expect(sim.vMs).toBeGreaterThanOrEqual(0);
-      sPrev = sim.sM;
-    });
-  });
-
-  it('no pedestrian-speed dips between stops under moderate tracking error', () => {
-    // Realistic tracking: 6 m/s schedule, a fresh fix every 45 s that lands
-    // 50 m BEHIND the sim (ahead-error oscillating around the yield
-    // threshold). Between stops the speed must never dip below the soft
-    // floor — walking pace is reserved for stuck/envelope/deep desync.
-    const geo = makeGeometry(
-      [
-        [0, 0],
-        [3000, 0],
-      ],
-      [
-        { atM: 0, arrivalMs: T0 - 50_000 },
-        { atM: 3000, arrivalMs: T0 - 50_000 + 500_000 },
-      ],
-    );
-    const profile = buildSpeedProfile(geo, { daytime: false });
-    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 150, observedAtMs: T0 }), T0);
-    let now = T0;
-    let vMin = Infinity;
-    for (let k = 0; k < 5; k++) {
-      applySnapshot(
-        sim,
-        makeSnapshot({ shapeDistM: Math.max(0, sim.sM - 50), observedAtMs: now }),
-        now,
-      );
-      now = run(sim, now, 45, () => {
-        // Mid-segment (well clear of the terminal envelope): never below the
-        // soft floor once the initial brake-down from cruise has settled.
-        if (sim.sM > 200 && sim.sM < 2500 && sim.vMs < vMin) vMin = sim.vMs;
-      });
-    }
-    expect(sim.deepCrawl).toBe(false); // moderate error never goes deep
-    expect(vMin).toBeGreaterThanOrEqual(AHEAD_SLOW_MIN_V_MS - 0.35); // one brake tick of slack
-    expect(vMin).toBeLessThan(6); // the yield did actually engage
-  });
-
-  it("phase 'dwell' means standing at a platform — never mid-segment yield/stuck", () => {
-    // Doors rendering keys off phase === 'dwell': the ahead-regimes and the
-    // stuck-hold stand mid-segment in 'cruise', and every dwell tick sits
-    // within the stop's reach window.
-    const geo = makeGeometry(
-      [
-        [0, 0],
-        [3000, 0],
-      ],
-      [
-        { atM: 0, arrivalMs: T0 - 50_000 },
-        { atM: 500, arrivalMs: T0 + 40_000, departureMs: T0 + 55_000, dwellSeconds: 15 },
-        { atM: 3000, arrivalMs: T0 - 50_000 + 500_000 },
-      ],
-    );
-    const profile = buildSpeedProfile(geo, { daytime: false });
-    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 150, observedAtMs: T0 }), T0);
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 50, observedAtMs: T0 }), T0); // ahead → yield
-    let now = T0;
-    for (let k = 0; k < 4; k++) {
-      now = run(sim, now, 30, () => {
-        if (sim.phase === 'dwell') {
-          expect(Math.abs(sim.sM - 500)).toBeLessThanOrEqual(STOP_REACH_M + 1e-6);
-          expect(sim.vMs).toBe(0);
-        }
-      });
-      applySnapshot(
-        sim,
-        makeSnapshot({ shapeDistM: Math.max(0, sim.sM - 30), observedAtMs: now }),
-        now,
-      );
-    }
-  });
-});
-
-describe('observation reconciliation (applySnapshot)', () => {
-  // 10 m/s schedule pace → the controller has a real equilibrium below vmax.
-  const geo = makeGeometry(
-    [
-      [0, 0],
-      [3000, 0],
-    ],
-    [
-      { atM: 0, arrivalMs: T0 },
-      { atM: 3000, arrivalMs: T0 + 300_000 },
-    ],
-  );
-
-  it('converges toward a fresher observed shapeDistM within ~30 s', () => {
-    const sim = makeSim(geo);
-    // Neutral learned pace (fresh sims start at the slower 0.62 prior; this
-    // test measures reconciliation speed, not cold-start calibration).
-    sim.paceBias = 1;
-    let now = run(sim, T0, 30);
-
-    // Fresh AVL fix: the real tram is 200 m AHEAD of the sim (below teleport).
-    const obsDist = sim.sM + 200;
-    applySnapshot(sim, makeSnapshot({ shapeDistM: obsDist, observedAtMs: now }), now);
-    expect(sim.lastTeleportMs).toBe(0);
-    expect(observedDistAt(sim, now) - sim.sM).toBeCloseTo(200, 0);
-
-    let sPrev = sim.sM;
-    now = run(sim, now, 30, () => {
-      expect(sim.sM).toBeGreaterThanOrEqual(sPrev); // never reverses
-      sPrev = sim.sM;
-    });
-    // ~30 s later the sim has closed most of the 200 m gap to the projected
-    // observation (pre-fix the observation was ignored and the gap persisted)…
-    expect(Math.abs(observedDistAt(sim, now) - sim.sM)).toBeLessThan(90);
-    // …and settles into the controller deadband shortly after.
-    now = run(sim, now, 15);
-    expect(Math.abs(observedDistAt(sim, now) - sim.sM)).toBeLessThan(60);
-  });
-
-  it('slows down — never reverses — when the observation falls behind the sim', () => {
-    const sim = makeSim(geo);
-    let now = run(sim, T0, 60);
-    const vBefore = sim.vMs;
-    applySnapshot(
-      sim,
-      makeSnapshot({ shapeDistM: Math.max(0, sim.sM - 300), observedAtMs: now }),
-      now,
-    );
-    let sPrev = sim.sM;
-    now = run(sim, now, 20, () => {
-      expect(sim.sM).toBeGreaterThanOrEqual(sPrev); // s NEVER decreases
-      expect(sim.vMs).toBeGreaterThanOrEqual(0);
-      sPrev = sim.sM;
-    });
-    expect(sim.vMs).toBeLessThan(vBefore - 1); // eased off to let reality catch up
-  });
-});
-
-describe('teleport on large observation error', () => {
-  const makeGeo = (departedAgoMs: number) =>
+describe('reseed on a genuinely-new fix (closed-form advance)', () => {
+  const straight = () =>
     makeGeometry(
       [
         [0, 0],
-        [3000, 0],
+        [6000, 0],
       ],
       [
-        { atM: 0, arrivalMs: T0 - departedAgoMs },
-        { atM: 3000, arrivalMs: T0 - departedAgoMs + 600_000 }, // 5 m/s pace
+        { atM: 0, arrivalMs: T0 - 600_000 },
+        { atM: 6000, arrivalMs: T0 + 600_000 },
       ],
     );
 
-  it('teleports to the projected OBSERVATION when it disagrees by > 500 m', () => {
-    const geo = makeGeo(200_000);
-    const sim = makeSim(geo);
-    expect(sim.sM).toBe(0);
-
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 1000, observedAtMs: T0 }), T0);
-    expect(sim.sM).toBeCloseTo(1000, 0);
-    // A tram teleported mid-segment is MOVING — cruise speed is seeded (#2).
-    expect(sim.vMs).toBeGreaterThan(0);
-    expect(sim.phase).toBe('cruise');
-    expect(sim.lastTeleportMs).toBe(T0);
-    // Dwell memory rebuilt for the new position: the origin stop is behind.
-    expect(sim.dwelledStopSeqs.has(geo.stops[0].sequence)).toBe(true);
-    expect(sim.dwelledStopSeqs.has(geo.stops[1].sequence)).toBe(false);
+  it('a just-observed fix seeds at the fix + the hidden-latency advance (R12)', () => {
+    const sim = makeSim(straight(), 1000);
+    // trueAge = (now − obsAt) + FEED_LATENCY_S = 3 s → ~21.8 m at prior pace.
+    expect(sim.sM).toBeGreaterThan(1000);
+    expect(sim.sM).toBeLessThanOrEqual(1000 + LATENCY_ADVANCE_M + 1);
+    // Mid-segment reseed is MOVING (field feedback #2): cruise-seeded speed.
+    expect(sim.vMs).toBeCloseTo(PRIOR_CRUISE, 2);
   });
 
-  it('trusts a fresh observation over a large timetable error (no teleport)', () => {
-    const geo = makeGeo(200_000); // sSched(T0) = 1000, but the tram is really near 50 m
-    const sim = makeSim(geo);
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 50, observedAtMs: T0 }), T0);
-    expect(sim.sM).toBe(0);
-    expect(sim.lastTeleportMs).toBe(0);
-    // The pace target stays anchored near the observation, not the timetable.
-    expect(targetDistAt(sim, T0)).toBeLessThan(300);
+  it('an old fix advances by trueAge × learned pace on an open straight', () => {
+    const geo = straight();
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const snapshot = makeSnapshot({ shapeDistM: 500, observedAtMs: T0 - 60_000 });
+    const sim = createSim(geo, profile, snapshot, T0);
+    const trueAgeS = 60 + FEED_LATENCY_S;
+    expect(sim.sM).toBeCloseTo(500 + trueAgeS * PRIOR_CRUISE, 0);
   });
 
-  it('does NOT teleport for observation errors under 500 m', () => {
-    const geo = makeGeo(60_000);
-    const sim = makeSim(geo);
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 300, observedAtMs: T0 }), T0);
-    expect(sim.sM).toBe(0);
-    expect(sim.lastTeleportMs).toBe(0);
+  it('the closed-form advance spends dwell time at stops it crosses', () => {
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [6000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 600_000 },
+        { atM: 700, arrivalMs: T0 - 300_000, dwellSeconds: 20 },
+        { atM: 6000, arrivalMs: T0 + 600_000 },
+      ],
+    );
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 500, observedAtMs: T0 - 60_000 }), T0);
+    const trueAgeS = 60 + FEED_LATENCY_S;
+    // 200 m to the stop (~27.6 s), 20 s dwell, remainder cruising.
+    const expected = 700 + (trueAgeS - 200 / PRIOR_CRUISE - 20) * PRIOR_CRUISE;
+    expect(sim.sM).toBeCloseTo(expected, 0);
+    // Clearly short of the naive no-dwell projection.
+    expect(sim.sM).toBeLessThan(500 + trueAgeS * PRIOR_CRUISE - 100);
   });
 
+  it('a long blind window can end INSIDE a crossed dwell (standing at the platform)', () => {
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [6000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 600_000 },
+        { atM: 700, arrivalMs: T0 - 300_000, dwellSeconds: 30 },
+        { atM: 6000, arrivalMs: T0 + 600_000 },
+      ],
+    );
+    const profile = buildSpeedProfile(geo, { daytime: false });
+    // trueAge ≈ 33 s: ~27.6 s to reach the stop, then 30 s dwell swallows the rest.
+    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 500, observedAtMs: T0 - 30_000 }), T0);
+    expect(sim.phase).toBe('dwell');
+    expect(sim.sM).toBeCloseTo(700, 3);
+    expect(sim.vMs).toBe(0);
+    expect(sim.dwellUntilMs).toBeGreaterThan(T0);
+  });
 
-  // ── Gap-aware teleports (feed-degradation defense, 2026-07-27) ─────────────
-  // Measured live: the feed intermittently delivers fixes 65-134 s apart, in
-  // which time a tram honestly covers 600-950 m. The flat 500 m check turned
-  // every such fix into a hard snap — fleet-wide forward AND backward jerks.
+  it('bounds the advance by maxAdvanceM on the true age (physics cap)', () => {
+    const sim = makeSim(straight(), 1000);
+    sim.paceBias = 1.6; // learned-fast: pace would exceed the reference cap
+    const t1 = T0 + 60_000;
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 1000, observedAtMs: t1 }), t1 + 30_000);
+    // The stuck detector arms only on a REPEAT; this is the same fix value at
+    // a new obsAt after movement… it repeats the previous fix distance, so it
+    // arms the stuck hold — use a moved fix instead to isolate the cap.
+    const sim2 = makeSim(straight(), 0);
+    sim2.paceBias = 1.6;
+    const t2 = T0 + 90_000;
+    applySnapshot(sim2, makeSnapshot({ shapeDistM: 1200, observedAtMs: t2 }), t2 + 60_000);
+    const trueAgeS = 60 + FEED_LATENCY_S;
+    expect(sim2.sM - 1200).toBeLessThanOrEqual(maxAdvanceM(trueAgeS) + 1e-6);
+  });
 
-  it('scales the teleport threshold with the observed fix gap (slow feed is not desync)', () => {
-    const geo = makeGeo(200_000);
-    const sim = makeSim(geo); // fix @ 0 m, T0
-    // 90 s later the tram is 810 m ahead: over the flat 500, but honest travel
-    // for the gap — MUST converge smoothly, not teleport.
+  it('jumps BACKWARD to a fresh fix behind the estimate (accepted live-mode UX, no fade)', () => {
+    const sim = makeSim(straight(), 1000);
+    let now = run(sim, T0, 30);
+    const before = sim.sM;
+    expect(before).toBeGreaterThan(1150);
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 900, observedAtMs: now }), now);
+    expect(sim.sM).toBeLessThan(before); // reseeded behind
+    expect(sim.sM).toBeGreaterThanOrEqual(900);
+    expect(sim.lastTeleportMs).toBe(0); // sub-threshold jump — no fade
+  });
+
+  it('a repeated poll of the same fix does NOT reseed (keeps integrating)', () => {
+    const sim = makeSim(straight(), 1000);
+    let now = run(sim, T0, 10);
+    const before = sim.sM;
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 1000, observedAtMs: T0 }), now);
+    expect(sim.sM).toBe(before);
+    now = run(sim, now, 5);
+    expect(sim.sM).toBeGreaterThan(before);
+  });
+});
+
+// ── predictor: gap-aware teleport classification ─────────────────────────────
+
+describe('gap-aware teleport classification', () => {
+  const straight = () =>
+    makeGeometry(
+      [
+        [0, 0],
+        [6000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 600_000 },
+        { atM: 6000, arrivalMs: T0 + 600_000 },
+      ],
+    );
+
+  it('an 810 m jump after a 90 s fix gap is honest travel — no teleport fade', () => {
+    const sim = makeSim(straight(), 0);
     applySnapshot(sim, makeSnapshot({ shapeDistM: 810, observedAtMs: T0 + 90_000 }), T0 + 90_000);
     expect(sim.lastTeleportMs).toBe(0);
+    expect(sim.sM).toBeGreaterThanOrEqual(810);
   });
 
-  it('still hard-teleports on true desync regardless of the gap', () => {
-    const geo = makeGeo(200_000);
-    const sim = makeSim(geo);
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 2000, observedAtMs: T0 + 90_000 }), T0 + 90_000);
-    expect(sim.lastTeleportMs).toBe(T0 + 90_000);
-    expect(sim.sM).toBeCloseTo(2000, 0);
+  it('a true desync jump stamps the teleport fade regardless of the gap', () => {
+    const sim = makeSim(straight(), 0);
+    const t1 = T0 + 90_000;
+    applySnapshot(sim, makeSnapshot({ shapeDistM: 2500, observedAtMs: t1 }), t1);
+    expect(sim.lastTeleportMs).toBe(t1);
+    expect(sim.sM).toBeGreaterThanOrEqual(2500);
   });
 
   it('teleportThresholdM: gap-scaled between the calibrated floor and the desync cap', () => {
@@ -660,26 +396,20 @@ describe('teleport on large observation error', () => {
       5,
     );
     expect(teleportThresholdM(600)).toBe(TELEPORT_THRESHOLD_MAX_M);
-    // Monotone in the gap up to the cap.
     expect(teleportThresholdM(80)).toBeGreaterThan(teleportThresholdM(50));
   });
 
-  it('caps a stale fix\'s forward projection at cruise-reference pace x its age', () => {
-    const geo = makeGeo(200_000);
-    const sim = makeSim(geo); // fix @ 0 m, T0 - the schedule runs ahead of it
-    for (const ageS of [30, 60, 120, 300]) {
-      const sObs = observedDistAt(sim, T0 + ageS * 1000);
-      // However fast the timetable races, the anchor may not claim more unseen
-      // progress than the real tram could physically have driven.
-      expect(sObs).toBeLessThanOrEqual(maxAdvanceM(ageS) + 1e-6);
+  it('maxAdvanceM grows linearly with the fix age at cruise-reference pace', () => {
+    for (const ageS of [0, 30, 60, 120, 300]) {
+      expect(maxAdvanceM(ageS)).toBeCloseTo(ageS * V_CRUISE_REF_MS, 9);
     }
+    expect(maxAdvanceM(-5)).toBe(0);
   });
-
 });
 
+// ── predictor: terminal un-latch ─────────────────────────────────────────────
+
 describe('terminal un-latch (fresh observation far behind the latched position)', () => {
-  // 1 km straight; terminal at 1000 m. Schedule long finished so the anchor is
-  // flat (projected observation == the raw fix — deterministic conditions).
   const makeTerminalGeo = () =>
     makeGeometry(
       [
@@ -692,48 +422,40 @@ describe('terminal un-latch (fresh observation far behind the latched position)'
       ],
     );
 
-  /** A sim latched in 'terminal' at the geometry end. */
+  /** A predictor latched in 'terminal' at the geometry end. */
   function makeLatchedSim() {
     const geo = makeTerminalGeo();
     const profile = buildSpeedProfile(geo, { daytime: false });
     const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 1000, observedAtMs: T0 }), T0);
-    run(sim, T0, 10);
     expect(sim.phase).toBe('terminal');
     expect(sim.sM).toBeCloseTo(1000, 0);
     return sim;
   }
 
-  it('re-anchors BACKWARD to a fresh fix > 150 m behind and resumes simulating', () => {
+  it('re-anchors BACKWARD to a fresh fix > 150 m behind, fade-stamped, and resumes', () => {
     const sim = makeLatchedSim();
-    // Fresh fix: the real tram is still 300 m out. This is the ONE sanctioned
-    // backward jump besides the 500 m teleport — terminal is an absorbing
-    // state (v pinned to 0), so the pace controller can never recover from a
-    // wrong latch; sub-500 m errors never hard-teleport; honesty beats
-    // monotonicity here. It renders as a teleport (lastTeleportMs dips
-    // opacity), not a visible reverse drive.
     const t1 = T0 + 20_000;
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 700, observedAtMs: t1 }), t1);
-    expect(sim.sM).toBeCloseTo(700, 0); // backward re-anchor to the observation
+    const res = applySnapshot(sim, makeSnapshot({ shapeDistM: 700, observedAtMs: t1 }), t1);
+    expect(res.terminalUnlatched).toBe(true);
+    expect(sim.sM).toBeGreaterThanOrEqual(700);
+    expect(sim.sM).toBeLessThan(1000 - TERMINAL_UNLATCH_BEHIND_M + 60);
     expect(sim.phase).toBe('cruise');
-    expect(sim.vMs).toBeGreaterThan(0); // re-anchored mid-segment = moving (#2)
-    expect(sim.lastTeleportMs).toBe(t1); // renders as a teleport
+    expect(sim.vMs).toBeGreaterThan(0); // re-anchored mid-segment = moving
+    expect(sim.lastTeleportMs).toBe(t1); // sanctioned backward correction fades
 
-    // …and normal simulation resumes: monotone forward progress toward the
-    // (now again distant) terminal.
     let sPrev = sim.sM;
-    run(sim, t1, 120, () => {
-      expect(sim.sM).toBeGreaterThanOrEqual(sPrev); // monotone after re-anchor
+    run(sim, t1, 60, () => {
+      expect(sim.sM).toBeGreaterThanOrEqual(sPrev);
       sPrev = sim.sM;
     });
-    expect(sim.sM).toBeGreaterThan(700);
+    expect(sim.sM).toBeGreaterThan(750);
   });
 
   it('holds the latch when the fresh fix is within the 150 m tolerance', () => {
     const sim = makeLatchedSim();
-    // End-of-trip fix scatter: the platform fix often sits slightly short of
-    // the geometry end. 100 m behind < TERMINAL_UNLATCH_BEHIND_M → keep hold.
     const t1 = T0 + 20_000;
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 900, observedAtMs: t1 }), t1);
+    const res = applySnapshot(sim, makeSnapshot({ shapeDistM: 900, observedAtMs: t1 }), t1);
+    expect(res.terminalUnlatched).toBe(false);
     expect(sim.phase).toBe('terminal');
     expect(sim.sM).toBeCloseTo(1000, 0);
     expect(sim.lastTeleportMs).toBe(0);
@@ -742,102 +464,24 @@ describe('terminal un-latch (fresh observation far behind the latched position)'
   it('ignores STALE fixes (a repeated poll of the pre-latch observation)', () => {
     const geo = makeTerminalGeo();
     const profile = buildSpeedProfile(geo, { daytime: false });
-    // Latched terminal while the last known fix is 400 m behind — above the
-    // un-latch tolerance but below the 500 m hard-teleport budget (which
-    // fires regardless of freshness and would mask this path).
     const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 600, observedAtMs: T0 }), T0);
     sim.sM = 1000;
     sim.phase = 'terminal';
     sim.vMs = 0;
-    // The next poll repeats the SAME fix (observedAtMs and shapeDistM
-    // unchanged — the vehicle hasn't reported): not evidence, no un-latch.
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 600, observedAtMs: T0 }), T0 + 15_000);
+    // The next poll repeats the SAME fix — not evidence, no un-latch.
+    const res = applySnapshot(sim, makeSnapshot({ shapeDistM: 600, observedAtMs: T0 }), T0 + 15_000);
+    expect(res.freshFix).toBe(false);
     expect(sim.phase).toBe('terminal');
     expect(sim.sM).toBe(1000);
     // A genuinely fresh fix at the same spot IS evidence → un-latch.
     applySnapshot(sim, makeSnapshot({ shapeDistM: 600, observedAtMs: T0 + 30_000 }), T0 + 30_000);
     expect(sim.phase).toBe('cruise');
-    expect(sim.sM).toBeCloseTo(600, 0);
+    expect(sim.sM).toBeGreaterThanOrEqual(600);
+    expect(sim.sM).toBeLessThan(700);
   });
 });
 
-describe('createSim initial position', () => {
-  it('projects the observed shape distance forward at schedule pace', () => {
-    const geo = makeGeometry(
-      [
-        [0, 0],
-        [3000, 0],
-      ],
-      [
-        { atM: 0, arrivalMs: T0 - 200_000 },
-        { atM: 3000, arrivalMs: T0 + 400_000 }, // 5 m/s pace
-      ],
-    );
-    const profile = buildSpeedProfile(geo, { daytime: false });
-    // Observed 10 s ago at 500 m → schedule advanced 50 m since.
-    const snapshot = makeSnapshot({ shapeDistM: 500, observedAtMs: T0 - 10_000 });
-    const sim = createSim(geo, profile, snapshot, T0);
-    expect(sim.sM).toBeCloseTo(550, 0);
-    // Stops behind the initial position are marked dwelled.
-    expect(sim.dwelledStopSeqs.has(geo.stops[0].sequence)).toBe(true);
-  });
-});
-
-describe('late tram braking (catch-up never defeats the envelope)', () => {
-  // Schedule pace 20 m/s — faster than any tram can go — keeps the pace factor
-  // pegged at its 1.65 maximum through the entire stop approach.
-  const geo = makeGeometry(
-    [
-      [0, 0],
-      [2000, 0],
-    ],
-    [
-      { atM: 0, arrivalMs: T0 },
-      { atM: 1000, arrivalMs: T0 + 50_000, departureMs: T0 + 70_000, dwellSeconds: 20 },
-      { atM: 2000, arrivalMs: T0 + 150_000 },
-    ],
-  );
-
-  it('approaches an isolated stop on the braking envelope and arrives smoothly', () => {
-    const sim = makeSim(geo);
-    let vPrev = sim.vMs;
-    let prevPhase: string = sim.phase;
-    let dwellEntries = 0;
-    let vAtDwellEntry = -1;
-    let vMax = 0;
-
-    run(sim, T0, 120, () => {
-      vMax = Math.max(vMax, sim.vMs);
-      const enteredDwell = sim.phase === 'dwell' && prevPhase !== 'dwell';
-      if (enteredDwell) {
-        dwellEntries++;
-        vAtDwellEntry = vPrev;
-      } else {
-        // No frame-to-frame speed discontinuity beyond the accel/brake clamps.
-        const dv = sim.vMs - vPrev;
-        expect(dv).toBeLessThanOrEqual(A_ACC * DT + 1e-9);
-        expect(dv).toBeGreaterThanOrEqual(-A_BRK * DT - 1e-9);
-      }
-      // On the approach, speed obeys the braking envelope toward the stop.
-      // (0.6 m/s allowance for accumulated per-frame integration lag; the
-      // pre-fix 1.65× envelope violated this by several m/s.)
-      if (dwellEntries === 0 && sim.sM > 600 && sim.sM < 1000 - STOP_REACH_M) {
-        expect(sim.vMs).toBeLessThanOrEqual(Math.sqrt(2 * A_BRK * (1000 - sim.sM)) + 0.6);
-      }
-      vPrev = sim.vMs;
-      prevPhase = sim.phase;
-    });
-
-    // Hard cap holds even at factor 1.65 (no ~66-70 km/h approach).
-    expect(vMax).toBeLessThanOrEqual(V_MAX_MS + 1e-9);
-    // The stop was neither skipped nor snapped through at speed.
-    expect(dwellEntries).toBe(1);
-    // Arrival speed ≈ the envelope value at the reach boundary (√(2·A_BRK·2 m)
-    // ≈ 2.2 m/s) — nearly stopped, not a 60 km/h → 0 snap like pre-fix.
-    expect(vAtDwellEntry).toBeGreaterThanOrEqual(0);
-    expect(vAtDwellEntry).toBeLessThan(Math.sqrt(2 * A_BRK * STOP_REACH_M) + 0.8);
-  });
-});
+// ── predictor: dwell seeding near stops ──────────────────────────────────────
 
 describe('spawning near a stop (dwell seeding)', () => {
   const makeStopGeo = () =>
@@ -853,35 +497,17 @@ describe('spawning near a stop (dwell seeding)', () => {
       ],
     );
 
-  it('spawning 1 m before a stop dwells there exactly once, held by the pinning fix until it moves', () => {
+  it('spawning 1 m before a stop with a future departure dwells there', () => {
     const geo = makeStopGeo();
     const sim = makeSim(geo, 499);
-    // The stop 1 m AHEAD is not silently marked as served — it dwells now.
     expect(sim.phase).toBe('dwell');
-    expect(sim.dwellUntilMs).toBe(T0 + 10_000); // remaining dwell = scheduled departure
-    expect(sim.dwelledStopSeqs.has(geo.stops[1].sequence)).toBe(true);
-    expect(sim.dwelledStopSeqs.has(geo.stops[0].sequence)).toBe(true); // truly behind
-
-    let dwellReEntries = 0;
-    let prevPhase: string = sim.phase;
-    let now = run(sim, T0, 15, () => {
-      if (sim.phase === 'dwell' && prevPhase !== 'dwell') dwellReEntries++;
-      prevPhase = sim.phase;
-    });
-    // Past the scheduled departure the last fix STILL pins the tram at the
-    // stop (fix-hold, field feedback #1) — no early departure.
-    expect(sim.phase).toBe('dwell');
-    // A fresh fix that moved past the stop releases the hold immediately.
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 520, observedAtMs: now }), now);
-    run(sim, now, 20, () => {
-      if (sim.phase === 'dwell' && prevPhase !== 'dwell') dwellReEntries++;
-      prevPhase = sim.phase;
-    });
-    expect(dwellReEntries).toBe(0); // the seeded dwell was the only one
-    expect(sim.sM).toBeGreaterThan(510); // and the tram departed afterwards
+    expect(sim.sM).toBeCloseTo(500, 3);
+    expect(sim.vMs).toBe(0);
+    // Remaining dwell honours the scheduled departure (timing point).
+    expect(sim.dwellUntilMs).toBeGreaterThanOrEqual(T0 + 10_000);
   });
 
-  it('feed at_stop initializes a dwell at the feed-declared stop', () => {
+  it('feed at_stop initializes a dwell at the feed-declared stop until its departure', () => {
     const geo = makeStopGeo();
     const profile = buildSpeedProfile(geo, { daytime: false });
     const snapshot = makeSnapshot({
@@ -893,8 +519,7 @@ describe('spawning near a stop (dwell seeding)', () => {
     const sim = createSim(geo, profile, snapshot, T0);
     expect(sim.phase).toBe('dwell');
     expect(sim.dwellUntilMs).toBe(T0 + 10_000);
-    expect(sim.dwelledStopSeqs.has(geo.stops[0].sequence)).toBe(true);
-    expect(sim.dwelledStopSeqs.has(geo.stops[1].sequence)).toBe(true);
+    expect(sim.fixStopDistM).toBe(geo.stops[1].distM);
   });
 
   it('marks a reach-window stop as served (no dwell) when its departure already passed', () => {
@@ -911,378 +536,338 @@ describe('spawning near a stop (dwell seeding)', () => {
     );
     const sim = makeSim(geo, 499);
     expect(sim.phase).toBe('cruise');
-    expect(sim.dwelledStopSeqs.has(geo.stops[1].sequence)).toBe(true);
+    expect(sim.sM).toBeGreaterThan(499);
   });
 });
 
-describe('adaptive dwell', () => {
-  // Flat schedule at the 500 m stop (the timetable says the tram is dwelling
-  // there right NOW, with a departure far in the future): the projected
-  // observation is frozen, so the tracking error e = target − s changes only
-  // via the sim's own motion or a fresh fix — deterministic test conditions.
-  const makeAheadGeo = () =>
+// ── predictor: late-tram braking ─────────────────────────────────────────────
+
+describe('braking into stops (the envelope always wins)', () => {
+  const geo = makeGeometry(
+    [
+      [0, 0],
+      [2000, 0],
+    ],
+    [
+      { atM: 0, arrivalMs: T0 },
+      { atM: 1000, arrivalMs: T0 + 50_000, departureMs: T0 + 70_000, dwellSeconds: 20 },
+      { atM: 2000, arrivalMs: T0 + 150_000 },
+    ],
+  );
+
+  it('approaches an isolated stop on the braking envelope and arrives smoothly', () => {
+    const sim = makeSim(geo);
+    sim.paceBias = 1.5; // learned-fast — the envelope must still bind
+    let vPrev = sim.vMs;
+    let prevPhase: string = sim.phase;
+    let dwellEntries = 0;
+    let vAtDwellEntry = -1;
+    let vMax = 0;
+
+    run(sim, T0, 180, () => {
+      vMax = Math.max(vMax, sim.vMs);
+      const enteredDwell = sim.phase === 'dwell' && prevPhase !== 'dwell';
+      const enteredTerminal = sim.phase === 'terminal' && prevPhase !== 'terminal';
+      if (enteredDwell) {
+        dwellEntries++;
+        vAtDwellEntry = vPrev;
+      } else if (!enteredTerminal) {
+        // Stop/terminal capture zeroes v via the reach clamp; every other
+        // frame obeys the accel/brake clamps.
+        const dv = sim.vMs - vPrev;
+        expect(dv).toBeLessThanOrEqual(A_ACC * DT + 1e-9);
+        expect(dv).toBeGreaterThanOrEqual(-A_BRK * DT - 1e-9);
+      }
+      if (dwellEntries === 0 && sim.sM > 600 && sim.sM < 1000 - STOP_REACH_M) {
+        expect(sim.vMs).toBeLessThanOrEqual(Math.sqrt(2 * A_BRK * (1000 - sim.sM)) + 0.6);
+      }
+      vPrev = sim.vMs;
+      prevPhase = sim.phase;
+    });
+
+    expect(vMax).toBeLessThanOrEqual(V_MAX_MS + 1e-9);
+    expect(dwellEntries).toBe(1);
+    expect(vAtDwellEntry).toBeGreaterThanOrEqual(0);
+    expect(vAtDwellEntry).toBeLessThan(Math.sqrt(2 * A_BRK * STOP_REACH_M) + 0.8);
+  });
+});
+
+// ── smoother (through the engine): core regime pins ──────────────────────────
+
+describe('smoother chases the predictor (v2 §3.3 pins)', () => {
+  const straight = () =>
     makeGeometry(
       [
         [0, 0],
-        [1000, 0],
+        [6000, 0],
       ],
       [
-        { atM: 0, arrivalMs: T0 - 530_000 },
-        { atM: 500, arrivalMs: T0 - 30_000, departureMs: T0 + 300_000, dwellSeconds: 10 },
-        { atM: 1000, arrivalMs: T0 + 800_000 },
+        { atM: 0, arrivalMs: T0 - 600_000 },
+        { atM: 6000, arrivalMs: T0 + 600_000 },
       ],
     );
 
-  function makeAdaptiveSim(geo: RouteGeometry, shapeDistM: number, nowMs = T0): TramSim {
-    const profile = buildSpeedProfile(geo, { daytime: false });
-    const snapshot = makeSnapshot({ shapeDistM, observedAtMs: nowMs });
-    return createSim(geo, profile, snapshot, nowMs, undefined, { adaptiveDwell: true });
-  }
-
-  /** Drive the sim until it enters 'dwell'; returns the entry timestamp. */
-  function runToDwell(sim: TramSim, fromMs: number, maxSeconds: number): number {
-    let now = fromMs;
-    const steps = Math.round(maxSeconds / DT);
-    for (let i = 0; i < steps; i++) {
-      now += DT * 1000;
-      tick(sim, now, DT);
-      if (sim.phase === 'dwell') return now;
-    }
-    throw new Error('sim never entered dwell');
-  }
-
-  /** Run until the sim leaves 'dwell'; returns the exit timestamp. */
-  function runToDepart(sim: TramSim, fromMs: number, maxSeconds: number): number {
-    let now = fromMs;
-    const steps = Math.round(maxSeconds / DT);
-    for (let i = 0; i < steps; i++) {
-      now += DT * 1000;
-      tick(sim, now, DT);
-      if (sim.phase !== 'dwell') return now;
-    }
-    throw new Error('sim never departed the dwell');
-  }
-
-  it('ahead by ~30 m at a stop: extends the dwell past the base until a fresh fix closes the gap', () => {
-    const geo = makeAheadGeo();
-    // Spawn 30 m before the stop; the frozen target sits at ~467.5 m, so on
-    // arrival at ~500 m the sim is ~30 m AHEAD of reality.
-    const sim = makeAdaptiveSim(geo, 470);
-    const enterMs = runToDwell(sim, T0, 30);
-    expect(dwellDurationMs(geo.stops[1])).toBe(10_000); // configured base dwell
-    expect(targetDistAt(sim, enterMs) - sim.sM).toBeLessThan(-DWELL_EXTEND_RELEASE_M);
-
-    // 5 s PAST the base dwell the sim is still dwelling (phase stays 'dwell'
-    // throughout — doors-open rendering keys off it) and holds position.
-    let now = run(sim, enterMs, 15, () => {
-      expect(sim.phase).toBe('dwell');
-      expect(sim.vMs).toBe(0);
-    });
-    const sAtStop = sim.sM;
-
-    // A fresh fix ahead of the stop recovers e above −8 m → released within
-    // ticks (re-evaluated every tick), and the tram departs.
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 505, observedAtMs: now }), now);
-    expect(targetDistAt(sim, now) - sim.sM).toBeGreaterThan(-DWELL_EXTEND_RELEASE_M);
-    const exitMs = runToDepart(sim, now, 2);
-    expect((exitMs - now) / 1000).toBeLessThanOrEqual(0.3); // released promptly
-    run(sim, exitMs, 10);
-    expect(sim.phase).toBe('cruise');
-    expect(sim.sM).toBeGreaterThan(sAtStop + 5); // actually departed
-  });
-
-  it('extension caps at base + DWELL_MAX_EXTEND_S when reality never catches up', () => {
-    const geo = makeAheadGeo();
-    const sim = makeAdaptiveSim(geo, 470);
-    const enterMs = runToDwell(sim, T0, 30);
-    const exitMs = runToDepart(sim, enterMs, 120);
-    const dwellS = (exitMs - enterMs) / 1000;
-    const baseS = dwellDurationMs(geo.stops[1]) / 1000;
-    expect(dwellS).toBeGreaterThanOrEqual(baseS + DWELL_MAX_EXTEND_S - 0.5);
-    expect(dwellS).toBeLessThanOrEqual(baseS + DWELL_MAX_EXTEND_S + 0.5);
-  });
-
-  it('non-adaptive sims (the projSim default) depart at the base dwell even when ahead', () => {
-    const geo = makeAheadGeo();
-    const profile = buildSpeedProfile(geo, { daytime: false });
-    // Fix at 460: far enough behind the 500 m stop that the fix-hold does NOT
-    // pin the dwell (beyond STOP_HOLD_NEAR_BEHIND_M, statePosition on_track) —
-    // this isolates the pure base-dwell behavior of non-adaptive sims.
-    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 460, observedAtMs: T0 }), T0);
-    expect(sim.adaptiveDwell).toBe(false); // opt-in only — projSims stay fixed
-    const enterMs = runToDwell(sim, T0, 30);
-    const exitMs = runToDepart(sim, enterMs, 30);
-    expect((exitMs - enterMs) / 1000).toBeGreaterThanOrEqual(9.5);
-    expect((exitMs - enterMs) / 1000).toBeLessThanOrEqual(10.5);
-  });
-
-  it('behind by ~100 m: rolls through the stop — never dwells, ≤ roll cap in the zone, stop served', () => {
-    // ~1.67 m/s schedule; a fresh fix places reality 160 m ahead of the sim,
-    // and the error stays > DWELL_SKIP_ERR_M through the stop zone at 60 m.
-    const geo = makeGeometry(
-      [
-        [0, 0],
-        [1000, 0],
-      ],
-      [
-        { atM: 0, arrivalMs: T0 - 96_000 },
-        { atM: 60, arrivalMs: T0 - 60_000, dwellSeconds: 18 },
-        { atM: 1000, arrivalMs: T0 + 504_000 },
-      ],
-    );
-    const sim = makeAdaptiveSim(geo, 0);
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 160, observedAtMs: T0 }), T0);
-    expect(sim.lastTeleportMs).toBe(0); // 160 m error — reconcile, don't teleport
-    expect(targetDistAt(sim, T0) - sim.sM).toBeGreaterThan(DWELL_SKIP_ERR_M);
-
-    const stop = geo.stops[1];
-    let sPrev = sim.sM;
-    let sawZone = false;
-    run(sim, T0, 40, () => {
-      // Doors never open: the real tram already served and left this stop.
-      expect(sim.phase).not.toBe('dwell');
-      expect(sim.sM).toBeGreaterThanOrEqual(sPrev); // s stays monotonic
-      sPrev = sim.sM;
-      if (Math.abs(sim.sM - stop.distM) <= DWELL_SKIP_ZONE_M) {
-        sawZone = true;
-        // Modest roll through the stop zone (small tolerance for the one
-        // envelope-limited tick straddling the zone boundary).
-        expect(sim.vMs).toBeLessThanOrEqual(DWELL_SKIP_ROLL_V_MS + 0.3);
-      }
-    });
-    expect(sawZone).toBe(true); // actually crossed the platform, didn't stop short
-    expect(sim.dwelledStopSeqs.has(stop.sequence)).toBe(true); // marked served
-    expect(sim.sM).toBeGreaterThan(stop.distM + 50); // rolled past and moved on
-  });
-
-  it('behind by ~30 m: dwells noticeably shorter than the base but well above the minimum', () => {
-    // Flat schedule at the 60 m stop; fix at 110 m → e ≈ +30 on arrival.
-    const geo = makeGeometry(
-      [
-        [0, 0],
-        [1000, 0],
-      ],
-      [
-        { atM: 0, arrivalMs: T0 - 100_000 },
-        { atM: 60, arrivalMs: T0 - 50_000, departureMs: T0 + 300_000, dwellSeconds: 16 },
-        { atM: 1000, arrivalMs: T0 + 800_000 },
-      ],
-    );
-    const sim = makeAdaptiveSim(geo, 0);
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 110, observedAtMs: T0 }), T0);
-
-    const enterMs = runToDwell(sim, T0, 30);
-    const eEntry = targetDistAt(sim, enterMs) - sim.sM;
-    expect(eEntry).toBeGreaterThan(20);
-    expect(eEntry).toBeLessThan(40);
-
-    const exitMs = runToDepart(sim, enterMs, 20);
-    const dwellS = (exitMs - enterMs) / 1000;
-    expect(dwellS).toBeLessThanOrEqual(13); // clearly shorter than the 16 s base
-    expect(dwellS).toBeGreaterThanOrEqual(8); // ~16 s × (1 − 30/80) ≈ 10 s
-    expect(dwellS).toBeGreaterThanOrEqual(DWELL_MIN_S);
-  });
-
-  it('never dwells shorter than DWELL_MIN_S when it does stop', () => {
-    // Base dwell 8 s, fix at ~137 m → e ≈ +50 on arrival (between the shorten
-    // and skip thresholds): 8 s × (1 − 50/80) = 3 s → clamped to the 4 s floor.
-    const geo = makeGeometry(
-      [
-        [0, 0],
-        [1000, 0],
-      ],
-      [
-        { atM: 0, arrivalMs: T0 - 100_000 },
-        { atM: 60, arrivalMs: T0 - 50_000, departureMs: T0 + 300_000, dwellSeconds: 8 },
-        { atM: 1000, arrivalMs: T0 + 800_000 },
-      ],
-    );
-    const sim = makeAdaptiveSim(geo, 0);
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 137, observedAtMs: T0 }), T0);
-
-    const enterMs = runToDwell(sim, T0, 30);
-    const eEntry = targetDistAt(sim, enterMs) - sim.sM;
-    expect(eEntry).toBeGreaterThan(40);
-    expect(eEntry).toBeLessThan(DWELL_SKIP_ERR_M); // shortened, not skipped
-
-    const exitMs = runToDepart(sim, enterMs, 20);
-    const dwellS = (exitMs - enterMs) / 1000;
-    expect(dwellS).toBeGreaterThanOrEqual(DWELL_MIN_S - 0.2);
-    expect(dwellS).toBeLessThanOrEqual(DWELL_MIN_S + 0.5);
-  });
-
-  it('arrival-fix anchor: an at_stop fix snaps a still-approaching sim ONTO the platform (never past it)', () => {
-    // Field bug 2026-07-19: the real tram STOOD at the stop (fresh at_stop
-    // fix) while the sim was still approaching; the schedule ran slightly
-    // late, so the uncorrected target already lay PAST the stop and the sim
-    // accelerated by the platform (shortened/skipped dwell) instead of
-    // standing there with open doors.
-    const geo = makeGeometry(
-      [
-        [0, 0],
-        [1000, 0],
-      ],
-      [
-        { atM: 0, arrivalMs: T0 - 300_000 },
-        // Departure already passed → the schedule anchor is past the stop.
-        { atM: 500, arrivalMs: T0 - 60_000, departureMs: T0 - 45_000, dwellSeconds: 8 },
-        { atM: 1000, arrivalMs: T0 + 240_000 },
-      ],
-    );
-    const profile = buildSpeedProfile(geo, { daytime: false });
-    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 440, observedAtMs: T0 }), T0);
-    expect(sim.sM).toBeGreaterThanOrEqual(440); // behind the platform, approaching
-
-    const t1 = T0 + 5_000;
-    applySnapshot(
-      sim,
-      makeSnapshot({
-        shapeDistM: 500,
-        observedAtMs: t1,
-        statePosition: 'at_stop',
-        lastStopSequence: geo.stops[1].sequence,
-      }),
-      t1,
-    );
-    // Snapped ONTO the platform, standing, doors open — not past it.
-    expect(sim.sM).toBeCloseTo(500, 6);
-    expect(sim.phase).toBe('dwell');
-    expect(sim.vMs).toBe(0);
-    // The late schedule must NOT drag the target beyond the pinned platform.
-    expect(targetDistAt(sim, t1)).toBeLessThanOrEqual(500);
-
-    // While the at-stop fix is fresh the tram STAYS at the platform.
-    let now = run(sim, t1, 15, () => {
-      expect(sim.sM).toBeLessThanOrEqual(500 + 1e-6);
-      expect(sim.phase).toBe('dwell');
-    });
-
-    // A moving fix (departure evidence) releases it within ticks.
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 540, observedAtMs: now }), now);
-    run(sim, now, 12);
-    expect(sim.phase).toBe('cruise');
-    expect(sim.sM).toBeGreaterThan(505);
-  });
-
-  it('arrival-fix anchor (positional): repeated fixes resting ON a platform pin the sim there without at_stop', () => {
-    const geo = makeGeometry(
-      [
-        [0, 0],
-        [1000, 0],
-      ],
-      [
-        { atM: 0, arrivalMs: T0 - 300_000 },
-        { atM: 500, arrivalMs: T0 - 60_000, departureMs: T0 - 45_000, dwellSeconds: 8 },
-        { atM: 1000, arrivalMs: T0 + 240_000 },
-      ],
-    );
-    const profile = buildSpeedProfile(geo, { daytime: false });
-    const sim = createSim(geo, profile, makeSnapshot({ shapeDistM: 300, observedAtMs: T0 }), T0);
-
-    // First fix at the platform edge: large inter-fix advance → an arriving
-    // sweep, no pin yet (a tram DRIVING past must not be pinned).
-    const t1 = T0 + 5_000;
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 498, observedAtMs: t1 }), t1);
-    expect(sim.phase).toBe('cruise');
-    const t2 = t1 + 45_000;
-    const sBefore = sim.sM;
-    // Second, genuinely fresh fix at the SAME platform position: standing
-    // evidence → pin, snap onto the platform, dwell (forward-only jump).
-    applySnapshot(sim, makeSnapshot({ shapeDistM: 498, observedAtMs: t2 }), t2);
-    expect(sim.sM).toBeCloseTo(500, 6);
-    expect(sim.sM).toBeGreaterThanOrEqual(sBefore); // never backwards
-    expect(sim.phase).toBe('dwell');
-    expect(sim.vMs).toBe(0);
-  });
-
-  it('arrival-fix anchor: the live projection stands at the fixed stop too (no dead-reckoning past it)', () => {
-    const geo = makeGeometry(
-      [
-        [0, 0],
-        [1000, 0],
-      ],
-      [
-        { atM: 0, arrivalMs: T0 - 300_000 },
-        { atM: 500, arrivalMs: T0 - 60_000, departureMs: T0 - 45_000, dwellSeconds: 8 },
-        { atM: 1000, arrivalMs: T0 + 240_000 },
-      ],
-    );
-    const engine = new TramEngine({
-      resolveModel: () => makeSpec1(),
-      isDaytime: () => false,
-      isCoupled: () => false,
-    });
-    const atStopSnap = (atMs: number) =>
-      makeSnapshot({
-        key: 'p',
-        shapeDistM: 500,
-        observedAtMs: atMs,
-        statePosition: 'at_stop',
-        lastStopSequence: geo.stops[1].sequence,
-      });
-    engine.ingest([atStopSnap(T0)], () => geo, T0);
-    engine.tick(T0);
+  it('mode-consistency (track regime): converged smooth and live speeds agree on identical data', () => {
+    const engine = makeEngine();
+    const geo = straight();
+    // Fixes advancing at exactly the prior cruise pace: the predictor reseeds
+    // with position continuity and the smoother stays inside the track band.
     let now = T0;
-    for (let i = 0; i < 200; i++) {
-      now += 100;
-      engine.tick(now);
-      const st = engine.getState('p', now);
-      if (!st) throw new Error('missing state');
-      // The projection must not drive off the platform the fix pins.
-      expect(st.projectedObservedDistM!).toBeLessThanOrEqual(500 + 1e-6);
-      expect(st.phase).toBe('dwell');
+    let fixD = 500;
+    engine.ingest([makeSnapshot({ key: 't', shapeDistM: fixD, observedAtMs: now })], () => geo, now);
+    engine.tick(now);
+    let maxSpeedGapMs = 0;
+    let teleports = 0;
+    for (let k = 0; k < 6; k++) {
+      // Settle 6 s after each reseed, then compare speeds over the next 14 s.
+      now = runEngine(engine, now, 6);
+      now = runEngine(engine, now, 14, (t) => {
+        const st = engine.getState('t', t)!;
+        const dbg = engine.getDebugInfo('t', t)!;
+        expect(dbg.regime).toBe('track');
+        if (dbg.lastTeleportMs > 0) teleports++;
+        const vSmooth = st.simSpeedKmh / 3.6;
+        maxSpeedGapMs = Math.max(maxSpeedGapMs, Math.abs(vSmooth - PRIOR_CRUISE));
+      });
+      fixD += PRIOR_CRUISE * 20;
+      engine.ingest([makeSnapshot({ key: 't', shapeDistM: fixD, observedAtMs: now })], () => geo, now);
     }
-    // A moving fix reseeds the projection ahead — normal live jump resumes.
+    expect(teleports).toBe(0);
+    // Track-regime factor stays within ~±15% of vPred at |err| ≤ 40 — the two
+    // rendered modes cruise at the same speed class on identical data.
+    expect(maxSpeedGapMs).toBeLessThan(0.2 * PRIOR_CRUISE);
+  });
+
+  it('catch-up divergence is transient: err shrinks monotonically back into the band', () => {
+    const engine = makeEngine();
+    const geo = straight();
+    engine.ingest([makeSnapshot({ key: 't', shapeDistM: 500, observedAtMs: T0 })], () => geo, T0);
+    engine.tick(T0);
+    let now = runEngine(engine, T0, 5);
+    // Fresh fix +150 m: the predictor reseeds ahead; the smoother must close
+    // the gap without ever exceeding it again.
+    const st0 = engine.getState('t', now)!;
     engine.ingest(
-      [makeSnapshot({ key: 'p', shapeDistM: 560, observedAtMs: now })],
+      [makeSnapshot({ key: 't', shapeDistM: st0.projectedObservedDistM! + 150, observedAtMs: now })],
       () => geo,
       now,
     );
-    engine.tick(now + 100);
-    const st = engine.getState('p', now + 100);
-    expect(st!.projectedObservedDistM!).toBeGreaterThanOrEqual(560 - 1e-6);
+    let prevErr = Infinity;
+    let sawCatchup = false;
+    now = runEngine(engine, now, 40, (t) => {
+      const dbg = engine.getDebugInfo('t', t)!;
+      if (dbg.regime === 'catchup') sawCatchup = true;
+      const err = dbg.errPredM!;
+      expect(err).toBeLessThanOrEqual(prevErr + 0.5); // monotone shrink (tick noise)
+      prevErr = Math.min(prevErr, err);
+    });
+    expect(sawCatchup).toBe(true);
+    const dbgEnd = engine.getDebugInfo('t', now)!;
+    expect(Math.abs(dbgEnd.errPredM!)).toBeLessThanOrEqual(40);
+    expect(dbgEnd.regime).toBe('track');
   });
 
-  it('a follower never overlaps a leader held in an extended dwell (queue clamp wins)', () => {
-    const geo = makeAheadGeo(); // frozen target → the leader's dwell extends
-    const engine = new TramEngine({
-      resolveModel: () => makeSpec1(),
-      isDaytime: () => false,
-      isCoupled: () => false,
-    });
+  it('yield: smoother ahead of a moving predictor eases off, never pedestrian, and recovers', () => {
+    const engine = makeEngine();
+    const geo = straight();
+    engine.ingest([makeSnapshot({ key: 't', shapeDistM: 1000, observedAtMs: T0 })], () => geo, T0);
+    engine.tick(T0);
+    let now = runEngine(engine, T0, 10);
+    // Fresh fix 180 m BEHIND the smoother: even after the latency advance the
+    // predictor reseeds well back and keeps moving; the smoother yields
+    // (never reverses, never stalls).
+    const smooth0 = engine.getState('t', now)!.simDistM;
     engine.ingest(
-      [
-        makeSnapshot({ key: 'lead', shapeDistM: 480, observedAtMs: T0 }),
-        makeSnapshot({ key: 'follow', shapeDistM: 460, observedAtMs: T0 }),
-      ],
+      [makeSnapshot({ key: 't', shapeDistM: Math.max(0, smooth0 - 180), observedAtMs: now })],
       () => geo,
-      T0,
+      now,
     );
-    engine.tick(T0); // arm the tick clock
+    let sPrev = -Infinity;
+    let vMin = Infinity;
+    let sawYield = false;
+    now = runEngine(engine, now, 20, (t) => {
+      const st = engine.getState('t', t)!;
+      const dbg = engine.getDebugInfo('t', t)!;
+      expect(st.simDistM).toBeGreaterThanOrEqual(sPrev); // monotone
+      sPrev = st.simDistM;
+      if (dbg.regime === 'yield') {
+        sawYield = true;
+        vMin = Math.min(vMin, st.simSpeedKmh / 3.6);
+      }
+    });
+    expect(sawYield).toBe(true);
+    expect(vMin).toBeGreaterThanOrEqual(3.0 - 0.35); // never below the yield floor
+  });
 
-    const clearance = makeSpec1().totalLengthM + QUEUE_GAP_M;
-    const stepMs = 100;
-    let leadDwellMs = 0;
-    let followMax = 0;
-    let now = T0;
-    for (let i = 0; i < 700; i++) {
-      now += stepMs;
-      engine.tick(now);
-      const lead = engine.getState('lead', now);
-      const follow = engine.getState('follow', now);
-      if (!lead || !follow) throw new Error('missing state');
-      // THE invariant: the follower's nose never breaches the leader's tail
-      // buffer, even while the leader's dwell is adaptively extended.
-      expect(follow.simDistM).toBeLessThanOrEqual(lead.simDistM - clearance + 1e-6);
-      expect(follow.phase).not.toBe('dwell'); // queued outside the reach window
-      if (lead.phase === 'dwell') leadDwellMs += stepMs;
-      followMax = Math.max(followMax, follow.simDistM);
-    }
-    // The leader's dwell really was extended (base is 10 s)…
-    expect(leadDwellMs).toBeGreaterThan(40_000);
-    // …and the follower pressed right up against the queue limit behind it,
-    // so the clamp (not mere distance) is what kept them apart.
-    expect(followMax).toBeGreaterThan(500 - clearance - 5);
-    expect(followMax).toBeLessThanOrEqual(500 - clearance + 1e-6);
+  it('hold-follow platform capture: the smoother dwells ON the platform, doors open', () => {
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [2000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 300_000 },
+        { atM: 500, arrivalMs: T0 - 10_000, departureMs: T0 + 600_000, dwellSeconds: 30 },
+        { atM: 2000, arrivalMs: T0 + 900_000 },
+      ],
+    );
+    const engine = makeEngine();
+    // Predictor approaches the stop from 350 m out and dwells there.
+    engine.ingest([makeSnapshot({ key: 't', shapeDistM: 350, observedAtMs: T0 })], () => geo, T0);
+    engine.tick(T0);
+    let captured = false;
+    runEngine(engine, T0, 60, (t) => {
+      const st = engine.getState('t', t)!;
+      const dbg = engine.getDebugInfo('t', t)!;
+      // Whenever the predictor dwells at the platform (stop-reach window),
+      // the smoother must not park TRAIL_M short of it in the street: it
+      // closes the gap, captures the platform and opens its doors.
+      if (
+        dbg.projDistM !== null &&
+        Math.abs(dbg.projDistM - 500) <= STOP_REACH_M &&
+        st.phase === 'dwell'
+      ) {
+        expect(st.simDistM).toBeGreaterThanOrEqual(500 - STOP_REACH_M - 0.5);
+        expect(st.simDistM).toBeLessThanOrEqual(500 + 1e-6);
+        // ON the predictor, not trailing it by TRAIL_M.
+        expect(Math.abs(st.simDistM - dbg.projDistM)).toBeLessThanOrEqual(STOP_REACH_M + 0.5);
+        captured = true;
+      }
+    });
+    expect(captured).toBe(true); // the smoother joined the dwell ON the platform
+  });
+
+  it('terminal un-latch propagation: the smoother backward fade-teleports off a wrong terminal', () => {
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [1000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 600_000 },
+        { atM: 1000, arrivalMs: T0 - 300_000, isTerminal: true },
+      ],
+    );
+    const engine = makeEngine();
+    engine.ingest([makeSnapshot({ key: 't', shapeDistM: 1000, observedAtMs: T0 })], () => geo, T0);
+    engine.tick(T0);
+    let now = runEngine(engine, T0, 10);
+    const latched = engine.getState('t', now)!;
+    expect(latched.phase).toBe('terminal');
+    expect(latched.simDistM).toBeCloseTo(1000, 0);
+
+    // Fresh fix 300 m behind: the predictor un-latches; the smoother MUST
+    // follow it backward (the err is far below the gap-aware threshold — this
+    // is the sanctioned propagation, not the teleport rule).
+    engine.ingest([makeSnapshot({ key: 't', shapeDistM: 700, observedAtMs: now })], () => geo, now);
+    const after = engine.getState('t', now)!;
+    expect(after.phase).not.toBe('terminal');
+    expect(after.simDistM).toBeLessThan(800);
+    const dbg = engine.getDebugInfo('t', now)!;
+    expect(dbg.lastTeleportMs).toBe(now); // rendered as a fade, not a reverse drive
+
+    // …and normal tracking resumes forward.
+    let sPrev = after.simDistM;
+    now = runEngine(engine, now, 20, (t) => {
+      const st = engine.getState('t', t)!;
+      expect(st.simDistM).toBeGreaterThanOrEqual(sPrev);
+      sPrev = st.simDistM;
+    });
+    expect(sPrev).toBeGreaterThan(after.simDistM + 50);
+  });
+});
+
+// ── smoother: stop rules (§2.3) ──────────────────────────────────────────────
+
+describe('smoother stop rules', () => {
+  it('arriving after the predictor departed (err ≤ 60): a brief min-dwell blink', () => {
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [2000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 300_000 },
+        { atM: 500, arrivalMs: T0 - 10_000, dwellSeconds: 8 },
+        { atM: 2000, arrivalMs: T0 + 900_000 },
+      ],
+    );
+    const engine = makeEngine();
+    engine.ingest([makeSnapshot({ key: 't', shapeDistM: 430, observedAtMs: T0 })], () => geo, T0);
+    engine.tick(T0);
+    // The predictor (seeded ~450, trail puts the smoother ~10 m behind it)
+    // reaches the stop first, dwells 8 s and departs; the smoother arrives
+    // while/after and must not dwell the full duration once reality left.
+    let dwellStart = 0;
+    let dwellEnd = 0;
+    runEngine(engine, T0, 60, (t) => {
+      const st = engine.getState('t', t)!;
+      if (st.phase === 'dwell' && Math.abs(st.simDistM - 500) <= STOP_REACH_M) {
+        if (dwellStart === 0) dwellStart = t;
+        dwellEnd = t;
+      }
+    });
+    expect(dwellStart).toBeGreaterThan(0); // doors did open at the platform
+    const dwellS = (dwellEnd - dwellStart) / 1000;
+    // Sync dwell while the predictor dwells + prompt release after: the
+    // smoother's total platform time stays in the same class as reality's 8 s
+    // (never the unbounded / full-default wait).
+    expect(dwellS).toBeGreaterThanOrEqual(DWELL_MIN_S - 0.5);
+    expect(dwellS).toBeLessThanOrEqual(8 + DWELL_MIN_S + 2);
+  });
+
+  it('badly behind (err > 60) at a served stop: skip — roll through ≤ cap, doors closed', () => {
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [2000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 300_000 },
+        { atM: 300, arrivalMs: T0 - 10_000, dwellSeconds: 18 },
+        { atM: 2000, arrivalMs: T0 + 900_000 },
+      ],
+    );
+    const engine = makeEngine();
+    engine.ingest([makeSnapshot({ key: 't', shapeDistM: 250, observedAtMs: T0 })], () => geo, T0);
+    engine.tick(T0);
+    let now = runEngine(engine, T0, 2);
+    // Fresh fix far ahead: reality has long served and left the 300 m stop.
+    engine.ingest([makeSnapshot({ key: 't', shapeDistM: 500, observedAtMs: now })], () => geo, now);
+    let sawZone = false;
+    let sPrev = -Infinity;
+    now = runEngine(engine, now, 40, (t) => {
+      const st = engine.getState('t', t)!;
+      expect(st.simDistM).toBeGreaterThanOrEqual(sPrev);
+      sPrev = st.simDistM;
+      if (Math.abs(st.simDistM - 300) <= DWELL_SKIP_ZONE_M) {
+        sawZone = true;
+        expect(st.phase).not.toBe('dwell'); // doors stay closed
+        expect(st.simSpeedKmh / 3.6).toBeLessThanOrEqual(DWELL_SKIP_ROLL_V_MS + 0.3);
+      }
+    });
+    expect(sawZone).toBe(true);
+    expect(engine.getState('t', now)!.simDistM).toBeGreaterThan(300 + 50);
+  });
+
+  it('the smoother trails a moving predictor by ~TRAIL_M in steady tracking', () => {
+    const geo = makeGeometry(
+      [
+        [0, 0],
+        [6000, 0],
+      ],
+      [
+        { atM: 0, arrivalMs: T0 - 600_000 },
+        { atM: 6000, arrivalMs: T0 + 600_000 },
+      ],
+    );
+    const engine = makeEngine();
+    engine.ingest([makeSnapshot({ key: 't', shapeDistM: 500, observedAtMs: T0 })], () => geo, T0);
+    engine.tick(T0);
+    const now = runEngine(engine, T0, 30);
+    const st = engine.getState('t', now)!;
+    const gap = st.projectedObservedDistM! - st.simDistM;
+    expect(gap).toBeGreaterThan(TRAIL_M - 8);
+    expect(gap).toBeLessThan(TRAIL_M + 12);
   });
 });

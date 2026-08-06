@@ -1,7 +1,5 @@
-// The equal-width action-pill row from Apple place cards (IMG_0077): the
-// prominent filled blue "walk time" pill next to translucent Call / Website
-// pills. Reused as Follow / Show Line / 3D Model on the tram sheet and
-// Route Here / Spot / Show on Map on the stop sheet. Icon over label.
+// Equal-width action pills used by tram and stop cards. Prominent actions use a
+// solid accent; supporting actions use a system-themed recessed fill.
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 

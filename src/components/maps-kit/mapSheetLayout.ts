@@ -364,15 +364,14 @@ export const CHROME_GAP = 14;
  * correctly stays below it and keeps the compact bottom sheet.
  */
 export const REGULAR_WIDTH_MIN = 768;
-/** Width of the docked iPad column. */
+/** Width of the collapsible iPad side sheet. */
 export const DOCK_WIDTH = 375;
 /** Inset of the docked column from the screen edges. */
 export const DOCK_INSET = 16;
 /**
- * Extra top padding inside the docked column. A bottom sheet gets its top inset
- * for free from the grabber sitting above the header row; a docked column has no
- * grabber, so without this the search field sat flush against the column's top
- * edge — the "no top padding on iPad" report.
+ * Legacy export retained for native-sheet geometry consumers. The owned iPad
+ * sheet now has the same grabber band as the phone sheet, so it needs no extra
+ * header padding of its own.
  */
 export const DOCK_TOP_EXTRA = 8;
 
@@ -386,8 +385,10 @@ export interface SheetEnv {
 }
 
 /**
- * True when the sheet should present as a DOCKED SIDE COLUMN rather than a
- * bottom sheet — Apple Maps' idiom, and for the same two reasons it uses:
+ * True when the sheet should present as a narrow SIDE SHEET rather than a
+ * full-width bottom sheet. It still has the same vertical detents and drag
+ * gesture as the phone sheet; "docked" describes width/placement, not a locked
+ * interaction state.
  *
  *  • regular width (iPad): a full-width bottom sheet on a 1024 pt canvas is a
  *    vast, mostly empty slab, and the search field stretched across it read as
@@ -443,8 +444,9 @@ export function peekCardHeight(headerH: number = SEARCH_H): number {
  * sheet tops out at y = 111.83 on a device reporting a 62 pt top inset ⇒ 50 of
  * clear band, giving a 762 pt card. Ours used 10, which put the top at 72 —
  * 50 pt too tall, and the reason the full detent read as a takeover, not a card.
- * On a docked iPad column there is a single height — the column is always its
- * full docked height — so the sheet never drags.
+ * On iPad the largest detent is capped by the side sheet's inset container, but
+ * peek and medium remain available. The old single-height special case made
+ * the panel impossible to dismiss and left half the app permanently covered.
  *
  * `mediumFraction` is the middle detent as a fraction of the window height. The
  * home sheet and the TRAM CARD now both land on the measured MEDIUM_DETENT, so
@@ -462,10 +464,12 @@ export function snapHeights(
 ): number[] {
   const { windowHeight, insetTop } = env;
   const peek = peekHeight(env, headerH);
-  if (isDocked(env)) {
-    return [Math.max(0, windowHeight - insetTop - DOCK_INSET * 2)];
-  }
-  const large = Math.max(peek, windowHeight - insetTop - FULL_TOP_GAP);
+  const large = Math.max(
+    peek,
+    isDocked(env)
+      ? windowHeight - insetTop - DOCK_INSET * 2
+      : windowHeight - insetTop - FULL_TOP_GAP,
+  );
   const medium = Math.max(peek, Math.min(large, windowHeight * mediumFraction));
   // Dedupe (a very short window can collapse medium onto peek/large) while
   // keeping ascending order — the snap picker assumes strictly sorted values.

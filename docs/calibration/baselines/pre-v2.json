@@ -1,0 +1,289 @@
+{
+  "generatedAt": "2026-08-01T16:20:39.545Z",
+  "engineGitDescribe": "332ad73-dirty",
+  "engine": "pre-v2 (dual-controller: main sim + projSim)",
+  "runner": {
+    "script": "scripts/calibration/replay-v2.ts",
+    "tickMs": 250,
+    "pollMs": 5000,
+    "projectionCadence": "full",
+    "offGateM": 30,
+    "resampleM": 8,
+    "delaySecondsForcedZero": true
+  },
+  "perRide": {
+    "20260720-193029-9097.jsonl": {
+      "meta": {
+        "file": "20260720-193029-9097.jsonl",
+        "line": "17",
+        "model": "kt8d5",
+        "tramKey": "9097",
+        "tripId": "17_37561_260713",
+        "points": 2240,
+        "truthPoints": 2219,
+        "stops": 24,
+        "fixes": 51,
+        "spanM": [
+          9708,
+          22984
+        ]
+      },
+      "sim": {
+        "n": 2219,
+        "meanAbs": 130.99,
+        "p50Abs": 115.7,
+        "p90Abs": 257.86,
+        "signedMean": -115.25,
+        "pctAhead": 17.85
+      },
+      "proj": {
+        "n": 2219,
+        "meanAbs": 120.74,
+        "p50Abs": 102.8,
+        "p90Abs": 252.3,
+        "signedMean": -97.97,
+        "pctAhead": 16.49
+      },
+      "halves": {
+        "sim": {
+          "first": {
+            "n": 1109,
+            "meanAbs": 113.7,
+            "p50Abs": 91.75,
+            "p90Abs": 227.09,
+            "signedMean": -85.35,
+            "pctAhead": 27.32
+          },
+          "second": {
+            "n": 1110,
+            "meanAbs": 148.27,
+            "p50Abs": 130.3,
+            "p90Abs": 268.59,
+            "signedMean": -145.11,
+            "pctAhead": 8.38
+          }
+        }
+      }
+    },
+    "20260728-172812-9507.jsonl": {
+      "meta": {
+        "file": "20260728-172812-9507.jsonl",
+        "line": "12",
+        "model": "52t",
+        "tramKey": "9507",
+        "tripId": "12_21031_260713",
+        "points": 1079,
+        "truthPoints": 1066,
+        "stops": 14,
+        "fixes": 30,
+        "spanM": [
+          3300,
+          9843
+        ]
+      },
+      "sim": {
+        "n": 1065,
+        "meanAbs": 113.73,
+        "p50Abs": 96.8,
+        "p90Abs": 257.95,
+        "signedMean": -90.28,
+        "pctAhead": 31.08
+      },
+      "proj": {
+        "n": 1065,
+        "meanAbs": 121.99,
+        "p50Abs": 96.6,
+        "p90Abs": 290.89,
+        "signedMean": -104.46,
+        "pctAhead": 27.7
+      },
+      "halves": {
+        "sim": {
+          "first": {
+            "n": 532,
+            "meanAbs": 82.14,
+            "p50Abs": 45.74,
+            "p90Abs": 206.38,
+            "signedMean": -39.82,
+            "pctAhead": 47.56
+          },
+          "second": {
+            "n": 533,
+            "meanAbs": 145.27,
+            "p50Abs": 121.84,
+            "p90Abs": 281.27,
+            "signedMean": -140.65,
+            "pctAhead": 14.63
+          }
+        }
+      }
+    },
+    "20260728-182204-9506.jsonl": {
+      "meta": {
+        "file": "20260728-182204-9506.jsonl",
+        "line": "12",
+        "model": "52t",
+        "tramKey": "9506",
+        "tripId": "12_21079_260713",
+        "points": 551,
+        "truthPoints": 551,
+        "stops": 7,
+        "fixes": 16,
+        "spanM": [
+          3715,
+          6829
+        ]
+      },
+      "sim": {
+        "n": 550,
+        "meanAbs": 106.48,
+        "p50Abs": 47.43,
+        "p90Abs": 267.56,
+        "signedMean": -86.51,
+        "pctAhead": 41.27
+      },
+      "proj": {
+        "n": 550,
+        "meanAbs": 125.63,
+        "p50Abs": 51.36,
+        "p90Abs": 382.55,
+        "signedMean": -94.55,
+        "pctAhead": 42.91
+      },
+      "halves": {
+        "sim": {
+          "first": {
+            "n": 275,
+            "meanAbs": 118.8,
+            "p50Abs": 125.47,
+            "p90Abs": 250.29,
+            "signedMean": -101.71,
+            "pctAhead": 35.64
+          },
+          "second": {
+            "n": 275,
+            "meanAbs": 94.15,
+            "p50Abs": 35.7,
+            "p90Abs": 398,
+            "signedMean": -71.31,
+            "pctAhead": 46.91
+          }
+        }
+      }
+    }
+  },
+  "aggregate": {
+    "sim": {
+      "n": 3834,
+      "meanAbs": 122.68,
+      "p50Abs": 103.52,
+      "p90Abs": 259.4,
+      "signedMean": -104.19,
+      "pctAhead": 24.88
+    },
+    "proj": {
+      "n": 3834,
+      "meanAbs": 121.79,
+      "p50Abs": 99.18,
+      "p90Abs": 270.97,
+      "signedMean": -99.28,
+      "pctAhead": 23.4
+    },
+    "halves": {
+      "sim": {
+        "first": {
+          "n": 1916,
+          "meanAbs": 105.67,
+          "p50Abs": 88.51,
+          "p90Abs": 227.09,
+          "signedMean": -75.06,
+          "pctAhead": 34.13
+        },
+        "second": {
+          "n": 1918,
+          "meanAbs": 139.68,
+          "p50Abs": 120.23,
+          "p90Abs": 277.11,
+          "signedMean": -133.29,
+          "pctAhead": 15.64
+        }
+      }
+    }
+  },
+  "atFix": {
+    "perRide": {
+      "20260720-193029-9097.jsonl": {
+        "sim": {
+          "n": 50,
+          "meanAbs": 107.22,
+          "p50Abs": 100.85,
+          "p90Abs": 221.14,
+          "signedMean": -80.92,
+          "pctAhead": 16
+        },
+        "proj": {
+          "n": 50,
+          "meanAbs": 117.91,
+          "p50Abs": 117.08,
+          "p90Abs": 253.61,
+          "signedMean": -66.31,
+          "pctAhead": 24
+        }
+      },
+      "20260728-172812-9507.jsonl": {
+        "sim": {
+          "n": 29,
+          "meanAbs": 124.17,
+          "p50Abs": 103.56,
+          "p90Abs": 253.7,
+          "signedMean": -61.41,
+          "pctAhead": 31.03
+        },
+        "proj": {
+          "n": 29,
+          "meanAbs": 132.24,
+          "p50Abs": 92.28,
+          "p90Abs": 333.6,
+          "signedMean": -89.31,
+          "pctAhead": 17.24
+        }
+      },
+      "20260728-182204-9506.jsonl": {
+        "sim": {
+          "n": 15,
+          "meanAbs": 128.73,
+          "p50Abs": 103.41,
+          "p90Abs": 261.89,
+          "signedMean": -51.32,
+          "pctAhead": 46.67
+        },
+        "proj": {
+          "n": 15,
+          "meanAbs": 147.71,
+          "p50Abs": 102.24,
+          "p90Abs": 410.6,
+          "signedMean": -97.93,
+          "pctAhead": 33.33
+        }
+      }
+    },
+    "aggregate": {
+      "sim": {
+        "n": 94,
+        "meanAbs": 115.88,
+        "p50Abs": 102.57,
+        "p90Abs": 242.96,
+        "signedMean": -70.18,
+        "pctAhead": 25.53
+      },
+      "proj": {
+        "n": 94,
+        "meanAbs": 127.09,
+        "p50Abs": 105.7,
+        "p90Abs": 311.76,
+        "signedMean": -78.45,
+        "pctAhead": 23.4
+      }
+    }
+  }
+}

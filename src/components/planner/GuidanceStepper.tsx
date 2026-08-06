@@ -1,9 +1,6 @@
-// Full step-by-step view of the active guidance session, rendered inside the
-// planner sheet, restyled to Apple Maps' itinerary "Details" list (IMG_0081):
-// big SF-symbol / line-badge step icons in a gutter, hairline separators, and
-// an Apple-red "End guidance" button. Pure presentation over (session,
-// progress, live states) — step advancement runs in GuidanceBanner's driver on
-// the map, so this only derives display state (same pure helpers, same inputs).
+// Full step-by-step view of an active journey. Line badges and live vehicle
+// details remain the dominant landmarks; step advancement runs in the map
+// banner's driver, so this component stays presentation-only.
 import * as Haptics from 'expo-haptics';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { Fragment, useMemo } from 'react';

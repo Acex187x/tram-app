@@ -450,18 +450,19 @@ about it is modal, so router sheets present straight over it.
   tested in `__tests__/map-sheet-layout.test.ts`) returns an **absolute** offset
   from the window bottom, read every frame. The controls therefore travel *with*
   the drag instead of chasing it.
-- **iPad / landscape** — `isDocked()` switches to a **docked side column**
-  (Apple Maps' idiom) at regular width *or* whenever the window is wider than it
+- **iPad / landscape** — `isDocked()` switches to a **docked side workspace**
+  at regular width *or* whenever the window is wider than it
   is tall. The map chrome takes a matching `leftInset` so the status tile, the
-  contextual chips and the Mapbox ornaments clear the column. A docked column has
-  no grabber, so `DOCK_TOP_EXTRA` supplies the top inset the grabber gives a
-  bottom sheet for free — without it the search field sat flush against the
-  column's top edge. The ornaments are lifted above the floating peek capsule on
+  contextual chips and the Mapbox ornaments clear the column. Regular width
+  changes only placement and width: the column keeps the grabber, all three
+  vertical detents and the same pan/scroll hand-off. It opens large and can be
+  pulled down to the search capsule. The ornaments are lifted above the floating peek capsule on
   a phone but stay at `bottom: 10` when docked (there the map runs to the bottom,
   and lifting them by the column's height threw them to the top of the screen).
-- **Appearance** — the sheet is an app surface, so it follows the **system**
-  scheme. Only chrome that floats over the basemap follows the map light preset.
-  Mixing the two is what rendered a black gear icon on a dark sheet.
+- **Appearance** — every application surface follows the **system** scheme,
+  including chrome floating over the basemap. Map lighting is an independent
+  cartographic setting and must never select a UI theme. Mixing the two is what
+  rendered a black gear icon on a dark sheet.
 
 **Perf.** The drag lives entirely in `heightSV` on the UI thread; the sheet
 transform, the body's `scrollEnabled` flip and the chrome ride are all worklets.
@@ -493,7 +494,8 @@ and middle detent. The map screen mounts whichever one is on stage.
   ride itself is the same `chromeRideFor` worklet. `useChromeRide` therefore
   lists `sheetHeight` in its `useAnimatedStyle` deps — without it the worklet
   keeps the shared value it captured first and rides the hidden sheet.
-- A **docked** column is never hidden (`offstage = hidden && !docked`).
+- A **docked** home column also slides offstage when the tram sheet replaces it;
+  exempting iPad from the hand-off stacked two translucent sheets in one rail.
 
 **What this replaces, and why.** The previous pass put the followed tram's
 identity in the HOME sheet's header (`FollowMiniCard`), so "minimizing" the tram

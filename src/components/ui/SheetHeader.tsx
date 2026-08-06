@@ -1,8 +1,6 @@
-// Apple-Maps sheet header (IMG_0075/76/80/81): a large bold title (+ optional
-// secondary subtitle) on the left, a circular translucent X on the right. An
-// optional leading share circle centers the title (place-card style, IMG_0077).
-// The `compact` variant is the minimized place bar shown at the smallest
-// tram-sheet detent (IMG_0079): [share] · title+subtitle · [X], one line.
+// Shared system-themed sheet header: title and optional subtitle, an optional
+// leading action, trailing actions and one consistent close control. The
+// compact variant keeps the same information in a single row.
 //
 // Supersedes src/components/favorites/SheetHeader.tsx (now a re-export shim).
 import { useRouter } from 'expo-router';
@@ -23,7 +21,7 @@ export interface SheetHeaderProps {
   leading?: ReactNode;
   /** Rendered just before the trailing X (e.g. an extra circular button). */
   trailing?: ReactNode;
-  /** One-line minimized place-bar variant (IMG_0079). */
+  /** One-line minimized header variant. */
   compact?: boolean;
 }
 

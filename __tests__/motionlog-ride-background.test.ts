@@ -159,11 +159,12 @@ describe('TramRuntime rideBackground transitions', () => {
 });
 
 describe('engine tick clock across mode transitions (audit P0)', () => {
-  it('every transition resets the engine clock — a suspension gap is never integrated', () => {
+  it('every transition resets the engine clock and a full pause resyncs on foreground', () => {
     jest.useFakeTimers();
     let riding = true;
     const { rt, p } = makeRuntime(() => riding);
     const resets = jest.spyOn(rt.engine, 'resetClock');
+    const resyncs = jest.spyOn(rt.engine, 'resyncAfterSuspension');
 
     p.resume();
     expect(resets).toHaveBeenCalledTimes(0); // cold start: nothing to reset yet
@@ -173,14 +174,17 @@ describe('engine tick clock across mode transitions (audit P0)', () => {
 
     p.onAppState('active'); // rideBackground → active
     expect(resets).toHaveBeenCalledTimes(2);
+    expect(resyncs).toHaveBeenCalledTimes(0); // the 1 Hz background sim stayed current
 
     p.onAppState('background'); // → rideBackground again…
     riding = false;
     rt.notifyRideActivity(); // …ride stops in background → full pause
     expect(resets).toHaveBeenCalledTimes(4);
-    // After the pause the first tick of the NEXT mode anchors instead of
-    // integrating the suspension gap (engine-substep.test.ts covers the
-    // engine-side semantics of resetClock).
+
+    p.onAppState('active');
+    expect(resyncs).toHaveBeenCalledTimes(1);
+    // Full suspension is reconciled from absolute wall-clock anchors once;
+    // no minute-long physics loop is replayed (engine-substep covers seeking).
   });
 
   it('rideBackground ticks the engine at 1 Hz with real timestamps (substep integration input)', () => {

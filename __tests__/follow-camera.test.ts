@@ -5,7 +5,9 @@
 import {
   CAMERA_DEADBAND_DEG,
   CAMERA_DEADBAND_M,
+  CAMERA_GLIDE_MS,
   CAMERA_RETARGET_MS,
+  RAW_FIX_GLIDE_MS,
   leadTarget,
   M_PER_DEG_LAT,
   withinDeadband,
@@ -91,5 +93,16 @@ describe('leadTarget', () => {
     const from = target();
     const to = target({ center: leadTarget([LNG, LAT], 30, 25) }); // 25 km/h → 0.56 m
     expect(withinDeadband(from, to)).toBe(false);
+  });
+});
+
+// Raw position mode (engine-v2.md §2.7): every actual camera send in raw mode
+// IS a fix jump (the deadband suppresses everything in between), so it glides
+// over a longer eased duration than the 170 ms steady-state overlap glide —
+// a hard snap across a ~45–95 s fix jump is unacceptable at follow zoom.
+describe('raw-mode fix-jump glide', () => {
+  it('is meaningfully longer than the steady-state glide, bounded by the return ease ballpark', () => {
+    expect(RAW_FIX_GLIDE_MS).toBeGreaterThan(CAMERA_GLIDE_MS * 2);
+    expect(RAW_FIX_GLIDE_MS).toBeLessThanOrEqual(1_500);
   });
 });

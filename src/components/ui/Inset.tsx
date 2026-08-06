@@ -1,4 +1,4 @@
-// iOS grouped-inset list kit (IMG_0075/76): rounded 22 pt glass cards, leading
+// System-themed grouped list kit: rounded cards, leading
 // colored icon circles with a white glyph, right-aligned values, chevrons,
 // blue-checkmark rows, uppercase section labels, and hairline separators.
 //
@@ -133,7 +133,7 @@ export interface InsetRowProps {
   trailing?: ReactNode;
   /** Renders the title in red. */
   destructive?: boolean;
-  /** Blue-checkmark selected row (IMG_0076 Preferences). */
+  /** Accent-checkmark selected row. */
   checked?: boolean;
   /**
    * VoiceOver custom actions for interactive `trailing` content (an ellipsis
@@ -260,14 +260,9 @@ const styles = StyleSheet.create({
     // same edge as the InsetGroup card (or the bare list) it labels and as the
     // sheet header's title above it — one left edge for every top-level element.
     //
-    // It used to carry marginLeft 16, which put it 16 pt inboard of the card it
-    // captions and left it aligned with nothing on the tram card: measured
-    // there at card + 37 against the timeline's rows at card + 22 and the
-    // header at card + 14. UIKit's insetGrouped tables DO indent their section
-    // headers that way (iOS 26 Settings: card 20.00, "Vision" 36.67), but the
-    // reference for these sheets is Apple Maps' place card, where the headings
-    // sit essentially ON the rail they caption — "About" at 20.67 and "Ratings
-    // & Guides" at 21.33 against a photo/button rail at 16.00.
+    // It used to carry marginLeft 16, which put the caption inboard of its card
+    // and aligned it with neither the sheet title nor the tram timeline. Keeping
+    // it on the shared content edge gives every top-level section one rail.
     marginLeft: 0,
   },
   hintRow: {

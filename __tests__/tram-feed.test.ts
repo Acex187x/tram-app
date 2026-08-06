@@ -153,9 +153,11 @@ describe('TramRuntime driven by an injected TramFeed', () => {
     expect(state).toBeDefined();
     expect(state!.hasGeometry).toBe(true);
     expect(state!.model.id).toBe('15t'); // resolved via the real fleet registry
-    // Sim anchored near the observation (trail-biased, so at/behind the fix).
+    // Sim anchored near the observation: the v2 predictor advances the fix by
+    // its hidden feed latency (R12, ≤ FEED_LATENCY_S × V_CRUISE_REF ≈ 35 m)
+    // and the rendered smoother trails it — near the fix either way.
     expect(state!.simDistM).toBeGreaterThan(0);
-    expect(state!.simDistM).toBeLessThanOrEqual(300);
+    expect(state!.simDistM).toBeLessThanOrEqual(300 + 36);
     rt.release();
   });
 
@@ -178,6 +180,28 @@ describe('TramRuntime driven by an injected TramFeed', () => {
     feed.geometries.set('trip-test', makeGeo());
     feed.push([makeSnapshot({ shapeDistM: 300, observedAtMs: T0 })], T0);
     expect(feed.requested).toHaveLength(0);
+    rt.release();
+  });
+
+  it('raw-mode dirty flag: armed at start, re-armed by every ingest, consumed once', () => {
+    // engine-v2.md §2.7: raw pushes ride the existing points-push due-check
+    // gated by this ingest-set flag — a raw frame changes only when a fix (or
+    // an adopted geometry) does.
+    const { feed, rt } = setup();
+    // Starts armed so the first raw frame after mount always renders.
+    expect(rt.takeRawFrameDirty()).toBe(true);
+    expect(rt.takeRawFrameDirty()).toBe(false);
+
+    // A snapshot batch (fix update) re-arms it; consuming clears it again.
+    feed.push([makeSnapshot({ shapeDistM: 300, observedAtMs: T0 })], T0);
+    expect(rt.takeRawFrameDirty()).toBe(true);
+    expect(rt.takeRawFrameDirty()).toBe(false);
+
+    // A geometry landing re-arms it via the debounced adopt re-ingest — the
+    // raw anchor moves from the bare GPS dot onto the shape.
+    feed.loadGeometry('trip-test', makeGeo());
+    jest.advanceTimersByTime(300);
+    expect(rt.takeRawFrameDirty()).toBe(true);
     rt.release();
   });
 

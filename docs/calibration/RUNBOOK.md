@@ -10,10 +10,13 @@ recording data spec). Fleet-side (simulator AVL) calibration is the older loop i
 ## 0. Checklist (the whole loop)
 
 1. Ingest the exported ride file → repo root (gitignored). Sanity-check it.
-2. `python3 docs/calibration/ride_replay.py <ALL ride files> --sweep` → diagnose.
+2. `python3 docs/calibration/ride_replay.py <ALL ride files> --sweep` → diagnose;
+   candidates found there are VERDICTED with the TS runner (§2a), which drives
+   the real engine.
 3. Candidate constants: mechanistic story only, never free-fit.
-4. **Double gate**: ride replay improves AND fleet `replay.py` does not regress;
-   jest + tsc green.
+4. **Double gate**: TS-runner ride replay (`npm run replay:v2 -- --dry`)
+   improves vs `docs/calibration/baselines/` AND fleet `replay.py` does not
+   regress; jest + tsc green.
 5. **Shrinkage**: one ride moves a constant at most half-way; full moves need ≥2
    independent rides agreeing.
 6. Apply to the engine + sync the two Python mirrors + append the round to an
@@ -41,6 +44,32 @@ recording data spec). Fleet-side (simulator AVL) calibration is the older loop i
     tram's shape (wrong tram, walking) fails this gate en masse — discard.
 
 ## 2. Replay and diagnose
+
+**Two replay paths exist; know which one your question needs.**
+
+### 2a. TS runner — the REAL engine (authoritative for engine changes)
+
+```
+npm run replay:v2 -- --dry                        # default 3 rides, score only
+npx tsx scripts/calibration/replay-v2.ts <ride.jsonl …> [--out=path] [--dry] [--engine=label]
+```
+
+`scripts/calibration/replay-v2.ts` reconstructs each ride exactly like
+`ride_replay.py` (shape from filtered rider GPS, stops from at-stop clusters,
+fixes from obsAt advances) but then drives the **actual TypeScript engine**
+via `ingest`/`tick` — no Python physics mirror, no port drift, scores BOTH
+the smoother (smooth mode) and the predictor (live mode) plus the at-fix
+probe. This is the engine-v2 gate runner (`docs/decisions/engine-v2.md` §3);
+committed reference scores live in `docs/calibration/baselines/`
+(`pre-v2.json`, `post-v2.json`, verdicts in `gate-v2.md`). Any engine-code
+change is judged by THIS runner against those baselines — same-runner
+comparisons only (its reconstructed schedule/terminal semantics differ from
+the Python harness; the deltas are documented in the script header and
+`baselines/README.md`). It has no `--sweep`; sweep by editing the engine
+constant and re-running `--dry` (the engine is the single source of truth —
+nothing to keep in sync).
+
+### 2b. Python harness — fast 1D sweeps (constants exploration)
 
 ```
 python3 docs/calibration/ride_replay.py <new-ride.jsonl> <older-ride.jsonl> … --sweep
