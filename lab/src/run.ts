@@ -277,7 +277,12 @@ export function start(): void {
 
     const stale: { key: string; snap: TramSnapshot; geom: RouteGeometry }[] = [];
     for (const [key, lf] of lastFix) {
-      if (trajectories.get(key)?.fixObsAtMs === lf.snap.observedAtMs) continue;
+      const entry = trajectories.get(key);
+      // Recompute when the fix changed OR the trajectory itself is aging out:
+      // long AVL gaps (p90 ~79 s, max >160 s) would otherwise leave all 13
+      // keyframes in the past and the app's marker frozen at the last point.
+      const computedAtMs = entry?.vehicle.points[0]?.t ?? 0;
+      if (entry?.fixObsAtMs === lf.snap.observedAtMs && tCompute - computedAtMs < 60_000) continue;
       const geom = geometry.resolve(lf.snap.tripId);
       if (!geom) {
         trajectories.delete(key); // no geometry ⇒ no s-axis to predict along
