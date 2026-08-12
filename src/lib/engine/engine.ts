@@ -102,9 +102,16 @@ const PROJ_COARSE_MAX_GAP_S = 1.5;
  * linearly interpolated predictor reference.
  */
 export type ProjectionCadence = 'full' | 'coarse';
-/** Render/culling anchor selector (v2 tri-state; booleans stay accepted for
- *  the pre-raw call sites: true = 'live', false = 'smooth'). */
-export type PositionAnchor = 'smooth' | 'live' | 'raw';
+/** Render/culling anchor selector (v2 tri-state, plus the experimental 'ml'
+ *  mode whose distances come from outside the engine — see getStatesInBounds;
+ *  booleans stay accepted for the pre-raw call sites: true = 'live',
+ *  false = 'smooth'). */
+export type PositionAnchor = 'smooth' | 'live' | 'raw' | 'ml';
+/** Resolver for the experimental 'ml' anchor: along-shape meters for a vehicle
+ *  at a wall-clock instant, or null when the lab published no usable
+ *  trajectory for it (src/lib/feed/mlTrajectories.ts). Injected per call so the
+ *  engine stays pure — it never imports the feed/store stack. */
+export type MlDistResolver = (key: string, tripId: string, nowMs: number) => number | null;
 /** Min clearance between a follower's nose and its leader's tail, meters. */
 export const QUEUE_GAP_M = 3;
 /**
@@ -1051,8 +1058,11 @@ export class TramEngine {
    * map frames use this before feature building so hundreds of off-screen
    * vehicles do not allocate full public-state objects 15–30 times/second.
    * `anchor` selects the culling anchor per render mode ('smooth' | 'live' |
-   * 'raw'); the boolean form of the old `useProjection` argument is still
-   * accepted (true = 'live') until the raw-mode plumbing lands everywhere.
+   * 'raw' | 'ml'); the boolean form of the old `useProjection` argument is
+   * still accepted (true = 'live') until the raw-mode plumbing lands
+   * everywhere. 'ml' additionally needs `mlDistM` — the lab's published
+   * distance for the vehicle — and culls at the fix when it returns null,
+   * matching what the feature builder then renders.
    */
   getStatesInBounds(
     nowMs: number,
@@ -1060,6 +1070,7 @@ export class TramEngine {
     preserveKeyA: string | null = null,
     preserveKeyB: string | null = null,
     anchor: PositionAnchor | boolean = 'smooth',
+    mlDistM: MlDistResolver | null = null,
   ): TramPublicState[] {
     const mode: PositionAnchor = anchor === true ? 'live' : anchor === false ? 'smooth' : anchor;
     const out: TramPublicState[] = [];
@@ -1069,6 +1080,18 @@ export class TramEngine {
         if (mode === 'raw') {
           // Raw mode renders the fix — cull by the raw AVL coordinate.
           include = coordinateIsInBbox(entry.snapshot.coordinates, bbox);
+        } else if (mode === 'ml') {
+          // The lab's horizon runs ~120 s past the fix — hundreds of meters,
+          // more than any caller's cull margin — so culling an ml frame by the
+          // fix would drop trams that ARE on screen. Cull at the rendered ml
+          // distance on the shared geometry; with no trajectory (or no
+          // geometry) ml renders the fix, so cull there instead.
+          const body: RailBody | null = entry.predictor ?? entry.smoother;
+          const mlDist = mlDistM ? mlDistM(entry.key, entry.snapshot.tripId, nowMs) : null;
+          include =
+            body && mlDist !== null
+              ? pointAtIsInBbox(body.geometry.coordinates, body.geometry.cumDistM, mlDist, bbox)
+              : coordinateIsInBbox(entry.snapshot.coordinates, bbox);
         } else {
           const body: RailBody | null =
             mode === 'live'

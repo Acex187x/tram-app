@@ -70,6 +70,7 @@ import {
 
 import { Tram } from '@/constants/theme';
 import { DETAIL_ENTER_ZOOM, getRuntime, pointsPushIntervalMs, pointsPushWanted } from '@/hooks/tramData';
+import { mlDistM } from '@/lib/feed/mlTrajectories';
 import {
   FACE_SPRITE_SCALE,
   ICON_PACKS,
@@ -480,6 +481,9 @@ export function TramLayers({
                 selection.selectedTramKey,
                 selection.followTramKey,
                 positionMode,
+                // Only read in 'ml' mode; a stable module-level reference, so
+                // no closure is allocated per push (perf invariant #8).
+                mlDistM,
               )
             : rt.engine.getStates(nowMs);
         const frame = buildFrame(states, viewport, {
@@ -495,6 +499,7 @@ export function TramLayers({
           skipPoints: !wantPoints,
           badgeMemory: badgeMemoryRef.current,
           positionMode,
+          mlDistM,
           nowMs,
         });
 
@@ -598,13 +603,27 @@ export function TramLayers({
       // (the engine's estimate of the real tram now) — anchoring to the raw
       // fix left the camera parked while the tram drove away. In raw mode the
       // fix IS the rendered anchor: the camera sits on observedPosition and
-      // eases across each fix jump (see the send below).
+      // eases across each fix jump (see the send below). In the experimental
+      // ml mode the lab's lerped distance is the rendered anchor, placed
+      // through the same geometry path, with the same raw-fix fallback the
+      // feature builder uses.
       const isLive = positionMode === 'live';
+      const isMl = positionMode === 'ml';
       let anchor = state.position;
       let bearing = state.bearing;
       if (isRaw) {
         anchor = state.observedPosition;
         bearing = state.observedBearing;
+      } else if (isMl) {
+        const geometry = rt.engine.getGeometry(followKey);
+        const dist = mlDistM(followKey, state.snapshot.tripId, nowMs);
+        if (geometry && dist != null) {
+          anchor = pointAt(geometry.coordinates, geometry.cumDistM, dist);
+          bearing = bearingAt(geometry.coordinates, geometry.cumDistM, dist);
+        } else {
+          anchor = state.observedPosition;
+          bearing = state.observedBearing;
+        }
       } else if (isLive) {
         const geometry = rt.engine.getGeometry(followKey);
         const projDist = state.projectedObservedDistM;
@@ -624,7 +643,10 @@ export function TramLayers({
         // Lead slightly toward where the tram will be at the next retarget.
         // Raw anchors only move on fix jumps — zero lead (leading a parked
         // point by a stale sim speed would aim the camera off the marker).
-        center: isRaw ? anchor : leadTarget(anchor, bearing, state.simSpeedKmh),
+        // Ml is observed-style for the same reason: the smoother's speed says
+        // nothing about the lab trajectory's, so leading by it would aim the
+        // camera off the ml marker.
+        center: isRaw || isMl ? anchor : leadTarget(anchor, bearing, state.simSpeedKmh),
         zoom: orientation?.zoom ?? FOLLOW_ZOOM,
         pitch: orientation?.pitch ?? FOLLOW_PITCH,
         heading: orientation?.heading ?? (((bearing % 360) + 360) % 360),
@@ -668,6 +690,8 @@ export function TramLayers({
         // actual send IS a fix jump (~45–95 s apart, possibly hundreds of
         // meters) — glide it over RAW_FIX_GLIDE_MS instead of the 170 ms
         // steady-state overlap glide, which would read as a hard snap (§2.7).
+        // Ml keeps the steady-state glide: its anchor moves continuously
+        // between keyframes, so it retargets like smooth/live, not in jumps.
         animationDuration: isRaw ? RAW_FIX_GLIDE_MS : CAMERA_GLIDE_MS,
       });
     });

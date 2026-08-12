@@ -49,6 +49,7 @@ const POSITION_SEGMENTS: { key: PositionMode; label: string }[] = [
   { key: 'smooth', label: 'Smooth' },
   { key: 'live', label: 'Live' },
   { key: 'raw', label: 'Raw' },
+  { key: 'ml', label: 'ML (эксперимент)' },
 ];
 
 const ATTRIBUTIONS: { icon: SFSymbol; iconColor: string; label: string; url: string }[] = [
@@ -123,7 +124,9 @@ function PositionModeSection() {
       />
       <Footnote>
         Smooth animates trams between updates. Live shows the best estimate of where each tram
-        really is right now. Raw shows the last reported position and jumps on every update.
+        really is right now. Raw shows the last reported position and jumps on every update. ML —
+        экспериментальный прогноз исследовательского сервера; трамваи без прогноза показываются по
+        последней позиции.
       </Footnote>
     </View>
   );

@@ -407,17 +407,21 @@ function HonestyLine({
   const c = appleScheme(scheme);
   const debugMode = useSettingsStore((s) => s.debugMode);
 
-  // Three-way per engine-v2.md §2.7: raw = the fix itself, live = the
-  // engine's estimate of the real tram, smooth = the cinematic sim (which is
-  // the only synthesized quantity worth quantifying against the fix).
+  // Four-way per engine-v2.md §2.7 (+ the experimental ml mode): raw = the fix
+  // itself, live = the engine's estimate of the real tram, ml = the research
+  // lab's prediction (labelled as the experiment it is — the deviation number
+  // would be measuring the wrong thing there), smooth = the cinematic sim
+  // (the only synthesized quantity worth quantifying against the fix).
   const text =
     positionMode === 'raw'
       ? 'Showing raw reported position'
       : positionMode === 'live'
         ? 'Showing estimated real-time position'
-        : deviationM != null
-          ? `Sim offset ±${Math.round(deviationM)} m from last fix`
-          : null;
+        : positionMode === 'ml'
+          ? 'ML-прогноз (эксперимент)'
+          : deviationM != null
+            ? `Sim offset ±${Math.round(deviationM)} m from last fix`
+            : null;
 
   if (!debugMode || text == null) return null;
   return (

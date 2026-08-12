@@ -81,7 +81,7 @@ function makeFrame(
   history: TraceHistory,
   positions: { fix: LngLat; live: LngLat; smooth: LngLat },
   fixAgeS: number,
-  activeMode: 'smooth' | 'live' | 'raw',
+  activeMode: 'smooth' | 'live' | 'raw' | 'ml',
 ): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
   const traces = [
@@ -94,7 +94,10 @@ function makeFrame(
 
   features.push(
     // The FIX dot is the ACTIVE marker in raw position mode — raw renders the
-    // last reported AVL coordinate itself (engine-v2.md §2.7).
+    // last reported AVL coordinate itself (engine-v2.md §2.7). In the
+    // experimental 'ml' mode NO dot is marked active on purpose: the map's
+    // marker is then the lab's trajectory position, which is none of these
+    // three engine layers, and claiming one of them would be a lie.
     pointFeature(
       'debug-fix',
       positions.fix,

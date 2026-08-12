@@ -159,7 +159,7 @@ export interface MotionLogDeps {
    */
   geometry?: (key: string) => RouteGeometry | undefined;
   /**
-   * Current position-mode setting ('smooth' | 'live' | 'raw'), for ride
+   * Current position-mode setting ('smooth' | 'live' | 'raw' | 'ml'), for ride
    * records — which rendering the user was visually comparing the tram
    * against. Passed through verbatim into the ride line's posMode field.
    * Optional seam so the pure core stays store-free; null when absent.

@@ -240,8 +240,19 @@ export interface BuildFrameOptions {
    * plain observedPosition/observedBearing without geometry. A raw frame only
    * changes when a fix does, so it jumps on every update (~45–95 s cadence);
    * the follow camera eases those jumps (§2.7).
+   * 'ml': EXPERIMENTAL — the head distance comes from `mlDistM` (the research
+   * lab's published trajectory, dumb-lerped) and is placed through the exact
+   * same geometry path as 'raw'; a vehicle the lab knows nothing about falls
+   * back to the raw fix, so no tram is ever hidden by the experiment.
    */
-  positionMode?: 'smooth' | 'live' | 'raw';
+  positionMode?: 'smooth' | 'live' | 'raw' | 'ml';
+  /**
+   * 'ml' mode only: along-shape meters for a vehicle at `nowMs`, or null when
+   * the lab published nothing usable for it (→ raw-fix fallback). Injected so
+   * this render module keeps its zero dependencies on the feed/network stack
+   * (perf invariant #9), like getGeometry/coupledPairFn above.
+   */
+  mlDistM?: (key: string, tripId: string, nowMs: number) => number | null;
   /** Frame timestamp; defaults to Date.now(). */
   nowMs?: number;
 }
@@ -736,6 +747,8 @@ export function buildFrame(
   const lineFilter = opts.lineFilter ?? null;
   const live = opts.positionMode === 'live';
   const raw = opts.positionMode === 'raw';
+  const ml = opts.positionMode === 'ml';
+  const nowMs = opts.nowMs ?? Date.now();
   const overlayKey = opts.followedKey ?? opts.selectedKey;
   let fixOverlay: GeoJSON.FeatureCollection | null = null;
   // Badge declutter runs only on points-push frames inside the badge band,
@@ -753,24 +766,28 @@ export function buildFrame(
     // Geometry is needed for sections, for live/raw-mode anchoring along the
     // shape, and for the fix-overlay connector slice.
     const geometry =
-      state.hasGeometry && (sectionsEnabled || live || raw || isOverlayTarget)
+      state.hasGeometry && (sectionsEnabled || live || raw || ml || isOverlayTarget)
         ? opts.getGeometry(state.key)
         : undefined;
 
     // Rendered anchor: the smoother in smooth mode; the predictor
-    // (projectedObservedDistM) in live mode; the raw fix distance in raw mode
-    // — all evaluated on the SAME shared geometry, falling back to the plain
-    // observed position when none exists.
+    // (projectedObservedDistM) in live mode; the raw fix distance in raw mode;
+    // the lab's lerped trajectory distance in ml mode — all evaluated on the
+    // SAME shared geometry, falling back to the plain observed position when
+    // none exists. Both live and ml fall back to the fix distance when their
+    // own source has nothing for this vehicle.
     let sHead = state.simDistM;
     let anchor = state.position;
     let bearing = state.bearing;
-    if (live || raw) {
+    if (live || raw || ml) {
       if (geometry) {
+        const modeDist = live
+          ? state.projectedObservedDistM
+          : ml
+            ? (opts.mlDistM?.(state.key, state.snapshot.tripId, nowMs) ?? null)
+            : null;
         sHead = Math.min(
-          Math.max(
-            (live ? state.projectedObservedDistM : null) ?? state.snapshot.shapeDistM,
-            0,
-          ),
+          Math.max(modeDist ?? state.snapshot.shapeDistM, 0),
           geometry.totalM,
         );
         anchor = pointAt(geometry.coordinates, geometry.cumDistM, sHead);
@@ -882,6 +899,6 @@ export function buildFrame(
         : [],
     },
     fixOverlay: fixOverlay ?? { type: 'FeatureCollection', features: [] },
-    atMs: opts.nowMs ?? Date.now(),
+    atMs: nowMs,
   };
 }

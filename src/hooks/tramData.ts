@@ -15,6 +15,7 @@ import { getModelSpec, isLikelyCoupledPair, regNumberToModelId } from '@/lib/fle
 import { TramEngine, type ProjectionCadence } from '@/lib/engine/engine';
 import { toCalibrationRecords } from '@/lib/feed/calibration';
 import { LocalGolemioFeed } from '@/lib/feed/localGolemioFeed';
+import { getMlTrajectories } from '@/lib/feed/mlTrajectories';
 import type { FeedStatus, TramFeed } from '@/lib/feed/types';
 import * as shapeCache from '@/lib/golemio/shapeCache';
 import type { RouteGeometry, TramPublicState, TramSnapshot, Viewport } from '@/lib/types';
@@ -101,6 +102,10 @@ export function pointsPushIntervalMs(zoom: number): number {
  * position-mode switch forces an immediate push in every mode (bypassing the
  * interval) so the rendered anchor changes the moment the setting does, even
  * at the 5 s city-scale cadence.
+ *
+ * The experimental 'ml' mode pushes like SMOOTH, not like raw: its lerped
+ * trajectory position changes on every frame between keyframes, so gating it
+ * on the ingest dirty flag would freeze the marker between fixes.
  */
 export function pointsPushWanted(
   mode: PositionMode,
@@ -202,6 +207,12 @@ export class TramRuntime {
   private rideActivity: (() => boolean) | null = null;
   /** Unsubscribe from the settings store (projection cadence follows positionMode). */
   private settingsUnsub: (() => void) | null = null;
+  /**
+   * Selected render mode, mirrored from the settings store by
+   * applyPositionMode. Only the experimental 'ml' mode reads it back — its
+   * trajectory poller is gated on mode AND runMode (see syncMlTrajectories).
+   */
+  private positionMode: PositionMode = 'smooth';
 
   private frameListeners = new Set<FrameListener>();
   private uiListeners = new Set<() => void>();
@@ -288,9 +299,27 @@ export class TramRuntime {
     // consumes it as the smoother's interpolated reference (coarse batches);
     // 'raw' renders the fix itself — the predictor stays on the coarse batch
     // cadence there too (both layers keep ticking so all three anchors stay
-    // populated for debug traces and instant mode switches — §2.7).
+    // populated for debug traces and instant mode switches — §2.7). The
+    // experimental 'ml' mode reuses raw's coarse semantics for the same
+    // reason: the engine is not the rendered source there at all, it only
+    // keeps every anchor alive for the debug traces and the switch back.
     const cadence: ProjectionCadence = mode === 'live' ? 'full' : 'coarse';
     this.engine.setProjectionCadence(cadence);
+    this.positionMode = mode;
+    this.syncMlTrajectories();
+  }
+
+  /**
+   * The lab trajectory poller ('ml' mode) obeys the same lifecycle rule as
+   * every other runtime timer (perf invariant #3): it runs ONLY while 'ml' is
+   * the selected mode AND the runtime is active. Called on every mode change,
+   * from resume(), and stopped by halt() — so there is zero network in
+   * smooth/live/raw, while backgrounded, and in rideBackground (where nothing
+   * renders anyway).
+   */
+  private syncMlTrajectories(): void {
+    if (this.positionMode === 'ml' && this.runMode === 'active') getMlTrajectories().start();
+    else getMlTrajectories().stop();
   }
 
   /**
@@ -325,6 +354,8 @@ export class TramRuntime {
     this.startTickTimer();
     this.uiNotifyTimer = setInterval(() => this.bumpUi(), UI_NOTIFY_MS);
     this.feed.start();
+    // Restarts the lab poller when (and only when) 'ml' is the selected mode.
+    this.syncMlTrajectories();
   }
 
   /**
@@ -405,6 +436,9 @@ export class TramRuntime {
       this.adoptTimer = null;
     }
     this.feed.stop();
+    // Nothing may tick in background (invariant #3) — the experimental 'ml'
+    // poller included. resume() restarts it if the mode still calls for it.
+    getMlTrajectories().stop();
     // Every mode transition is a tick-clock boundary. Full pause → foreground
     // performs an absolute wall-clock seek in resume(); rideBackground already
     // advances continuously. In neither case is a long gap numerically replayed.

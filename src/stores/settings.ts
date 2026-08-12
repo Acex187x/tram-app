@@ -14,11 +14,15 @@ export type LightPreset = 'auto' | 'day' | 'dusk' | 'night';
  * Tram positioning (engine v2 render anchors, docs/decisions/engine-v2.md §2):
  *   'smooth' — the cinematic smoother (layer 2);
  *   'live'   — the predictor's best estimate of the real tram now (layer 1);
- *   'raw'    — the last reported AVL fix, jumping on every update (layer 0).
+ *   'raw'    — the last reported AVL fix, jumping on every update (layer 0);
+ *   'ml'     — EXPERIMENTAL: the research lab's published trajectory keyframes,
+ *              dumb-lerped (src/lib/feed/mlTrajectories.ts). Not an engine
+ *              layer at all — the engine keeps ticking underneath exactly as in
+ *              'raw', and a vehicle without a trajectory renders its raw fix.
  * Persisted as a plain string; older installs stored only 'smooth' | 'live',
  * which remain valid members — no migration needed.
  */
-export type PositionMode = 'smooth' | 'live' | 'raw';
+export type PositionMode = 'smooth' | 'live' | 'raw' | 'ml';
 /**
  * Live-data source (backend rollout, docs/decisions/backend-convex.md §7):
  *   'local'  — LocalGolemioFeed, the on-client 5 s Golemio poll loop (default);
