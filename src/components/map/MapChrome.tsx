@@ -29,7 +29,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PollRing, usePollModel } from '@/components/map/PollIndicator';
+import { usePollModel } from '@/components/map/PollIndicator';
 import {
   CircleControl,
   ControlCapsule,
@@ -169,12 +169,13 @@ const FOLLOW_H = 32;
 // ── Status tile (top-left): weather/AQI-style live-data glass square ─────────
 
 /**
- * The poll indicator and the status tile are ONE element: the 5-segment ring
- * counts down the 5 s positions poll (fills once per second at the shared
- * 1 Hz UI cadence — no timers or animations of its own, see PollIndicator),
- * recolors on stale/error, and tapping the tile toggles an inline "updated
- * N s ago" / offline detail so the information lives in a single surface.
- * Restyled as Apple Maps' rounded weather tile: 🚊 N over a LIVE ● dot row.
+ * Live-status tile: 🚊 N (tram count) with a dot + label row ONLY when the
+ * feed is non-nominal (STALE / OFFLINE / PAUSED). The poll-cycle countdown
+ * ring and the tap-to-reveal "updated N s ago" disclosure were removed
+ * (2026-08-08) — request timing is no longer surfaced anywhere in the UI; the
+ * PollRing component survives unused in components/map/PollIndicator.tsx.
+ * `usePollModel` still supplies the health classification the warning row
+ * needs, at the same shared 1 Hz cadence (no timers, no animation).
  */
 export function MapStatusTile({ leftInset }: { leftInset?: number }) {
   const insets = useSafeAreaInsets();
@@ -182,12 +183,10 @@ export function MapStatusTile({ leftInset }: { leftInset?: number }) {
   const { scheme, text, secondary } = useTextColors();
   const poll = usePollModel(); // ~1 Hz, same subscription
 
-  const dimColor = scheme === 'dark' ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.15)';
   const status = statusLabel(poll.state);
 
   const topRow = (
     <>
-      <PollRing model={poll} color={text} dimColor={dimColor} size={20} />
       <SymbolView name="tram.fill" size={15} tintColor={liveryTint(scheme)} />
       <Text style={[styles.tileCount, { color: text }]} maxFontSizeMultiplier={TextScale.compact}>
         {states.length}
@@ -215,21 +214,11 @@ export function MapStatusTile({ leftInset }: { leftInset?: number }) {
     >
       <StatusTile
         appearance={scheme}
-        // The count and any non-nominal status (STALE / OFFLINE / PAUSED) live in
-        // the collapsed label so a broken feed is announced without expanding;
-        // `poll.detail` is the disclosure's own spoken form, passed as detailLabel.
+        // The count and any non-nominal status (STALE / OFFLINE / PAUSED) live
+        // in the label so a broken feed is announced without any disclosure.
         label={`Live data: ${states.length} trams${status ? `, ${status.label.toLowerCase()}` : ''}`}
-        detailLabel={poll.detail}
         topRow={topRow}
         bottomRow={bottomRow}
-        expandedDetail={
-          <Text
-            style={[styles.tileDetail, { color: secondary }]}
-            maxFontSizeMultiplier={TextScale.chrome}
-          >
-            {poll.detail}
-          </Text>
-        }
       />
     </View>
   );
@@ -878,7 +867,6 @@ const styles = StyleSheet.create({
   },
   tileDot: { width: 7, height: 7, borderRadius: 3.5 },
   tileStatus: { fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
-  tileDetail: { fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'] },
 
   // ── Layers quick-menu ──
   layersAnchor: { position: 'absolute', right: CONTROL_RIGHT },

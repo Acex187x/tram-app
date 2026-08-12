@@ -453,11 +453,9 @@ function MotionDataSection() {
 function DeveloperSection() {
   const debugMode = useSettingsStore((s) => s.debugMode);
   const setDebugMode = useSettingsStore((s) => s.setDebugMode);
-  const feedSource = useSettingsStore((s) => s.feedSource);
-  const setFeedSource = useSettingsStore((s) => s.setFeedSource);
-  const remoteConfigured =
-    typeof process.env.EXPO_PUBLIC_CONVEX_URL === 'string' &&
-    process.env.EXPO_PUBLIC_CONVEX_URL.length > 0;
+  // The "Backend feed" toggle is gone (2026-08-08): the app streams from the
+  // Tram Spotter server unconditionally — there is no device-side Golemio
+  // polling to switch back to.
   return (
     <View style={styles.section}>
       <SectionLabel>Developer</SectionLabel>
@@ -468,26 +466,9 @@ function DeveloperSection() {
           title="Debug mode"
           trailing={<ThemedSwitch label="Debug mode" value={debugMode} onValueChange={setDebugMode} />}
         />
-        <InsetRow
-          icon="antenna.radiowaves.left.and.right"
-          iconTint={Tram.onTime}
-          title="Backend feed"
-          trailing={
-            <ThemedSwitch
-              label="Backend feed"
-              value={feedSource === 'remote'}
-              onValueChange={(on) => setFeedSource(on ? 'remote' : 'local')}
-            />
-          }
-        />
       </InsetGroup>
       <Footnote>
-        {'Debug mode overlays a live technical readout of the simulation on the followed tram. ' +
-          'Backend feed streams positions from the Tram Spotter server (fresher fixes, one shared ' +
-          'poller) instead of polling Golemio from the device; it takes effect on the next launch' +
-          (remoteConfigured
-            ? '.'
-            : ' and needs a configured server URL — without one the app stays on the device poller.')}
+        Debug mode overlays a live technical readout of the simulation on the followed tram.
       </Footnote>
     </View>
   );

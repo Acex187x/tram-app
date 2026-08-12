@@ -1,7 +1,14 @@
-// Tiny typed fetch wrapper for the Golemio API with a global rate-limit queue.
+// Tiny typed fetch wrapper with a global rate-limit queue.
 //
-// The API key is a rate-limited resource shared by every caller in the app, so
-// all requests funnel through one process-wide scheduler:
+// TRANSPORT (2026-08-08): every request goes to the Tram Spotter BACKEND
+// (`USE_BACKEND_PROXY`), which proxies/caches Golemio server-side — the app
+// ships no Golemio credential and never dials api.golemio.cz. The direct-
+// Golemio path (endpoint + key below) is retained as reference code but is
+// compiled out while the flag is true.
+//
+// The upstream key is still a rate-limited resource shared by every caller
+// (the backend spends it on cache misses), so all requests funnel through one
+// process-wide scheduler:
 //   • at most MAX_CONCURRENT (4) requests in flight at once
 //   • at most MAX_PER_WINDOW (16) request *starts* per rolling WINDOW_MS (8s)
 //     — comfortably under Golemio's documented 20-req/8s key limit
@@ -19,6 +26,18 @@
 //   • abort, timeout and HTTP failures throw distinct error classes so
 //     diagnostics can tell lifecycle cancellation from server trouble.
 
+/**
+ * Compile-time transport switch: true = all requests go through the backend's
+ * HTTP-actions origin (no Golemio key on the device, no direct Golemio
+ * traffic). The direct path survives in code only — flipping this back is a
+ * deliberate source change, not a runtime or env toggle.
+ */
+export const USE_BACKEND_PROXY = true;
+
+/** The backend HTTP-actions origin (self-hosted CONVEX_SITE_ORIGIN). */
+const PROXY_DEFAULT_BASE = 'https://tram-site.acex.sh';
+
+/** Direct-Golemio base — unused while USE_BACKEND_PROXY is true. */
 const DEFAULT_BASE = 'https://api.golemio.cz';
 
 /** Hard per-attempt timeout. */
@@ -311,7 +330,9 @@ export function demoteTag(tag: string, priority: GolemioPriority): boolean {
 // ── URL + headers ────────────────────────────────────────────────────────────
 
 function baseUrl(): string {
-  const raw = process.env.EXPO_PUBLIC_GOLEMIO_ENDPOINT ?? DEFAULT_BASE;
+  const raw = USE_BACKEND_PROXY
+    ? (process.env.EXPO_PUBLIC_CONVEX_SITE_URL ?? PROXY_DEFAULT_BASE)
+    : (process.env.EXPO_PUBLIC_GOLEMIO_ENDPOINT ?? DEFAULT_BASE);
   return raw.replace(/\/+$/, '');
 }
 
@@ -331,6 +352,9 @@ function buildUrl(
 }
 
 function authHeaders(): Record<string, string> {
+  // The backend needs no client credential; the Golemio key lives server-side
+  // only. The token header below belongs to the compiled-out direct path.
+  if (USE_BACKEND_PROXY) return { Accept: 'application/json' };
   const token = process.env.EXPO_PUBLIC_GOLEMIO_KEY ?? '';
   return {
     'X-Access-Token': token,

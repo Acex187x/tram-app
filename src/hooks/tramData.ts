@@ -666,28 +666,36 @@ export class TramRuntime {
 
 let runtime: TramRuntime | null = null;
 
+/** The public backend (self-hosted CONVEX_CLOUD_ORIGIN) — the baked fallback
+ * when the build carries no EXPO_PUBLIC_CONVEX_URL, so the app can never
+ * silently drop back to polling Golemio from the device. */
+const DEFAULT_CONVEX_URL = 'https://tram-api.acex.sh';
+
 /**
- * Feed selection (backend rollout, docs/decisions/backend-convex.md §3/§7).
- * 'remote' requires EXPO_PUBLIC_CONVEX_URL; anything else — or a missing
- * URL — falls back to LocalGolemioFeed. Read once at runtime construction:
- * switching feeds mid-session is a restart-level operation by design (the
- * runtime owns subscriptions/lifecycle against exactly one feed object).
+ * Feed selection (backend rollout, docs/decisions/backend-convex.md §3/§7):
+ * RemoteFeed over the Convex backend, unconditionally — direct-from-device
+ * polling is a non-goal since the backend went public (2026-08-08), and the
+ * `feedSource` setting no longer participates. LocalGolemioFeed survives in
+ * code (and as the construction-failure escape below, which a trivial
+ * RemoteFeed constructor cannot hit in production) but is otherwise unused.
+ * Read once at runtime construction: switching feeds mid-session is a
+ * restart-level operation by design (the runtime owns subscriptions/lifecycle
+ * against exactly one feed object).
  */
 function constructFeed(): TramFeed {
   try {
-    const source = useSettingsStore.getState().feedSource;
-    const url = process.env.EXPO_PUBLIC_CONVEX_URL;
-    if (source === 'remote' && typeof url === 'string' && url.length > 0) {
-      // Lazy require: keeps the convex client stack out of the module graph
-      // (and out of jest workers) unless the remote feed is actually selected.
-      const { RemoteFeed } = require('@/lib/feed/remoteFeed') as typeof import('@/lib/feed/remoteFeed');
-      return new RemoteFeed({ url });
-    }
+    const env = process.env.EXPO_PUBLIC_CONVEX_URL;
+    const url = typeof env === 'string' && env.length > 0 ? env : DEFAULT_CONVEX_URL;
+    // Lazy require: keeps the convex client stack out of the module graph
+    // (and out of bare jest workers) until the runtime actually constructs.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { RemoteFeed } = require('@/lib/feed/remoteFeed') as typeof import('@/lib/feed/remoteFeed');
+    return new RemoteFeed({ url });
   } catch {
-    // Settings store unavailable (bare tests) or remote feed failed to
-    // construct — the local feed is always a safe default.
+    // The convex stack failed to even load (bare test environment) — the
+    // local feed keeps the runtime constructible there.
+    return new LocalGolemioFeed();
   }
-  return new LocalGolemioFeed();
 }
 
 /** The app-wide runtime singleton (created lazily; feed per constructFeed()). */

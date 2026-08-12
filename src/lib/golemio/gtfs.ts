@@ -5,7 +5,10 @@
 // fetchAllTramRoutes lists the 38 tram lines for pickers.
 
 import type { RouteGeometry, RouteStop } from '@/lib/types';
-import { pragueOffsetSeconds } from '@/lib/time/prague';
+// Relative on purpose: convex/geometry.ts imports this module's builder, and
+// the Convex bundler only follows the app's `@/` alias for TYPE-only imports
+// (convex/tsconfig.json maps it for typechecking, not bundling).
+import { pragueOffsetSeconds } from '../time/prague';
 import type {
   GtfsRoute,
   GtfsShapePoint,
@@ -14,6 +17,7 @@ import type {
 } from './apiTypes';
 import {
   golemioFetch,
+  USE_BACKEND_PROXY,
   type GolemioPriority,
   type GolemioRequestOptions,
 } from './client';
@@ -286,14 +290,77 @@ function routeIdToLine(routeId: string): string {
 }
 
 /**
- * Fetch a trip's full geometry + timetable and normalize into RouteGeometry.
- * Requests includeShapes/includeStopTimes/includeStops; stop names + coordinates
- * arrive nested under each stop_time's `stop`.
+ * The backend's served-geometry payload (convex/geometry.ts): a prebuilt
+ * RouteGeometry with plain number[] coordinates (Convex has no tuple type)
+ * plus the service midnight its stop epochs were anchored to at build time.
+ */
+export interface ServedGeometry {
+  tripId: string;
+  shapeId: string;
+  routeId: string;
+  line: string;
+  headsign: string;
+  serviceMidnightMs: number;
+  coordinates: number[][];
+  cumDistM: number[];
+  totalM: number;
+  stops: (Omit<RouteStop, 'coordinates'> & { coordinates: number[] })[];
+  builtAtMs: number;
+}
+
+/**
+ * Re-narrow a served geometry into RouteGeometry and re-anchor its stop epochs
+ * onto the CURRENT service day — the server built (or cached) it on some
+ * earlier day, exactly like a local disk-cache hit, and the same shift logic
+ * applies (see shapeCache.reanchor / serviceDayShiftMs).
+ */
+export function servedToRouteGeometry(served: ServedGeometry, nowMs: number): RouteGeometry {
+  const geometry: RouteGeometry = {
+    shapeId: served.shapeId,
+    tripId: served.tripId,
+    routeId: served.routeId,
+    line: served.line,
+    headsign: served.headsign,
+    coordinates: served.coordinates.map((c) => [c[0], c[1]] as [number, number]),
+    cumDistM: served.cumDistM,
+    totalM: served.totalM,
+    stops: served.stops.map((s) => ({
+      ...s,
+      coordinates: [s.coordinates[0], s.coordinates[1]] as [number, number],
+    })),
+  };
+  const shift = serviceDayShiftMs(geometry, served.serviceMidnightMs, nowMs);
+  if (shift === 0) return geometry;
+  return {
+    ...geometry,
+    stops: geometry.stops.map((s) => ({
+      ...s,
+      arrivalMs: s.arrivalMs + shift,
+      departureMs: s.departureMs + shift,
+    })),
+  };
+}
+
+/**
+ * Fetch a trip's full geometry + timetable as RouteGeometry.
+ *
+ * Backend transport (USE_BACKEND_PROXY): `GET /geometry/:tripId` on the Tram
+ * Spotter backend, which builds/caches it server-side with this same module's
+ * builder — the device makes no Golemio request and holds no key. The direct
+ * branch below (raw GTFS trip detail, includeShapes/includeStopTimes/
+ * includeStops, normalized on-device) is the retained-but-unused path.
  */
 export async function fetchTripGeometry(
   tripId: string,
   options?: FetchTripGeometryOptions,
 ): Promise<RouteGeometry> {
+  if (USE_BACKEND_PROXY) {
+    const served = await golemioFetch<ServedGeometry>(
+      `/geometry/${encodeURIComponent(tripId)}`,
+      { priority: options?.priority ?? 1, signal: options?.signal },
+    );
+    return servedToRouteGeometry(served, options?.nowMs ?? Date.now());
+  }
   const req: GolemioRequestOptions = {
     priority: options?.priority ?? 1,
     signal: options?.signal,

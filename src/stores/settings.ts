@@ -24,11 +24,10 @@ export type LightPreset = 'auto' | 'day' | 'dusk' | 'night';
  */
 export type PositionMode = 'smooth' | 'live' | 'raw' | 'ml';
 /**
- * Live-data source (backend rollout, docs/decisions/backend-convex.md §7):
- *   'local'  — LocalGolemioFeed, the on-client 5 s Golemio poll loop (default);
- *   'remote' — RemoteFeed over the Convex backend (requires
- *              EXPO_PUBLIC_CONVEX_URL; silently falls back to local without it).
- * Read once at runtime construction — changing it takes effect on next launch.
+ * Live-data source. INERT since 2026-08-08: the runtime constructs RemoteFeed
+ * unconditionally (hooks/tramData.ts) and nothing reads this setting anymore —
+ * the field and its setter survive only so persisted settings JSON from older
+ * installs keeps round-tripping without a migration.
  */
 export type FeedSource = 'local' | 'remote';
 
@@ -73,7 +72,7 @@ export const useSettingsStore = create<SettingsState>()(
       showRouteLines: true,
       followHeadingLock: false,
       passiveFleetLogging: true,
-      feedSource: 'local',
+      feedSource: 'remote',
       iconPack: DEFAULT_ICON_PACK,
       debugMode: false,
       setLightPreset: (lightPreset) => set({ lightPreset }),
