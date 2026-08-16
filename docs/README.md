@@ -22,7 +22,7 @@ and HOW (with `src/…` references) for one subsystem.
 | Doc | Covers |
 |---|---|
 | [`decisions/data-pipeline.md`](decisions/data-pipeline.md) | Golemio polling, rate-limit queue, entity keying, GTFS/shape fetching + disk cache, `RouteGeometry` construction. |
-| [`decisions/engine-v2.md`](decisions/engine-v2.md) | **The current engine** (2026-08-01): the fix → predictor → smoother layer stack, three render modes (smooth/live/raw), why the dual-controller design was replaced, and the TS replay ship gate. Start here for physics. |
+| [`decisions/engine-v2.md`](decisions/engine-v2.md) | HISTORY (2026-08-01, retired by physics v3 on 2026-08-16): the on-client fix → predictor → smoother layer stack, three render modes (smooth/live/raw), why the dual-controller design was replaced, and the TS replay ship gate. For today's physics start at `research/physics-v3-protocol.md`. |
 | [`decisions/interpolation-engine.md`](decisions/interpolation-engine.md) | SUPERSEDED by engine-v2.md for the controller architecture; still the evidence base for the braking envelope, holds, queueing, and every field-fix's rationale. |
 | [`decisions/backend-convex.md`](decisions/backend-convex.md) | **The backend as built** (Convex): 24/7 self-rescheduling Golemio poller, diff-stream via reactive queries, server-side continuous calibration (segment/model/vehicle/stop EWMAs → client prior bundle), `RemoteFeed`. |
 | [`decisions/backend-plan.md`](decisions/backend-plan.md) | The original backend design record (generic WS/HTTP sketch) — motivation and the `TramFeed` seam; transport superseded by backend-convex.md. |
@@ -40,6 +40,8 @@ Empirical notes, all verified on 2026-07-11 against live systems / installed
 
 | Doc | Covers |
 |---|---|
+| [`research/physics-v3-protocol.md`](research/physics-v3-protocol.md) | **The frozen physics-v3 contract (2026-08-16) — start here for physics.** The `/api/trajectories/v2` wire format, the server-owned continuity + modal-stop invariants, the client's one pure evaluator, the connection-honesty states, and the client excision list. |
+| [`research/prediction-architecture.md`](research/prediction-architecture.md) | **Prediction v3 research (2026-08-08)**: options analysis (ML monolith vs deterministic vs hybrid) for a server-side, self-calibrating, multi-city prediction system; recommended target architecture (trajectory protocol, two-timescale learned surfaces, evaluation flywheel) + phased roadmap. No decision executed yet. |
 | [`research/golemio-api.md`](research/golemio-api.md) | Golemio PID API: auth, endpoints, rate limits, `vehiclepositions`/GTFS response shapes, and the gotchas (km-as-string distances, `includeNotTracking`). |
 | [`research/mapbox-rn.md`](research/mapbox-rn.md) | `@rnmapbox/maps` 10.3.2 on Expo SDK 57 / RN 0.86 / Fabric: Standard style, `ModelLayer` + `Models`, version facts. |
 | [`research/glb-authoring.md`](research/glb-authoring.md) | Authoring tram GLBs from primitives in Node with `@gltf-transform/core` (no Blender) — materials, file size, validation. |
