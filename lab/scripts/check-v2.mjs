@@ -241,6 +241,8 @@ const sh = {
   convNear: [],
   convFar: [],
   unconverged: 0,
+  aheadRepaid: [],
+  aheadUnconverged: 0,
   osc: [],
   dips: 0,
   dipTracks: 0,
@@ -316,7 +318,12 @@ function checkShadowVehicle(v, bundleAtMs) {
         fail(`sh:${v.key}: shadow continuity broken |Δsmooth| = ${d.toFixed(2)} m (G9)`);
       }
       if (kind === 'fix') {
-        const gap = Math.abs(evalTrack(v.opinion, E) - evalTrack(v.smooth, E));
+        // Direction split: gSigned > 0 = smooth BEHIND the fresh opinion (the
+        // catch-up mechanism the G5 gates target). gSigned < 0 = smooth AHEAD
+        // — repaid at the next platform hold BY DESIGN (§6), tracked
+        // separately and not gated.
+        const gSigned = evalTrack(v.opinion, E) - evalTrack(v.smooth, E);
+        const gap = Math.abs(gSigned);
         if (gap >= 20) {
           const horizonS = Math.round((v.opinion[v.opinion.length - 1].t - E) / 1000);
           let convS = null;
@@ -327,23 +334,28 @@ function checkShadowVehicle(v, bundleAtMs) {
               break;
             }
           }
-          if (convS === null) sh.unconverged++;
-          else if (gap > 120) sh.convFar.push(convS);
-          else sh.convNear.push(convS);
-          if (convS !== null) {
-            let sign = 0;
-            let osc = 0;
-            for (let dt = convS; dt <= horizonS; dt++) {
-              const d2 = evalTrack(v.smooth, E + dt * 1000) - evalTrack(v.opinion, E + dt * 1000);
-              if (d2 > 2) {
-                if (sign < 0) osc++;
-                sign = 1;
-              } else if (d2 < -2) {
-                if (sign > 0) osc++;
-                sign = -1;
+          if (gSigned < 0) {
+            if (convS === null) sh.aheadUnconverged++;
+            else sh.aheadRepaid.push(convS);
+          } else {
+            if (convS === null) sh.unconverged++;
+            else if (gap > 120) sh.convFar.push(convS);
+            else sh.convNear.push(convS);
+            if (convS !== null) {
+              let sign = 0;
+              let osc = 0;
+              for (let dt = convS; dt <= horizonS; dt++) {
+                const d2 = evalTrack(v.smooth, E + dt * 1000) - evalTrack(v.opinion, E + dt * 1000);
+                if (d2 > 2) {
+                  if (sign < 0) osc++;
+                  sign = 1;
+                } else if (d2 < -2) {
+                  if (sign > 0) osc++;
+                  sign = -1;
+                }
               }
+              sh.osc.push(osc);
             }
-            sh.osc.push(osc);
           }
         }
       }
@@ -549,8 +561,9 @@ if (sh.bundles === 0) {
     `${fleetFlips.toFixed(2)}/min over ${sh.flipMinutes.toFixed(0)} track-min`);
   gate('G3 per-track flips p95 ≤ 3.0/min', sh.flipRates.length, 20, flipP95 <= 3.0,
     `p95 = ${flipP95.toFixed(2)}/min (n=${sh.flipRates.length})`);
-  console.log(`G5 catch-up latency near(20–120 m) ${fmt(sh.convNear, 's')}`);
+  console.log(`G5 catch-up latency (smooth BEHIND) near(20–120 m) ${fmt(sh.convNear, 's')}`);
   console.log(`                    far(120 m–T_disc) ${fmt(sh.convFar, 's')}   unconverged-in-horizon: ${sh.unconverged}`);
+  console.log(`ahead-repaid (§6, absorbed at the next hold — not gated) ${fmt(sh.aheadRepaid, 's')}  unconverged: ${sh.aheadUnconverged}`);
   gate('G5 near p50 ≤ 12 s', sh.convNear.length, 10, pct(sh.convNear, 50) <= 12,
     `p50 = ${pct(sh.convNear, 50).toFixed(1)}s`);
   gate('G5 near p90 ≤ 28 s', sh.convNear.length, 10, pct(sh.convNear, 90) <= 28,

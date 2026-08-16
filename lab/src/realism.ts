@@ -308,11 +308,16 @@ export class PerceptualCounters {
   private jerkHist = new Histogram(0, 2, 0.01);
   private flipRateHist = new Histogram(0, 12, 0.05);
   private knotHist = new Histogram(0, 26, 1);
-  private convNearHist = new Histogram(0, 180, 1); // gap 20–120 m, seconds
-  private convFarHist = new Histogram(0, 300, 1); // gap 120 m–T_disc, seconds
+  private convNearHist = new Histogram(0, 180, 1); // BEHIND, gap 20–120 m, s
+  private convFarHist = new Histogram(0, 300, 1); // BEHIND, gap 120 m–T_disc, s
+  /** AHEAD episodes (smooth ahead of the fresh opinion): §6 doctrine says the
+   *  lead is repaid where it is natural — at the next platform hold — so the
+   *  wait is DESIGNED, not latency; measured separately and not gated. */
+  private aheadRepaidHist = new Histogram(0, 300, 1);
   private oscHist = new Histogram(0, 20, 1);
   private flipsTotal = 0;
   private flipMinutesTotal = 0;
+  aheadUnconverged = 0;
 
   record(e: PerceptualEmission): void {
     this.emissions++;
@@ -354,11 +359,15 @@ export class PerceptualCounters {
     }
 
     // G5 + G6: convergence latency and post-convergence hunting, measured on
-    // the emitted curves exactly as a client would render them.
+    // the emitted curves exactly as a client would render them. Split by
+    // DIRECTION: gSigned > 0 = smooth BEHIND the fresh opinion — the catch-up
+    // mechanism the G5 gates target («вяло догоняет»). gSigned < 0 = smooth
+    // AHEAD: §6 repays the lead at the next platform hold by construction, so
+    // the wait is the design working, tracked separately and not gated.
     if (e.kind === 'fix' && !e.discontinuity) {
       const E = e.emittedAtMs;
-      const gap = Math.abs(evalTrack(e.opinion, E) - evalTrack(e.smooth, E));
-      const far = gap > 120;
+      const gSigned = evalTrack(e.opinion, E) - evalTrack(e.smooth, E);
+      const gap = Math.abs(gSigned);
       if (gap >= 20) {
         const horizonS = Math.round((e.opinion[e.opinion.length - 1].t - E) / 1000);
         let convS: number | null = null;
@@ -369,26 +378,31 @@ export class PerceptualCounters {
             break;
           }
         }
-        if (convS === null) this.unconverged++;
-        else if (far) this.convFarHist.add(convS);
-        else this.convNearHist.add(convS);
-        if (convS !== null) {
-          // G6: sign changes of (smooth − opinion) after first convergence,
-          // 2 m deadband so cm-rounding noise never counts as hunting.
-          let sign = 0;
-          let osc = 0;
-          for (let dt = convS; dt <= horizonS; dt++) {
-            const d = evalTrack(e.smooth, E + dt * 1000) - evalTrack(e.opinion, E + dt * 1000);
-            if (d > 2) {
-              if (sign < 0) osc++;
-              sign = 1;
-            } else if (d < -2) {
-              if (sign > 0) osc++;
-              sign = -1;
+        if (gSigned < 0) {
+          if (convS === null) this.aheadUnconverged++;
+          else this.aheadRepaidHist.add(convS);
+        } else {
+          if (convS === null) this.unconverged++;
+          else if (gap > 120) this.convFarHist.add(convS);
+          else this.convNearHist.add(convS);
+          if (convS !== null) {
+            // G6: sign changes of (smooth − opinion) after first convergence,
+            // 2 m deadband so cm-rounding noise never counts as hunting.
+            let sign = 0;
+            let osc = 0;
+            for (let dt = convS; dt <= horizonS; dt++) {
+              const d = evalTrack(e.smooth, E + dt * 1000) - evalTrack(e.opinion, E + dt * 1000);
+              if (d > 2) {
+                if (sign < 0) osc++;
+                sign = 1;
+              } else if (d < -2) {
+                if (sign > 0) osc++;
+                sign = -1;
+              }
             }
+            this.oscHist.add(osc);
+            if (osc > this.maxOscillations) this.maxOscillations = osc;
           }
-          this.oscHist.add(osc);
-          if (osc > this.maxOscillations) this.maxOscillations = osc;
         }
       }
     }
@@ -428,6 +442,12 @@ export class PerceptualCounters {
           p90s: this.convFarHist.pct(90),
         },
         unconverged: this.unconverged,
+        aheadRepaid: {
+          n: this.aheadRepaidHist.n,
+          p50s: this.aheadRepaidHist.pct(50),
+          p90s: this.aheadRepaidHist.pct(90),
+          unconverged: this.aheadUnconverged,
+        },
       },
       g6oscillation: {
         episodes: this.oscHist.n,

@@ -102,11 +102,12 @@ export const DISC_GAP_MIN_S = 45;
 export const DISC_GAP_MAX_S = 240;
 /** A stop is "reached" within this of its distM, m (port: tramSim STOP_REACH_M). */
 export const STOP_REACH_M = 2;
-/** Hold entry zeroes the speed inside one sim step, so it is only legal below
- *  A_BRK·dt — above it the final step becomes an over-rail brake and prints a
- *  wire accel violation. Between this and SKIP the sim inserts full-rail
- *  braking steps (the driver's late-brake residue) and enters a step later. */
-export const HOLD_ENTRY_V_MAX = 1.2;
+/** Hold entry zeroes the speed inside one sim step; with the S-curve landing
+ *  floor the tram reaches the platform with |a| ≤ √(2·J·v), so entering from
+ *  ≤ this keeps the entry's wire jerk under the gate. Above it the sim simply
+ *  keeps integrating — the envelope + landing floor decay the speed and the
+ *  entry fires a step or two later. */
+export const HOLD_ENTRY_V_MAX = 0.8;
 /** Arriving at a planned hold faster than this means the plan was infeasible
  *  from the seam state (e.g. a backward re-anchor placed a stop inside the
  *  braking distance) — the stop is rolled through and counted, never slammed
@@ -610,8 +611,14 @@ function runDrive(args: {
       vCmd = env;
     }
 
-    // ── accel: rate- and jerk-limited; integrate (exact for linear v) ────────
+    // ── accel: rate-, jerk- and landing-limited; integrate (exact, linear v) ─
     let aDes = clamp((vCmd - vI) / DT_S, -TRAJ_A_BRK, TRAJ_A_ACC);
+    // S-curve landing floor: the deepest decel that still reaches v = 0 with
+    // a → 0 under jerk J is a = −√(2·J·v) (da/dt along it is exactly −J). It
+    // binds only below ~A_BRK²/2J ≈ 1.2 m/s, shaping every stop's last metre
+    // into the S-tail — without it the demand pins a at full brake while v
+    // crosses zero and the release prints a >J wire jerk at every platform.
+    aDes = Math.max(aDes, -Math.sqrt(2 * TRAJ_J_MAX * Math.max(0, vI)));
     aDes = clamp(aDes, a - TRAJ_J_MAX * DT_S, a + TRAJ_J_MAX * DT_S);
     let vN = vI + aDes * DT_S;
     if (vN < 0) {
@@ -622,73 +629,18 @@ function runDrive(args: {
       vN = TRAJ_V_MAX_MS;
     }
     a = aDes;
-    let sN = sI + ((vI + vN) / 2) * DT_S;
+    const sN = sI + ((vI + vN) / 2) * DT_S;
     if (!Number.isFinite(sN) || !Number.isFinite(vN)) return null;
 
     // ── stop service (§4.2): brake in on the envelope, stand, depart ─────────
-    // Late-brake residue: any hold reached above HOLD_ENTRY_V_MAX gets a
-    // full-rail braking step (physical — the one place the jerk shoulder
-    // yields to not sliding through a platform) and enters a step later.
-    const railStepToward = (capM: number): void => {
-      a = Math.max(-TRAJ_A_BRK, -vI / DT_S);
-      vN = Math.max(0, vI + a * DT_S);
-      sN = Math.min(sI + ((vI + vN) / 2) * DT_S, capM);
-      binding[i] = 'hold';
-      s[i + 1] = sN;
-      v[i + 1] = vN;
-    };
-    const target = nextStop < plan.length ? plan[nextStop] : null;
-    const gated =
-      mode === 'regimes' && target !== null && grid[i + 1] >= ref!.gateMs[nextStop];
-    if (target !== null && sN >= target.distM - STOP_REACH_M && !gated) {
-      // Entry gates on vI — the speed the entry ZEROES across this one step —
-      // not on vN: zeroing from vI > A_BRK·dt is an over-rail drop in the fine
-      // profile and prints straight through to the wire (measured live
-      // 2026-08-16: accel spikes to −1.9 at hold entries under the vN test).
-      if (vI > SKIP_V_MAX) {
-        // Kinematically unreachable from the seam state: roll through, count.
-        // The gate opens NOW so the smooth run never waits on a service that
-        // will not happen.
-        infeasibleSkips++;
-        if (mode === 'ladder') departMs[nextStop] = grid[i + 1];
-        nextStop++;
-      } else if (vI > HOLD_ENTRY_V_MAX) {
-        railStepToward(target.distM);
-        continue;
-      } else {
-        sN = Math.max(sI, Math.min(sN, target.distM));
-        s[i + 1] = sN;
-        v[i + 1] = 0;
-        a = 0;
-        holdAtM = sN;
-        holdPos[i + 1] = sN;
-        protectedSteps.add(i + 1);
-        mode2 = 'hold';
-        holdStopIdx = nextStop;
-        if (mode === 'ladder') {
-          // Dwell budgeted at leg start (deterministic); regimes: stand until
-          // the opinion departs this stop (its gate) — never before.
-          holdEndMs = grid[i + 1] + legDwellS * 1000;
-        } else {
-          holdEndMs = ref!.gateMs[nextStop];
-        }
-        nextStop++;
-        continue;
-      }
-    } else if (target !== null && sN > target.distM + STOP_REACH_M) {
-      // Passed at speed: a gated-open stop for the smooth, or (ladder, only
-      // ever via numeric edge) a missed service — either way the gate opens.
-      if (mode === 'ladder') departMs[nextStop] = grid[i + 1];
-      nextStop++;
-    }
-
-    // ── terminal latch: geometry end is a permanent hold ─────────────────────
-    if (sN >= total - STOP_REACH_M && nextStop >= plan.length) {
-      if (vI > HOLD_ENTRY_V_MAX) {
-        railStepToward(total);
-        continue;
-      }
-      sN = Math.min(sN, total);
+    // POSITION IS NEVER CLAMPED: emit() re-integrates s from the trapezoids of
+    // vFine, so any clamp here would silently shift the emitted curve along
+    // the geometry — the first live window showed exactly that (braking drawn
+    // ~10–20 m past the real curve, phantom G4). The envelope + landing floor
+    // bring v to ≈0 AT the platform; the entry then latches wherever the
+    // integration actually stands (within ~2 m of the sign, occasionally a
+    // metre past it — physical and honest).
+    const enterHold = (endMs: number, stopIdx: number): void => {
       s[i + 1] = sN;
       v[i + 1] = 0;
       a = 0;
@@ -696,13 +648,56 @@ function runDrive(args: {
       holdPos[i + 1] = sN;
       protectedSteps.add(i + 1);
       mode2 = 'hold';
-      holdEndMs = Infinity;
-      holdStopIdx = -1;
-      continue;
+      holdEndMs = endMs;
+      holdStopIdx = stopIdx;
+    };
+    const target = nextStop < plan.length ? plan[nextStop] : null;
+    const gated =
+      mode === 'regimes' && target !== null && grid[i + 1] >= ref!.gateMs[nextStop];
+    if (target !== null && sN >= target.distM - STOP_REACH_M && !gated) {
+      // Entry gates on vI — the speed the entry ZEROES across this one step.
+      if (vI > SKIP_V_MAX) {
+        // Kinematically unreachable from the seam state: roll through, count.
+        // The gate opens NOW so the smooth run never waits on a service that
+        // will not happen.
+        infeasibleSkips++;
+        if (mode === 'ladder') departMs[nextStop] = grid[i + 1];
+        nextStop++;
+      } else if (vI <= HOLD_ENTRY_V_MAX) {
+        // Dwell budgeted at leg start (deterministic); regimes: stand until
+        // the opinion departs this stop (its gate) — never before.
+        enterHold(
+          mode === 'ladder' ? grid[i + 1] + legDwellS * 1000 : ref!.gateMs[nextStop],
+          nextStop,
+        );
+        nextStop++;
+        continue;
+      }
+      // else: still landing — the envelope + S-floor decay v; enter shortly.
+    } else if (target !== null && sN > target.distM + STOP_REACH_M) {
+      if (gated || vN > HOLD_ENTRY_V_MAX) {
+        // A gated-open stop the smooth rolls through, or (ladder, numeric
+        // edge only) a genuinely missed service — either way the gate opens.
+        if (mode === 'ladder') departMs[nextStop] = grid[i + 1];
+        nextStop++;
+      }
+      // else: landing overshoot past the sign — keep the pointer; the entry
+      // grabs it on the next step at ≤ HOLD_ENTRY_V_MAX.
     }
 
-    s[i + 1] = Math.min(sN, total);
-    v[i + 1] = vN;
+    // ── terminal latch: geometry end is a permanent hold ─────────────────────
+    if (mode2 === 'drive' && sN >= total - STOP_REACH_M && nextStop >= plan.length) {
+      if (vI <= HOLD_ENTRY_V_MAX) {
+        enterHold(Infinity, -1);
+        continue;
+      }
+      // else: the end-of-shape envelope term is already decaying v.
+    }
+
+    if (mode2 === 'drive') {
+      s[i + 1] = sN;
+      v[i + 1] = vN;
+    }
   }
 
   return { s, v, holdPos, binding, departMs, protectedSteps, infeasibleSkips };
