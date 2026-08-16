@@ -722,11 +722,18 @@ function emitCompressed(
 
   // Protect binding-curve local speed minima (the dip the client must not
   // lerp over) in addition to the hold/seam/release knots the sim marked.
+  // STRICT corners only: a run riding a constant cap is v-flat, and its
+  // interior steps merge at zero cost — protecting them (the ≤/≤ reading)
+  // saturated the 24-knot budget on real winding shapes and triggered the
+  // §11 pressure path on ~10 % of emissions, which then re-lerped ACROSS
+  // dips (measured live 2026-08-16: G4 62, accel spikes to −1.84). A dip or
+  // plateau keeps exactly its entry and exit corners.
   const prot = new Set<number>(protectedSteps);
   for (let i = 1; i < n; i++) {
-    if (bindingSteps[i] === 'curve' && vFine[i] <= vFine[i - 1] && vFine[i] <= vFine[i + 1]) {
-      prot.add(i);
-    }
+    if (bindingSteps[i] !== 'curve') continue;
+    const dl = vFine[i - 1] - vFine[i];
+    const dr = vFine[i + 1] - vFine[i];
+    if (dl >= -1e-9 && dr >= -1e-9 && (dl > 1e-9 || dr > 1e-9)) prot.add(i);
   }
   prot.add(0);
   prot.add(n);
