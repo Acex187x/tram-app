@@ -52,15 +52,75 @@ first, in its own commit.
   `emittedAtMs`, ≤ 24 points per track.
 - **Continuity invariant (server-enforced)**: `smooth_n(emittedAtMs_n)` equals
   the previous emission's `smooth_{n-1}(emittedAtMs_n)` within 2 m, unless
-  `discontinuity: true`. Convergence to `opinion` completes within ≤ 30 s and
-  the blended curve stays monotone (never reverses to converge — if the new
-  opinion is BEHIND the rendered position, the smooth track holds position
-  until the opinion catches up, mirroring "trams don't drive backwards").
+  `discontinuity: true`. Convergence to `opinion` completes within ≤ 30 s
+  **when the kinematic limits below allow it** (see the extended-convergence
+  exception) and the blended curve stays monotone (never reverses to converge —
+  if the new opinion is BEHIND the rendered position, the smooth track brakes
+  at ≤ `A_BRK` and waits rather than reversing, mirroring "trams don't drive
+  backwards").
 - **Modal stop rule (both tracks)**: while the release model says
-  P(departed) < 0.6 the curve HOLDS at the stop; it departs at full learned
-  pace when the threshold crosses. No expectation-floating off platforms.
+  P(departed) < 0.6 the curve HOLDS at the stop; when the threshold crosses it
+  departs **under the acceleration limit** (`≤ A_BRK`… `≤ A_ACC`, §Kinematic
+  limits) toward full learned pace. No expectation-floating off platforms, and
+  no teleport-speed departures either.
 - `opinion` re-anchors to each fresh fix (jumps allowed between emissions).
 - Removed vehicles disappear from `vehicles`; clients drop them.
+
+## Kinematic limits — a contract property (added 2026-08-16)
+
+Owner field report, build 13: *«трамваи не умеют резко тормозить»* — both
+tracks braked instantly into stops (10 s knots + a modal hold is a step
+function), and the smooth track closed its catch-up gap at visibly impossible
+speed because the ≤ 30 s convergence rule was purely temporal. A curve that
+disobeys physics is a lie no matter how accurate its endpoints are, so the
+limits are now part of the wire contract, not an implementation detail.
+
+Every published track is the sampling of a **piecewise-constant-acceleration
+profile** that never violates:
+
+| symbol | limit | source |
+|---|---|---|
+| `V_MAX` | 16.7 m/s (60 km/h) | vehicle capability ceiling. Deliberately above the 50 km/h network cap (the old engine's `V_MAX_MS = 13.9`): this is a *never-lie* bound, not a pace target — the ML curve, not this number, decides how fast a tram is drawn |
+| `A_ACC` | ≤ +1.3 m/s² | `lab/vendor/engine/speedProfile.ts` — measured against real stop exits (field feedback 2026-07-13) |
+| `A_BRK` | ≥ −1.4 m/s² | same source — service braking, comfortably inside Tatra/Škoda capability (~1.5+) |
+
+Knots are emitted **at profile breakpoints** (instants where acceleration
+changes), not on a fixed grid. Because the client lerps between knots, the
+only observable quantities are the per-segment mean speed and the
+central-difference acceleration between consecutive segments:
+
+```
+v_i = (s_{i+1} − s_i) / (t_{i+1} − t_i)                    [segment mean speed]
+a_i = (v_{i+1} − v_i) / ((Δt_i + Δt_{i+1}) / 2)            [between segments]
+```
+
+Sampling a constant-acceleration phase at its own breakpoints makes `v_i` the
+instantaneous speed at the segment midpoint and `a_i` a convex combination of
+the two phases' accelerations — so both are bounded by construction, exactly,
+with no reliance on the sampling density.
+
+**Guarantee**: for every segment of every published track of every vehicle,
+
+```
+v_i ≤ 17.0 m/s        and        −1.45 ≤ a_i ≤ +1.35 m/s²
+```
+
+(the 0.3 / 0.05 slack absorbs the cm-and-millisecond rounding of the wire
+format). This is machine-checked live by `lab/scripts/check-v2.mjs`, which
+exits non-zero on any violation, and counted continuously in the lab's
+`/api/summary` under `realism`.
+
+**Extended-convergence exception.** The smooth track closes its seam gap by
+*driving*: its commanded speed is the opinion's own speed plus the gap divided
+by the time left in the convergence window, clamped to `V_MAX` and rate-limited
+to `A_ACC` / `A_BRK`, and further clamped by the braking envelope
+`√(2·A_BRK·Δs)` of any upcoming hold so catch-up can never blast through a
+platform. When a gap is too large to close legally within 30 s, **the window
+extends — the limits never bend.** Convergence therefore reads: *the smooth
+track converges onto the opinion within 30 s whenever the kinematic limits
+permit, and otherwise as fast as they permit.* Gaps big enough to matter are
+already `discontinuity: true` (> 150 m, or a trip change), which resets the
+smooth track onto the opinion outright.
 
 ## Client pure evaluator (the whole "physics engine")
 
