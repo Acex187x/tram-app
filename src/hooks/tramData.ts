@@ -510,8 +510,18 @@ export class TramRuntime {
     const missingVisible: TramSnapshot[] = [];
     const missingBackground: string[] = [];
     for (const s of snapshots) {
-      if (this.feed.getGeometry(s.tripId) || (changedSet?.has(s.tripId) ?? false)) continue;
-      if (bbox && inBbox(s.coordinates, bbox)) missingVisible.push(s);
+      if (changedSet?.has(s.tripId) ?? false) continue;
+      // A pack-seeded trip resolves to a geometry (so it renders at once) but
+      // still needs its OWN timetable — keep it in the warm-up queue until the
+      // authoritative per-trip fetch replaces it, or arrivals/planner would sit
+      // out the whole session (they read authoritative geometry only). It never
+      // competes for the visible lane: nothing about it is visibly broken, so
+      // refinement always warms at background priority behind trams that are
+      // genuinely still bare dots.
+      const resolved = this.feed.getGeometry(s.tripId) !== undefined;
+      const needsRefine = resolved && shapeCache.isProvisional(s.tripId);
+      if (resolved && !needsRefine) continue;
+      if (!needsRefine && bbox && inBbox(s.coordinates, bbox)) missingVisible.push(s);
       else missingBackground.push(s.tripId);
     }
     const visibleIds = this.orderByViewportProximity(missingVisible, viewport);
@@ -737,5 +747,11 @@ export function usePhysicsHealth(): TrajectoryHealth {
 export function useLoadedGeometries(): RouteGeometry[] {
   const rt = getRuntime();
   useSyncExternalStore(rt.subscribeUi, rt.getUiVersion);
-  return shapeCache.getAllLoaded();
+  // AUTHORITATIVE only: every consumer of this hook reads stop epochs
+  // (arrivals, stop sheet, planner guidance, spotter, nearby-stop, search).
+  // Pack-seeded provisional entries carry a sibling trip's timetable, so they
+  // are withheld here until the real per-trip geometry lands — showing nothing
+  // is honest, showing someone else's schedule is not. The map is unaffected:
+  // it resolves geometry through fleet/feed.getGeometry, not this hook.
+  return shapeCache.getAllAuthoritative();
 }

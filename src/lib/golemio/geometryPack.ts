@@ -86,7 +86,13 @@ export async function fetchGeometryPack(
   try {
     const response = await fetch(url, {
       signal: ctl.signal,
-      headers: { Accept: 'application/json' },
+      // Accept-Encoding is EXPLICIT on purpose: the pack is ~340 KB gzipped but
+      // 1.18 MiB raw, and the edge proxy only compresses when the client asks.
+      // Omitting it costs a mobile user ~850 KB on every cold start. CFNetwork
+      // still decodes the body transparently, and if a proxy ever handed back
+      // an undecoded body, response.json() throws and this whole function
+      // returns null — i.e. the silent per-trip fallback, never a broken app.
+      headers: { Accept: 'application/json', 'Accept-Encoding': 'gzip' },
     });
     if (!response.ok) return null; // 404 = not deployed yet; anything else = no pack
     return parsePack((await response.json()) as unknown);

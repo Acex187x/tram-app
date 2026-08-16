@@ -494,9 +494,31 @@ export function getLoaded(tripId: string): RouteGeometry | undefined {
   return memCache.get(tripId);
 }
 
-/** All geometries currently resident in memory (e.g. for the planner graph). */
+/**
+ * All geometries resident in memory, INCLUDING pack-seeded provisional ones.
+ * Right for consumers that only need the polyline — the route-network layer
+ * draws lines sooner because of them.
+ */
 export function getAllLoaded(): RouteGeometry[] {
   return [...memCache.values()];
+}
+
+/**
+ * Only geometries whose TIMETABLE is authoritative (per-trip fetch or disk).
+ *
+ * Provisional pack seeds borrow a sibling trip's stop epochs — fine for drawing
+ * a tram on its line, useless for "when does it arrive". Every schedule surface
+ * (arrivals, stop sheet, planner, spotter, nearby-stop) reads through here, so
+ * a seeded trip is simply absent for them until its real geometry lands —
+ * exactly the behavior they already have while a shape is still loading. Never
+ * a wrong time; just not yet.
+ */
+export function getAllAuthoritative(): RouteGeometry[] {
+  const out: RouteGeometry[] = [];
+  for (const [tripId, geometry] of memCache) {
+    if (!provisional.has(tripId)) out.push(geometry);
+  }
+  return out;
 }
 
 /** Drop the in-memory cache + failure memory (does not touch disk). Mainly for tests. */
