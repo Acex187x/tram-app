@@ -89,9 +89,15 @@ export const YIELD_MIN_V_MS = 3.0;
  *  pace, never the legal cap (the night-centre lesson). */
 export const CATCH_HEADROOM = 1.9;
 /** Catch-up demand: surplus = min(DV_CATCH_MAX, gap / T_CLOSE) (new — replaces
- *  the 30 s blend window as the *demand* constant; §6 math: 40 m → ~10 s). */
-export const T_CLOSE_S = 10;
-export const DV_CATCH_MAX = 6.0;
+ *  the 30 s blend window as the *demand* constant; §6 math: 40 m → ~10 s).
+ *  Both tuned to the decisive edge of their pre-registered bands (T_CLOSE
+ *  8–15, DV 4–7) after the first live G5 window read p50 21.5 s / p90 42.5 s
+ *  against the 12/28 gates — night seams often start from a standing smooth
+ *  (jerk-limited spin-up eats ~8 s before any surplus exists), so the demand
+ *  side gets no slack. The CATCH_HEADROOM ceiling still binds first on slow
+ *  corridors, by design. */
+export const T_CLOSE_S = 8;
+export const DV_CATCH_MAX = 7.0;
 /** Gap-aware discontinuity threshold (design §7; descends from tramSim's
  *  teleportThresholdM with floor/cap rescaled to the drive's close-out
  *  ability). Replaces the flat TRAJ_DISCONTINUITY_M = 150 for the v3 drive. */
@@ -353,8 +359,10 @@ interface FineRun {
   /** Standing position per step (NaN = moving) — the smooth run's hold-follow
    *  reference and the compressor's hold knots. */
   holdPos: number[];
-  /** Which constraint the envelope bound at each step ('none' = guidance won). */
-  binding: ('none' | 'curve' | 'hold')[];
+  /** Which constraint bound each step: envelope terms ('curve'/'hold'), a
+   *  commanded regime reduction ('regime' — yield / hold-follow braking, a
+   *  documented manoeuvre, not noise), or 'none' = plain guidance. */
+  binding: ('none' | 'curve' | 'hold' | 'regime')[];
   /** Per plan-stop index: sim ms the drive DEPARTS it (Infinity = not reached
    *  within the horizon; 0 = not part of this run's plan / already behind). */
   departMs: number[];
@@ -414,7 +422,7 @@ function runDrive(args: {
   const s = new Array<number>(n + 1);
   const v = new Array<number>(n + 1);
   const holdPos = new Array<number>(n + 1).fill(NaN);
-  const binding = new Array<'none' | 'curve' | 'hold'>(n + 1).fill('none');
+  const binding = new Array<'none' | 'curve' | 'hold' | 'regime'>(n + 1).fill('none');
   const departMs = new Array<number>(plan.length).fill(mode === 'ladder' ? Infinity : 0);
   const protectedSteps = new Set<number>();
   let infeasibleSkips = 0;
@@ -517,7 +525,10 @@ function runDrive(args: {
       const g = o - sI;
       if (!Number.isNaN(oHold)) {
         // hold-follow: the reference is the POINT the opinion stands at.
+        // Tagged 'regime': braking onto a standing reality is a commanded
+        // manoeuvre — its release transient must never read as a phantom dip.
         yielding = false;
+        binding[i] = 'regime';
         const d = oHold - sI;
         if (d > 0) {
           const ceil = Math.min(
@@ -536,6 +547,7 @@ function runDrive(args: {
         }
         if (yielding) {
           // never pedestrian, never reverse, never a phantom mid-street stand
+          binding[i] = 'regime';
           vCmd = Math.max(YIELD_MIN_V_MS, YIELD_FACTOR * vO);
         } else if (g > CATCH_ENTER_M) {
           const ceil = Math.min(CATCH_HEADROOM * surfaces.paceAt(sI, tMs), TRAJ_V_MAX_MS);
@@ -722,7 +734,7 @@ function emitCompressed(
   vFine: number[],
   sFine: number[],
   protectedSteps: Set<number>,
-  bindingSteps: ('none' | 'curve' | 'hold')[],
+  bindingSteps: ('none' | 'curve' | 'hold' | 'regime')[],
 ): { track: KinTrack; pressureDrops: number; budgetForced: boolean; knotStep: number[] } | null {
   const n = grid.length - 1;
   const t0 = grid[0];
@@ -827,11 +839,23 @@ function measureTrack(
     if (vSeg > cap * 1.05 + 0.3) curveViolations++;
   }
   let phantomDips = 0;
+  // A dip knot is phantom only when NO constraint or regime was active at the
+  // knot or its neighbouring sim steps: the minimum of a commanded dip lands
+  // one step after the constraint releases (hold-release / yield-exit
+  // transients), which is the constraint working, not a phantom brake.
+  const unconstrained = (k: number): boolean =>
+    k < 0 || k >= fine.binding.length || fine.binding[k] === 'none';
   for (let k = 1; k < v.length - 1; k++) {
     const step = emitted.knotStep[k];
     const standing = !Number.isNaN(fine.holdPos[step]);
     if (standing || v[k] <= 0.05) continue;
-    if (v[k] <= v[k - 1] - 1.0 && v[k] <= v[k + 1] - 1.0 && fine.binding[step] === 'none') {
+    if (
+      v[k] <= v[k - 1] - 1.0 &&
+      v[k] <= v[k + 1] - 1.0 &&
+      unconstrained(step) &&
+      unconstrained(step - 1) &&
+      unconstrained(step + 1)
+    ) {
       phantomDips++;
     }
   }
@@ -858,11 +882,21 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
       ? clamp(Math.max(modal.stopS, raw[0].s), 0, geom.totalM)
       : clamp(raw[0].s, 0, geom.totalM);
   const samePrevTrip = prev !== null && prev.tripId === args.tripId;
+  // The opinion RE-ANCHORS its position on every fix (protocol), so inheriting
+  // the previous speed is a smoothness nicety, not a continuity contract — and
+  // a re-anchor INTO a curve zone must not import a speed above the local cap
+  // (live G4 probe: every residual violation was seg#1/2 of a fresh seam).
+  // The smooth track's position IS continuous, so its seam speed was already
+  // legal at its own position and stays exactly C¹.
+  const vSeamCap = curveEnvAt(profile, geom, s0);
   const v0 = holdingNow
     ? 0
-    : samePrevTrip
-      ? speedAt(prev.opinion, t0)
-      : Math.max(0, Math.min(TRAJ_V_MAX_MS, (evalTrack(raw, t0 + TRAJ_SIM_STEP_MS) - raw[0].s) / DT_S));
+    : Math.min(
+        vSeamCap,
+        samePrevTrip
+          ? speedAt(prev.opinion, t0)
+          : Math.max(0, Math.min(TRAJ_V_MAX_MS, (evalTrack(raw, t0 + TRAJ_SIM_STEP_MS) - raw[0].s) / DT_S)),
+      );
   const a0 = holdingNow ? 0 : samePrevTrip ? accelAt(prev.opinion, t0) : 0;
 
   // ── stop plan: every platform ahead is SERVED (§4.2) ─────────────────────
