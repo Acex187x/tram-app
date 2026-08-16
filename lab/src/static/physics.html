@@ -45,6 +45,10 @@
 <div id="bar">
   <span><b>TRAM LAB</b> · физика</span>
   <label>вагон <select id="pick"></select></label>
+  <label>кривые <select id="src">
+    <option value="published">published (v2)</option>
+    <option value="shadow">shadow (drive v3)</option>
+  </select></label>
   <span id="meta">загрузка…</span>
   <span><span class="swatch" style="border-top-color:var(--opinion)"></span>opinion</span>
   <span><span class="swatch" style="border-top-color:var(--smooth)"></span>smooth</span>
@@ -77,7 +81,12 @@ const C = {
 };
 const M = { l: 54, r: 16, t: 12, b: 22 };
 const pick = document.getElementById('pick');
+const srcPick = document.getElementById('src');
 let selected = localStorage.getItem('physics.key') || '';
+/* Track source: the published /api/trajectories/v2 curves, or the curvegen-v3
+   SHADOW drive (/api/shadow-trajectories) — visual review compares the two. */
+let source = localStorage.getItem('physics.source') === 'shadow' ? 'shadow' : 'published';
+srcPick.value = source;
 let debug = null;
 let crossT = null;
 
@@ -99,7 +108,8 @@ async function loadFleet() {
 async function loadDebug() {
   if (!selected) return;
   try {
-    debug = await (await fetch(`/api/vehicle/${encodeURIComponent(selected)}/debug`)).json();
+    const q = source === 'shadow' ? '?source=shadow' : '';
+    debug = await (await fetch(`/api/vehicle/${encodeURIComponent(selected)}/debug${q}`)).json();
     draw();
   } catch (e) { /* transient */ }
 }
@@ -107,6 +117,13 @@ async function loadDebug() {
 pick.addEventListener('change', () => {
   selected = pick.value;
   localStorage.setItem('physics.key', selected);
+  debug = null;
+  loadDebug();
+});
+
+srcPick.addEventListener('change', () => {
+  source = srcPick.value === 'shadow' ? 'shadow' : 'published';
+  localStorage.setItem('physics.source', source);
   debug = null;
   loadDebug();
 });
@@ -168,7 +185,7 @@ function draw() {
   const meta = document.getElementById('meta');
   if (!debug) { meta.textContent = 'загрузка…'; return; }
   if (!debug.found) {
-    meta.textContent = `${debug.key}: нет опубликованной траектории (нет геометрии или ML недоступен)`;
+    meta.textContent = `${debug.key}: нет ${source === 'shadow' ? 'shadow-' : ''}траектории (нет геометрии или ML недоступен)`;
     for (const id of ['cS', 'cV', 'cA']) document.getElementById(id).innerHTML = '';
     return;
   }
@@ -180,7 +197,8 @@ function draw() {
   const xd = [Math.min(t0, fixes.length ? fixes[0].obsAtMs : t0), d.opinion.points[d.opinion.points.length - 1].t];
 
   meta.innerHTML =
-    `линия <b>${esc(d.line)}</b> · ${esc(d.statePosition || '?')} · возраст фикса ` +
+    `линия <b>${esc(d.line)}</b> · ${esc(d.statePosition || '?')} · ` +
+    `<b>${d.source === 'shadow' ? 'shadow drive-v3' : 'published'}</b> · возраст фикса ` +
     `${Math.round((now - d.anchorMs) / 1000)} с · эмиссия ${Math.round((now - t0) / 1000)} с назад · ` +
     `узлов ${d.opinion.points.length}/${d.smooth.points.length}` +
     (d.discontinuity ? ' · <b>разрыв</b>' : '');

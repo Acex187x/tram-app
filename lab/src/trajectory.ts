@@ -130,6 +130,28 @@ export function speedAt(track: KinTrack, tMs: number): number {
   return v[lo] + ((v[hi] - v[lo]) * (tMs - points[lo].t)) / dt;
 }
 
+/** Piecewise-constant acceleration of a kinematic track at t, m/s² — exact,
+ *  because v is linear inside every emitted segment (the phase accel is the
+ *  slope of v(t)). Outside the knot span the marker stands ⇒ 0. Added for the
+ *  curvegen-v3 C¹⁺ seam: the next emission inherits not only (s, v) but the
+ *  seam ACCELERATION, so the new drive transitions from it under J_MAX
+ *  instead of restarting its jerk state from zero. */
+export function accelAt(track: KinTrack, tMs: number): number {
+  const { points, v } = track;
+  const n = points.length;
+  if (n < 2 || v.length !== n) return 0;
+  if (tMs <= points[0].t || tMs >= points[n - 1].t) return 0;
+  let lo = 0;
+  let hi = n - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid].t <= tMs) lo = mid;
+    else hi = mid;
+  }
+  const dtS = (points[hi].t - points[lo].t) / 1000;
+  return dtS > 0 ? (v[hi] - v[lo]) / dtS : 0;
+}
+
 /** Φ⁻¹(p) by bisection over the SAME normalCdf the learned model uses, so the
  *  modal threshold and the two-hypothesis variant can never drift apart. */
 function normalQuantile(p: number): number {

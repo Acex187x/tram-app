@@ -76,6 +76,30 @@ export const TRAJ_V_MAX_GATE_MS = 17.0;
 export const TRAJ_A_ACC_GATE = 1.35;
 export const TRAJ_A_BRK_GATE = 1.45;
 
+/** ── curvegen v3 (docs/research/curvegen-v3-design.md §5) ──
+ * Comfort jerk cap of the virtual-tram drive, m/s³ — inside the 0.5–1.0
+ * comfort band of the rail literature, half the EN 13452-1 jolt limit (1.5).
+ * Wire-observable jerk (Δ of consecutive central-difference accels ÷ time
+ * between their centres) is ≤ J_MAX by construction (averages of a
+ * J-Lipschitz function over adjacent windows); the gate absorbs cm/ms
+ * rounding, mirroring the +0.05 accel slack. */
+export const TRAJ_J_MAX = 0.8;
+export const TRAJ_J_GATE = 0.9;
+/** G3 accel sign-flip deadband, m/s²: phases with |a| ≤ this neither count as
+ * a sign nor reset the previous one (design §8 G3). */
+export const TRAJ_FLIP_DEADBAND = 0.2;
+/** G5 convergence target: |smooth − opinion| below this counts as converged,
+ * m (≈ one tram length, design §10 CONV_TOL_M). */
+export const TRAJ_CONV_TOL_M = 15;
+
+/** ── curvegen-v3 flip flag (design §12 phase B) ──
+ * OFF: /api/trajectories/v2 serves the CURRENT generator unchanged and the v3
+ * drive runs shadow-only (/api/shadow-trajectories, variants ml-drive /
+ * ml-drive-smooth). ON: the published bundle is built by the v3 drive (the
+ * shadow chain keeps running for the overlap week). Flip = set the env var
+ * (or this default) and restart tram-lab — one line either way. */
+export const TRAJ_V3_PUBLISH = (process.env.TRAJ_V3_PUBLISH ?? '0') === '1';
+
 /** Fine grid the kinematic profile is simulated on before being compressed
  * onto ≤ TRAJ_MAX_POINTS breakpoints. */
 export const TRAJ_SIM_STEP_MS = 1_000;

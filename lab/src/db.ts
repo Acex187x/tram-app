@@ -138,6 +138,15 @@ export function openDb(): Database.Database {
   } catch {
     /* column already exists */
   }
+  // Additive migration (2026-08-16, curvegen-v3): corridor/corridorPace cell
+  // counts — a known telemetry blind spot until now.
+  for (const col of ['corridorCells', 'corridorPaceCells']) {
+    try {
+      db.exec(`ALTER TABLE rollup_learning ADD COLUMN ${col} INTEGER`);
+    } catch {
+      /* column already exists */
+    }
+  }
   return db;
 }
 
@@ -169,8 +178,8 @@ export class Store {
       (tsMin, variant, hbucket, n, meanAbs, p50Abs, p90Abs, signedMean)
       VALUES (@tsMin, @variant, @hbucket, @n, @meanAbs, @p50Abs, @p90Abs, @signedMean)`);
     this.insLearnRollup = db.prepare(`INSERT OR REPLACE INTO rollup_learning
-      (tsMin, segCells, segShapeCells, routeCells, stopDwellCells, stopReleaseCells, paceSamples, dwellSamples, releaseSamples)
-      VALUES (@tsMin, @segCells, @segShapeCells, @routeCells, @stopDwellCells, @stopReleaseCells, @paceSamples, @dwellSamples, @releaseSamples)`);
+      (tsMin, segCells, segShapeCells, routeCells, stopDwellCells, stopReleaseCells, corridorCells, corridorPaceCells, paceSamples, dwellSamples, releaseSamples)
+      VALUES (@tsMin, @segCells, @segShapeCells, @routeCells, @stopDwellCells, @stopReleaseCells, @corridorCells, @corridorPaceCells, @paceSamples, @dwellSamples, @releaseSamples)`);
     this.insIngestRollup = db.prepare(`INSERT OR REPLACE INTO rollup_ingest
       (tsMin, fixes, batches, vehicles, withGeometry, geomFetchOk, geomFetchFail, avgLatencyS, avgFixGapS, pollerFleetSize, pollerRunning, discarded)
       VALUES (@tsMin, @fixes, @batches, @vehicles, @withGeometry, @geomFetchOk, @geomFetchFail, @avgLatencyS, @avgFixGapS, @pollerFleetSize, @pollerRunning, @discarded)`);
@@ -210,7 +219,7 @@ export class Store {
     tx(rows);
   }
 
-  writeLearningRollup(row: { tsMin: number; segCells: number; segShapeCells: number; routeCells: number; stopDwellCells: number; stopReleaseCells: number; paceSamples: number; dwellSamples: number; releaseSamples: number }): void {
+  writeLearningRollup(row: { tsMin: number; segCells: number; segShapeCells: number; routeCells: number; stopDwellCells: number; stopReleaseCells: number; corridorCells: number; corridorPaceCells: number; paceSamples: number; dwellSamples: number; releaseSamples: number }): void {
     this.insLearnRollup.run(row);
   }
 

@@ -19,6 +19,10 @@
 //                   ml-gbdt keyframes + the modal stop rule, evaluated by the
 //                   client's own pure evaluator (cost of modal stops)
 //   ml-smooth     — physics-v3 SMOOTH track as published (cost of continuity)
+//   ml-drive      — curvegen-v3 SHADOW opinion: the virtual-tram drive
+//                   (docs/research/curvegen-v3-design.md), NOT published while
+//                   TRAJ_V3_PUBLISH is off; same matched-probe discipline
+//   ml-drive-smooth — curvegen-v3 SHADOW smooth (regime-based continuity)
 
 import zlib from 'zlib';
 
@@ -39,15 +43,17 @@ import {
   TRAJ_ML_MAX_ROWS,
   TRAJ_POINTS,
   TRAJ_STEP_MS,
+  TRAJ_V3_PUBLISH,
   TRAJ_V_MAX_MS,
   horizonBucket,
 } from './config';
 import { fetchBatchesSince, fetchFullFleet, fetchHealth, type PollerHealth } from './convex';
 import { openDb, pct, round2, Store, type ScoreRow } from './db';
+import { buildDriveVehicle, type DriveBuilt } from './drive';
 import { GeometryStore } from './geometry';
 import { LearnedModel } from './learned';
 import { buildMlFeatures, MlClient } from './ml';
-import { RealismCounters } from './realism';
+import { PerceptualCounters, RealismCounters } from './realism';
 import { schedulePosition } from './schedule';
 import { startServer } from './server';
 import {
@@ -81,6 +87,9 @@ const DAY_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' });
 interface LastFix {
   snap: TramSnapshot;
   cycle: number;
+  /** Observed gap between the last two genuinely-new fixes, s (0 = only one
+   *  seen). Feeds the curvegen-v3 gap-aware discontinuity threshold T_disc. */
+  fixGapS: number;
 }
 
 interface ScoringEvent {
@@ -121,6 +130,18 @@ interface TrajectoryEntry {
   smoothK: KinTrack;
 }
 
+/** One curvegen-v3 SHADOW emission (design §12 phase A): built from the same
+ *  ML samples + modal inputs as the published entry, chained on its own seam
+ *  state, never published while TRAJ_V3_PUBLISH is off. */
+interface ShadowEntry {
+  fixObsAtMs: number;
+  v2: V2Vehicle;
+  opinionK: KinTrack;
+  smoothK: KinTrack;
+  /** Raw ML target positions (the /physics page draws them for shadow too). */
+  target: TrajectoryPoint[];
+}
+
 export interface LiveVehicle {
   key: string;
   line: string;
@@ -148,11 +169,15 @@ export function start(): void {
   const lastFix = new Map<string, LastFix>();
   /** key → keyframe trajectory computed for that vehicle's CURRENT fix. */
   const trajectories = new Map<string, TrajectoryEntry>();
+  /** key → curvegen-v3 shadow emission, chained on its own seam state. */
+  const shadowTrajectories = new Map<string, ShadowEntry>();
   let trajRefreshing = false;
   let trajJson: string | null = null;
   let trajJsonAtMs = 0;
   let trajV2Json: string | null = null;
   let trajV2JsonAtMs = 0;
+  let shadowJson: string | null = null;
+  let shadowJsonAtMs = 0;
   /** Build time of the currently published bundle (protocol `atMs`). */
   let trajBuiltAtMs = 0;
   let cursor: number | null = null;
@@ -180,6 +205,17 @@ export function start(): void {
   let probeMissing = 0;
   let probeStaleAnchor = 0;
   let probeTripMismatch = 0;
+  /** curvegen-v3 shadow gauges: same G1 realism gate + the §8 perceptual
+   *  counters over every shadow emission, and the shadow probe split. */
+  const realismShadow = new RealismCounters();
+  const perceptual = new PerceptualCounters();
+  let shadowEmissions = 0;
+  let shadowDiscontinuities = 0;
+  let shadowBuildFailures = 0;
+  let shadowProbeOk = 0;
+  let shadowProbeMissing = 0;
+  let shadowProbeStaleAnchor = 0;
+  let shadowProbeTripMismatch = 0;
 
   const log = (msg: string) => console.log(`[lab ${new Date().toISOString()}] ${msg}`);
 
@@ -278,6 +314,19 @@ export function start(): void {
         preds.push({ variant: 'ml-smooth', value: evalTrack(pub.v2.smooth, nowMs) });
       }
 
+      // curvegen-v3 shadow probe: the CURRENTLY GENERATED (unpublished) drive
+      // tracks, evaluated at the same scoring instant with the same guards, so
+      // ml-drive/ml-drive-smooth land on matched events vs ml-mode/ml-smooth.
+      const sh = shadowTrajectories.get(snap.key);
+      if (!sh) shadowProbeMissing++;
+      else if (sh.v2.tripId !== prev.snap.tripId) shadowProbeTripMismatch++;
+      else if (sh.fixObsAtMs !== prev.snap.observedAtMs) shadowProbeStaleAnchor++;
+      else {
+        shadowProbeOk++;
+        preds.push({ variant: 'ml-drive', value: evalTrack(sh.v2.opinion, nowMs) });
+        preds.push({ variant: 'ml-drive-smooth', value: evalTrack(sh.v2.smooth, nowMs) });
+      }
+
       events.push({
         base: {
           atMs: nowMs,
@@ -300,7 +349,7 @@ export function start(): void {
     // ── learning + reseed (after prediction capture — never peek the answer)
     if (prev && sameTrip) learned.update(prev.snap, snap, geom);
     learned.reseed(snap);
-    lastFix.set(snap.key, { snap, cycle });
+    lastFix.set(snap.key, { snap, cycle, fixGapS: gapS > 0 ? round2(gapS) : 0 });
   }
 
   async function resolveEvents(events: ScoringEvent[]): Promise<void> {
@@ -344,8 +393,11 @@ export function start(): void {
     for (const key of trajectories.keys()) {
       if (!lastFix.has(key)) trajectories.delete(key);
     }
+    for (const key of shadowTrajectories.keys()) {
+      if (!lastFix.has(key)) shadowTrajectories.delete(key);
+    }
 
-    const stale: { key: string; snap: TramSnapshot; geom: RouteGeometry }[] = [];
+    const stale: { key: string; snap: TramSnapshot; geom: RouteGeometry; fixGapS: number }[] = [];
     for (const [key, lf] of lastFix) {
       const entry = trajectories.get(key);
       // Recompute when the fix changed OR the trajectory itself is aging out:
@@ -356,9 +408,10 @@ export function start(): void {
       const geom = geometry.resolve(lf.snap.tripId);
       if (!geom) {
         trajectories.delete(key); // no geometry ⇒ no s-axis to predict along
+        shadowTrajectories.delete(key);
         continue;
       }
-      stale.push({ key, snap: lf.snap, geom });
+      stale.push({ key, snap: lf.snap, geom, fixGapS: lf.fixGapS });
     }
     if (stale.length === 0) {
       trajBuiltAtMs = tCompute; // set validated, nothing to recompute
@@ -379,15 +432,22 @@ export function start(): void {
       if (!pred) {
         // ML down or models not ready: drop these vehicles from the feed
         // rather than serve keyframes anchored to a superseded fix.
-        for (const v of group) trajectories.delete(v.key);
+        for (const v of group) {
+          trajectories.delete(v.key);
+          shadowTrajectories.delete(v.key);
+        }
         continue;
       }
       group.forEach((v, gi) => {
+        const drop = (): void => {
+          trajectories.delete(v.key);
+          shadowTrajectories.delete(v.key);
+        };
         const points: TrajectoryPoint[] = [];
         let maxS = 0;
         for (let k = 0; k < TRAJ_POINTS; k++) {
           const ds = pred.gbdt[gi * TRAJ_POINTS + k];
-          if (ds === null || !Number.isFinite(ds)) return void trajectories.delete(v.key);
+          if (ds === null || !Number.isFinite(ds)) return drop();
           const s = Math.min(v.geom.totalM, Math.max(0, v.snap.shapeDistM + ds));
           // Each horizon is predicted independently, so the sequence can jitter
           // backwards; the app lerps it blindly, so clamp it monotone here.
@@ -415,23 +475,93 @@ export function start(): void {
             walk: (tMs: number) => learned.walkFrom(stopS, releaseAtMs, tMs, v.geom),
           };
         }
-        const prevEntry = trajectories.get(v.key);
-        const built = buildV2Vehicle({
+        const baseArgs = {
           key: v.key,
           tripId: v.snap.tripId,
           line: v.snap.line,
           anchorMs: v.snap.observedAtMs,
           emittedAtMs: tCompute,
           raw: points,
-          modal,
-          prev: prevEntry
+        };
+        // The drive consumes the learned surfaces through a narrow adapter so
+        // its unit tests can inject constants (design §8: builder ≠ measure).
+        const surfaces = {
+          paceAt: (sM: number, atMs: number) =>
+            learned.paceAt(v.geom.shapeId, v.geom.routeId, sM, atMs),
+          dwellAt: (stopId: string, atMs: number) => learned.dwellAt(stopId, atMs),
+        };
+
+        // ── curvegen-v3 SHADOW build (design §12 phase A): its own seam
+        // chain, its own realism gate + perceptual counters, never published
+        // while TRAJ_V3_PUBLISH is off.
+        const prevShadow = shadowTrajectories.get(v.key);
+        const shadowBuilt: DriveBuilt | null = buildDriveVehicle({
+          ...baseArgs,
+          modal: modal ? { stopS: modal.stopS, releaseAtMs: modal.releaseAtMs } : null,
+          geom: v.geom,
+          surfaces,
+          fixGapS: v.fixGapS,
+          prev: prevShadow
             ? {
-                tripId: prevEntry.v2.tripId,
-                smooth: prevEntry.smoothK,
-                opinion: prevEntry.opinionK,
+                tripId: prevShadow.v2.tripId,
+                smooth: prevShadow.smoothK,
+                opinion: prevShadow.opinionK,
               }
             : null,
         });
+        if (shadowBuilt === null) {
+          shadowBuildFailures++;
+          shadowTrajectories.delete(v.key);
+        } else {
+          shadowEmissions++;
+          if (shadowBuilt.vehicle.discontinuity) shadowDiscontinuities++;
+          realismShadow.check(v.key, 'opinion', shadowBuilt.vehicle.opinion, tCompute);
+          realismShadow.check(v.key, 'smooth', shadowBuilt.vehicle.smooth, tCompute);
+          perceptual.record({
+            key: v.key,
+            emittedAtMs: tCompute,
+            kind: !prevShadow
+              ? 'first'
+              : prevShadow.fixObsAtMs !== v.snap.observedAtMs
+                ? 'fix'
+                : 'age',
+            discontinuity: shadowBuilt.vehicle.discontinuity,
+            discKind: shadowBuilt.meta.discKind,
+            opinion: shadowBuilt.vehicle.opinion,
+            smooth: shadowBuilt.vehicle.smooth,
+            prevSmooth: prevShadow ? prevShadow.v2.smooth : null,
+            perTrack: { opinion: shadowBuilt.meta.opinion, smooth: shadowBuilt.meta.smooth },
+          });
+          shadowTrajectories.set(v.key, {
+            fixObsAtMs: v.snap.observedAtMs,
+            v2: shadowBuilt.vehicle,
+            opinionK: shadowBuilt.opinion,
+            smoothK: shadowBuilt.smooth,
+            target: points,
+          });
+        }
+
+        // ── the PUBLISHED bundle: the current generator until the flip flag
+        // turns, then the v3 drive on the published chain's own seam state
+        // (phase B: ml-mode/ml-smooth then measure the published v3 pixels).
+        const prevEntry = trajectories.get(v.key);
+        const prevPub = prevEntry
+          ? {
+              tripId: prevEntry.v2.tripId,
+              smooth: prevEntry.smoothK,
+              opinion: prevEntry.opinionK,
+            }
+          : null;
+        const built = TRAJ_V3_PUBLISH
+          ? buildDriveVehicle({
+              ...baseArgs,
+              modal: modal ? { stopS: modal.stopS, releaseAtMs: modal.releaseAtMs } : null,
+              geom: v.geom,
+              surfaces,
+              fixGapS: v.fixGapS,
+              prev: prevPub,
+            })
+          : buildV2Vehicle({ ...baseArgs, modal, prev: prevPub });
         if (built === null) return void trajectories.delete(v.key);
         const v2 = built.vehicle;
         trajEmissions++;
@@ -503,6 +633,26 @@ export function start(): void {
     return trajV2Json;
   }
 
+  /** GET /api/shadow-trajectories — the curvegen-v3 SHADOW bundle, exactly the
+   * v2 shape plus `shadow: true`, so check-v2.mjs / determinism-v2.mjs and the
+   * /physics page can consume it with the same code paths. Frozen for the same
+   * 2 s TTL as v2; NEVER fetched by phones. */
+  function getShadowTrajectories(): string {
+    const nowMs = Date.now();
+    if (shadowJson !== null && nowMs - shadowJsonAtMs < TRAJ_JSON_TTL_MS) return shadowJson;
+    shadowJson = JSON.stringify({
+      protocolVersion: 2,
+      shadow: true,
+      generator: 'drive-v3',
+      serverNowMs: nowMs,
+      atMs: trajBuiltAtMs,
+      horizonS: ((TRAJ_POINTS - 1) * TRAJ_STEP_MS) / 1000,
+      vehicles: [...shadowTrajectories.values()].map((e) => e.v2),
+    });
+    shadowJsonAtMs = nowMs;
+    return shadowJson;
+  }
+
   // ── GET /api/geometry-pack — cold start for clients ────────────────────────
   // A fresh phone knows every tram's `s` from the v2 bundle within 2 s but has
   // no shape to place it on, and fetching /geometry/:tripId per vehicle is
@@ -554,7 +704,7 @@ export function start(): void {
       for (const v of full.vehicles) {
         fleet.set(v.key, v);
         learned.reseed(v);
-        lastFix.set(v.key, { snap: v, cycle });
+        lastFix.set(v.key, { snap: v, cycle, fixGapS: 0 });
       }
       cursor = full.seq;
       pollerHealth = full.poller;
@@ -701,25 +851,50 @@ export function start(): void {
         probe: { ok: probeOk, missing: probeMissing, staleAnchor: probeStaleAnchor, tripMismatch: probeTripMismatch },
       },
       realism: realism.gauges(),
+      shadow: {
+        generator: 'drive-v3',
+        published: TRAJ_V3_PUBLISH,
+        vehicles: shadowTrajectories.size,
+        emissions: shadowEmissions,
+        discontinuities: shadowDiscontinuities,
+        buildFailures: shadowBuildFailures,
+        probe: {
+          ok: shadowProbeOk,
+          missing: shadowProbeMissing,
+          staleAnchor: shadowProbeStaleAnchor,
+          tripMismatch: shadowProbeTripMismatch,
+        },
+        realism: realismShadow.gauges(),
+      },
+      perceptual: perceptual.gauges(),
       horizonBuckets: HORIZON_BUCKETS,
     };
   }
 
-  /** GET /api/vehicle/:key/debug — everything the /physics page needs to draw
-   *  "how it drives": both published curves with their true knot speeds, and
-   *  the vehicle's recent REAL fixes so the model can be eyeballed against the
-   *  only ground truth there is. */
-  function getVehicleDebug(key: string): unknown {
-    const entry = trajectories.get(key);
+  /** GET /api/vehicle/:key/debug[?source=shadow] — everything the /physics
+   *  page needs to draw "how it drives": both curves of the chosen track
+   *  source (published bundle, or the curvegen-v3 shadow drive) with their
+   *  true knot speeds, and the vehicle's recent REAL fixes so the model can be
+   *  eyeballed against the only ground truth there is. */
+  function getVehicleDebug(key: string, source: 'published' | 'shadow'): unknown {
+    const entry =
+      source === 'shadow'
+        ? (shadowTrajectories.get(key) ?? null)
+        : (trajectories.get(key) ?? null);
     const fixes = store.recentFixes(key, 10);
     if (!entry) {
-      return { key, atMs: Date.now(), found: false, fixes, limits: LIMITS };
+      return { key, atMs: Date.now(), found: false, source, fixes, limits: LIMITS };
     }
     const snap = fleet.get(key);
+    const target =
+      source === 'shadow'
+        ? (entry as ShadowEntry).target
+        : (entry as TrajectoryEntry).vehicle.points;
     return {
       key,
       atMs: Date.now(),
       found: true,
+      source,
       line: entry.v2.line,
       tripId: entry.v2.tripId,
       anchorMs: entry.v2.anchorMs,
@@ -728,8 +903,8 @@ export function start(): void {
       statePosition: snap?.statePosition ?? null,
       opinion: { points: entry.v2.opinion, v: entry.opinionK.v },
       smooth: { points: entry.v2.smooth, v: entry.smoothK.v },
-      /** The raw ml-gbdt TARGET positions the kinematic fit was chasing. */
-      target: entry.vehicle.points,
+      /** The raw ml-gbdt TARGET positions both generators consume. */
+      target,
       fixes,
       limits: LIMITS,
     };
@@ -740,6 +915,7 @@ export function start(): void {
     getSummary,
     getTrajectories,
     getTrajectoriesV2,
+    getShadowTrajectories,
     getVehicleDebug,
     getGeometryPack,
     isHealthy: () => Date.now() - lastBatchAtMs < 120_000,

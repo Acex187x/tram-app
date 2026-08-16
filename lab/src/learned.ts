@@ -398,13 +398,17 @@ export class LearnedModel {
     );
   }
 
-  gauges(): { segCells: number; segShapeCells: number; routeCells: number; stopDwellCells: number; stopReleaseCells: number; paceSamples: number; dwellSamples: number; releaseSamples: number } {
+  gauges(): { segCells: number; segShapeCells: number; routeCells: number; stopDwellCells: number; stopReleaseCells: number; corridorCells: number; corridorPaceCells: number; paceSamples: number; dwellSamples: number; releaseSamples: number } {
     return {
       segCells: this.cellCount('seg'),
       segShapeCells: this.cellCount('segShape'),
       routeCells: this.cellCount('route'),
       stopDwellCells: this.cellCount('stopDwell'),
       stopReleaseCells: this.cellCount('stopRelease'),
+      // The corridor tables were a telemetry blind spot: learned-fast and the
+      // ML leader features consumed them for a week with no cell-count gauge.
+      corridorCells: this.cellCount('corridor'),
+      corridorPaceCells: this.cellCount('corridorPace'),
       paceSamples: this.paceSamples,
       dwellSamples: this.dwellSamples,
       releaseSamples: this.releaseSamples,
