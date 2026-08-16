@@ -101,7 +101,7 @@ const ewmaFields = {
   updatedAtMs: v.number(),
 };
 
-const routeStopValidator = v.object({
+export const routeStopValidator = v.object({
   stopId: v.string(),
   name: v.string(),
   sequence: v.number(),
