@@ -21,7 +21,8 @@ first, in its own commit.
    3-state connection UI; stale data is visibly stale.
 5. Two render modes, one comparison mechanism:
    - `smooth` (default) — the continuity track; never teleports except
-     server-flagged discontinuities (trip change, >150 m model break).
+     server-flagged discontinuities (trip change, or a model break beyond the
+     gap-aware desync threshold `T_disc` — see §Extended-convergence).
    - `fixed` («более точное положение») — the raw model-opinion track;
      re-anchors on every fix, may jump. Exists to be visibly beaten by
      smooth and eventually removed.
@@ -111,16 +112,28 @@ exits non-zero on any violation, and counted continuously in the lab's
 `/api/summary` under `realism`.
 
 **Extended-convergence exception.** The smooth track closes its seam gap by
-*driving*: its commanded speed is the opinion's own speed plus the gap divided
-by the time left in the convergence window, clamped to `V_MAX` and rate-limited
-to `A_ACC` / `A_BRK`, and further clamped by the braking envelope
-`√(2·A_BRK·Δs)` of any upcoming hold so catch-up can never blast through a
-platform. When a gap is too large to close legally within 30 s, **the window
-extends — the limits never bend.** Convergence therefore reads: *the smooth
-track converges onto the opinion within 30 s whenever the kinematic limits
-permit, and otherwise as fast as they permit.* Gaps big enough to matter are
-already `discontinuity: true` (> 150 m, or a trip change), which resets the
-smooth track onto the opinion outright.
+*driving*: its commanded speed is the opinion's own speed plus a bounded
+closing surplus (the gap divided by a fixed close-out time constant, capped),
+itself capped by the observed-pace catch-up ceiling — `CATCH_HEADROOM ×` the
+learned pace surface at the tram's position, never the bare legal `V_MAX`,
+which would sprint the night centre at multiples of anything real — rate- and
+jerk-limited to `A_ACC` / `A_BRK` / `J_MAX`, and further clamped by the
+braking envelope `√(2·A_BRK·Δs)` of any upcoming hold so catch-up can never
+blast through a platform. When a gap is too large to close legally within
+30 s, **the window extends — the limits never bend.** Convergence therefore
+reads: *the smooth track converges onto the opinion within 30 s whenever the
+kinematic limits permit, and otherwise as fast as they permit.* Gaps big
+enough to matter are already `discontinuity: true` — a trip change, or a seam
+gap beyond the gap-aware desync threshold (server policy constant, replacing
+the former flat 150 m: a teleport must mean *desync*, never model re-anchor
+noise)
+
+```
+T_disc = clamp( clamp(fixGapS, 45, 240) · max(learnedPace, 5.5 m/s) · 1.25,
+                350 m, 1200 m )
+```
+
+— which resets the smooth track onto the opinion outright.
 
 ## Client pure evaluator (the whole "physics engine")
 
