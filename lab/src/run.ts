@@ -219,7 +219,22 @@ export function start(): void {
 
   const log = (msg: string) => console.log(`[lab ${new Date().toISOString()}] ${msg}`);
 
+  /** Non-finite predictions skipped at the write boundary. A NaN errM binds as
+   *  SQL NULL, fails the NOT NULL constraint and aborts the WHOLE cycle's
+   *  score writes (observed live 2026-08-16 19:55–20:14, pre-curvegen-v3:
+   *  27 poll errors = whole cycles of every variant's rows lost). NaN also
+   *  sails through the 22 m/s displacement gate — every NaN comparison is
+   *  false — so the guard lives here, where all variants pass. */
+  let nonFiniteScores = 0;
+
   function writeScore(row: Omit<ScoreRow, 'absErrM'>): void {
+    if (!Number.isFinite(row.errM)) {
+      nonFiniteScores++;
+      if (nonFiniteScores <= 5 || nonFiniteScores % 1000 === 0) {
+        log(`non-finite score skipped: ${row.variant} for ${row.key} (total ${nonFiniteScores})`);
+      }
+      return;
+    }
     const full: ScoreRow = { ...row, errM: round2(row.errM), absErrM: round2(Math.abs(row.errM)) };
     store.addScore(full);
     scoreBuf.push(full);
@@ -843,6 +858,7 @@ export function start(): void {
       lastHour: store.summarySince(Date.now() - 3_600_000),
       learning: learned.gauges(),
       ml: { ready: ml.modelsReady, lastOkMs: ml.lastOkMs, lastError: ml.lastError },
+      scoring: { nonFiniteSkipped: nonFiniteScores },
       trajectories: {
         vehicles: trajectories.size,
         builtAtMs: trajBuiltAtMs,
