@@ -1,6 +1,7 @@
 // TramEngine (v2): owns all per-tram sims. Pure TS, deterministic, no timers —
 // the caller drives ingest() on each poll and tick() at frame rate.
-// Depends only on '@/lib/types' + sibling engine/geo modules; the fleet model
+// Depends only on the feed contract in '@/lib/types', the frozen types in
+// ../types, and sibling engine/geo modules; the fleet model
 // resolver is injected so the engine stays free of fleet/golemio imports.
 //
 // v2 architecture (docs/decisions/engine-v2.md): per tram the engine keeps
@@ -13,13 +14,10 @@
 // ingest from each fleet's own positions and applied O(1)/pair per substep
 // (performance invariant #8: the tick path allocates nothing).
 
-import type {
-  RouteGeometry,
-  SimDebugInfo,
-  TramModelSpec,
-  TramPublicState,
-  TramSnapshot,
-} from '@/lib/types';
+import type { RouteGeometry, TramModelSpec, TramSnapshot } from '@/lib/types';
+// Frozen at build 12: physics v3 deleted SimDebugInfo and reshaped
+// TramPublicState in the app. See ../types.ts.
+import type { SimDebugInfo, TramPublicState } from '../types';
 import {
   bearingAt,
   bearingBetween,

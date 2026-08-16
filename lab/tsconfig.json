@@ -1,4 +1,18 @@
 {
+  // Typecheck project for the lab (the runtime uses tsconfig.runtime.json via
+  // TSX_TSCONFIG_PATH). It covers the lab's OWN sources — src/ and the frozen
+  // vendored engine — plus whatever app code they import, which tsc pulls in
+  // transitively through the '@/*' paths.
+  //
+  // It deliberately does NOT glob ../src/**/*.ts wholesale: that dragged the
+  // whole app (screens, .tsx face packs, GeoJSON feature builders) into a
+  // node-only, jsx-less project and produced 20 errors that say nothing about
+  // the lab. The app is typechecked by its own tsconfig, which excludes lab/.
   "extends": "./tsconfig.runtime.json",
-  "include": ["src/**/*.ts", "../src/**/*.ts"]
+  "compilerOptions": {
+    // geojson: src/lib/types.ts annotates its render types with the global
+    // GeoJSON namespace, and the lab imports that file for the feed contract.
+    "types": ["node", "geojson"]
+  },
+  "include": ["src/**/*.ts", "vendor/**/*.ts"]
 }
