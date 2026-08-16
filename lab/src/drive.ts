@@ -547,12 +547,20 @@ function runDrive(args: {
     vCmd = clamp(vCmd, 0, TRAJ_V_MAX_MS);
 
     // ── constraint stack (§4.1) — never violated ─────────────────────────────
-    // slack(d) = max(0, d − s − v·(T_BRK_BUILD/2 + dt)): the jerk-onset margin
-    // (§5) makes the brake start a touch early, which is what a driver does
-    // anyway; the extra v·dt bites one sim step of travel out of the distance
-    // — following an exact envelope with a one-step lag guarantees an
-    // overshoot (the previous generator documented the same bite).
-    const margin = vI * (T_BRK_BUILD_S / 2 + DT_S);
+    // Jerk-onset margin, generalized to the CURRENT accel state: a stop from
+    // (v, a) under jerk J costs ≈ v²/(2·A_BRK) + v·(max(0,a)+A_BRK)²/(2·J·A_BRK)
+    // — at a = 0 the second term is exactly the design's v·T_BRK_BUILD/2 (§5);
+    // at a = +A_ACC the full −reversal takes (A_ACC+A_BRK)/J = 3.4 s (§5's own
+    // number) and the margin must carry it, or a catch-up tram sails into a
+    // curve dip above its cap (measured live 2026-08-16: 9 m/s across a
+    // 3.9 m/s junction). The extra v·dt bites one sim step of travel out of
+    // the distance — following an exact envelope with a one-step lag
+    // guarantees an overshoot (the previous generator documented the same
+    // bite). Within `margin` of a limit point the vertex term degrades to the
+    // bare cap, so the demand flattens at `lim` before the apex and the
+    // one-step follow lag decays on the flat, not inside the dip.
+    const margin =
+      vI * ((Math.max(0, a) + TRAJ_A_BRK) ** 2 / (2 * TRAJ_J_MAX * TRAJ_A_BRK) + DT_S);
     const slack = (d: number): number => Math.max(0, d - sI - margin);
     let envCurve = Math.min(V_LIMIT_MAX, cruiseCapAt(profile, geom, sI));
     {
@@ -633,14 +641,18 @@ function runDrive(args: {
     const gated =
       mode === 'regimes' && target !== null && grid[i + 1] >= ref!.gateMs[nextStop];
     if (target !== null && sN >= target.distM - STOP_REACH_M && !gated) {
-      if (vN > SKIP_V_MAX) {
+      // Entry gates on vI — the speed the entry ZEROES across this one step —
+      // not on vN: zeroing from vI > A_BRK·dt is an over-rail drop in the fine
+      // profile and prints straight through to the wire (measured live
+      // 2026-08-16: accel spikes to −1.9 at hold entries under the vN test).
+      if (vI > SKIP_V_MAX) {
         // Kinematically unreachable from the seam state: roll through, count.
         // The gate opens NOW so the smooth run never waits on a service that
         // will not happen.
         infeasibleSkips++;
         if (mode === 'ladder') departMs[nextStop] = grid[i + 1];
         nextStop++;
-      } else if (vN > HOLD_ENTRY_V_MAX) {
+      } else if (vI > HOLD_ENTRY_V_MAX) {
         railStepToward(target.distM);
         continue;
       } else {
@@ -672,7 +684,7 @@ function runDrive(args: {
 
     // ── terminal latch: geometry end is a permanent hold ─────────────────────
     if (sN >= total - STOP_REACH_M && nextStop >= plan.length) {
-      if (vN > HOLD_ENTRY_V_MAX) {
+      if (vI > HOLD_ENTRY_V_MAX) {
         railStepToward(total);
         continue;
       }
