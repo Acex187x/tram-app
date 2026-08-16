@@ -35,6 +35,7 @@ jest.mock('@/lib/golemio/shapeCache', () => ({
   requestPrefetch: jest.fn(),
   subscribeLoaded: jest.fn(() => () => {}),
   has: jest.fn(() => false),
+  isProvisional: jest.fn(() => false),
 }));
 jest.mock('@/lib/golemio/client', () => ({
   promoteTag: jest.fn(() => false),
@@ -42,6 +43,9 @@ jest.mock('@/lib/golemio/client', () => ({
 
 const promoteTagMock = promoteTag as jest.MockedFunction<typeof promoteTag>;
 const hasMock = shapeCache.has as jest.MockedFunction<typeof shapeCache.has>;
+const provisionalMock = shapeCache.isProvisional as jest.MockedFunction<
+  typeof shapeCache.isProvisional
+>;
 
 const T0 = 1_000_000_000_000;
 const URL = 'https://tram-spotter-test.convex.cloud';
@@ -683,6 +687,21 @@ describe('RemoteFeed geometry + calibration delegation (phase 1: Golemio client-
 
     feed.promoteGeometry('cold-trip');
     expect(shapeCache.requestPrefetch).toHaveBeenCalledWith(['cold-trip'], 0, undefined);
+  });
+
+  it('promoteGeometry: a tapped PACK-SEEDED tram still jumps to the urgent lane', () => {
+    // A provisional trip is resident (has() === true) yet its authoritative
+    // timetable has not landed, so the tram sheet's stop timeline is still
+    // withheld. Treating it as "cached" would leave a tapped tram waiting out
+    // the background refinement queue — the one case priority 0 exists for.
+    const { feed } = setup();
+    hasMock.mockReturnValueOnce(true);
+    provisionalMock.mockReturnValueOnce(true);
+
+    feed.promoteGeometry('seeded-trip');
+
+    expect(promoteTagMock).toHaveBeenCalledWith('seeded-trip', 0);
+    expect(shapeCache.requestPrefetch).toHaveBeenCalledWith(['seeded-trip'], 0, undefined);
   });
 
   it('reportCalibration honors the passive-logging gate and swallows sink errors', () => {

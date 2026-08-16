@@ -316,7 +316,11 @@ export class RemoteFeed implements TramFeed {
   }
 
   promoteGeometry(tripId: string): void {
-    if (!tripId || shapeCache.has(tripId)) return;
+    // A pack-seeded (provisional) trip already renders, but its stop TIMELINE
+    // is withheld until the authoritative per-trip geometry lands. Tapping the
+    // tram is exactly the "user poke" the urgent lane exists for, so treat
+    // provisional as not-yet-resolved here and let it jump the background queue.
+    if (!tripId || (shapeCache.has(tripId) && !shapeCache.isProvisional(tripId))) return;
     if (!promoteTag(tripId, 0)) {
       shapeCache.requestPrefetch([tripId], 0, this.sessionAbort?.signal);
     }
