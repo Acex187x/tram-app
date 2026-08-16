@@ -64,26 +64,60 @@ rollups (mean/p50/p90/signed, per horizon bucket) feed Grafana.
 | `GET /api/trajectories/v2` | physics-v3 clients | `docs/research/physics-v3-protocol.md` — FROZEN |
 
 v2 emits BOTH tracks per vehicle over the same ml-gbdt samples v1 uses (one ML
-call, no extra inference cost):
+call, no extra inference cost). Since 2026-08-16 the ML output is treated as a
+sequence of TARGET POSITIONS and both tracks are **kinematic curves** fitted to
+them — the closest curve a real tram could actually drive (`V_MAX` 16.7 m/s,
+`A_ACC` ≤ 1.3, `A_BRK` ≤ 1.4 m/s², protocol §Kinematic limits):
 
-- **`opinion`** — v1's curve plus the **modal stop rule**: while the learned
-  release model says `P(departed | elapsed + already-standing) < 0.6` under
-  `Normal(releaseStats.mean, sd)`, the curve HOLDS at the platform; at the
-  crossing it departs at full learned pace (`LearnedModel.walkFrom`). Extra
-  keyframes are inserted at the release instant and +5 s so a 10 s grid cannot
-  smear the departure into a creep. This is the fix for the 2026-08-13 field
-  report: the mean-optimal expectation floats off the platform while the real
-  tram is still standing.
+- **`opinion`** — the model's belief plus the **modal stop rule**: while the
+  learned release model says `P(departed | elapsed + already-standing) < 0.6`
+  under `Normal(releaseStats.mean, sd)`, the curve HOLDS at the platform; at
+  the crossing it ACCELERATES away (≤ 1.3 m/s²) toward full learned pace
+  (`LearnedModel.walkFrom`) instead of stepping onto it. This is the fix for
+  the 2026-08-13 field report (expectation floats off the platform) plus the
+  2026-08-16 one (the departure was a step function).
 - **`smooth`** — server-owned continuity. Each re-emission starts exactly where
   the PREVIOUS smooth track says the tram is at the new `emittedAtMs` (≤2 m,
-  server-enforced), then converges onto `opinion` within 30 s. If the opinion
-  is BEHIND the rendered position the track holds instead of reversing (trams
-  don't drive backwards) — the protocol's explicit exception to the 30 s bound.
-  `discontinuity:true` (smooth starts AT opinion) on trip change or a >150 m
-  break; a first-ever emission is `false`.
+  server-enforced) **and at the speed it was doing there** (C¹, not just C⁰),
+  then DRIVES onto `opinion`: commanded speed = the opinion's own slope + gap /
+  time-left-in-the-window, clamped to `V_MAX`, rate-limited to the accel caps,
+  and further clamped by the braking envelope `√(2·A_BRK·Δs)` of any upcoming
+  hold so catch-up can never blast through a platform. When a gap cannot be
+  closed legally in 30 s the WINDOW extends — the limits never bend. If the
+  opinion is BEHIND the rendered position the track brakes and waits instead of
+  reversing (trams don't drive backwards). `discontinuity:true` (smooth starts
+  AT opinion) on trip change or a >150 m break; a first-ever emission is
+  `false`.
 
 Both tracks are monotone in `t` and non-decreasing in `s`, ≤24 points, ≥120 s
 of horizon — the client is one binary search + lerp (`evalTrack`), no state.
+Knots now sit at **profile breakpoints** (instants where acceleration changes)
+rather than on the 10 s grid, which is what makes the limits exact rather than
+approximate: sampling a constant-acceleration phase at its own breakpoints
+makes each segment's mean speed the midpoint instantaneous speed, and the
+acceleration a lerping client observes a convex combination of two in-range
+phase accelerations. A constant-pace target therefore collapses to 2 knots.
+
+**Realism gate.** `readRealism()` (lab/src/realism.ts) measures a track exactly
+as a lerping client experiences it; `RealismCounters` runs it over everything
+published and exposes lifetime counts + distributions at `/api/summary` →
+`realism`, and `check-v2.mjs` asserts the same thing against the served bytes
+and exits non-zero on any violation.
+
+## Other endpoints
+
+| endpoint | what |
+|---|---|
+| `GET /physics` | debug page: pick a vehicle, see s(t)/v(t)/a(t) for BOTH published tracks against its recent real fixes, with the limit lines drawn. Seeing "how it drives" without a phone |
+| `GET /api/vehicle/:key/debug` | JSON behind that page — both tracks with their knot speeds, the raw ML target curve, and the last 10 fixes from SQLite |
+| `GET /api/geometry-pack` | gzip (`Content-Encoding: gzip`) `{atMs, shapes:[ServedGeometry…], trips:{tripId:shapeId}}` for the ACTIVE fleet, deduplicated by shapeId — client cold start in one request instead of hundreds of `/geometry/:tripId`. Rebuilt at most every 60 s and served from a cached buffer; `X-Pack-Meta` carries the sizes |
+
+`/api/geometry-pack` dedupes by SHAPE because that is what a physics-v3 client
+renders along: it turns a published `s` into a point/bearing via
+`coordinates`/`cumDistM`, and dozens of trips share one shape. The trip-scoped
+fields of the representative geometry (`tripId`, `headsign`,
+`stops[].arrivalMs/departureMs`) belong to whichever trip was picked — only the
+shape-scoped fields are valid for every trip in `trips`.
 
 Determinism: the whole v2 body, `serverNowMs` included, is frozen for the 2 s
 cache window, so any two clients fetching inside it get byte-identical bytes
@@ -93,7 +127,7 @@ and render identically. The price is that a client's clock offset can be up to
 Verify any of this against the live service:
 
 ```sh
-node lab/scripts/check-v2.mjs            # wire contract + continuity invariant
+node lab/scripts/check-v2.mjs            # contract + continuity + KINEMATIC LIMITS
 node lab/scripts/determinism-v2.mjs fetch 8 && \
   node lab/scripts/determinism-v2.mjs eval /tmp/v2-bundle.json   # run twice, diff
 cd lab && TSX_TSCONFIG_PATH=$PWD/tsconfig.runtime.json \
@@ -242,6 +276,41 @@ TSX_TSCONFIG_PATH=$PWD/tsconfig.runtime.json ./node_modules/.bin/tsx src/main.ts
     is the learned walk's known lateness, inherited through the "departs at
     full learned pace" branch, not the hold itself. Worth a follow-up: drive
     the post-release branch from the ML curve's own increments and re-price.
+- **2026-08-16 (day 8, physics-v3 W2): realism is FREE — the kinematic limits
+  cost nothing measurable.** Owner field report on build 13: smooth caught up
+  to fixed at impossible speed, and both tracks braked instantly into stops.
+  Both tracks are now kinematic curves (V_MAX 16.7 m/s, a ≤ +1.3 / ≥ −1.4)
+  fitted to the ML target positions instead of the targets being published raw.
+  - **gate: ZERO violations.** 2 112 published tracks / 45 676 segments over a
+    3 min live sweep: per-segment speed p50 4.19, p90 8.38, p99 16.26, max
+    16.70 m/s (exactly V_MAX); between-segment acceleration p01 −1.35, p50
+    −0.01, p99 1.24, min −1.40, max +1.30 m/s² — the profile rides its own
+    physical caps and never crosses the +1.35/−1.45 wire tolerance. Continuity
+    survived untouched: 645 non-discontinuity seams, max |Δsmooth| 0.01 m.
+  - **the impossible catch-up, quantified.** Over 289 catch-up episodes the OLD
+    time-weighted blend implied `opinion' + δ/30` with nothing bounding the
+    sum: p99 21.35 m/s, max 21.70 m/s (78 km/h), and **31 % of episodes would
+    have driven above V_MAX**. Worst three: 9388/line 15 (gap 150 m) 78 → 60
+    km/h, 8576/line 21 (144 m) 77 → 60, 9515/line 5 (142 m) 77 → 60. The
+    median episode is unchanged (11.11 → 11.12 m/s) — the fix clips only the
+    tail that was lying.
+  - **price of realism ≈ 0 m.** Matched 15 min post-change (n=2 665) against
+    the untouched `ml-gbdt` control, differenced to cancel the traffic
+    difference between windows: ml-mode − ml-gbdt went **+35.6 → +34.5 m mean**
+    and **+20.3 → +16.3 m p50**; ml-smooth − ml-gbdt +35.8 → +34.7 m. At
+    at_stop anchors the gap narrowed 60.8 → 57.9 m mean. The only regression is
+    ml-smooth at MOVING anchors (+1.6 → +3.7 m vs ml-gbdt), which is the honest
+    cost of C¹ seams plus physics-limited convergence. Absolute levels rose
+    (~5 m) in both the control and the tracks — that is the window, not the
+    change.
+  - **the discontinuity rate was never 4.9 %.** This run showed 20 % of
+    same-trip re-emissions flagged, which looked like a regression and is not:
+    the day-8 figure was measured in a window dominated by AGE-driven
+    re-emissions (|Δopinion| p50 0.3 m) rather than FIX-driven ones (p50
+    75.8 m). Replaying the same 501 fix-driven events under the old
+    converge-exactly behaviour gives **17.2 % teleports vs 16.4 % now** — the
+    threshold is being crossed by the model's own re-anchor error, not by the
+    smooth track. Worth a follow-up: 150 m may simply be the wrong threshold.
 - **2026-08-16 (day 8): the lab's engine baseline had to be pinned.** physics-v3
   deletes `src/lib/engine/*` from the app; the lab imported it live, so the
   first restart after that landed crash-looped (`MODULE_NOT_FOUND`, ~4 min of
