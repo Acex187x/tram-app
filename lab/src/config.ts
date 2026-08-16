@@ -42,17 +42,52 @@ export const TRAJ_JSON_TTL_MS = 2_000;
 
 /** ── physics v3 (docs/research/physics-v3-protocol.md), GET /api/trajectories/v2
  * The protocol is FROZEN; these are its numeric constants. */
-/** The smooth track must reach the opinion track within this window. */
+/** The smooth track must reach the opinion track within this window — WHEN
+ * the kinematic limits below allow it (protocol §Extended-convergence). */
 export const TRAJ_CONVERGE_MS = 30_000;
+/** Floor on the "time left to close the gap" divisor, seconds. Past the
+ * convergence window the residual gap keeps closing with this time constant
+ * instead of demanding an infinite (and then clamped) speed. */
+export const TRAJ_CONVERGE_MIN_S = 3;
 /** |rendered − opinion| above this at emission ⇒ honest teleport, not a blend. */
 export const TRAJ_DISCONTINUITY_M = 150;
 /** Modal stop rule: hold at the platform while P(departed) < this. */
 export const TRAJ_MODAL_P = 0.6;
-/** Extra knot this far after the modal release, so a 10 s grid cannot smear
- * the departure kink into a slow creep off the platform. */
-export const TRAJ_MODAL_KICK_MS = 5_000;
 /** Hard per-track keyframe cap from the protocol. */
 export const TRAJ_MAX_POINTS = 24;
+
+/** ── Kinematic limits (protocol §Kinematic limits — a CONTRACT property).
+ * Vehicle-capability ceiling, 60 km/h. Deliberately above the 50 km/h network
+ * cap the old engine used (V_MAX_MS = 13.9): this is a never-lie bound, not a
+ * pace target — the ML curve decides how fast a tram is actually drawn. */
+export const TRAJ_V_MAX_MS = 16.7;
+/** Service acceleration / braking, m/s² — the SAME constants the shipped
+ * engine used (lab/vendor/engine/speedProfile.ts A_ACC / A_BRK, calibrated
+ * against real stop exits, field feedback 2026-07-13). */
+export const TRAJ_A_ACC = 1.3;
+export const TRAJ_A_BRK = 1.4;
+
+/** Gate tolerances: what check-v2.mjs and the live counters assert on the
+ * WIRE values, i.e. after `s` is rounded to cm and `t` to whole ms. A segment
+ * of duration Δt carries ≤ 0.01/Δt m/s of speed-rounding noise and ≤ 0.02/Δt
+ * m/s² of acceleration noise; with TRAJ_MIN_SEG_MS ≥ 1000 that is ≤ 0.01 and
+ * ≤ 0.02, comfortably inside this slack. */
+export const TRAJ_V_MAX_GATE_MS = 17.0;
+export const TRAJ_A_ACC_GATE = 1.35;
+export const TRAJ_A_BRK_GATE = 1.45;
+
+/** Fine grid the kinematic profile is simulated on before being compressed
+ * onto ≤ TRAJ_MAX_POINTS breakpoints. */
+export const TRAJ_SIM_STEP_MS = 1_000;
+/** No emitted segment shorter than this (keeps wire-rounding noise ≪ gate).
+ * Enforced structurally: knots are a SUBSET of the TRAJ_SIM_STEP_MS grid, so
+ * segments are multiples of it — keep TRAJ_SIM_STEP_MS ≥ TRAJ_MIN_SEG_MS. */
+export const TRAJ_MIN_SEG_MS = 1_000;
+/** Reference speed below which the target curve counts as STANDING. */
+export const TRAJ_HOLD_V_MS = 0.3;
+/** A standing run must last at least this long to be treated as a stop the
+ * profile has to brake into (shorter flats are model jitter). */
+export const TRAJ_HOLD_MIN_MS = 4_000;
 
 /** Horizon buckets for rollups (fix gap seconds → label). */
 export function horizonBucket(gapS: number): string {

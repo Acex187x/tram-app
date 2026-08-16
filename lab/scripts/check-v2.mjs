@@ -11,14 +11,28 @@
 //     observed by dense polling: smooth_n(emittedAtMs_n) == smooth_{n-1}
 //     (emittedAtMs_n) within 2 m unless discontinuity=true;
 //  3. the literal two-fetch (t, t+65 s) comparison the runbook asks for;
-//  4. how many METERS the modal stop rule and the continuity track move the
-//     rendered position away from the raw v1 ml-gbdt curve, and how big the
-//     re-anchor teleport that continuity absorbs actually is.
+//  4. the KINEMATIC LIMITS (protocol §Kinematic limits) on every segment of
+//     every published track — implied speed ≤ 17.0 m/s, client-observable
+//     acceleration inside +1.35/−1.45 m/s². Any violation fails the run;
+//  5. how many METERS the modal stop rule and the continuity track move the
+//     rendered position away from the raw v1 ml-gbdt curve, how big the
+//     re-anchor teleport that continuity absorbs actually is, and how fast the
+//     smooth track actually drives when it is closing a catch-up gap.
 
 const BASE = process.env.LAB_URL ?? 'https://tram-lab.acex.sh';
 const DURATION_S = Number(process.env.DURATION_S ?? 75);
 const POLL_MS = Number(process.env.POLL_MS ?? 2000);
 const CONTINUITY_TOL_M = 2;
+
+// Wire-level tolerances from lab/src/config.ts — the physical limits are
+// V_MAX 16.7 m/s and +1.3/−1.4 m/s²; the slack absorbs cm/ms rounding.
+const V_MAX_GATE = 17.0;
+const A_ACC_GATE = 1.35;
+const A_BRK_GATE = 1.45;
+/** A re-emission whose smooth track starts at least this far from the opinion
+ *  counts as a CATCH-UP EPISODE — the thing that used to happen at impossible
+ *  speed (owner field report, build 13). */
+const CATCHUP_MIN_M = 20;
 
 let failures = 0;
 const fail = (msg) => {
@@ -62,6 +76,64 @@ const get = async (path) => {
   if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
   return res.json();
 };
+
+// ── kinematic limits (protocol §Kinematic limits) ────────────────────────────
+// A client only ever draws straight lines between knots, so the physical
+// quantities that EXIST for it are the per-segment mean speed and the change
+// of that speed from one segment to the next — a central difference, because
+// segment i's mean speed is its midpoint instantaneous speed.
+function readRealism(track) {
+  const speeds = [];
+  const dts = [];
+  for (let i = 1; i < track.length; i++) {
+    const dtS = (track[i].t - track[i - 1].t) / 1000;
+    dts.push(dtS);
+    speeds.push(dtS > 0 ? (track[i].s - track[i - 1].s) / dtS : 0);
+  }
+  const accels = [];
+  for (let i = 1; i < speeds.length; i++) {
+    const span = (dts[i - 1] + dts[i]) / 2;
+    accels.push(span > 0 ? (speeds[i] - speeds[i - 1]) / span : 0);
+  }
+  return { speeds, accels };
+}
+
+const realism = {
+  tracks: 0,
+  segments: 0,
+  violations: 0,
+  speedViolations: 0,
+  accelViolations: 0,
+  allSpeeds: [],
+  allAccels: [],
+  worst: [],
+};
+const realismSeen = new Set();
+
+function checkRealism(v, name) {
+  const id = `${v.key}@${v.emittedAtMs}:${name}`;
+  if (realismSeen.has(id)) return; // each emission is polled many times
+  realismSeen.add(id);
+  const { speeds, accels } = readRealism(v[name]);
+  realism.tracks++;
+  realism.segments += speeds.length;
+  for (const s of speeds) realism.allSpeeds.push(s);
+  for (const a of accels) realism.allAccels.push(a);
+  const offend = (kind, value, limit) => {
+    realism.violations++;
+    if (kind === 'speed') realism.speedViolations++;
+    else realism.accelViolations++;
+    realism.worst.push({ id, kind, value, limit, excess: Math.abs(value - limit) });
+    realism.worst.sort((a, b) => b.excess - a.excess);
+    if (realism.worst.length > 5) realism.worst.length = 5;
+    fail(`${id}: ${kind} ${value.toFixed(3)} outside limit ${limit}`);
+  };
+  for (const s of speeds) if (s > V_MAX_GATE) offend('speed', s, V_MAX_GATE);
+  for (const a of accels) {
+    if (a > A_ACC_GATE) offend('accel', a, A_ACC_GATE);
+    else if (a < -A_BRK_GATE) offend('accel', a, -A_BRK_GATE);
+  }
+}
 
 // ── per-vehicle contract ─────────────────────────────────────────────────────
 const seenBad = new Set();
@@ -112,6 +184,19 @@ let maxPoints = 0;
 let minHorizonS = Infinity;
 let v1Points = new Set();
 let v1Vehicles = 0;
+const catchupGap = [];   // |smooth − opinion| at a re-emission, ≥ CATCHUP_MIN_M
+const catchupSpeed = []; // fastest the smooth track drives in the next 30 s
+
+/** Fastest per-segment implied speed of a track inside a time window. */
+function maxSpeedWithin(track, tFrom, tTo) {
+  let m = 0;
+  for (let i = 1; i < track.length; i++) {
+    if (track[i].t <= tFrom || track[i - 1].t >= tTo) continue;
+    const dtS = (track[i].t - track[i - 1].t) / 1000;
+    if (dtS > 0) m = Math.max(m, (track[i].s - track[i - 1].s) / dtS);
+  }
+  return m;
+}
 
 const t0 = Date.now();
 while (Date.now() - t0 < DURATION_S * 1000) {
@@ -131,6 +216,8 @@ while (Date.now() - t0 < DURATION_S * 1000) {
   for (const v of b.vehicles) {
     vehiclesSeen++;
     if (!checkVehicle(v, b.atMs)) continue;
+    checkRealism(v, 'opinion');
+    checkRealism(v, 'smooth');
     maxPoints = Math.max(maxPoints, v.opinion.length, v.smooth.length);
     minHorizonS = Math.min(minHorizonS, (v.opinion[v.opinion.length - 1].t - v.emittedAtMs) / 1000);
 
@@ -167,6 +254,13 @@ while (Date.now() - t0 < DURATION_S * 1000) {
       for (const dt of [0, 10_000, 30_000]) {
         smoothVsOpinion.push(Math.abs(evalTrack(v.opinion, E + dt) - evalTrack(v.smooth, E + dt)));
       }
+      // A catch-up episode: the smooth track is emitted with a real gap to the
+      // opinion and has to DRIVE it off. How fast does it actually go?
+      const gap = Math.abs(evalTrack(v.opinion, E) - evalTrack(v.smooth, E));
+      if (!v.discontinuity && gap >= CATCHUP_MIN_M) {
+        catchupGap.push(gap);
+        catchupSpeed.push(maxSpeedWithin(v.smooth, E, E + 30_000));
+      }
     }
     last.set(v.key, v);
   }
@@ -200,6 +294,27 @@ console.log(`non-discontinuity     ${fmt(contDelta)}   [must be ≤ ${CONTINUITY
 console.log(`discontinuity         ${fmt(contDeltaDisc)}   [teleport is allowed here]`);
 console.log(`two-fetch ~${DURATION_S}s apart, 1 generation:  ${fmt(twoFetchSingleGen)}`);
 console.log(`two-fetch ~${DURATION_S}s apart, ≥2 generations: ${fmt(twoFetchMultiGen)}  [chained, not comparable]`);
+console.log(`\n── kinematic limits (protocol §Kinematic limits) ──────────────────`);
+console.log(`tracks measured       ${realism.tracks} (${realism.segments} segments), each emission once`);
+console.log(`VIOLATIONS            ${realism.violations}  [speed ${realism.speedViolations}, accel ${realism.accelViolations}]  ` +
+  `— limits v ≤ ${V_MAX_GATE} m/s, a ∈ [−${A_BRK_GATE}, +${A_ACC_GATE}] m/s²`);
+if (realism.worst.length > 0) {
+  console.log('worst offenders:');
+  for (const w of realism.worst) console.log(`   ${w.id}  ${w.kind} ${w.value.toFixed(3)} (limit ${w.limit}, excess ${w.excess.toFixed(3)})`);
+}
+const dist = (arr, unit) =>
+  arr.length === 0 ? 'n=0' :
+  `n=${arr.length} p01=${pct(arr, 1).toFixed(2)} p50=${pct(arr, 50).toFixed(2)} p90=${pct(arr, 90).toFixed(2)} ` +
+  `p99=${pct(arr, 99).toFixed(2)} min=${Math.min(...arr).toFixed(2)} max=${Math.max(...arr).toFixed(2)} ${unit}`;
+console.log(`per-segment speed     ${dist(realism.allSpeeds, 'm/s')}`);
+console.log(`between-segment accel ${dist(realism.allAccels, 'm/s²')}`);
+
+console.log(`\n── catch-up: how fast does smooth actually drive to converge? ─────`);
+console.log(`episodes (gap ≥ ${CATCHUP_MIN_M} m)  ${catchupGap.length}`);
+console.log(`gap at emission       ${fmt(catchupGap)}`);
+console.log(`peak smooth speed in the next 30 s   ${dist(catchupSpeed, 'm/s')}`);
+console.log(`   ⇒ hard ceiling is V_MAX 16.7 m/s; before 2026-08-16 this was unbounded`);
+
 console.log(`\n── what physics-v3 costs/gains, in meters ─────────────────────────`);
 console.log(`raw teleport at re-anchor |Δopinion(E)|      ${fmt(opinionJump)}`);
 console.log(`   ⇒ absorbed by the smooth track, which moves ≤${CONTINUITY_TOL_M} m at the seam`);

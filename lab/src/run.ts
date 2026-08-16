@@ -41,12 +41,14 @@ import { openDb, pct, round2, Store, type ScoreRow } from './db';
 import { GeometryStore } from './geometry';
 import { LearnedModel } from './learned';
 import { buildMlFeatures, MlClient } from './ml';
+import { RealismCounters } from './realism';
 import { schedulePosition } from './schedule';
 import { startServer } from './server';
 import {
   buildV2Vehicle,
   evalTrack,
   modalReleaseMs,
+  type KinTrack,
   type ModalHold,
   type V2Vehicle,
 } from './trajectory';
@@ -102,6 +104,11 @@ interface TrajectoryEntry {
   vehicle: TrajectoryVehicle;
   /** v2 payload — physics-v3 opinion + smooth tracks over the same ML samples. */
   v2: V2Vehicle;
+  /** The same two tracks WITH their knot speeds. Memory only, never on the
+   *  wire: the next emission starts from the real velocity (C¹ seams) and the
+   *  /physics page draws the true v(t) rather than a staircase. */
+  opinionK: KinTrack;
+  smoothK: KinTrack;
 }
 
 export interface LiveVehicle {
@@ -156,6 +163,8 @@ export function start(): void {
   /** v2 lifetime counters (never reset — /api/summary gauges). */
   let trajEmissions = 0;
   let trajDiscontinuities = 0;
+  /** Kinematic-limits gate over every track ever published (protocol contract). */
+  const realism = new RealismCounters();
   /** Why an at-fix probe could/couldn't score the PUBLISHED v2 tracks. */
   let probeOk = 0;
   let probeMissing = 0;
@@ -397,7 +406,7 @@ export function start(): void {
           };
         }
         const prevEntry = trajectories.get(v.key);
-        const v2 = buildV2Vehicle({
+        const built = buildV2Vehicle({
           key: v.key,
           tripId: v.snap.tripId,
           line: v.snap.line,
@@ -405,11 +414,23 @@ export function start(): void {
           emittedAtMs: tCompute,
           raw: points,
           modal,
-          prev: prevEntry ? { tripId: prevEntry.v2.tripId, smooth: prevEntry.v2.smooth } : null,
+          prev: prevEntry
+            ? {
+                tripId: prevEntry.v2.tripId,
+                smooth: prevEntry.smoothK,
+                opinion: prevEntry.opinionK,
+              }
+            : null,
         });
-        if (v2 === null) return void trajectories.delete(v.key);
+        if (built === null) return void trajectories.delete(v.key);
+        const v2 = built.vehicle;
         trajEmissions++;
         if (v2.discontinuity) trajDiscontinuities++;
+        // Realism gate, continuous side: measure what we are about to publish
+        // exactly as a lerping client will experience it (protocol §Kinematic
+        // limits). Counters are lifetime, so a regression surfaces in digests.
+        realism.check(v.key, 'opinion', v2.opinion, tCompute);
+        realism.check(v.key, 'smooth', v2.smooth, tCompute);
 
         trajectories.set(v.key, {
           fixObsAtMs: v.snap.observedAtMs,
@@ -421,6 +442,8 @@ export function start(): void {
             points,
           },
           v2,
+          opinionK: built.opinion,
+          smoothK: built.smooth,
         });
       });
     }
@@ -628,6 +651,7 @@ export function start(): void {
         discontinuities: trajDiscontinuities,
         probe: { ok: probeOk, missing: probeMissing, staleAnchor: probeStaleAnchor, tripMismatch: probeTripMismatch },
       },
+      realism: realism.gauges(),
       horizonBuckets: HORIZON_BUCKETS,
     };
   }
