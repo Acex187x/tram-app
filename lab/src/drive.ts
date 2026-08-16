@@ -110,10 +110,12 @@ export const DISC_GAP_MAX_S = 240;
 export const STOP_REACH_M = 2;
 /** Hold entry zeroes the speed inside one sim step; with the S-curve landing
  *  floor the tram reaches the platform with |a| ≤ √(2·J·v), so entering from
- *  ≤ this keeps the entry's wire jerk under the gate. Above it the sim simply
- *  keeps integrating — the envelope + landing floor decay the speed and the
- *  entry fires a step or two later. */
-export const HOLD_ENTRY_V_MAX = 0.8;
+ *  ≤ this keeps the entry's wire jerk under the gate (0.7 leaves 0.2 of
+ *  headroom under J_GATE for adjacent-phase stacking — the 0.8 reading left a
+ *  1.0x tail in the live G2 histogram). Above it the sim simply keeps
+ *  integrating — the envelope + landing floor decay the speed and the entry
+ *  fires a step or two later. */
+export const HOLD_ENTRY_V_MAX = 0.7;
 /** Arriving at a planned hold faster than this means the plan was infeasible
  *  from the seam state (e.g. a backward re-anchor placed a stop inside the
  *  braking distance) — the stop is rolled through and counted, never slammed
@@ -302,6 +304,11 @@ export interface DriveArgs {
   prev: PrevTrack | null;
   /** Observed gap between the last two fixes, s (0 when unknown) — T_disc. */
   fixGapS: number;
+  /** True when this chain HAD an emission that was dropped (ML outage,
+   *  geometry loss, build failure) — the re-appearance may land anywhere, so
+   *  it must carry the honest discontinuity flag even though prev is null
+   *  (measured live: a silent 21 km smooth jump on an ML-drop rebuild). */
+  chainBroken?: boolean;
 }
 
 export interface TrackBuildMeta {
@@ -328,7 +335,7 @@ export interface DriveBuilt {
   opinion: KinTrack;
   smooth: KinTrack;
   meta: {
-    discKind: 'none' | 'trip' | 'gap';
+    discKind: 'none' | 'trip' | 'gap' | 'break';
     /** The T_disc threshold applied at this emission, m (null: first emission). */
     tDiscM: number | null;
     /** |prev smooth(t_E) − new opinion(t_E)| before the decision, m. */
@@ -634,8 +641,13 @@ function runDrive(args: {
     aDes = clamp(aDes, a - TRAJ_J_MAX * DT_S, a + TRAJ_J_MAX * DT_S);
     let vN = vI + aDes * DT_S;
     if (vN < 0) {
-      aDes = -vI / DT_S;
-      vN = 0;
+      // v crossed zero mid-step. Stay jerk-legal: relax a within the jerk
+      // window toward −v/dt; if the window cannot reach it yet, keep the
+      // legal maximum and creep — never snap a to an out-of-window value
+      // (the old snap was the last pointwise-J break and printed the 1.0x
+      // wire-jerk tail).
+      aDes = clamp(-vI / DT_S, a - TRAJ_J_MAX * DT_S, a + TRAJ_J_MAX * DT_S);
+      vN = Math.max(0, vI + aDes * DT_S);
     } else if (vN > TRAJ_V_MAX_MS) {
       aDes = (TRAJ_V_MAX_MS - vI) / DT_S;
       vN = TRAJ_V_MAX_MS;
@@ -934,11 +946,14 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
   };
 
   // ── smooth: same drive re-run from the C¹⁺ seam under the regime table ───
-  let discKind: 'none' | 'trip' | 'gap' = 'none';
+  let discKind: 'none' | 'trip' | 'gap' | 'break' = 'none';
   let tDiscM: number | null = null;
   let seamGapM: number | null = null;
   let sEmit = oEmit;
   let smoothMeta = opinionMeta;
+  if (prev === null && args.chainBroken === true) {
+    discKind = 'break'; // honest re-appearance: clients may fade once
+  }
   if (prev !== null) {
     const sStart = evalTrack(prev.smooth.points, t0);
     seamGapM = Math.abs(sStart - s0);

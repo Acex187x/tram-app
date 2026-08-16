@@ -171,6 +171,12 @@ export function start(): void {
   const trajectories = new Map<string, TrajectoryEntry>();
   /** key → curvegen-v3 shadow emission, chained on its own seam state. */
   const shadowTrajectories = new Map<string, ShadowEntry>();
+  /** Chains whose emission was dropped (ML outage / geometry loss / build
+   *  failure): the next successful drive build carries the honest
+   *  discontinuity flag — an absence shorter than a client's fetch interval
+   *  would otherwise render as a silent teleport. */
+  const shadowChainBroken = new Set<string>();
+  const publishedChainBroken = new Set<string>();
   let trajRefreshing = false;
   let trajJson: string | null = null;
   let trajJsonAtMs = 0;
@@ -405,11 +411,15 @@ export function start(): void {
   async function refreshTrajectories(): Promise<void> {
     const tCompute = Date.now();
 
+    const markDropped = (key: string): void => {
+      if (trajectories.delete(key)) publishedChainBroken.add(key);
+      if (shadowTrajectories.delete(key)) shadowChainBroken.add(key);
+    };
     for (const key of trajectories.keys()) {
-      if (!lastFix.has(key)) trajectories.delete(key);
+      if (!lastFix.has(key)) markDropped(key);
     }
     for (const key of shadowTrajectories.keys()) {
-      if (!lastFix.has(key)) shadowTrajectories.delete(key);
+      if (!lastFix.has(key)) markDropped(key);
     }
 
     const stale: { key: string; snap: TramSnapshot; geom: RouteGeometry; fixGapS: number }[] = [];
@@ -422,8 +432,7 @@ export function start(): void {
       if (entry?.fixObsAtMs === lf.snap.observedAtMs && tCompute - computedAtMs < 60_000) continue;
       const geom = geometry.resolve(lf.snap.tripId);
       if (!geom) {
-        trajectories.delete(key); // no geometry ⇒ no s-axis to predict along
-        shadowTrajectories.delete(key);
+        markDropped(key); // no geometry ⇒ no s-axis to predict along
         continue;
       }
       stale.push({ key, snap: lf.snap, geom, fixGapS: lf.fixGapS });
@@ -447,17 +456,11 @@ export function start(): void {
       if (!pred) {
         // ML down or models not ready: drop these vehicles from the feed
         // rather than serve keyframes anchored to a superseded fix.
-        for (const v of group) {
-          trajectories.delete(v.key);
-          shadowTrajectories.delete(v.key);
-        }
+        for (const v of group) markDropped(v.key);
         continue;
       }
       group.forEach((v, gi) => {
-        const drop = (): void => {
-          trajectories.delete(v.key);
-          shadowTrajectories.delete(v.key);
-        };
+        const drop = (): void => markDropped(v.key);
         const points: TrajectoryPoint[] = [];
         let maxS = 0;
         for (let k = 0; k < TRAJ_POINTS; k++) {
@@ -516,6 +519,7 @@ export function start(): void {
           geom: v.geom,
           surfaces,
           fixGapS: v.fixGapS,
+          chainBroken: shadowChainBroken.has(v.key),
           prev: prevShadow
             ? {
                 tripId: prevShadow.v2.tripId,
@@ -527,6 +531,7 @@ export function start(): void {
         if (shadowBuilt === null) {
           shadowBuildFailures++;
           shadowTrajectories.delete(v.key);
+          shadowChainBroken.add(v.key);
         } else {
           shadowEmissions++;
           if (shadowBuilt.vehicle.discontinuity) shadowDiscontinuities++;
@@ -554,6 +559,7 @@ export function start(): void {
             smoothK: shadowBuilt.smooth,
             target: points,
           });
+          shadowChainBroken.delete(v.key);
         }
 
         // ── the PUBLISHED bundle: the current generator until the flip flag
@@ -574,10 +580,15 @@ export function start(): void {
               geom: v.geom,
               surfaces,
               fixGapS: v.fixGapS,
+              chainBroken: publishedChainBroken.has(v.key),
               prev: prevPub,
             })
           : buildV2Vehicle({ ...baseArgs, modal, prev: prevPub });
-        if (built === null) return void trajectories.delete(v.key);
+        if (built === null) {
+          trajectories.delete(v.key);
+          publishedChainBroken.add(v.key);
+          return;
+        }
         const v2 = built.vehicle;
         trajEmissions++;
         if (v2.discontinuity) trajDiscontinuities++;

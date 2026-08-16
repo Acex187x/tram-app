@@ -72,11 +72,15 @@ const pct = (arr, p) => {
   const c = Math.min(f + 1, a.length - 1);
   return a[f] + (a[c] - a[f]) * (k - f);
 };
+// Loop min/max: Math.min(...arr) blows the call stack on the 300k-element
+// arrays a 15-minute run accumulates.
+const arrMin = (arr) => arr.reduce((m, x) => (x < m ? x : m), Infinity);
+const arrMax = (arr) => arr.reduce((m, x) => (x > m ? x : m), -Infinity);
 const fmt = (arr, unit = 'm') =>
   arr.length === 0
     ? 'n=0'
     : `n=${arr.length} p50=${pct(arr, 50).toFixed(2)}${unit} p90=${pct(arr, 90).toFixed(2)}${unit} ` +
-      `max=${Math.max(...arr).toFixed(2)}${unit} mean=${(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2)}${unit}`;
+      `max=${arrMax(arr).toFixed(2)}${unit} mean=${(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2)}${unit}`;
 
 const get = async (path) => {
   const res = await fetch(`${BASE}${path}`);
@@ -250,7 +254,7 @@ const sh = {
   minHorizonS: Infinity,
 };
 
-function checkShadowVehicle(v, bundleAtMs) {
+function checkShadowVehicle(v, bundleAtMs, wasPresent) {
   const id = `sh:${v.key}@${v.emittedAtMs}`;
   if (sh.seen.has(id)) return; // dense polling sees each emission many times
   sh.seen.add(id);
@@ -298,7 +302,11 @@ function checkShadowVehicle(v, bundleAtMs) {
   }
 
   const prev = sh.last.get(v.key);
-  if (prev && prev.emittedAtMs !== v.emittedAtMs) {
+  // Re-appearance guard: if the key was ABSENT from the previous bundle, the
+  // chain broke server-side (ML drop / geometry loss) — clients dropped the
+  // marker, so there is no continuity expectation to check; comparing across
+  // the absence printed km-scale phantom "seams" in the first live windows.
+  if (prev && prev.emittedAtMs !== v.emittedAtMs && wasPresent) {
     const E = v.emittedAtMs;
     const kind = prev.anchorMs !== v.anchorMs ? 'fix' : 'age';
     if (kind === 'fix') {
@@ -317,7 +325,9 @@ function checkShadowVehicle(v, bundleAtMs) {
     if (!v.discontinuity) {
       const d = Math.abs(evalTrack(v.smooth, E) - evalTrack(prev.smooth, E));
       sh.contDelta.push(d);
-      if (d > CONTINUITY_TOL_M) {
+      // +0.02: both evaluations run on wire values (s rounded to cm), so a
+      // server-side seam of exactly 2.00 m can read 2.01–2.02 from bytes.
+      if (d > CONTINUITY_TOL_M + 0.02) {
         fail(`sh:${v.key}: shadow continuity broken |Δsmooth| = ${d.toFixed(2)} m (G9)`);
       }
       if (kind === 'fix') {
@@ -369,6 +379,8 @@ function checkShadowVehicle(v, bundleAtMs) {
 
 // ── run ──────────────────────────────────────────────────────────────────────
 const last = new Map(); // key → last seen vehicle
+let pubPrevPresent = null; // key set of the previous v2 bundle (re-appearance guard)
+let shadowPrevPresent = null; // same for the shadow bundle
 const gens = new Map(); // key → generations since the first bundle
 const contDelta = [];   // |smooth_new(E) − smooth_prev(E)| on non-discontinuity
 const contDeltaDisc = [];
@@ -412,7 +424,11 @@ while (Date.now() - t0 < DURATION_S * 1000) {
     sh.bundles++;
     if (sb.shadow !== true) fail('shadow bundle missing shadow:true');
     if (Array.isArray(sb.vehicles)) {
-      for (const v of sb.vehicles) checkShadowVehicle(v, sb.atMs);
+      const present = new Set(sb.vehicles.map((v) => v.key));
+      for (const v of sb.vehicles) {
+        checkShadowVehicle(v, sb.atMs, shadowPrevPresent === null || shadowPrevPresent.has(v.key));
+      }
+      shadowPrevPresent = present;
     } else {
       fail('shadow bundle has no vehicles array');
     }
@@ -450,7 +466,10 @@ while (Date.now() - t0 < DURATION_S * 1000) {
     }
 
     const prev = last.get(v.key);
-    if (prev && prev.emittedAtMs !== v.emittedAtMs) {
+    // Same re-appearance guard as the shadow section: a key absent from the
+    // previous bundle was dropped and re-added server-side; clients dropped
+    // the marker, so its "seam" is not a continuity observation.
+    if (prev && prev.emittedAtMs !== v.emittedAtMs && (pubPrevPresent === null || pubPrevPresent.has(v.key))) {
       transitions++;
       gens.set(v.key, (gens.get(v.key) ?? 0) + 1);
       const E = v.emittedAtMs;
@@ -479,6 +498,7 @@ while (Date.now() - t0 < DURATION_S * 1000) {
     }
     last.set(v.key, v);
   }
+  pubPrevPresent = new Set(b.vehicles.map((v) => v.key));
   if (first === null) {
     first = new Map(b.vehicles.map((v) => [v.key, v]));
     firstAtMs = b.atMs;
@@ -520,7 +540,7 @@ if (realism.worst.length > 0) {
 const dist = (arr, unit) =>
   arr.length === 0 ? 'n=0' :
   `n=${arr.length} p01=${pct(arr, 1).toFixed(2)} p50=${pct(arr, 50).toFixed(2)} p90=${pct(arr, 90).toFixed(2)} ` +
-  `p99=${pct(arr, 99).toFixed(2)} min=${Math.min(...arr).toFixed(2)} max=${Math.max(...arr).toFixed(2)} ${unit}`;
+  `p99=${pct(arr, 99).toFixed(2)} min=${arrMin(arr).toFixed(2)} max=${arrMax(arr).toFixed(2)} ${unit}`;
 console.log(`per-segment speed     ${dist(realism.allSpeeds, 'm/s')}`);
 console.log(`between-segment accel ${dist(realism.allAccels, 'm/s²')}`);
 
@@ -574,7 +594,7 @@ if (sh.bundles === 0) {
   gate('G5 far p90 ≤ 60 s', sh.convFar.length, 5, pct(sh.convFar, 90) <= 60,
     `p90 = ${pct(sh.convFar, 90).toFixed(1)}s`);
   gate('G6 oscillation p95 ≤ 1', sh.osc.length, 10, pct(sh.osc, 95) <= 1,
-    `p95 = ${sh.osc.length > 0 ? pct(sh.osc, 95).toFixed(1) : '—'} (max ${sh.osc.length > 0 ? Math.max(...sh.osc) : 0})`);
+    `p95 = ${sh.osc.length > 0 ? pct(sh.osc, 95).toFixed(1) : '—'} (max ${sh.osc.length > 0 ? arrMax(sh.osc) : 0})`);
   const discRate = sh.fixTrans > 0 ? (100 * sh.fixDisc) / sh.fixTrans : 0;
   gate('G8 fix-driven discontinuity ≤ 5 %', sh.fixTrans, 20, discRate <= 5,
     `${discRate.toFixed(1)} % (${sh.fixDisc}/${sh.fixTrans})`);
