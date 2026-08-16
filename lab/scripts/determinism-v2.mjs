@@ -38,27 +38,35 @@ const mode = process.argv[2] ?? 'fetch';
 
 if (mode === 'fetch') {
   const n = Number(process.argv[3] ?? 8);
-  const rows = [];
-  for (let i = 0; i < n; i++) {
-    const t = Date.now();
-    const body = await (await fetch(`${BASE}/api/trajectories/v2`)).text();
-    rows.push({ i, dtMs: Date.now() - t, atMs: t, bytes: body.length, hash: sha(body), body });
-  }
-  const span = rows[rows.length - 1].atMs - rows[0].atMs;
-  const distinct = new Set(rows.map((r) => r.hash));
-  console.log(`${n} fetches spanning ${span} ms (cache TTL is 2000 ms)`);
-  for (const r of rows) {
-    console.log(`  #${r.i} +${r.atMs - rows[0].atMs}ms  ${r.bytes} bytes  ${r.hash.slice(0, 16)}…`);
-  }
-  const pairs = rows.slice(1).filter((r, i) => r.hash === rows[i].hash).length;
-  console.log(`distinct bodies: ${distinct.size}   identical consecutive pairs: ${pairs}/${n - 1}`);
-  const ok = distinct.size <= 2 && pairs >= 1;
-  console.log(ok
-    ? `OK — repeated fetches inside the TTL window are byte-identical (${distinct.size - 1} cache rollover(s) seen)`
-    : 'FAIL — responses are not stable inside the cache window');
-  fs.writeFileSync(BUNDLE, rows[rows.length - 1].body);
-  console.log(`bundle saved to ${BUNDLE}`);
-  process.exit(ok ? 0 : 1);
+  const probe = async (path) => {
+    const rows = [];
+    for (let i = 0; i < n; i++) {
+      const t = Date.now();
+      const body = await (await fetch(`${BASE}${path}`)).text();
+      rows.push({ i, dtMs: Date.now() - t, atMs: t, bytes: body.length, hash: sha(body), body });
+    }
+    const span = rows[rows.length - 1].atMs - rows[0].atMs;
+    const distinct = new Set(rows.map((r) => r.hash));
+    console.log(`${path}: ${n} fetches spanning ${span} ms (cache TTL is 2000 ms)`);
+    for (const r of rows) {
+      console.log(`  #${r.i} +${r.atMs - rows[0].atMs}ms  ${r.bytes} bytes  ${r.hash.slice(0, 16)}…`);
+    }
+    const pairs = rows.slice(1).filter((r, i) => r.hash === rows[i].hash).length;
+    console.log(`distinct bodies: ${distinct.size}   identical consecutive pairs: ${pairs}/${n - 1}`);
+    const ok = distinct.size <= 2 && pairs >= 1;
+    console.log(ok
+      ? `OK — repeated fetches inside the TTL window are byte-identical (${distinct.size - 1} cache rollover(s) seen)`
+      : `FAIL — ${path} responses are not stable inside the cache window`);
+    return { ok, rows };
+  };
+  const pub = await probe('/api/trajectories/v2');
+  // curvegen-v3 shadow: the same 2 s freeze contract (never fetched by phones,
+  // but the checkers and /physics rely on cache-stability all the same).
+  const shadow = await probe('/api/shadow-trajectories');
+  fs.writeFileSync(BUNDLE, pub.rows[pub.rows.length - 1].body);
+  fs.writeFileSync('/tmp/shadow-bundle.json', shadow.rows[shadow.rows.length - 1].body);
+  console.log(`bundles saved to ${BUNDLE} and /tmp/shadow-bundle.json`);
+  process.exit(pub.ok && shadow.ok ? 0 : 1);
 }
 
 if (mode === 'eval') {

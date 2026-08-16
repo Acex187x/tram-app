@@ -11,14 +11,37 @@
 // as a lerping client experiences it. `contract()` asserts that on every track
 // this file builds, so a limit violation fails the suite wherever it appears.
 
+import type { RouteGeometry, RouteStop } from '@/lib/types';
+import { cumulativeDistances, pointAt } from '@/lib/geo/polyline';
 import {
   TRAJ_A_ACC_GATE,
   TRAJ_A_BRK_GATE,
+  TRAJ_J_GATE,
+  TRAJ_J_MAX,
   TRAJ_V_MAX_GATE_MS,
   TRAJ_V_MAX_MS,
 } from '../src/config';
-import { readRealism } from '../src/realism';
-import { buildV2Vehicle, evalTrack, modalReleaseMs, speedAt, type TrackPoint } from '../src/trajectory';
+import {
+  buildDriveVehicle,
+  curveEnvAt,
+  discThresholdM,
+  driveProfileFor,
+  legKinFloorS,
+  mlCrossingMs,
+  mlTailPace,
+  type DriveBuilt,
+  type DriveSurfaces,
+} from '../src/drive';
+import { readJerk, readRealism } from '../src/realism';
+import {
+  accelAt,
+  buildV2Vehicle,
+  evalTrack,
+  modalReleaseMs,
+  speedAt,
+  type KinTrack,
+  type TrackPoint,
+} from '../src/trajectory';
 
 const T0 = 1_800_000_000_000;
 let failures = 0;
@@ -290,6 +313,370 @@ function contract(name: string, track: TrackPoint[], t0: number): void {
   const c = [T0 - 99, T0 + 12_345, T0 + 119_999, T0 + 500_000].map((t) => evalTrack(r, t));
   check('evalTrack is pure + clamps outside the horizon',
     a.every((x, i) => Object.is(x, c[i])) && a[0] === 1000 && a[3] === r[12].s);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// curvegen-v3: the virtual-tram drive (lab/src/drive.ts, design
+// docs/research/curvegen-v3-design.md). Pure offline: synthetic geometry,
+// constant learned surfaces — the suite asserts the CONTRACT and the design's
+// mechanisms (curve braking, ML-as-timetable, C¹⁺ seams, regimes, T_disc),
+// never the model. G4 is recomputed here independently from the geometry via
+// the imported curve-envelope math (sanctioned by design §8: selftest may
+// import the speed profile for curve checks).
+// ═════════════════════════════════════════════════════════════════════════════
+
+/** Synthetic shape in local meters → lng/lat around Prague: straight east,
+ *  optionally a quarter turn of radius `curveR` at `curveAtM` (a tight
+ *  junction curve), then straight north. Vertices every ~8 m. */
+function synthGeometry(opts: {
+  totalM: number;
+  curveAtM?: number;
+  curveR?: number;
+  stops?: { atM: number; id: string }[];
+}): RouteGeometry {
+  const LAT0 = 50.08;
+  const LNG0 = 14.4;
+  const M_LAT = 111_195;
+  const M_LNG = M_LAT * Math.cos((LAT0 * Math.PI) / 180);
+  const pts: [number, number][] = [];
+  const R = opts.curveR ?? 25;
+  const cAt = opts.curveAtM ?? Infinity;
+  const arcLen = (Math.PI / 2) * R;
+  let d = 0;
+  while (d <= opts.totalM) {
+    let x: number;
+    let y: number;
+    if (d <= cAt) {
+      x = d;
+      y = 0;
+    } else if (d <= cAt + arcLen) {
+      const phi = (d - cAt) / R; // 0 → π/2
+      x = cAt + R * Math.sin(phi);
+      y = R * (1 - Math.cos(phi));
+    } else {
+      x = cAt + R;
+      y = R + (d - cAt - arcLen);
+    }
+    pts.push([LNG0 + x / M_LNG, LAT0 + y / M_LAT]);
+    d += d > cAt - 20 && d < cAt + arcLen + 20 ? 4 : 8;
+  }
+  const cumDistM = cumulativeDistances(pts);
+  const totalM = cumDistM[cumDistM.length - 1];
+  const stops: RouteStop[] = (opts.stops ?? []).map((s, i) => ({
+    stopId: s.id,
+    name: s.id,
+    sequence: i + 1,
+    coordinates: pointAt(pts, cumDistM, Math.min(s.atM, totalM)),
+    distM: Math.min(s.atM, totalM),
+    arrivalMs: 0,
+    departureMs: 0,
+    dwellSeconds: 0,
+    isTerminal: false,
+  }));
+  return {
+    shapeId: 'synth', tripId: 'tSynth', routeId: 'L22', line: '22', headsign: 'Test',
+    coordinates: pts, cumDistM, totalM, stops,
+  };
+}
+
+const surf = (paceMs: number, dwellS = 20): DriveSurfaces => ({
+  paceAt: () => paceMs,
+  dwellAt: () => dwellS,
+});
+
+/** Wire contract + kinematic limits + the v3 jerk gate + generator meta. */
+function driveContract(name: string, b: DriveBuilt): void {
+  for (const tr of ['opinion', 'smooth'] as const) {
+    contract(`${name}/${tr}`, b.vehicle[tr], b.vehicle.emittedAtMs);
+    const jerks = readJerk(b.vehicle[tr]).map(Math.abs);
+    const jMax = jerks.length > 0 ? Math.max(...jerks) : 0;
+    check(`${name}/${tr}: wire jerk ≤ J_GATE ${TRAJ_J_GATE}`, jMax <= TRAJ_J_GATE,
+      `max |jerk| = ${jMax.toFixed(3)} m/s³ over ${jerks.length} samples`);
+  }
+  check(`${name}: no generator curve violations (G4) / phantom dips (G7)`,
+    b.meta.opinion.curveViolations === 0 && b.meta.smooth.curveViolations === 0 &&
+    b.meta.opinion.phantomDips === 0 && b.meta.smooth.phantomDips === 0,
+    `G4 ${b.meta.opinion.curveViolations}/${b.meta.smooth.curveViolations}, ` +
+    `G7 ${b.meta.opinion.phantomDips}/${b.meta.smooth.phantomDips}`);
+}
+
+/** Independent G4 recompute from the geometry (design §8, G4 second column). */
+function checkCurveGate(name: string, geom: RouteGeometry, track: TrackPoint[]): void {
+  const profile = driveProfileFor(geom);
+  let worstExcess = -Infinity;
+  let violations = 0;
+  for (let i = 1; i < track.length; i++) {
+    const dtS = (track[i].t - track[i - 1].t) / 1000;
+    if (dtS <= 0) continue;
+    const vSeg = (track[i].s - track[i - 1].s) / dtS;
+    const cap = curveEnvAt(profile, geom, (track[i].s + track[i - 1].s) / 2);
+    const excess = vSeg - (cap * 1.05 + 0.3);
+    if (excess > worstExcess) worstExcess = excess;
+    if (excess > 0) violations++;
+  }
+  check(`${name}: G4 recomputed from geometry — 0 violations`, violations === 0,
+    `worst excess ${worstExcess.toFixed(2)} m/s`);
+}
+
+const mkDrive = (over: Partial<Parameters<typeof buildDriveVehicle>[0]> &
+  Pick<Parameters<typeof buildDriveVehicle>[0], 'raw' | 'geom' | 'surfaces'>): DriveBuilt => {
+  const b = buildDriveVehicle({
+    key: 'V', tripId: 'tSynth', line: '22', anchorMs: T0 - 5000, emittedAtMs: T0,
+    modal: null, prev: null, fixGapS: 30, ...over,
+  });
+  if (b === null) throw new Error('buildDriveVehicle returned null');
+  return b;
+};
+
+// ── D0. adapter primitives ──────────────────────────────────────────────────
+{
+  const r = raw(1000, 6);
+  const tau = mlCrossingMs(r, 1300);
+  check('drive/adapter: ML crossing time of a monotone curve', tau !== null && Math.abs(tau - (T0 + 50_000)) < 20,
+    `τ(1300) = +${tau === null ? '∅' : ((tau - T0) / 1000).toFixed(1)}s (expect +50s)`);
+  check('drive/adapter: tail pace = mean slope of the last 30 s', Math.abs(mlTailPace(r) - 6) < 1e-9);
+  check('drive/adapter: never-crossed stop ⇒ null', mlCrossingMs(r, 1e9) === null);
+  const tk = legKinFloorS(100, 0, 0);
+  check('drive/adapter: kinematic floor — 100 m stop-to-stop ≈ 19 s S-curve', Math.abs(tk - 19) < 1.2,
+    `${tk.toFixed(1)}s`);
+  check('drive/adapter: T_disc policy values',
+    Math.abs(discThresholdM(60, 5.5) - 412.5) < 1e-6 && discThresholdM(0, 1) === 350 &&
+    discThresholdM(1e6, 100) === 1200,
+    `T_disc(60s, 5.5) = ${discThresholdM(60, 5.5)}`);
+}
+
+// ── D1. straight drive tracks the ML timetable ──────────────────────────────
+{
+  const geom = synthGeometry({ totalM: 4000 });
+  const b = mkDrive({ raw: raw(1000, 8), geom, surfaces: surf(8) });
+  driveContract('drive/straight', b);
+  const worst = Math.max(...[30_000, 60_000, 120_000].map((d) =>
+    Math.abs(evalTrack(b.vehicle.opinion, T0 + d) - evalTrack(raw(1000, 8), T0 + d))));
+  check('drive/straight: an unconstrained leg lands with the ML timetable', worst < 25,
+    `worst |drive − M| = ${worst.toFixed(1)} m (trim equilibrium ≈ 18 m)`);
+  check('drive/straight: few knots on a constant-pace stretch', b.vehicle.opinion.length <= 6,
+    `${b.vehicle.opinion.length} pts`);
+}
+
+// ── D2. braking INTO a tight curve — the headline perceptual fix ────────────
+{
+  const geom = synthGeometry({ totalM: 4000, curveAtM: 1500, curveR: 25 });
+  const b = mkDrive({ raw: raw(1000, 9), geom, surfaces: surf(9) });
+  driveContract('drive/curve', b);
+  checkCurveGate('drive/curve', geom, b.vehicle.opinion);
+  // curveCap(1/25) = 0.85·√(0.98·25) ≈ 4.2 m/s; the drive must dip into it
+  // with S-curve shoulders, then re-accelerate.
+  const k = b.opinion;
+  const speedNear = (sLo: number, sHi: number): number => {
+    let m = Infinity;
+    for (let i = 0; i < k.points.length; i++) {
+      if (k.points[i].s >= sLo && k.points[i].s <= sHi) m = Math.min(m, k.v[i]);
+    }
+    return m;
+  };
+  const dip = speedNear(1450, 1620);
+  check('drive/curve: dips to the curve cap at the junction (≈4.2 m/s)', dip < 4.7 && dip > 1.0,
+    `min knot speed in the curve zone = ${dip.toFixed(2)} m/s`);
+  const before = Math.max(...k.v.filter((_, i) => k.points[i].s < 1300));
+  const after = Math.max(...k.v.filter((_, i) => k.points[i].s > 1800));
+  check('drive/curve: at pace before, back at pace after', before > 7 && after > 7,
+    `${before.toFixed(1)} → dip → ${after.toFixed(1)} m/s`);
+}
+
+// ── D3. downstream stop is SERVED, timed by the ML's τ, not the surface ─────
+{
+  const geom = synthGeometry({ totalM: 4000, stops: [{ atM: 500, id: 'S1' }, { atM: 2600, id: 'S2' }] });
+  // The learned surface says 4 m/s (arrival would be +100 s); the ML curve
+  // runs 6 m/s (τ = +66.7 s). The ML has leg-timing authority inside the
+  // ±50 % trust region, so the drive must arrive on the ML's clock. The ±15 %
+  // positional trim (equilibrium gap ≈ 18 m, §4.3) keeps arrival within a few
+  // seconds of τ itself; −0.5·D moves it earlier when the ladder is unbound.
+  const b = mkDrive({ raw: raw(100, 6), geom, surfaces: surf(4, 20) });
+  driveContract('drive/stop', b);
+  const o = b.vehicle.opinion;
+  // Arrival: first instant the curve is within 3 m of the platform.
+  let tArr: number | null = null;
+  let tDep: number | null = null;
+  for (let dt = 0; dt <= 120_000; dt += 1000) {
+    const s = evalTrack(o, T0 + dt);
+    if (tArr === null && s >= 500 - 3) tArr = dt / 1000;
+    if (tArr !== null && tDep === null && s > 500 + 3) tDep = dt / 1000;
+  }
+  const tauS = (mlCrossingMs(raw(100, 6), 500)! - T0) / 1000; // +66.7 s
+  check('drive/stop: arrival rides the ML timetable, not the slow surface',
+    tArr !== null && tArr >= tauS - 14 && tArr <= tauS + 6 && tArr <= 80,
+    `arrived +${tArr}s; τ = +${tauS.toFixed(1)}s, learned-pace arrival would be +100s`);
+  check('drive/stop: stands the learned dwell (20 s), then departs',
+    tArr !== null && tDep !== null && tDep - tArr >= 18 && tDep - tArr <= 32,
+    `stood ${(tDep ?? 0) - (tArr ?? 0)}s`);
+  check('drive/stop: stops AT the platform, not past it',
+    tArr !== null && tDep !== null &&
+      Math.abs(evalTrack(o, T0 + (tArr + ((tDep - tArr) / 2)) * 1000) - 500) <= 2.5);
+}
+
+// ── D4. modal anchor hold: flat, then an S-curve departure ──────────────────
+{
+  const geom = synthGeometry({ totalM: 4000, stops: [{ atM: 1450, id: 'S1' }] });
+  const releaseAtMs = modalReleaseMs(T0, 0, 20, 8); // ≈ +22 s
+  const b = mkDrive({
+    raw: raw(1000, 4), geom, surfaces: surf(6, 20),
+    modal: { stopS: 1000, releaseAtMs },
+  });
+  driveContract('drive/modal', b);
+  check('drive/modal: HOLDS at the platform until the modal release',
+    [0, 5_000, 10_000, 20_000].every((d) => evalTrack(b.vehicle.opinion, T0 + d) === 1000));
+  const vAt = (d: number): number => speedAt(b.opinion, releaseAtMs + d);
+  check('drive/modal: departure is a jerk-limited RAMP',
+    vAt(0) < 0.05 && vAt(3_000) > 0.5 && vAt(3_000) < 4 && vAt(25_000) > 3,
+    `v at release +0/+3/+25 s = ${[0, 3, 25].map((s) => vAt(s * 1000).toFixed(2)).join('/')}`);
+}
+
+// ── D5. C¹⁺ seam: speed AND acceleration carry over under J_MAX ─────────────
+{
+  const geom = synthGeometry({ totalM: 4000 });
+  const releaseAtMs = T0 - 14_000 + 10_000; // released 4 s before the new emission
+  const prev = mkDrive({
+    raw: raw(1000, 8, T0 - 14_000), geom, surfaces: surf(8),
+    emittedAtMs: T0 - 14_000, anchorMs: T0 - 19_000,
+    modal: { stopS: 1000, releaseAtMs },
+  });
+  const vSeam = speedAt(prev.opinion, T0);
+  const aSeam = accelAt(prev.opinion, T0);
+  check('drive/seam: the previous track is mid-ramp at the seam (test setup)', vSeam > 1 && aSeam > 0.3,
+    `v=${vSeam.toFixed(2)} m/s, a=${aSeam.toFixed(2)} m/s²`);
+  const next = mkDrive({
+    raw: raw(evalTrack(prev.vehicle.opinion, T0) + 4, 8), geom, surfaces: surf(8),
+    prev: { tripId: 'tSynth', smooth: prev.smooth, opinion: prev.opinion },
+  });
+  driveContract('drive/seam', next);
+  check('drive/seam: opinion starts at the previous opinion speed (C¹)',
+    Math.abs(speedAt(next.opinion, T0) - vSeam) < 1e-9,
+    `${vSeam.toFixed(3)} → ${speedAt(next.opinion, T0).toFixed(3)} m/s`);
+  const k = next.opinion;
+  const firstPhaseDtS = (k.points[1].t - k.points[0].t) / 1000;
+  const aFirst = (k.v[1] - k.v[0]) / firstPhaseDtS;
+  check('drive/seam: seam acceleration transitions under J_MAX (C¹⁺)',
+    Math.abs(aFirst - aSeam) <= TRAJ_J_MAX * firstPhaseDtS + 1e-6,
+    `a ${aSeam.toFixed(2)} → first phase ${aFirst.toFixed(2)} m/s² over ${firstPhaseDtS}s`);
+}
+
+// ── D6. smooth regimes: catch-up is decisive AND ceiling-bounded ────────────
+{
+  const geom = synthGeometry({ totalM: 6000 });
+  const prev = mkDrive({
+    raw: raw(1000, 6, T0 - 40_000), geom, surfaces: surf(6),
+    emittedAtMs: T0 - 40_000, anchorMs: T0 - 45_000,
+  });
+  const sSeam = evalTrack(prev.vehicle.smooth, T0);
+  const b = mkDrive({
+    raw: raw(sSeam + 80, 6), geom, surfaces: surf(6), fixGapS: 40,
+    prev: { tripId: 'tSynth', smooth: prev.smooth, opinion: prev.opinion },
+  });
+  driveContract('drive/catchup', b);
+  check('drive/catchup: 80 m gap is NOT a discontinuity under T_disc', !b.vehicle.discontinuity,
+    `T_disc = ${b.meta.tDiscM?.toFixed(0)} m`);
+  check('drive/catchup: smooth starts at the previous render (≤2 m)',
+    Math.abs(evalTrack(b.vehicle.smooth, T0) - sSeam) <= 2);
+  let convS: number | null = null;
+  for (let dt = 0; dt <= 120; dt++) {
+    if (Math.abs(evalTrack(b.vehicle.smooth, T0 + dt * 1000) - evalTrack(b.vehicle.opinion, T0 + dt * 1000)) < 15) {
+      convS = dt;
+      break;
+    }
+  }
+  check('drive/catchup: decisive — 80 m gap inside 15 m within ≤ 28 s (G5)',
+    convS !== null && convS <= 28, `converged at +${convS}s`);
+  const peak = Math.max(...b.smooth.v);
+  check('drive/catchup: never above the observed-pace ceiling 1.9×pace',
+    peak <= 1.9 * 6 + 1e-9, `peak ${peak.toFixed(2)} ≤ ${(1.9 * 6).toFixed(1)} m/s`);
+  // G6: no hunting after convergence.
+  let sign = 0;
+  let osc = 0;
+  for (let dt = convS ?? 0; dt <= 120; dt++) {
+    const d = evalTrack(b.vehicle.smooth, T0 + dt * 1000) - evalTrack(b.vehicle.opinion, T0 + dt * 1000);
+    if (d > 2) { if (sign < 0) osc++; sign = 1; }
+    else if (d < -2) { if (sign > 0) osc++; sign = -1; }
+  }
+  check('drive/catchup: converge, settle, no hunting (G6 ≤ 1)', osc <= 1, `${osc} sign flips`);
+}
+
+// ── D7. smooth regimes: yield-when-ahead — never a phantom mid-street stop ──
+{
+  const geom = synthGeometry({ totalM: 6000 });
+  const prev = mkDrive({
+    raw: raw(1000, 9, T0 - 40_000), geom, surfaces: surf(9),
+    emittedAtMs: T0 - 40_000, anchorMs: T0 - 45_000,
+  });
+  const sSeam = evalTrack(prev.vehicle.smooth, T0); // ≈ 1360, running 9 m/s
+  const b = mkDrive({
+    raw: raw(sSeam - 70, 6), geom, surfaces: surf(6), fixGapS: 40,
+    prev: { tripId: 'tSynth', smooth: prev.smooth, opinion: prev.opinion },
+  });
+  driveContract('drive/yield', b);
+  check('drive/yield: 70 m ahead is NOT a discontinuity', !b.vehicle.discontinuity);
+  const sm = b.smooth;
+  const minV = Math.min(...sm.points.map((p, i) => (p.t <= T0 + 45_000 ? sm.v[i] : Infinity)));
+  check('drive/yield: slows to the yield floor, never a dead stand mid-street',
+    minV >= 2.8, `min v in the first 45 s = ${minV.toFixed(2)} m/s (floor 3.0)`);
+  check('drive/yield: never reverses',
+    b.vehicle.smooth.every((p, i, a) => i === 0 || p.s >= a[i - 1].s));
+  const dLate = Math.abs(evalTrack(b.vehicle.smooth, T0 + 100_000) - evalTrack(b.vehicle.opinion, T0 + 100_000));
+  check('drive/yield: opinion absorbs the lead and the tracks rejoin', dLate < 25,
+    `Δ at +100 s = ${dLate.toFixed(1)} m`);
+}
+
+// ── D8. discontinuity policy: T_disc, not 150 m ─────────────────────────────
+{
+  const geom = synthGeometry({ totalM: 6000 });
+  const prev = mkDrive({
+    raw: raw(1000, 5.5, T0 - 40_000), geom, surfaces: surf(5.5),
+    emittedAtMs: T0 - 40_000, anchorMs: T0 - 45_000,
+  });
+  const sSeam = evalTrack(prev.vehicle.smooth, T0);
+  const prevRef = { tripId: 'tSynth', smooth: prev.smooth, opinion: prev.opinion };
+  const at = (gapM: number): DriveBuilt =>
+    mkDrive({ raw: raw(sSeam + gapM, 5.5), geom, surfaces: surf(5.5), fixGapS: 60, prev: prevRef });
+  const b300 = at(300);
+  check('drive/disc: 300 m < T_disc(60 s, 5.5) = 412.5 ⇒ DRIVEN OFF, not a teleport',
+    !b300.vehicle.discontinuity && b300.meta.tDiscM !== null && Math.abs(b300.meta.tDiscM - 412.5) < 1e-6,
+    `T_disc = ${b300.meta.tDiscM}`);
+  driveContract('drive/disc-300', b300);
+  const b500 = at(500);
+  check('drive/disc: 500 m > T_disc ⇒ honest discontinuity, smooth = opinion',
+    b500.vehicle.discontinuity && b500.meta.discKind === 'gap' &&
+      evalTrack(b500.vehicle.smooth, T0) === evalTrack(b500.vehicle.opinion, T0));
+  const bTrip = mkDrive({
+    raw: raw(sSeam + 5, 5.5), geom, surfaces: surf(5.5), tripId: 'tOther', fixGapS: 60, prev: prevRef,
+  });
+  check('drive/disc: trip change ⇒ discontinuity even when the numbers are close',
+    bTrip.vehicle.discontinuity && bTrip.meta.discKind === 'trip');
+}
+
+// ── D9. terminal latch ──────────────────────────────────────────────────────
+{
+  const geom = synthGeometry({ totalM: 1000 });
+  const b = mkDrive({ raw: raw(800, 8), geom, surfaces: surf(8) });
+  driveContract('drive/terminal', b);
+  const end = evalTrack(b.vehicle.opinion, T0 + 119_000);
+  check('drive/terminal: latches AT the geometry end, never past it',
+    end <= geom.totalM + 1e-6 && end >= geom.totalM - 3,
+    `final s = ${end.toFixed(1)} of ${geom.totalM.toFixed(1)} m`);
+  check('drive/terminal: flat once latched',
+    Math.abs(evalTrack(b.vehicle.opinion, T0 + 60_000) - end) < 1);
+}
+
+// ── D10. knot budget under a dense-centre stop ladder ───────────────────────
+{
+  const geom = synthGeometry({
+    totalM: 4000,
+    stops: [300, 500, 700, 900, 1100].map((atM, i) => ({ atM, id: `S${i}` })),
+  });
+  const b = mkDrive({ raw: raw(100, 6), geom, surfaces: surf(6, 12) });
+  driveContract('drive/dense', b);
+  check('drive/dense: ≤24 knots with every platform served',
+    b.vehicle.opinion.length <= 24 && b.vehicle.smooth.length <= 24,
+    `knots ${b.vehicle.opinion.length}/${b.vehicle.smooth.length}, ` +
+    `pressureDrops ${b.meta.opinion.pressureDrops}, budgetForced ${b.meta.opinion.budgetForced}`);
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

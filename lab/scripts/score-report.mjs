@@ -13,7 +13,12 @@ import Database from 'better-sqlite3';
 
 const WINDOW_MIN = Number(process.argv[2] ?? process.env.WINDOW_MIN ?? 15);
 const DB = process.env.LAB_DB ?? '/data/lab.db';
-const CORE = ['ml-gbdt', 'ml-mode', 'ml-smooth', 'engine-live'];
+// CORE defines the matched subset. Override for the curvegen-v3 shadow
+// comparison, e.g. CORE=ml-gbdt,ml-mode,ml-smooth,ml-drive,ml-drive-smooth.
+const CORE = (process.env.CORE ?? 'ml-gbdt,ml-mode,ml-smooth,engine-live')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 const db = new Database(DB, { readonly: true });
 const since = Date.now() - WINDOW_MIN * 60_000;
@@ -97,10 +102,15 @@ const dist = (a, b, es) => {
   return `p50=${pct(d, 50).toFixed(1)} m  p90=${pct(d, 90).toFixed(1)} m  mean=${(d.reduce((x, y) => x + y, 0) / d.length).toFixed(1)} m  max=${d[d.length - 1].toFixed(0)} m`;
 };
 console.log('\n── how far apart the renderings are, in meters ────────────────────');
+const PAIRS = [
+  ['modal stops   |ml-mode − ml-gbdt|   ', 'ml-mode', 'ml-gbdt'],
+  ['continuity    |ml-smooth − ml-mode| ', 'ml-smooth', 'ml-mode'],
+  ['both          |ml-smooth − ml-gbdt| ', 'ml-smooth', 'ml-gbdt'],
+  ['drive vs mode |ml-drive − ml-mode|  ', 'ml-drive', 'ml-mode'],
+  ['drive smooth  |ml-drive-smooth − ml-drive|', 'ml-drive-smooth', 'ml-drive'],
+].filter(([, a, b]) => CORE.includes(a) && CORE.includes(b));
 for (const [label, es] of [['all matched', matched], ['at_stop anchors', split.at_stop], ['moving anchors', split.moving]]) {
   if (es.length === 0) continue;
   console.log(`${label} (n=${es.length})`);
-  console.log(`   modal stops   |ml-mode − ml-gbdt|    ${dist('ml-mode', 'ml-gbdt', es)}`);
-  console.log(`   continuity    |ml-smooth − ml-mode|  ${dist('ml-smooth', 'ml-mode', es)}`);
-  console.log(`   both          |ml-smooth − ml-gbdt|  ${dist('ml-smooth', 'ml-gbdt', es)}`);
+  for (const [name, a, b] of PAIRS) console.log(`   ${name} ${dist(a, b, es)}`);
 }
