@@ -123,6 +123,27 @@ export class GeometryStore {
     }
   }
 
+  /** Cold-start pack for a set of ACTIVE trips: one geometry per distinct
+   *  shapeId plus the tripId → shapeId index (GET /api/geometry-pack).
+   *
+   *  Deduplication is by shape because that is what the client renders along —
+   *  a physics-v3 phone needs `coordinates`/`cumDistM` to turn the published
+   *  `s` into a point and a bearing, and dozens of trips run the same shape.
+   *  The representative geometry's TRIP-scoped fields (tripId, headsign,
+   *  stops[].arrivalMs/departureMs) belong to whichever trip was picked; only
+   *  the shape-scoped fields are valid for every trip in `trips`. */
+  pack(tripIds: Iterable<string>): { shapes: RouteGeometry[]; trips: Record<string, string> } {
+    const shapes = new Map<string, RouteGeometry>();
+    const trips: Record<string, string> = {};
+    for (const tripId of tripIds) {
+      const geom = this.mem.get(tripId);
+      if (!geom) continue;
+      trips[tripId] = geom.shapeId;
+      if (!shapes.has(geom.shapeId)) shapes.set(geom.shapeId, geom);
+    }
+    return { shapes: [...shapes.values()], trips };
+  }
+
   /** Daily service-day rollover: re-anchor everything in memory. */
   reanchorAll(nowMs: number): void {
     for (const [tripId, geom] of this.mem) {

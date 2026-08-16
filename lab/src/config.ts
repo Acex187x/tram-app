@@ -126,6 +126,10 @@ export const MIN_CELL_WEIGHT = 3;
 export const GEOMETRY_404_TTL_MS = 10 * 60 * 1000;
 /** Re-fetch geometry after this age (server rebuilds daily). */
 export const GEOMETRY_TTL_MS = 26 * 60 * 60 * 1000;
+/** GET /api/geometry-pack: how long a gzipped cold-start pack is reused.
+ * The active fleet's shape set barely moves minute to minute, and gzipping
+ * megabytes is the most expensive thing the lab would otherwise do. */
+export const GEOMETRY_PACK_TTL_MS = 60_000;
 
 const HOUR_FMT = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Europe/Prague',

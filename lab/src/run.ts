@@ -20,10 +20,13 @@
 //                   client's own pure evaluator (cost of modal stops)
 //   ml-smooth     — physics-v3 SMOOTH track as published (cost of continuity)
 
+import zlib from 'zlib';
+
 import type { RouteGeometry, TramSnapshot } from '@/lib/types';
 import {
   FEED_LATENCY_MS,
   FLUSH_MS,
+  GEOMETRY_PACK_TTL_MS,
   HORIZON_BUCKETS,
   POLL_MS,
   ROLLUP_MS,
@@ -500,6 +503,45 @@ export function start(): void {
     return trajV2Json;
   }
 
+  // ── GET /api/geometry-pack — cold start for clients ────────────────────────
+  // A fresh phone knows every tram's `s` from the v2 bundle within 2 s but has
+  // no shape to place it on, and fetching /geometry/:tripId per vehicle is
+  // hundreds of round trips. This is the whole ACTIVE fleet's geometry in one
+  // gzip: deduplicated by shapeId (dozens of trips share a shape) plus the
+  // tripId → shapeId index. The gzipped buffer is cached — recompressing a
+  // multi-megabyte payload per request would be the most expensive thing the
+  // lab does.
+  let packBuf: Buffer | null = null;
+  let packBuiltAtMs = 0;
+  let packMeta = { shapes: 0, trips: 0, rawBytes: 0, gzipBytes: 0, buildMs: 0 };
+
+  function getGeometryPack(): { buf: Buffer; meta: typeof packMeta; atMs: number } {
+    const nowMs = Date.now();
+    if (packBuf !== null && nowMs - packBuiltAtMs < GEOMETRY_PACK_TTL_MS) {
+      return { buf: packBuf, meta: packMeta, atMs: packBuiltAtMs };
+    }
+    const t0 = Date.now();
+    const { shapes, trips } = geometry.pack(
+      new Set([...fleet.values()].map((v) => v.tripId)),
+    );
+    const json = JSON.stringify({ atMs: nowMs, shapes, trips });
+    packBuf = zlib.gzipSync(json, { level: 9 });
+    packBuiltAtMs = nowMs;
+    packMeta = {
+      shapes: shapes.length,
+      trips: Object.keys(trips).length,
+      rawBytes: Buffer.byteLength(json),
+      gzipBytes: packBuf.length,
+      buildMs: Date.now() - t0,
+    };
+    log(
+      `geometry-pack rebuilt: ${packMeta.shapes} shapes / ${packMeta.trips} trips, ` +
+        `${(packMeta.rawBytes / 1048576).toFixed(2)} MiB raw → ` +
+        `${(packMeta.gzipBytes / 1048576).toFixed(2)} MiB gzip in ${packMeta.buildMs} ms`,
+    );
+    return { buf: packBuf, meta: packMeta, atMs: packBuiltAtMs };
+  }
+
   async function pollOnce(): Promise<void> {
     cycle++;
     const nowMs = Date.now();
@@ -699,6 +741,7 @@ export function start(): void {
     getTrajectories,
     getTrajectoriesV2,
     getVehicleDebug,
+    getGeometryPack,
     isHealthy: () => Date.now() - lastBatchAtMs < 120_000,
   });
 

@@ -14,6 +14,8 @@ export interface ServerDeps {
   getTrajectoriesV2: () => string;
   /** Published curves + recent real fixes for one vehicle (the /physics page). */
   getVehicleDebug: (key: string) => unknown;
+  /** Pre-gzipped cold-start geometry pack (cached upstream). */
+  getGeometryPack: () => { buf: Buffer; meta: unknown; atMs: number };
   isHealthy: () => boolean;
 }
 
@@ -43,6 +45,19 @@ export function startServer(deps: ServerDeps): void {
       } else if (url.startsWith('/api/vehicle/') && url.endsWith('/debug')) {
         const key = decodeURIComponent(url.slice('/api/vehicle/'.length, -'/debug'.length));
         json(200, deps.getVehicleDebug(key));
+      } else if (url === '/api/geometry-pack') {
+        // Pre-gzipped upstream and sent as-is: the body IS the cached buffer,
+        // so a fleet-wide cold start costs one compression per minute.
+        const pack = deps.getGeometryPack();
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Content-Encoding': 'gzip',
+          'Content-Length': String(pack.buf.length),
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'no-store',
+          'X-Pack-Meta': JSON.stringify(pack.meta),
+        });
+        res.end(req.method === 'HEAD' ? undefined : pack.buf);
       } else if (url === '/api/live') {
         json(200, deps.getLive());
       } else if (url === '/api/summary') {
