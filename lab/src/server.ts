@@ -12,11 +12,14 @@ export interface ServerDeps {
   getTrajectories: () => string;
   /** physics-v3 bundle (docs/research/physics-v3-protocol.md), also cached. */
   getTrajectoriesV2: () => string;
+  /** Published curves + recent real fixes for one vehicle (the /physics page). */
+  getVehicleDebug: (key: string) => unknown;
   isHealthy: () => boolean;
 }
 
 export function startServer(deps: ServerDeps): void {
   const mapHtml = fs.readFileSync(path.join(__dirname, 'static', 'map.html'));
+  const physicsHtml = fs.readFileSync(path.join(__dirname, 'static', 'physics.html'));
 
   const server = http.createServer((req, res) => {
     const url = (req.url ?? '/').split('?')[0];
@@ -34,6 +37,12 @@ export function startServer(deps: ServerDeps): void {
       if (url === '/' || url === '/index.html') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
         res.end(mapHtml);
+      } else if (url === '/physics') {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(physicsHtml);
+      } else if (url.startsWith('/api/vehicle/') && url.endsWith('/debug')) {
+        const key = decodeURIComponent(url.slice('/api/vehicle/'.length, -'/debug'.length));
+        json(200, deps.getVehicleDebug(key));
       } else if (url === '/api/live') {
         json(200, deps.getLive());
       } else if (url === '/api/summary') {

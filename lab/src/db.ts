@@ -227,6 +227,21 @@ export class Store {
     this.db.prepare('INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v').run(k, v);
   }
 
+  /** The vehicle's most recent real fixes, oldest first — ground truth for
+   *  the /physics debug page to draw the published curves against. */
+  recentFixes(key: string, limit: number): {
+    obsAtMs: number; seenAtMs: number; shapeDistM: number; statePos: string | null;
+    tripId: string; nextStopId: string | null; delayS: number | null;
+  }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT obsAtMs, seenAtMs, shapeDistM, statePos, tripId, nextStopId, delayS
+         FROM fixes WHERE key = ? ORDER BY obsAtMs DESC LIMIT ?`,
+      )
+      .all(key, limit) as never[];
+    return (rows as { obsAtMs: number }[]).reverse() as never;
+  }
+
   /** Last-hour per-variant summary for /api/summary and the map header. */
   summarySince(sinceMs: number): { variant: string; n: number; meanAbs: number; p50Abs: number; p90Abs: number }[] {
     const rows = this.db

@@ -30,10 +30,13 @@ import {
   SCORE_MAX_GAP_S,
   SCORE_MIN_GAP_S,
   TICK_MS,
+  TRAJ_A_ACC,
+  TRAJ_A_BRK,
   TRAJ_JSON_TTL_MS,
   TRAJ_ML_MAX_ROWS,
   TRAJ_POINTS,
   TRAJ_STEP_MS,
+  TRAJ_V_MAX_MS,
   horizonBucket,
 } from './config';
 import { fetchBatchesSince, fetchFullFleet, fetchHealth, type PollerHealth } from './convex';
@@ -52,6 +55,10 @@ import {
   type ModalHold,
   type V2Vehicle,
 } from './trajectory';
+
+/** The kinematic contract, echoed to debug clients so the /physics page draws
+ *  its limit lines from the server's own numbers rather than a copy. */
+const LIMITS = { vMaxMs: TRAJ_V_MAX_MS, aAccMs2: TRAJ_A_ACC, aBrkMs2: TRAJ_A_BRK };
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 // engine-live/engine-smooth are the control line "what is in users' hands".
@@ -656,11 +663,42 @@ export function start(): void {
     };
   }
 
+  /** GET /api/vehicle/:key/debug — everything the /physics page needs to draw
+   *  "how it drives": both published curves with their true knot speeds, and
+   *  the vehicle's recent REAL fixes so the model can be eyeballed against the
+   *  only ground truth there is. */
+  function getVehicleDebug(key: string): unknown {
+    const entry = trajectories.get(key);
+    const fixes = store.recentFixes(key, 10);
+    if (!entry) {
+      return { key, atMs: Date.now(), found: false, fixes, limits: LIMITS };
+    }
+    const snap = fleet.get(key);
+    return {
+      key,
+      atMs: Date.now(),
+      found: true,
+      line: entry.v2.line,
+      tripId: entry.v2.tripId,
+      anchorMs: entry.v2.anchorMs,
+      emittedAtMs: entry.v2.emittedAtMs,
+      discontinuity: entry.v2.discontinuity,
+      statePosition: snap?.statePosition ?? null,
+      opinion: { points: entry.v2.opinion, v: entry.opinionK.v },
+      smooth: { points: entry.v2.smooth, v: entry.smoothK.v },
+      /** The raw ml-gbdt TARGET positions the kinematic fit was chasing. */
+      target: entry.vehicle.points,
+      fixes,
+      limits: LIMITS,
+    };
+  }
+
   startServer({
     getLive,
     getSummary,
     getTrajectories,
     getTrajectoriesV2,
+    getVehicleDebug,
     isHealthy: () => Date.now() - lastBatchAtMs < 120_000,
   });
 
