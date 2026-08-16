@@ -89,6 +89,7 @@ import {
   FACE_TEXT_OFFSET_Y_EM,
   type BadgeAnchorMemory,
 } from '@/lib/render/featureBuilder';
+import { dimIfStale } from '@/lib/render/styleExpr';
 import type { PlannerItinerary, Viewport } from '@/lib/types';
 import { useFavoritesStore } from '@/stores/favorites';
 import { usePlannerStore } from '@/stores/planner';
@@ -165,14 +166,13 @@ const LINE_COLOR = ['case', NIGHT_LINE, Tram.night, Tram.pidRed] as unknown as s
  *
  * Pure style expression over a prop the FC already carries: zero per-frame JS
  * and zero payload growth (perf invariants #1/#5).
+ *
+ * The implementation lives in @/lib/render/styleExpr because it must fold the
+ * factor into a zoom ramp's OUTPUT stops rather than wrap the ramp: `["zoom"]`
+ * is only legal as the input of a TOP-LEVEL step/interpolate, and wrapping it
+ * made Mapbox reject these five layers outright (build 13's bare-circle trams —
+ * see that module's header). Keeping it pure is what lets a test pin it.
  */
-const STALE_DIM = 0.42;
-const STALE_FACTOR = ['case', ['==', ['get', 'stale'], 1], STALE_DIM, 1];
-
-/** Multiply an opacity expression by the stale dim factor. */
-function dimIfStale(base: unknown): number {
-  return ['*', base, STALE_FACTOR] as unknown as number;
-}
 
 // Geometry-less trams (no loaded shape yet) are excluded from the bearing-
 // rotated teardrop / capsule sprites via an inline `['!=', ['get',

@@ -69,6 +69,22 @@ interface DiskEntry {
 const memCache = new Map<string, RouteGeometry>();
 const inFlight = new Map<string, Promise<RouteGeometry>>();
 
+/**
+ * Trips whose resident geometry came from the COLD-START PACK (see
+ * lib/golemio/geometryPack), not from `GET /geometry/:tripId`.
+ *
+ * The pack dedups its shapes by shapeId, so a provisional entry carries the
+ * right polyline (position, bearing and the 3D body are correct immediately —
+ * that is the whole point: no "circles phase" on a cold start) but a SIBLING
+ * trip's stop epochs. Arrival/departure times drive arrivals, spotter and
+ * planner guidance, so a provisional entry is deliberately NOT treated as
+ * final: it renders, it is never written to disk, and the ordinary per-trip
+ * warm-up still fetches the authoritative geometry in the background and
+ * replaces it. Honest by construction — we show the tram on its line at once
+ * without ever quoting a timetable we only guessed.
+ */
+const provisional = new Set<string>();
+
 // ── Failure memory (negative cache with re-check backoff) ────────────────────
 
 /**
@@ -324,7 +340,10 @@ export async function getTripGeometry(
   signal?: AbortSignal,
 ): Promise<RouteGeometry> {
   const mem = memCache.get(tripId);
-  if (mem) return mem;
+  // A provisional (pack-seeded) entry renders, but is not the final answer —
+  // fall through to the network so its real timetable replaces the sibling
+  // trip's. Every other resident entry short-circuits as before.
+  if (mem && !provisional.has(tripId)) return mem;
   if (signal?.aborted) throw new GolemioAbortError();
 
   const existing = inFlight.get(tripId);
@@ -375,6 +394,8 @@ export async function getTripGeometry(
       );
     }
     memCache.set(tripId, geometry);
+    // Authoritative result: this trip is no longer pack-provisional.
+    provisional.delete(tripId);
     writeDisk(tripId, geometry);
     notifyLoaded();
     return geometry;
@@ -407,7 +428,9 @@ export function requestPrefetch(
 ): void {
   if (signal?.aborted) return;
   for (const tripId of tripIds) {
-    if (memCache.has(tripId)) continue;
+    // Provisional entries stay in the warm-up queue until the authoritative
+    // per-trip geometry lands (at background priority — they already render).
+    if (memCache.has(tripId) && !provisional.has(tripId)) continue;
     if (inFlight.has(tripId)) {
       // Already queued or fetching. Re-assert the still-queued scheduler
       // waiter's priority from THIS (freshest) request, matched by the trip id
@@ -434,6 +457,33 @@ export function requestPrefetch(
   }
 }
 
+/**
+ * Seed a trip's geometry from the cold-start pack without touching the network
+ * or the disk. Returns true when it was actually stored (an already-resident
+ * entry — memory or a real per-trip fetch in flight — always wins, so a late
+ * pack can never overwrite better data).
+ *
+ * Callers pass an already re-anchored RouteGeometry (geometryPack does this via
+ * the same servedToRouteGeometry the per-trip path uses).
+ */
+export function seedProvisional(tripId: string, geometry: RouteGeometry): boolean {
+  if (!isUsableGeometry(geometry)) return false;
+  if (memCache.has(tripId) || inFlight.has(tripId)) return false;
+  memCache.set(tripId, geometry);
+  provisional.add(tripId);
+  return true;
+}
+
+/** Fire the geometry-landed listeners once after a batch of seeds. */
+export function notifySeeded(): void {
+  notifyLoaded();
+}
+
+/** True while this trip's resident geometry is a pack seed, not a real fetch. */
+export function isProvisional(tripId: string): boolean {
+  return provisional.has(tripId);
+}
+
 /** Synchronously report whether a trip's geometry is loaded in memory. */
 export function has(tripId: string): boolean {
   return memCache.has(tripId);
@@ -454,4 +504,5 @@ export function clearMemoryCache(): void {
   memCache.clear();
   inFlight.clear();
   failCache.clear();
+  provisional.clear();
 }

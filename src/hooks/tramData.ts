@@ -214,6 +214,8 @@ export class TramRuntime {
   private rideActivity: (() => boolean) | null = null;
   /** Unsubscribe from the settings store (render mode mirrors positionMode). */
   private settingsUnsub: (() => void) | null = null;
+  /** The cold-start geometry pack is fetched at most once per runtime. */
+  private packAttempted = false;
 
   private frameListeners = new Set<FrameListener>();
   private uiListeners = new Set<() => void>();
@@ -322,6 +324,38 @@ export class TramRuntime {
     this.uiNotifyTimer = setInterval(() => this.bumpUi(), UI_NOTIFY_MS);
     this.feed.start();
     this.trajectories.start();
+    void this.warmGeometryPack();
+  }
+
+  /**
+   * ONE-SHOT cold-start geometry pack (lib/golemio/geometryPack): seeds the
+   * whole in-service shape set in a single request so visible trams stop being
+   * bare dots while ~180 per-trip fetches drain the rate-limit queue.
+   *
+   * Strictly additive: it runs alongside the per-trip warm-up (never instead of
+   * it), every failure — including the 404 the endpoint returns until the
+   * predictor service ships it — silently leaves today's behavior untouched,
+   * and seeded trips stay PROVISIONAL so the authoritative per-trip geometry
+   * still replaces them (see shapeCache.seedProvisional). Attempted once per
+   * runtime: a second cold start is a process restart anyway.
+   */
+  private async warmGeometryPack(): Promise<void> {
+    if (this.packAttempted) return;
+    this.packAttempted = true;
+    const gen = this.generation;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { warmFromGeometryPack } = require('@/lib/golemio/geometryPack') as typeof import('@/lib/golemio/geometryPack');
+    const seeded = await warmFromGeometryPack();
+    // Teardown while the pack was in flight: the seeds are harmless (they only
+    // populate the cache) but the ingest below must not touch a dead runtime.
+    if (gen !== this.generation || seeded === 0) return;
+    if (__DEV__) console.log(`[tram-runtime] geometry pack seeded ${seeded} trips`);
+    // Adopt immediately rather than waiting for the next poll: seeding fires
+    // the geometry-landed event too, but this makes the first paint certain.
+    if (this.lastSnapshots.length > 0) {
+      this.fleet.ingest(this.lastSnapshots, (tripId) => this.feed.getGeometry(tripId));
+    }
+    this.bumpUi();
   }
 
   /**
