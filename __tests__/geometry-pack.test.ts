@@ -185,3 +185,11 @@ describe('warmFromGeometryPack', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 });
+
+describe('provisional visibility', () => {
+  it('keeps provisional trips out of the schedule surfaces but in the raw list', () => {
+    seedFromPack(PACK, SERVICE_MIDNIGHT + 36_000_000);
+    expect(shapeCache.getAllLoaded()).toHaveLength(3); // route-network still draws them
+    expect(shapeCache.getAllAuthoritative()).toHaveLength(0); // arrivals see nothing
+  });
+});

@@ -375,6 +375,11 @@ export async function getTripGeometry(
     if (signal?.aborted) throw new GolemioAbortError(); // no cache writes after abort
     if (disk) {
       memCache.set(tripId, disk);
+      // A disk entry is this trip's OWN geometry (written by a real per-trip
+      // fetch), so it clears the pack-provisional mark just like a network
+      // result — otherwise a refined trip stays flagged and every poll
+      // re-queues it forever.
+      provisional.delete(tripId);
       notifyLoaded();
       return disk;
     }
