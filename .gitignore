@@ -57,3 +57,8 @@ __pycache__/
 # Skill-installer duplicate copies (the tracked convention is .claude/skills/)
 /agent/
 /.agents/
+
+# tram-lab (research infra)
+lab/node_modules/
+lab/.env
+lab/data/
