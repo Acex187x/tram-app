@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Tram Lab — живое сравнение предикторов</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  html,body{margin:0;height:100%;font-family:ui-monospace,Menlo,Consolas,monospace}
+  #map{position:absolute;inset:0}
+  #bar{position:absolute;z-index:1000;top:10px;left:50px;right:10px;display:flex;flex-wrap:wrap;
+       gap:6px 16px;align-items:center;background:rgba(20,19,23,.92);color:#f3e9d2;
+       padding:8px 14px;border-radius:10px;font-size:12px;line-height:1.5}
+  #bar b{color:#e6b84c;font-weight:600}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+  label{cursor:pointer;user-select:none}
+  #stats{opacity:.85}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="bar">
+  <span><b>TRAM LAB</b></span>
+  <label><input type="checkbox" id="cbFix" checked><span class="dot" style="background:#f5f5f5;border:1px solid #888"></span>фикс (реальные данные)</label>
+  <label><input type="checkbox" id="cbEng" checked><span class="dot" style="background:#e04a38"></span>engine-v2 (движок приложения)</label>
+  <label><input type="checkbox" id="cbLrn" checked><span class="dot" style="background:#e6b84c"></span>learned (обучаемый)</label>
+  <label><input type="checkbox" id="cbSm"><span class="dot" style="background:#3fa7d6"></span>smooth (кино-слой)</label>
+  <span id="stats">загрузка…</span>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+const map = L.map('map', { preferCanvas: true }).setView([50.083, 14.43], 13);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; OpenStreetMap | data: Golemio/PID',
+}).addTo(map);
+
+const layers = {
+  fix: L.layerGroup().addTo(map),
+  eng: L.layerGroup().addTo(map),
+  lrn: L.layerGroup().addTo(map),
+  sm:  L.layerGroup(),
+  link: L.layerGroup().addTo(map),
+};
+const markers = { fix: new Map(), eng: new Map(), lrn: new Map(), sm: new Map(), link: new Map() };
+
+function bindToggle(id, name) {
+  const cb = document.getElementById(id);
+  cb.addEventListener('change', () => {
+    if (cb.checked) layers[name].addTo(map); else layers[name].remove();
+  });
+}
+bindToggle('cbFix','fix'); bindToggle('cbEng','eng'); bindToggle('cbLrn','lrn'); bindToggle('cbSm','sm');
+
+const STYLE = {
+  fix: { radius: 4, color: '#777', weight: 1, fillColor: '#f5f5f5', fillOpacity: 1 },
+  eng: { radius: 4, color: '#8a2016', weight: 1, fillColor: '#e04a38', fillOpacity: 0.95 },
+  lrn: { radius: 4, color: '#8a6a1c', weight: 1, fillColor: '#e6b84c', fillOpacity: 0.95 },
+  sm:  { radius: 3, color: '#1d637f', weight: 1, fillColor: '#3fa7d6', fillOpacity: 0.9 },
+};
+
+function upsert(kind, key, lngLat, popup) {
+  if (!lngLat) { drop(kind, key); return; }
+  const ll = [lngLat[1], lngLat[0]];
+  let m = markers[kind].get(key);
+  if (!m) {
+    m = L.circleMarker(ll, STYLE[kind]).addTo(layers[kind]);
+    markers[kind].set(key, m);
+  } else m.setLatLng(ll);
+  if (popup) m.bindPopup(popup);
+}
+function drop(kind, key) {
+  const m = markers[kind].get(key);
+  if (m) { layers[kind].removeLayer(m); markers[kind].delete(key); }
+}
+function upsertLink(key, a, b) {
+  if (!a || !b) { drop('link', key); return; }
+  const pts = [[a[1], a[0]], [b[1], b[0]]];
+  let l = markers.link.get(key);
+  if (!l) {
+    l = L.polyline(pts, { color: '#e04a38', weight: 1, opacity: 0.5 }).addTo(layers.link);
+    markers.link.set(key, l);
+  } else l.setLatLngs(pts);
+}
+
+async function tickLive() {
+  try {
+    const r = await fetch('/api/live'); const d = await r.json();
+    const seen = new Set();
+    for (const v of d.vehicles) {
+      seen.add(v.key);
+      const info = `<b>${v.key}</b> · линия ${v.line}<br>возраст фикса: ${v.fixAgeS} c<br>` +
+        `fix: ${Math.round(v.fixDistM)} м` +
+        (v.engineDistM != null ? `<br>engine: ${Math.round(v.engineDistM)} м (Δ ${Math.round(v.engineDistM - v.fixDistM)})` : '') +
+        (v.learnedDistM != null ? `<br>learned: ${Math.round(v.learnedDistM)} м (Δ ${Math.round(v.learnedDistM - v.fixDistM)})` : '');
+      upsert('fix', v.key, v.fix, info);
+      upsert('eng', v.key, v.engine, info);
+      upsert('lrn', v.key, v.learned, info);
+      upsert('sm',  v.key, v.smooth, info);
+      upsertLink(v.key, v.fix, v.engine);
+    }
+    for (const kind of ['fix','eng','lrn','sm','link']) {
+      for (const key of [...markers[kind].keys()]) if (!seen.has(key)) drop(kind, key);
+    }
+  } catch (e) { /* transient */ }
+}
+
+async function tickSummary() {
+  try {
+    const r = await fetch('/api/summary'); const d = await r.json();
+    const parts = [`машин: <b>${d.fleet}</b>`, `геометрий: ${d.geometries}`];
+    for (const s of d.lastHour || []) {
+      parts.push(`${s.variant}: p50 <b>${Math.round(s.p50Abs)}</b> м / p90 ${Math.round(s.p90Abs)} м (n=${s.n})`);
+    }
+    if (d.learning) parts.push(`выучено ячеек: ${d.learning.segCells}`);
+    document.getElementById('stats').innerHTML = parts.join(' · ');
+  } catch (e) { /* transient */ }
+}
+
+setInterval(tickLive, 2000); tickLive();
+setInterval(tickSummary, 15000); tickSummary();
+</script>
+</body>
+</html>

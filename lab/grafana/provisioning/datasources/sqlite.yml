@@ -1,0 +1,9 @@
+apiVersion: 1
+datasources:
+  - name: TramLab SQLite
+    uid: tramlab-sqlite
+    type: frser-sqlite-datasource
+    access: proxy
+    isDefault: true
+    jsonData:
+      path: /data/lab.db

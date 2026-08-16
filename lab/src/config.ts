@@ -34,8 +34,25 @@ export const TRAJ_STEP_MS = 10_000;
 export const TRAJ_POINTS = 13;
 /** Max feature rows per ML inference request (chunked vehicle-aligned). */
 export const TRAJ_ML_MAX_ROWS = 2_000;
-/** Serialized-response cache: hammering the endpoint must stay free. */
+/** Serialized-response cache: hammering the endpoint must stay free. Both v1
+ * and v2 freeze their whole payload (serverNowMs included) for this window, so
+ * repeated fetches inside it are byte-identical — the cost is that a client's
+ * clock offset can be up to this much stale. */
 export const TRAJ_JSON_TTL_MS = 2_000;
+
+/** ── physics v3 (docs/research/physics-v3-protocol.md), GET /api/trajectories/v2
+ * The protocol is FROZEN; these are its numeric constants. */
+/** The smooth track must reach the opinion track within this window. */
+export const TRAJ_CONVERGE_MS = 30_000;
+/** |rendered − opinion| above this at emission ⇒ honest teleport, not a blend. */
+export const TRAJ_DISCONTINUITY_M = 150;
+/** Modal stop rule: hold at the platform while P(departed) < this. */
+export const TRAJ_MODAL_P = 0.6;
+/** Extra knot this far after the modal release, so a 10 s grid cannot smear
+ * the departure kink into a slow creep off the platform. */
+export const TRAJ_MODAL_KICK_MS = 5_000;
+/** Hard per-track keyframe cap from the protocol. */
+export const TRAJ_MAX_POINTS = 24;
 
 /** Horizon buckets for rollups (fix gap seconds → label). */
 export function horizonBucket(gapS: number): string {

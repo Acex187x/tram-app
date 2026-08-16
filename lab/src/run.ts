@@ -15,9 +15,14 @@
 //   learned-2h    — + two-hypothesis stop release (probability blend)
 //   ml-gbdt/ml-mlp— LightGBM / neural net trained nightly on the archive
 //                   (lab/ml/service.py), predicting Δs from shared features
+//   ml-mode       — physics-v3 OPINION track as PUBLISHED to phones, i.e.
+//                   ml-gbdt keyframes + the modal stop rule, evaluated by the
+//                   client's own pure evaluator (cost of modal stops)
+//   ml-smooth     — physics-v3 SMOOTH track as published (cost of continuity)
 
 import type { RouteGeometry, TramSnapshot } from '@/lib/types';
 import {
+  FEED_LATENCY_MS,
   FLUSH_MS,
   HORIZON_BUCKETS,
   POLL_MS,
@@ -38,9 +43,24 @@ import { LearnedModel } from './learned';
 import { buildMlFeatures, MlClient } from './ml';
 import { schedulePosition } from './schedule';
 import { startServer } from './server';
+import {
+  buildV2Vehicle,
+  evalTrack,
+  modalReleaseMs,
+  type ModalHold,
+  type V2Vehicle,
+} from './trajectory';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
-const { TramEngine } = require('@/lib/engine/engine') as typeof import('@/lib/engine/engine');
+// engine-live/engine-smooth are the control line "what is in users' hands".
+// physics-v3 DELETES TramEngine from the app (protocol §excision list), so the
+// lab can no longer import it from src/ — it would have gone dark mid-program
+// the moment that landed. The baseline is therefore PINNED to build 12's
+// engine, vendored verbatim under lab/vendor/engine (see lab/README.md); to
+// move the control line, replace those files with the next shipped build's.
+const { TramEngine } = require('../vendor/engine/engine') as {
+  TramEngine: import('../vendor/engine-api').FrozenTramEngineCtor;
+};
 const { getModelSpec, regNumberToModelId } =
   require('@/lib/fleet/registry') as typeof import('@/lib/fleet/registry');
 
@@ -78,7 +98,10 @@ export interface TrajectoryVehicle {
 
 interface TrajectoryEntry {
   fixObsAtMs: number;
+  /** v1 payload — the shape build-12 phones consume; NEVER change it. */
   vehicle: TrajectoryVehicle;
+  /** v2 payload — physics-v3 opinion + smooth tracks over the same ML samples. */
+  v2: V2Vehicle;
 }
 
 export interface LiveVehicle {
@@ -111,6 +134,10 @@ export function start(): void {
   let trajRefreshing = false;
   let trajJson: string | null = null;
   let trajJsonAtMs = 0;
+  let trajV2Json: string | null = null;
+  let trajV2JsonAtMs = 0;
+  /** Build time of the currently published bundle (protocol `atMs`). */
+  let trajBuiltAtMs = 0;
   let cursor: number | null = null;
   let cycle = 0;
   let lastBatchAtMs = 0;
@@ -126,6 +153,14 @@ export function start(): void {
   let gapSum = 0;
   let gapN = 0;
   let cDiscarded = 0;
+  /** v2 lifetime counters (never reset — /api/summary gauges). */
+  let trajEmissions = 0;
+  let trajDiscontinuities = 0;
+  /** Why an at-fix probe could/couldn't score the PUBLISHED v2 tracks. */
+  let probeOk = 0;
+  let probeMissing = 0;
+  let probeStaleAnchor = 0;
+  let probeTripMismatch = 0;
 
   const log = (msg: string) => console.log(`[lab ${new Date().toISOString()}] ${msg}`);
 
@@ -206,6 +241,22 @@ export function start(): void {
       for (const variant of ['learned', 'learned-fast', 'learned-2h'] as const) {
         const v = learned.predict(snap.key, nowMs, geom, variant);
         if (v !== null) preds.push({ variant, value: v });
+      }
+
+      // physics-v3: score what a PHONE IS RENDERING right now — the published
+      // v2 tracks evaluated by the client's own pure evaluator. Not recomputed,
+      // so this measures the real cost of the modal stop rule (ml-mode) and of
+      // server-owned continuity (ml-smooth) on top of ml-gbdt. Only scored when
+      // the published bundle is anchored to the SAME fix every other variant
+      // starts from, so n stays matched.
+      const pub = trajectories.get(snap.key);
+      if (!pub) probeMissing++;
+      else if (pub.v2.tripId !== prev.snap.tripId) probeTripMismatch++;
+      else if (pub.fixObsAtMs !== prev.snap.observedAtMs) probeStaleAnchor++;
+      else {
+        probeOk++;
+        preds.push({ variant: 'ml-mode', value: evalTrack(pub.v2.opinion, nowMs) });
+        preds.push({ variant: 'ml-smooth', value: evalTrack(pub.v2.smooth, nowMs) });
       }
 
       events.push({
@@ -290,7 +341,10 @@ export function start(): void {
       }
       stale.push({ key, snap: lf.snap, geom });
     }
-    if (stale.length === 0) return;
+    if (stale.length === 0) {
+      trajBuiltAtMs = tCompute; // set validated, nothing to recompute
+      return;
+    }
 
     // Chunk on VEHICLE boundaries so a failed chunk drops whole vehicles only.
     const perChunk = Math.max(1, Math.floor(TRAJ_ML_MAX_ROWS / TRAJ_POINTS));
@@ -321,6 +375,42 @@ export function start(): void {
           maxS = k === 0 ? s : Math.max(maxS, s);
           points.push({ t: tCompute + k * TRAJ_STEP_MS, s: round2(maxS) });
         }
+        // ── physics v3: opinion (+ modal stops) and smooth (+ continuity) ──
+        // The modal hold mirrors learned-2h's probability model exactly (same
+        // anchor epoch, same already-standing credit, same release Normal), so
+        // "the curve holds" and "P(departed) < 0.6" can never drift apart.
+        let modal: ModalHold | null = null;
+        if (v.snap.statePosition === 'at_stop' && v.snap.nextStopId != null) {
+          const t0Ms = v.snap.observedAtMs + FEED_LATENCY_MS;
+          const a = learned.anchorOf(v.key);
+          const standingS =
+            a && a.tripId === v.snap.tripId && a.nextStopId === v.snap.nextStopId && a.atStop
+              ? a.standingS
+              : 0;
+          const { mean, sd } = learned.releaseStats(v.snap.nextStopId, t0Ms);
+          const stopS = v.snap.shapeDistM;
+          const releaseAtMs = modalReleaseMs(t0Ms, standingS, mean, sd);
+          modal = {
+            stopS,
+            releaseAtMs,
+            walk: (tMs: number) => learned.walkFrom(stopS, releaseAtMs, tMs, v.geom),
+          };
+        }
+        const prevEntry = trajectories.get(v.key);
+        const v2 = buildV2Vehicle({
+          key: v.key,
+          tripId: v.snap.tripId,
+          line: v.snap.line,
+          anchorMs: v.snap.observedAtMs,
+          emittedAtMs: tCompute,
+          raw: points,
+          modal,
+          prev: prevEntry ? { tripId: prevEntry.v2.tripId, smooth: prevEntry.v2.smooth } : null,
+        });
+        if (v2 === null) return void trajectories.delete(v.key);
+        trajEmissions++;
+        if (v2.discontinuity) trajDiscontinuities++;
+
         trajectories.set(v.key, {
           fixObsAtMs: v.snap.observedAtMs,
           vehicle: {
@@ -330,9 +420,11 @@ export function start(): void {
             anchorMs: v.snap.observedAtMs,
             points,
           },
+          v2,
         });
       });
     }
+    trajBuiltAtMs = tCompute;
   }
 
   /** Detached refresh with an in-flight guard — never awaited by the poller. */
@@ -358,6 +450,24 @@ export function start(): void {
     });
     trajJsonAtMs = nowMs;
     return trajJson;
+  }
+
+  /** GET /api/trajectories/v2 — the physics-v3 bundle. Frozen for the same TTL
+   * as v1 INCLUDING serverNowMs, so two fetches inside the window are
+   * byte-identical (determinism gate); clients pay ≤ TRAJ_JSON_TTL_MS of clock
+   * offset for that, which the staleness field makes visible. */
+  function getTrajectoriesV2(): string {
+    const nowMs = Date.now();
+    if (trajV2Json !== null && nowMs - trajV2JsonAtMs < TRAJ_JSON_TTL_MS) return trajV2Json;
+    trajV2Json = JSON.stringify({
+      protocolVersion: 2,
+      serverNowMs: nowMs,
+      atMs: trajBuiltAtMs,
+      horizonS: ((TRAJ_POINTS - 1) * TRAJ_STEP_MS) / 1000,
+      vehicles: [...trajectories.values()].map((e) => e.v2),
+    });
+    trajV2JsonAtMs = nowMs;
+    return trajV2Json;
   }
 
   async function pollOnce(): Promise<void> {
@@ -511,6 +621,13 @@ export function start(): void {
       lastHour: store.summarySince(Date.now() - 3_600_000),
       learning: learned.gauges(),
       ml: { ready: ml.modelsReady, lastOkMs: ml.lastOkMs, lastError: ml.lastError },
+      trajectories: {
+        vehicles: trajectories.size,
+        builtAtMs: trajBuiltAtMs,
+        emissions: trajEmissions,
+        discontinuities: trajDiscontinuities,
+        probe: { ok: probeOk, missing: probeMissing, staleAnchor: probeStaleAnchor, tripMismatch: probeTripMismatch },
+      },
       horizonBuckets: HORIZON_BUCKETS,
     };
   }
@@ -519,6 +636,7 @@ export function start(): void {
     getLive,
     getSummary,
     getTrajectories,
+    getTrajectoriesV2,
     isHealthy: () => Date.now() - lastBatchAtMs < 120_000,
   });
 

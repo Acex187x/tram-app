@@ -10,6 +10,8 @@ export interface ServerDeps {
   getSummary: () => unknown;
   /** Already-serialized JSON (cached upstream) — sent verbatim. */
   getTrajectories: () => string;
+  /** physics-v3 bundle (docs/research/physics-v3-protocol.md), also cached. */
+  getTrajectoriesV2: () => string;
   isHealthy: () => boolean;
 }
 
@@ -37,7 +39,9 @@ export function startServer(deps: ServerDeps): void {
       } else if (url === '/api/summary') {
         json(200, deps.getSummary());
       } else if (url === '/api/trajectories') {
-        jsonRaw(200, deps.getTrajectories());
+        jsonRaw(200, deps.getTrajectories()); // v1 — build-12 phones; frozen
+      } else if (url === '/api/trajectories/v2') {
+        jsonRaw(200, deps.getTrajectoriesV2());
       } else if (url === '/api/mlreport') {
         try {
           const raw = fs.readFileSync('/data/models/report.json', 'utf8');

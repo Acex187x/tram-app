@@ -1,0 +1,18 @@
+{
+  "name": "tram-lab",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tram Spotter research lab: 24/7 fix archive, parallel shadow predictors (naive / engine-v2 / learned), online learning, accuracy telemetry + live map + Grafana",
+  "scripts": {
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

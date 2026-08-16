@@ -1,0 +1,121 @@
+{
+  "uid": "tram-lab-main",
+  "title": "Tram Lab — точность и обучение",
+  "tags": ["tram-lab"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "ПОЧАСОВОЙ тренд средней |ошибки|, м — сглаженный взгляд (сюда смотреть за трендами; минутные панели ниже шумят по природе)",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 9 },
+      "datasource": { "type": "frser-sqlite-datasource", "uid": "tramlab-sqlite" },
+      "fieldConfig": { "defaults": { "unit": "lengthm", "custom": { "spanNulls": true, "lineWidth": 2 } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "queryType": "table", "timeColumns": ["time"], "rawQueryText": "SELECT (atMs/3600000)*3600 AS time, ROUND(AVG(CASE WHEN variant='naive' THEN absErrM END),1) AS \"naive\", ROUND(AVG(CASE WHEN variant='schedule' THEN absErrM END),1) AS \"schedule\", ROUND(AVG(CASE WHEN variant='engine-live' THEN absErrM END),1) AS \"engine-live\", ROUND(AVG(CASE WHEN variant='learned' THEN absErrM END),1) AS \"learned\", ROUND(AVG(CASE WHEN variant='learned-fast' THEN absErrM END),1) AS \"learned-fast\", ROUND(AVG(CASE WHEN variant='learned-2h' THEN absErrM END),1) AS \"learned-2h\", ROUND(AVG(CASE WHEN variant='ml-gbdt' THEN absErrM END),1) AS \"ml-gbdt\", ROUND(AVG(CASE WHEN variant='ml-mlp' THEN absErrM END),1) AS \"ml-mlp\" FROM scores WHERE atMs BETWEEN $__from AND $__to GROUP BY atMs/3600000 ORDER BY time", "queryText": "SELECT (atMs/3600000)*3600 AS time, ROUND(AVG(CASE WHEN variant='naive' THEN absErrM END),1) AS \"naive\", ROUND(AVG(CASE WHEN variant='schedule' THEN absErrM END),1) AS \"schedule\", ROUND(AVG(CASE WHEN variant='engine-live' THEN absErrM END),1) AS \"engine-live\", ROUND(AVG(CASE WHEN variant='learned' THEN absErrM END),1) AS \"learned\", ROUND(AVG(CASE WHEN variant='learned-fast' THEN absErrM END),1) AS \"learned-fast\", ROUND(AVG(CASE WHEN variant='learned-2h' THEN absErrM END),1) AS \"learned-2h\", ROUND(AVG(CASE WHEN variant='ml-gbdt' THEN absErrM END),1) AS \"ml-gbdt\", ROUND(AVG(CASE WHEN variant='ml-mlp' THEN absErrM END),1) AS \"ml-mlp\" FROM scores WHERE atMs BETWEEN $__from AND $__to GROUP BY atMs/3600000 ORDER BY time" }
+      ]
+    },
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Средняя |ошибка|, м — все горизонты (ниже = лучше)",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 9 },
+      "datasource": { "type": "frser-sqlite-datasource", "uid": "tramlab-sqlite" },
+      "fieldConfig": { "defaults": { "unit": "lengthm", "custom": { "spanNulls": true } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "queryType": "table", "timeColumns": ["time"], "rawQueryText": "SELECT tsMin*60 AS time, MAX(CASE WHEN variant='naive' THEN meanAbs END) AS \"naive\", MAX(CASE WHEN variant='schedule' THEN meanAbs END) AS \"schedule\", MAX(CASE WHEN variant='engine-live' THEN meanAbs END) AS \"engine-live\", MAX(CASE WHEN variant='engine-smooth' THEN meanAbs END) AS \"engine-smooth\", MAX(CASE WHEN variant='learned' THEN meanAbs END) AS \"learned\", MAX(CASE WHEN variant='learned-fast' THEN meanAbs END) AS \"learned-fast\", MAX(CASE WHEN variant='learned-2h' THEN meanAbs END) AS \"learned-2h\", MAX(CASE WHEN variant='ml-gbdt' THEN meanAbs END) AS \"ml-gbdt\", MAX(CASE WHEN variant='ml-mlp' THEN meanAbs END) AS \"ml-mlp\" FROM rollup_minute WHERE hbucket='all' AND tsMin*60000 BETWEEN $__from AND $__to GROUP BY tsMin ORDER BY tsMin", "queryText": "SELECT tsMin*60 AS time, MAX(CASE WHEN variant='naive' THEN meanAbs END) AS \"naive\", MAX(CASE WHEN variant='schedule' THEN meanAbs END) AS \"schedule\", MAX(CASE WHEN variant='engine-live' THEN meanAbs END) AS \"engine-live\", MAX(CASE WHEN variant='engine-smooth' THEN meanAbs END) AS \"engine-smooth\", MAX(CASE WHEN variant='learned' THEN meanAbs END) AS \"learned\", MAX(CASE WHEN variant='learned-fast' THEN meanAbs END) AS \"learned-fast\", MAX(CASE WHEN variant='learned-2h' THEN meanAbs END) AS \"learned-2h\", MAX(CASE WHEN variant='ml-gbdt' THEN meanAbs END) AS \"ml-gbdt\", MAX(CASE WHEN variant='ml-mlp' THEN meanAbs END) AS \"ml-mlp\" FROM rollup_minute WHERE hbucket='all' AND tsMin*60000 BETWEEN $__from AND $__to GROUP BY tsMin ORDER BY tsMin" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "p90 |ошибка|, м — хвост (моменты «приложение врёт»)",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 9 },
+      "datasource": { "type": "frser-sqlite-datasource", "uid": "tramlab-sqlite" },
+      "fieldConfig": { "defaults": { "unit": "lengthm", "custom": { "spanNulls": true } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "queryType": "table", "timeColumns": ["time"], "rawQueryText": "SELECT tsMin*60 AS time, MAX(CASE WHEN variant='naive' THEN p90Abs END) AS \"naive\", MAX(CASE WHEN variant='schedule' THEN p90Abs END) AS \"schedule\", MAX(CASE WHEN variant='engine-live' THEN p90Abs END) AS \"engine-live\", MAX(CASE WHEN variant='learned' THEN p90Abs END) AS \"learned\", MAX(CASE WHEN variant='learned-fast' THEN p90Abs END) AS \"learned-fast\", MAX(CASE WHEN variant='learned-2h' THEN p90Abs END) AS \"learned-2h\", MAX(CASE WHEN variant='ml-gbdt' THEN p90Abs END) AS \"ml-gbdt\", MAX(CASE WHEN variant='ml-mlp' THEN p90Abs END) AS \"ml-mlp\" FROM rollup_minute WHERE hbucket='all' AND tsMin*60000 BETWEEN $__from AND $__to GROUP BY tsMin ORDER BY tsMin", "queryText": "SELECT tsMin*60 AS time, MAX(CASE WHEN variant='naive' THEN p90Abs END) AS \"naive\", MAX(CASE WHEN variant='schedule' THEN p90Abs END) AS \"schedule\", MAX(CASE WHEN variant='engine-live' THEN p90Abs END) AS \"engine-live\", MAX(CASE WHEN variant='learned' THEN p90Abs END) AS \"learned\", MAX(CASE WHEN variant='learned-fast' THEN p90Abs END) AS \"learned-fast\", MAX(CASE WHEN variant='learned-2h' THEN p90Abs END) AS \"learned-2h\", MAX(CASE WHEN variant='ml-gbdt' THEN p90Abs END) AS \"ml-gbdt\", MAX(CASE WHEN variant='ml-mlp' THEN p90Abs END) AS \"ml-mlp\" FROM rollup_minute WHERE hbucket='all' AND tsMin*60000 BETWEEN $__from AND $__to GROUP BY tsMin ORDER BY tsMin" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Ошибка по горизонтам предсказания (выбранный период)",
+      "gridPos": { "x": 0, "y": 9, "w": 12, "h": 9 },
+      "datasource": { "type": "frser-sqlite-datasource", "uid": "tramlab-sqlite" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        { "refId": "A", "queryType": "table", "timeColumns": [], "rawQueryText": "SELECT variant, CASE WHEN horizonS<30 THEN '1) <30s' WHEN horizonS<60 THEN '2) 30-60s' WHEN horizonS<120 THEN '3) 60-120s' ELSE '4) 120s+' END AS horizon, COUNT(*) AS n, ROUND(AVG(absErrM),1) AS mean_abs_m, ROUND(AVG(errM),1) AS bias_m FROM scores WHERE atMs BETWEEN $__from AND $__to GROUP BY variant, horizon ORDER BY horizon, mean_abs_m", "queryText": "SELECT variant, CASE WHEN horizonS<30 THEN '1) <30s' WHEN horizonS<60 THEN '2) 30-60s' WHEN horizonS<120 THEN '3) 60-120s' ELSE '4) 120s+' END AS horizon, COUNT(*) AS n, ROUND(AVG(absErrM),1) AS mean_abs_m, ROUND(AVG(errM),1) AS bias_m FROM scores WHERE atMs BETWEEN $__from AND $__to GROUP BY variant, horizon ORDER BY horizon, mean_abs_m" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Знаковая ошибка (bias), м — плюс = предсказание впереди реальности",
+      "gridPos": { "x": 12, "y": 9, "w": 12, "h": 9 },
+      "datasource": { "type": "frser-sqlite-datasource", "uid": "tramlab-sqlite" },
+      "fieldConfig": { "defaults": { "unit": "lengthm", "custom": { "spanNulls": true } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "queryType": "table", "timeColumns": ["time"], "rawQueryText": "SELECT tsMin*60 AS time, MAX(CASE WHEN variant='naive' THEN signedMean END) AS \"naive\", MAX(CASE WHEN variant='schedule' THEN signedMean END) AS \"schedule\", MAX(CASE WHEN variant='engine-live' THEN signedMean END) AS \"engine-live\", MAX(CASE WHEN variant='learned' THEN signedMean END) AS \"learned\", MAX(CASE WHEN variant='learned-fast' THEN signedMean END) AS \"learned-fast\", MAX(CASE WHEN variant='learned-2h' THEN signedMean END) AS \"learned-2h\", MAX(CASE WHEN variant='ml-gbdt' THEN signedMean END) AS \"ml-gbdt\", MAX(CASE WHEN variant='ml-mlp' THEN signedMean END) AS \"ml-mlp\" FROM rollup_minute WHERE hbucket='all' AND tsMin*60000 BETWEEN $__from AND $__to GROUP BY tsMin ORDER BY tsMin", "queryText": "SELECT tsMin*60 AS time, MAX(CASE WHEN variant='naive' THEN signedMean END) AS \"naive\", MAX(CASE WHEN variant='schedule' THEN signedMean END) AS \"schedule\", MAX(CASE WHEN variant='engine-live' THEN signedMean END) AS \"engine-live\", MAX(CASE WHEN variant='learned' THEN signedMean END) AS \"learned\", MAX(CASE WHEN variant='learned-fast' THEN signedMean END) AS \"learned-fast\", MAX(CASE WHEN variant='learned-2h' THEN signedMean END) AS \"learned-2h\", MAX(CASE WHEN variant='ml-gbdt' THEN signedMean END) AS \"ml-gbdt\", MAX(CASE WHEN variant='ml-mlp' THEN signedMean END) AS \"ml-mlp\" FROM rollup_minute WHERE hbucket='all' AND tsMin*60000 BETWEEN $__from AND $__to GROUP BY tsMin ORDER BY tsMin" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Улучшение p50 относительно naive, % (выше = лучше; ГЛАВНЫЙ график гипотез)",
+      "gridPos": { "x": 0, "y": 18, "w": 12, "h": 9 },
+      "datasource": { "type": "frser-sqlite-datasource", "uid": "tramlab-sqlite" },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": -100, "custom": { "spanNulls": true } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "queryType": "table", "timeColumns": ["time"], "rawQueryText": "SELECT time, ROUND(100.0*(nv-sc)/nv,1) AS \"schedule\", ROUND(100.0*(nv-el)/nv,1) AS \"engine-live\", ROUND(100.0*(nv-l)/nv,1) AS \"learned\", ROUND(100.0*(nv-lf)/nv,1) AS \"learned-fast\", ROUND(100.0*(nv-l2)/nv,1) AS \"learned-2h\", ROUND(100.0*(nv-g)/nv,1) AS \"ml-gbdt\", ROUND(100.0*(nv-m)/nv,1) AS \"ml-mlp\" FROM (SELECT tsMin*60 AS time, MAX(CASE WHEN variant='naive' THEN p50Abs END) AS nv, MAX(CASE WHEN variant='schedule' THEN p50Abs END) AS sc, MAX(CASE WHEN variant='engine-live' THEN p50Abs END) AS el, MAX(CASE WHEN variant='learned' THEN p50Abs END) AS l, MAX(CASE WHEN variant='learned-fast' THEN p50Abs END) AS lf, MAX(CASE WHEN variant='learned-2h' THEN p50Abs END) AS l2, MAX(CASE WHEN variant='ml-gbdt' THEN p50Abs END) AS g, MAX(CASE WHEN variant='ml-mlp' THEN p50Abs END) AS m FROM rollup_minute WHERE hbucket='all' AND tsMin*60000 BETWEEN $__from AND $__to GROUP BY tsMin) WHERE nv > 0 ORDER BY time", "queryText": "SELECT time, ROUND(100.0*(nv-sc)/nv,1) AS \"schedule\", ROUND(100.0*(nv-el)/nv,1) AS \"engine-live\", ROUND(100.0*(nv-l)/nv,1) AS \"learned\", ROUND(100.0*(nv-lf)/nv,1) AS \"learned-fast\", ROUND(100.0*(nv-l2)/nv,1) AS \"learned-2h\", ROUND(100.0*(nv-g)/nv,1) AS \"ml-gbdt\", ROUND(100.0*(nv-m)/nv,1) AS \"ml-mlp\" FROM (SELECT tsMin*60 AS time, MAX(CASE WHEN variant='naive' THEN p50Abs END) AS nv, MAX(CASE WHEN variant='schedule' THEN p50Abs END) AS sc, MAX(CASE WHEN variant='engine-live' THEN p50Abs END) AS el, MAX(CASE WHEN variant='learned' THEN p50Abs END) AS l, MAX(CASE WHEN variant='learned-fast' THEN p50Abs END) AS lf, MAX(CASE WHEN variant='learned-2h' THEN p50Abs END) AS l2, MAX(CASE WHEN variant='ml-gbdt' THEN p50Abs END) AS g, MAX(CASE WHEN variant='ml-mlp' THEN p50Abs END) AS m FROM rollup_minute WHERE hbucket='all' AND tsMin*60000 BETWEEN $__from AND $__to GROUP BY tsMin) WHERE nv > 0 ORDER BY time" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Обучение: сколько ячеек выучено (растёт с данными)",
+      "gridPos": { "x": 12, "y": 18, "w": 12, "h": 9 },
+      "datasource": { "type": "frser-sqlite-datasource", "uid": "tramlab-sqlite" },
+      "fieldConfig": { "defaults": { "custom": { "spanNulls": true } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "queryType": "table", "timeColumns": ["time"], "rawQueryText": "SELECT tsMin*60 AS time, segCells AS \"скоростные ячейки (участок×время)\", stopDwellCells AS \"стоянки остановок\", stopReleaseCells AS \"время отпускания\", paceSamples AS \"всего скоростных замеров\" FROM rollup_learning WHERE tsMin*60000 BETWEEN $__from AND $__to ORDER BY tsMin", "queryText": "SELECT tsMin*60 AS time, segCells AS \"скоростные ячейки (участок×время)\", stopDwellCells AS \"стоянки остановок\", stopReleaseCells AS \"время отпускания\", paceSamples AS \"всего скоростных замеров\" FROM rollup_learning WHERE tsMin*60000 BETWEEN $__from AND $__to ORDER BY tsMin" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Поток данных: фиксов/мин, машин, с геометрией",
+      "gridPos": { "x": 0, "y": 27, "w": 8, "h": 8 },
+      "datasource": { "type": "frser-sqlite-datasource", "uid": "tramlab-sqlite" },
+      "fieldConfig": { "defaults": { "custom": { "spanNulls": true } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "queryType": "table", "timeColumns": ["time"], "rawQueryText": "SELECT tsMin*60 AS time, fixes AS \"фиксов/мин\", vehicles AS \"машин\", withGeometry AS \"с геометрией\" FROM rollup_ingest WHERE tsMin*60000 BETWEEN $__from AND $__to ORDER BY tsMin", "queryText": "SELECT tsMin*60 AS time, fixes AS \"фиксов/мин\", vehicles AS \"машин\", withGeometry AS \"с геометрией\" FROM rollup_ingest WHERE tsMin*60000 BETWEEN $__from AND $__to ORDER BY tsMin" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Качество фида: задержка и интервал фиксов, с",
+      "gridPos": { "x": 8, "y": 27, "w": 8, "h": 8 },
+      "datasource": { "type": "frser-sqlite-datasource", "uid": "tramlab-sqlite" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "spanNulls": true } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "queryType": "table", "timeColumns": ["time"], "rawQueryText": "SELECT tsMin*60 AS time, avgLatencyS AS \"задержка доставки\", avgFixGapS AS \"интервал фиксов\" FROM rollup_ingest WHERE tsMin*60000 BETWEEN $__from AND $__to ORDER BY tsMin", "queryText": "SELECT tsMin*60 AS time, avgLatencyS AS \"задержка доставки\", avgFixGapS AS \"интервал фиксов\" FROM rollup_ingest WHERE tsMin*60000 BETWEEN $__from AND $__to ORDER BY tsMin" }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "ML: MAE на holdout по тренировкам, м (вся история)",
+      "gridPos": { "x": 16, "y": 27, "w": 8, "h": 8 },
+      "datasource": { "type": "frser-sqlite-datasource", "uid": "tramlab-sqlite" },
+      "fieldConfig": { "defaults": { "unit": "lengthm", "custom": { "spanNulls": true, "pointSize": 8, "showPoints": "always" } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "queryType": "table", "timeColumns": ["time"], "rawQueryText": "SELECT tsMin*60 AS time, MAX(CASE WHEN model='gbdt' THEN maeHoldout END) AS \"LightGBM\", MAX(CASE WHEN model='mlp' THEN maeHoldout END) AS \"нейросеть (MLP)\", MAX(CASE WHEN model='naive_ds0' THEN maeHoldout END) AS \"naive (стоит на месте)\" FROM ml_train_log GROUP BY tsMin ORDER BY tsMin", "queryText": "SELECT tsMin*60 AS time, MAX(CASE WHEN model='gbdt' THEN maeHoldout END) AS \"LightGBM\", MAX(CASE WHEN model='mlp' THEN maeHoldout END) AS \"нейросеть (MLP)\", MAX(CASE WHEN model='naive_ds0' THEN maeHoldout END) AS \"naive (стоит на месте)\" FROM ml_train_log GROUP BY tsMin ORDER BY tsMin" }
+      ]
+    }
+  ]
+}

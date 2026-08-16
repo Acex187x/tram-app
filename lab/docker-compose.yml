@@ -1,0 +1,88 @@
+# Tram Lab — research infrastructure (docs/research/prediction-architecture.md
+# phase 0): 24/7 fix archive + parallel shadow predictors + online learning +
+# accuracy telemetry, plus Grafana over the same SQLite file.
+#
+# Run from this directory:   docker compose -p tram-lab up -d
+# The repo is mounted read-only; lab node_modules live in a named volume and
+# are installed on first boot (npm ci against the committed lockfile).
+#
+# Public routes (file /etc/dokploy/traefik/dynamic/tram-lab.yml):
+#   https://tram-lab.acex.sh          → live map + /api
+#   https://tram-lab-grafana.acex.sh  → Grafana (login: admin / .env password)
+#
+# Teardown: docker compose -p tram-lab down   (+ remove the traefik file);
+# volumes tram-lab_lab-data / tram-lab_grafana-data hold the archive — keep
+# them unless you mean to delete the collected data.
+
+services:
+  lab:
+    image: node:22-bookworm
+    container_name: tram-lab
+    working_dir: /repo
+    command: bash -lc "cd /repo/lab && npm ci --no-audit --no-fund && exec ./node_modules/.bin/tsx src/main.ts"
+    environment:
+      TSX_TSCONFIG_PATH: /repo/lab/tsconfig.runtime.json
+      LAB_DB: /data/lab.db
+      LAB_PORT: "8090"
+      CONVEX_URL: http://tram-convex-backend:3210
+      SITE_URL: http://tram-convex-backend:3211
+      ML_URL: http://tram-lab-ml:8092
+    volumes:
+      - ../:/repo:ro
+      - lab-node-modules:/repo/lab/node_modules
+      - lab-data:/data
+    restart: unless-stopped
+    networks:
+      - dokploy-network
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "curl -sf http://localhost:8090/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 240s
+
+  ml:
+    image: python:3.12-slim
+    container_name: tram-lab-ml
+    working_dir: /repo/lab/ml
+    command: bash -lc "apt-get update -qq && apt-get install -y -qq libgomp1 >/dev/null && pip install --no-cache-dir -q lightgbm scikit-learn pandas joblib && exec python service.py"
+    environment:
+      LAB_DB: /data/lab.db
+      MODELS_DIR: /data/models
+      ML_PORT: "8092"
+    volumes:
+      - ../:/repo:ro
+      - lab-data:/data
+    restart: unless-stopped
+    networks:
+      - dokploy-network
+
+  grafana:
+    image: grafana/grafana-oss:11.6.3
+    container_name: tram-lab-grafana
+    environment:
+      GF_INSTALL_PLUGINS: frser-sqlite-datasource
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${LAB_GRAFANA_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SERVER_ROOT_URL: https://tram-lab-grafana.acex.sh
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - lab-data:/data
+    restart: unless-stopped
+    networks:
+      - dokploy-network
+
+volumes:
+  lab-node-modules:
+  lab-data:
+  grafana-data:
+
+networks:
+  dokploy-network:
+    external: true
