@@ -124,7 +124,8 @@ instead of the full pause:
 | work | cadence in `rideBackground` |
 |---|---|
 | Golemio poll (feed) | 10 s (`RIDE_BG_POLL_MS`, vs 5 s foreground) |
-| engine tick | 1 Hz (`RIDE_BG_TICK_MS`) — enough for the 1–2 Hz ride log |
+| trajectory bundle poll | 10 s (same constant, vs 5 s foreground) |
+| tram position evaluation | **no timer** — physics v3 evaluates the curves on demand, at the instant the ride recorder samples a tram |
 | render pushes (`frameListeners`) | **off** |
 | UI notifications (`bumpUi`, 1 Hz hooks) | **off** |
 | geometry warm-up | unchanged (needed for the ride's `gpsDist`/`lagM` fields) |
@@ -138,8 +139,8 @@ Gates that keep invariant #3 meaningful:
   the 90 min auto-stop) → `notifyRideActivity()` → immediate full `pause()`. Nothing may
   keep ticking once `isRiding()` is false.
 - Budget is minimal by construction — no Mapbox work at all (the map isn't rendered), no
-  React re-renders, one 1 Hz tick + one 10 s poll. This is the floor that keeps the ride
-  log's sim-side fields meaningful.
+  React re-renders, no tick timer at all: just the two 10 s polls. This is the floor that
+  keeps the ride log's model-side fields meaningful.
 - The background check in section C still applies to the **no-ride** case verbatim.
 
 For the no-ride full-pause path, foregrounding performs one O(n) absolute-time seek via
@@ -164,7 +165,7 @@ the first visible frame current without replaying a minute of 250 ms substeps.
   should stay `nominal`/`fair`.
 - **Background check:** background 2 min → metro/log silence, then foreground → resumes
   within one poll (the P0 regression class). With a ride recording active, background
-  activity must be exactly the `rideBackground` budget (10 s polls, 1 Hz tick, zero pushes)
+  activity must be exactly the `rideBackground` budget (10 s polls, no tick timer, zero pushes)
   and must stop entirely the moment the ride stops.
 
 Related: `docs/decisions/map-rendering.md` (rendering decisions),

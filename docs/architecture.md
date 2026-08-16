@@ -20,10 +20,10 @@ src/
     feed/calibration.ts    # TramPublicState → CalibrationRecord (field order/rounding = JSONL + API contract)
     fleet/registry.ts      # regNumberToModel(), MODEL_SPECS (sections, lengths, livery), coupled-pair heuristic
     geo/polyline.ts        # Polyline: cumulative dists, pointAt(s), bearingAt(s), curvature profile
-    engine/engine.ts       # TramEngine (pure TS, no React): ingest() + tick() + getFrame()
-    engine/speedProfile.ts # per-shape speed-limit profile from curvature + stops + zones
-    engine/tramSim.ts      # per-tram physics/state machine
-    render/featureBuilder.ts # engine frame → GeoJSON FCs (points FC + 3D sections FC), viewport culling
+    physics/evaluator.ts   # evalTrajectory(track, tMs): binary search + lerp — the whole client physics
+    physics/bundle.ts      # /api/trajectories/v2 → typed arrays, once per fetch; clock.ts = server-time offset
+    physics/fleet.ts       # curves → TramPublicState behind the seam TramEngine used to occupy
+    render/featureBuilder.ts # fleet states → GeoJSON FCs (points FC + 3D sections FC), viewport culling
   components/map/          # MapScreen composition: layers, camera controller, glass chrome
   components/ui/           # GlassPanel (guarded expo-glass-effect w/ blur fallback), badges, rows
   stores/                  # zustand: favorites (persisted), selection/follow, settings (persisted)
@@ -80,52 +80,52 @@ untouched — see `decisions/backend-plan.md`.
    timetable/AVL anchors before rendering resumes, rather than restarting at their old
    position or synchronously replaying every missed physics step.
 
-## Interpolation engine (the heart)
+## Client physics (physics v3)
 
-**v2 — one predictor, one smoother, three render modes.** The full design
-record (rationale, regime table, review-mandated requirements) is
-`docs/decisions/engine-v2.md`; gate results vs the replaced dual-controller
-engine are `docs/calibration/baselines/gate-v2.md`. The layer stack per tram:
+**One pure function over server-published curves.** The client simulates
+nothing any more: prediction, smoothing and all per-tram state live in the
+predictor service, which publishes ready-made trajectories; the app only
+evaluates them. The wire format, the continuity / modal-stop invariants the
+server must honour, and the connection-honesty table are FROZEN in
+[`research/physics-v3-protocol.md`](research/physics-v3-protocol.md) — read it
+before touching either side. `src/lib/physics/` is the whole engine:
 
 ```
-fix       (layer 0)  last raw AVL fix on the shape           → "Raw" mode
-   ↓ seeds
-predictor (layer 1)  best estimate of the REAL tram now      → "Live" mode
-   ↓ is chased by
-smoother  (layer 2)  cinematic monotonic tracker             → "Smooth" mode
+GET /api/trajectories/v2   two curves per tram, built server-side
+  ├─ smooth   continuity track, blended across emissions → default
+  └─ opinion  raw model opinion, re-anchors on each fix  → "fixed" mode
+       ↓ evaluated at Date.now() + clockOffset
+  s (meters along shape) → polyline.pointAt/bearingAt → position + bearing
 ```
 
-- **Predictor** (`tramSim.ts`): reseeds on every genuinely-new fix — seed at
-  the fix, then a **closed-form segmented advance** over the fix's true age
-  (`(now − obsAt) + FEED_LATENCY_S`), walking stop-to-stop at the learned
-  pace and spending dwells, bounded by `maxAdvanceM`. Between fixes it
-  dead-reckons at `min(cruiseCap, V_CRUISE_REF)·paceBias·tod` under the
-  braking envelope. Owns every observation-pinned hold: arrival-fix pin,
-  stuck-hold, latency-aware staleness release. **No schedule pace reference
-  anywhere** — the schedule is demoted to dwell durations, terminal semantics
-  and UI ETAs. Its `sM` jumps on reseeds (that IS live mode's honest UX);
-  jumps past the gap-aware teleport threshold stamp a render fade.
-- **Smoother** (`smoother.ts`): a thin follower whose ONLY reference is the
-  predictor — the v1 smooth/live mode-divergence class is gone structurally.
-  Regime table: hold-follow (predictor standing → close onto the hold point,
-  join its dwell), track (`vPred · clamp(1 + err/120, 0.7, 1.35)`), catch-up
-  (continuous ramp to a ceiling anchored on observed free-running pace,
-  `CATCHUP_HEADROOM 1.9`), yield (hysteresis, 3 m/s floor), teleport
-  (gap-aware snap + fade). Per-stop-index dwell sync with a 75 s doors cap;
-  skip-roll through stops reality already served; `sM` monotonic except two
-  sanctioned fades (gap teleport, terminal un-latch propagation).
-- **Speed profile** (`speedProfile.ts`): per-vertex `vLimit` = min(zone cap,
-  curve cap); braking envelope `vAllowed(s)` over limits within 400 m;
-  `A_BRK 1.4`, `A_ACC 1.3` (real-ride IMU p90); `brakeTowards()` is the one
-  brake-to-a-point primitive. Stops are `vLimit = 0` points; terminal = last
-  stop; 8.6 m/s centre-zone cap 07:00–19:00 Prague time.
-- **Engine** (`engine.ts`): owns both fleets behind the unchanged public seam
-  (`ingest()` per poll, `tick()` per frame, `getStates*`). Queue /
-  cross-shape / junction constraints run on BOTH fleets (discovered per fleet
-  at ingest, O(1)/pair per substep); trip changes swap geometry for both
-  layers atomically; `'coarse'` cadence batches the predictor at 500 ms while
-  the smoother ticks every substep against an interpolated reference; the
-  culling/render anchor is tri-state (`'smooth' | 'live' | 'raw'`).
+- **`evaluator.ts`** — `evalTrajectory(track, tMs)`: binary search + lerp over a
+  `Float64Array` of `t,s` knots, clamped at both ends, so the app can never
+  animate past the data it has. No state, no allocation (100k calls ≈ 4–10 ms).
+- **`bundle.ts`** — decodes one fetch into typed arrays once (≤ 24 knots/track);
+  nothing per frame. **`trajectoryStore.ts`** is the single network call: one
+  bundle per 5 s for the whole fleet.
+- **`clock.ts`** — `serverNowMs − Date.now()` offset (EWMA over the last 3
+  fetches). Every evaluation uses server time, which is what makes two devices
+  render the same tram in the same place at the same instant.
+- **`render.ts`** — picks the track: `smooth` (default) or `fixed`
+  («Более точное положение»). Switching is FREE — it changes which curve the
+  next evaluation reads, and nothing else.
+- **`connection.ts`** — live / degraded / offline derived from BUNDLE AGE
+  (< 15 s, 15–45 s, > 45 s), not from fetch outcomes; drives the explicit
+  offline banner and the dimmed `stale` render prop.
+- **`adapter.ts` / `fleet.ts`** — curves → `TramPublicState` behind the exact
+  seam `TramEngine` used to occupy (`ingest()` / `getStates*`), so the ~40 UI
+  consumers stayed untouched across the replacement.
+
+There is no tick loop and no per-tram state left: `TICK_MS` now only paces the
+map's push due-checks, and resuming after any suspension is correct by
+construction (evaluate at `now`) — no seek, no catch-up integration.
+
+The v2 engine — predictor (`tramSim`), smoother, `speedProfile`, the
+`paceBias`/TOD calibration surface and the client queue/junction constraints —
+is retired. Its design record and gate results survive as history in
+`decisions/engine-v2.md` and `calibration/baselines/gate-v2.md`; the physics
+they encoded now belongs to the server.
 
 Sections (articulated bending): model spec gives section lengths `L_i` and gaps. Head at `s`;
 section i center at `s − (Σ previous lengths + gaps) − L_i/2`; its position/bearing from
