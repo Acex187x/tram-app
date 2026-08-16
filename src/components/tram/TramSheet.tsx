@@ -85,12 +85,13 @@ import { SectionLabel } from '@/components/ui/Inset';
 import { LineBadge } from '@/components/ui/LineBadge';
 import { SheetContent } from '@/components/ui/SheetContent';
 import { appleScheme, TabularNums, TextScale } from '@/constants/theme';
-import { getRuntime, useLoadedGeometries, useTramState } from '@/hooks/tramData';
+import { getRuntime, useConnectionState, useLoadedGeometries, useTramState } from '@/hooks/tramData';
+import type { ConnectionState } from '@/lib/physics/connection';
 import { useNowMs } from '@/hooks/uiClock';
 import type { TramPublicState } from '@/lib/types';
 import { useFavoritesStore } from '@/stores/favorites';
 import { useSelectionStore } from '@/stores/selection';
-import { useSettingsStore } from '@/stores/settings';
+import { useSettingsStore, type PositionMode } from '@/stores/settings';
 
 /**
  * The identity portrait's side. Apple's place-card avatar band, and the size the
@@ -389,38 +390,41 @@ function TimelineMeta({
  * The position-mode honesty line — DEBUG ONLY as of this pass.
  *
  * ux-screens §8 required the card to declare its own uncertainty, and it still
- * does: this string is unchanged. What changed is who sees it. After the stats
- * band was deleted the card no longer presents ANY synthesized quantity — the
- * only thing left for this line to qualify is the MAP's dot, which is chrome
- * this card does not own, and which the user opted into in Settings. §8's hard
- * rule (never dress a simulated quantity up as a measurement) is untouched:
- * nothing simulated is surfaced here at all any more.
+ * does. Physics v3 gives it three things to be honest about:
+ *   • which of the two published curves the map is drawing;
+ *   • how far apart those curves are right now (the smooth↔fixed gap — a
+ *     genuine measurement of disagreement, not a dressed-up simulation);
+ *   • whether the position is FROZEN because the data ran out, which outranks
+ *     both — a stale dot must never be qualified as if it were live.
  */
 function HonestyLine({
   deviationM,
+  pastHorizon,
   positionMode,
+  connection,
 }: {
   deviationM: number | null | undefined;
-  positionMode: string;
+  pastHorizon: boolean | undefined;
+  positionMode: PositionMode;
+  connection: ConnectionState;
 }) {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const c = appleScheme(scheme);
   const debugMode = useSettingsStore((s) => s.debugMode);
 
-  // Four-way per engine-v2.md §2.7 (+ the experimental ml mode): raw = the fix
-  // itself, live = the engine's estimate of the real tram, ml = the research
-  // lab's prediction (labelled as the experiment it is — the deviation number
-  // would be measuring the wrong thing there), smooth = the cinematic sim
-  // (the only synthesized quantity worth quantifying against the fix).
+  // Offline/frozen wins over everything: there is no point qualifying a
+  // position that is not being updated at all.
   const text =
-    positionMode === 'raw'
-      ? 'Showing raw reported position'
-      : positionMode === 'live'
-        ? 'Showing estimated real-time position'
-        : positionMode === 'ml'
-          ? 'ML-прогноз (эксперимент)'
+    connection === 'offline'
+      ? 'Нет связи с сервером — положение устарело'
+      : pastHorizon
+        ? 'Прогноз закончился — трамвай остановлен на последней известной точке'
+        : positionMode === 'fixed'
+          ? deviationM != null
+            ? `Точное положение · ${Math.round(deviationM)} m from the smooth track`
+            : 'Точное положение (прогноз сервера)'
           : deviationM != null
-            ? `Sim offset ±${Math.round(deviationM)} m from last fix`
+            ? `Smooth track · ${Math.round(deviationM)} m from the precise position`
             : null;
 
   if (!debugMode || text == null) return null;
@@ -431,7 +435,6 @@ function HonestyLine({
         style={[styles.honestyText, { color: c.secondary }]}
         maxFontSizeMultiplier={TextScale.content}
       >
-        {text}
       </Text>
     </View>
   );
@@ -580,6 +583,7 @@ export function TramSheet({ tramKey, heightSV, onSnapsChange }: TramSheetProps) 
   );
 
   const positionMode = useSettingsStore((s) => s.positionMode);
+  const connection = useConnectionState();
   const isFavorite = useFavoritesStore((s) => s.favoriteTrams.includes(tramKey));
   const toggleTram = useFavoritesStore((s) => s.toggleTram);
 
@@ -680,7 +684,12 @@ export function TramSheet({ tramKey, heightSV, onSnapsChange }: TramSheetProps) 
             <AboutTramCard model={state.model} snapshot={state.snapshot} />
           </View>
 
-          <HonestyLine deviationM={state.deviationM} positionMode={positionMode} />
+          <HonestyLine
+            deviationM={state.deviationM}
+            pastHorizon={state.pastHorizon}
+            positionMode={positionMode}
+            connection={connection}
+          />
 
           {/* Clearance for the floating capsule, which overlays this scroll. */}
           <View style={styles.pillClearance} />

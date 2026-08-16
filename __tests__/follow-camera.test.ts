@@ -7,7 +7,9 @@ import {
   CAMERA_DEADBAND_M,
   CAMERA_GLIDE_MS,
   CAMERA_RETARGET_MS,
-  RAW_FIX_GLIDE_MS,
+  JUMP_GLIDE_MS,
+  JUMP_MIN_M,
+  isJumpTarget,
   leadTarget,
   M_PER_DEG_LAT,
   withinDeadband,
@@ -96,13 +98,32 @@ describe('leadTarget', () => {
   });
 });
 
-// Raw position mode (engine-v2.md §2.7): every actual camera send in raw mode
-// IS a fix jump (the deadband suppresses everything in between), so it glides
-// over a longer eased duration than the 170 ms steady-state overlap glide —
-// a hard snap across a ~45–95 s fix jump is unacceptable at follow zoom.
-describe('raw-mode fix-jump glide', () => {
+// Discontinuity glide (physics-v3-protocol §"Two render modes"): the «fixed»
+// curve re-anchors on every fix and the smooth one may fade-teleport once at a
+// server-flagged discontinuity. Either way the followed tram LEAPS, and a hard
+// 170 ms snap across hundreds of meters at follow zoom reads as a cut. The
+// decision is keyed on how far the target actually moved, not on the mode, so
+// a smooth-mode discontinuity is eased exactly like a fixed-mode re-anchor.
+describe('discontinuity glide', () => {
   it('is meaningfully longer than the steady-state glide, bounded by the return ease ballpark', () => {
-    expect(RAW_FIX_GLIDE_MS).toBeGreaterThan(CAMERA_GLIDE_MS * 2);
-    expect(RAW_FIX_GLIDE_MS).toBeLessThanOrEqual(1_500);
+    expect(JUMP_GLIDE_MS).toBeGreaterThan(CAMERA_GLIDE_MS * 2);
+    expect(JUMP_GLIDE_MS).toBeLessThanOrEqual(1_500);
+  });
+
+  it('does not fire without a previous send (follow just engaged)', () => {
+    expect(isJumpTarget(null, target())).toBe(false);
+  });
+
+  it('ordinary motion between retargets is not a jump', () => {
+    // ~2.2 m north — a tram at 100 km/h covers that in one 80 ms retarget.
+    const from = target();
+    const to = target({ center: [LNG, LAT + 2 / M_PER_DEG_LAT] });
+    expect(isJumpTarget(from, to)).toBe(false);
+  });
+
+  it('a re-anchor beyond JUMP_MIN_M is a jump', () => {
+    const from = target();
+    const to = target({ center: [LNG, LAT + (JUMP_MIN_M + 5) / M_PER_DEG_LAT] });
+    expect(isJumpTarget(from, to)).toBe(true);
   });
 });

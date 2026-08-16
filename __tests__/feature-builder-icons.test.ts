@@ -100,7 +100,8 @@ describe('points FC props consumed by the icon expressions', () => {
       observedPosition: [ORIGIN[0], ORIGIN[1]] as [number, number],
       observedBearing: 90,
       deviationM: 0,
-      projectedObservedDistM: 500,
+      fixedDistM: 500,
+      pastHorizon: false,
       nextStopName: null,
       nextStopEtaS: null,
       hasGeometry: true,
@@ -122,7 +123,7 @@ describe('points FC props consumed by the icon expressions', () => {
     expect(props.geometryless).toBe(0); // has geometry → drawn on-shape, not a dot
     // Payload guard: no unexpected prop creep on the 60 Hz push path.
     expect(Object.keys(props).sort()).toEqual(
-      ['bearing', 'favorite', 'geometryless', 'key', 'line', 'modelId', 'selected'].sort(),
+      ['bearing', 'favorite', 'geometryless', 'key', 'line', 'modelId', 'selected', 'stale'].sort(),
     );
   });
 });

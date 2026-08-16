@@ -69,7 +69,7 @@ function SpotterEngine({ station }: { station: SpotterStation }) {
       return;
     }
     const expected = expectedFollowRef.current;
-    if (expected !== null && getRuntime().engine.getState(expected) == null) {
+    if (expected !== null && getRuntime().fleet.getState(expected) == null) {
       // TramLayers ended the follow because the tram left the engine — drop
       // the target and let the next 1 Hz step acquire the following arrival.
       trackingRef.current = null;
@@ -97,7 +97,7 @@ function SpotterEngine({ station }: { station: SpotterStation }) {
       const key = result.tracking!.targetKey;
       expectedFollowRef.current = key;
       useSelectionStore.getState().setFollowTramKey(key);
-      const st = getRuntime().engine.getState(key);
+      const st = getRuntime().fleet.getState(key);
       if (st) getRuntime().prioritizeTrip(st.snapshot.tripId);
       // Soft tick so the window-side spotter notices the hand-off.
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft);

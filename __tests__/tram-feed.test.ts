@@ -149,15 +149,18 @@ describe('TramRuntime driven by an injected TramFeed', () => {
 
     feed.push([makeSnapshot({ shapeDistM: 300, observedAtMs: T0 })], T0);
 
-    const state = rt.engine.getState('9201', T0);
+    const state = rt.fleet.getState('9201', T0);
     expect(state).toBeDefined();
     expect(state!.hasGeometry).toBe(true);
     expect(state!.model.id).toBe('15t'); // resolved via the real fleet registry
-    // Sim anchored near the observation: the v2 predictor advances the fix by
-    // its hidden feed latency (R12, ≤ FEED_LATENCY_S × V_CRUISE_REF ≈ 35 m)
-    // and the rendered smoother trails it — near the fix either way.
-    expect(state!.simDistM).toBeGreaterThan(0);
-    expect(state!.simDistM).toBeLessThanOrEqual(300 + 36);
+    // No trajectory bundle in this test, so there is NO physics: the tram
+    // stands exactly on its last raw fix and is marked frozen. That is the
+    // honesty requirement — the client never invents motion the server did
+    // not publish.
+    expect(state!.simDistM).toBe(300);
+    expect(state!.pastHorizon).toBe(true);
+    expect(state!.simSpeedKmh).toBe(0);
+    expect(state!.deviationM).toBeNull();
     rt.release();
   });
 
@@ -166,12 +169,12 @@ describe('TramRuntime driven by an injected TramFeed', () => {
 
     feed.push([makeSnapshot({ shapeDistM: 300, observedAtMs: T0 })], T0);
     expect(feed.requested).toEqual([{ tripIds: ['trip-test'], priority: 2 }]);
-    expect(rt.engine.getState('9201', T0)!.hasGeometry).toBe(false);
+    expect(rt.fleet.getState('9201', T0)!.hasGeometry).toBe(false);
 
     // Geometry "arrives" in the cache; the nudge re-ingests without a new push.
     feed.geometries.set('trip-test', makeGeo());
     jest.advanceTimersByTime(2_500);
-    expect(rt.engine.getState('9201', Date.now())!.hasGeometry).toBe(true);
+    expect(rt.fleet.getState('9201', Date.now())!.hasGeometry).toBe(true);
     rt.release();
   });
 
@@ -180,28 +183,6 @@ describe('TramRuntime driven by an injected TramFeed', () => {
     feed.geometries.set('trip-test', makeGeo());
     feed.push([makeSnapshot({ shapeDistM: 300, observedAtMs: T0 })], T0);
     expect(feed.requested).toHaveLength(0);
-    rt.release();
-  });
-
-  it('raw-mode dirty flag: armed at start, re-armed by every ingest, consumed once', () => {
-    // engine-v2.md §2.7: raw pushes ride the existing points-push due-check
-    // gated by this ingest-set flag — a raw frame changes only when a fix (or
-    // an adopted geometry) does.
-    const { feed, rt } = setup();
-    // Starts armed so the first raw frame after mount always renders.
-    expect(rt.takeRawFrameDirty()).toBe(true);
-    expect(rt.takeRawFrameDirty()).toBe(false);
-
-    // A snapshot batch (fix update) re-arms it; consuming clears it again.
-    feed.push([makeSnapshot({ shapeDistM: 300, observedAtMs: T0 })], T0);
-    expect(rt.takeRawFrameDirty()).toBe(true);
-    expect(rt.takeRawFrameDirty()).toBe(false);
-
-    // A geometry landing re-arms it via the debounced adopt re-ingest — the
-    // raw anchor moves from the bare GPS dot onto the shape.
-    feed.loadGeometry('trip-test', makeGeo());
-    jest.advanceTimersByTime(300);
-    expect(rt.takeRawFrameDirty()).toBe(true);
     rt.release();
   });
 
@@ -357,33 +338,33 @@ describe('TramRuntime driven by an injected TramFeed', () => {
     const forTrip = feed.requested.filter((r) => r.tripIds.includes('trip-test'));
     expect(forTrip).toHaveLength(3); // one re-request per poll, none dropped
     expect(forTrip.every((r) => r.priority === 1)).toBe(true); // visible lane
-    expect(rt.engine.getState('9201', Date.now())!.hasGeometry).toBe(false);
+    expect(rt.fleet.getState('9201', Date.now())!.hasGeometry).toBe(false);
 
     // The retry finally succeeds → the debounced adopt revives the tram, no tap.
     feed.loadGeometry('trip-test', makeGeo());
     jest.advanceTimersByTime(400);
-    expect(rt.engine.getState('9201', Date.now())!.hasGeometry).toBe(true);
+    expect(rt.fleet.getState('9201', Date.now())!.hasGeometry).toBe(true);
     rt.release();
   });
 
   it('a geometry landing (feed event) re-ingests within the debounce — the sim appears with NO tap', () => {
     const { feed, rt } = setup();
     feed.push([makeSnapshot({ shapeDistM: 300, observedAtMs: T0 })], T0);
-    expect(rt.engine.getState('9201', T0)!.hasGeometry).toBe(false);
+    expect(rt.fleet.getState('9201', T0)!.hasGeometry).toBe(false);
 
     // The shape streams into the cache and the feed announces it. Well before
     // the 2.5 s nudge, and with NO prioritizeTrip (no tap), the debounced
     // geometry-adopt ingest brings the sim up — the dot comes alive by itself.
     feed.loadGeometry('trip-test', makeGeo());
     jest.advanceTimersByTime(400);
-    expect(rt.engine.getState('9201', Date.now())!.hasGeometry).toBe(true);
+    expect(rt.fleet.getState('9201', Date.now())!.hasGeometry).toBe(true);
     expect(feed.promoted).toEqual([]); // no tap was needed
     rt.release();
   });
 
   it('a burst of geometry events coalesces into one debounced ingest', () => {
     const { feed, rt } = setup();
-    const ingestSpy = jest.spyOn(rt.engine, 'ingest');
+    const ingestSpy = jest.spyOn(rt.fleet, 'ingest');
     feed.push([makeSnapshot({ tripId: 'trip-test' })], T0);
     const ingestsAfterPush = ingestSpy.mock.calls.length;
 
@@ -463,6 +444,6 @@ describe('TramRuntime driven by an injected TramFeed', () => {
     const { feed, rt } = setup();
     rt.release();
     feed.push([makeSnapshot({ shapeDistM: 300, observedAtMs: T0 })], T0);
-    expect(rt.engine.getState('9201', T0)).toBeUndefined();
+    expect(rt.fleet.getState('9201', T0)).toBeUndefined();
   });
 });

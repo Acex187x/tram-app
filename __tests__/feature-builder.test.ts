@@ -34,9 +34,10 @@ function makeState(
       : [snapshot.coordinates[0], snapshot.coordinates[1]],
     observedBearing: geo ? bearingAt(geo.coordinates, geo.cumDistM, obsDistM) : (snapshot.bearing ?? 0),
     deviationM: geo ? Math.abs(simDistM - obsDistM) : null,
-    // Default projection = the raw fix distance (a just-arrived fix); tests
-    // override it to exercise live-mode dead-reckoned anchoring.
-    projectedObservedDistM: geo ? obsDistM : null,
+    // Default «fixed» curve position = the raw fix distance (as just after a
+    // re-anchor); tests override it to exercise the smooth↔fixed comparison.
+    fixedDistM: geo ? obsDistM : null,
+    pastHorizon: false,
     nextStopName: null,
     nextStopEtaS: null,
     hasGeometry: geo !== null,
@@ -415,9 +416,12 @@ describe('planner route-only mode (lineFilter)', () => {
   });
 });
 
-describe('position mode (smooth vs live)', () => {
-  // Straight east 1 km track; the sim (s=300) has run ahead of the last
-  // reported AVL fix (shapeDistM=250).
+describe('rendered anchor is whatever the state says (mode-agnostic)', () => {
+  // Physics v3: the render mode is resolved UPSTREAM, in the physics adapter —
+  // it decides which published curve `simDistM`/`position`/`bearing` describe.
+  // The feature builder has no mode branch left at all, which is the point:
+  // switching smooth↔fixed changes the numbers arriving here, never the code
+  // path taken, so the two modes cannot drift apart in rendering.
   const geo = makeGeometry(
     [
       [0, 0],
@@ -425,19 +429,17 @@ describe('position mode (smooth vs live)', () => {
     ],
     [],
   );
-  const state = makeState('9201', geo, 300, {
-    snapshot: makeSnapshot({ key: '9201', shapeDistM: 250 }),
-  });
 
-  it("default/'smooth' anchors at the simulated position (unchanged)", () => {
-    const byDefault = buildFrame([state], WIDE, opts(geo));
-    const explicit = buildFrame([state], WIDE, opts(geo, { positionMode: 'smooth' }));
-    expect(explicit).toEqual(byDefault);
-
-    const point = byDefault.points.features[0].geometry.coordinates as [number, number];
+  it('anchors the point AND all sections at simDistM, ignoring the raw fix', () => {
+    // Fix says 250 m; the curve says 300 m. The curve wins — always.
+    const state = makeState('9201', geo, 300, {
+      snapshot: makeSnapshot({ key: '9201', shapeDistM: 250 }),
+    });
+    const frame = buildFrame([state], WIDE, opts(geo));
+    const point = frame.points.features[0].geometry.coordinates as [number, number];
     expect(haversineM(point, rightOf(metersToCoord(ORIGIN, 300, 0), 90))).toBeLessThan(0.5);
-    // Head section center at simDistM − 5.
-    const head = byDefault.sections.features[0];
+    // Head section center at simDistM − 5 (10 m sections).
+    const head = frame.sections.features[0];
     expect(
       haversineM(
         head.geometry.coordinates as [number, number],
@@ -446,233 +448,30 @@ describe('position mode (smooth vs live)', () => {
     ).toBeLessThan(1);
   });
 
-  it("'live' anchors the point AND all sections at the observed fix", () => {
-    const frame = buildFrame([state], WIDE, opts(geo, { positionMode: 'live' }));
-
-    const point = frame.points.features[0];
-    expect(
-      haversineM(
-        point.geometry.coordinates as [number, number],
-        rightOf(state.observedPosition, state.observedBearing),
-      ),
-    ).toBeLessThan(0.5);
-    expect(angularDiff(point.properties.bearing, state.observedBearing)).toBeLessThan(1);
-
-    // Sections laid back along the shape from observedDist (250): centers at
-    // 245, 234.5, 224 — same section math as smooth, just re-anchored.
-    expect(frame.sections.features).toHaveLength(3);
-    const pos = frame.sections.features.map((f) => f.geometry.coordinates as [number, number]);
-    expect(haversineM(pos[0], rightOf(metersToCoord(ORIGIN, 245, 0), 90))).toBeLessThan(1);
-    expect(haversineM(pos[1], rightOf(metersToCoord(ORIGIN, 234.5, 0), 90))).toBeLessThan(1);
-    expect(haversineM(pos[2], rightOf(metersToCoord(ORIGIN, 224, 0), 90))).toBeLessThan(1);
-  });
-
-  it("'live' clamps an out-of-range fix to the geometry end", () => {
-    const past = makeState('9201', geo, 900, {
-      snapshot: makeSnapshot({ key: '9201', shapeDistM: 5000 }),
-    });
-    const frame = buildFrame([past], WIDE, opts(geo, { positionMode: 'live' }));
-    const point = frame.points.features[0].geometry.coordinates as [number, number];
-    expect(haversineM(point, rightOf(metersToCoord(ORIGIN, 1000, 0), 90))).toBeLessThan(0.5);
-    // Head section center at totalM − 5, still on the track.
-    const head = frame.sections.features[0];
-    expect(
-      haversineM(
-        head.geometry.coordinates as [number, number],
-        rightOf(metersToCoord(ORIGIN, 995, 0), 90),
-      ),
-    ).toBeLessThan(1);
-  });
-
-  it("'live' without geometry renders ONLY a dot at the raw fix (no sections, no offset)", () => {
-    // Geometry-less trams never draw a 3D body in EITHER position mode; live
-    // mode anchors the dot at the raw fix.
-    const rawFix = metersToCoord(ORIGIN, 100, 0);
-    const raw = makeState('9201', null, 0, {
-      snapshot: makeSnapshot({ key: '9201', coordinates: rawFix, bearing: 90 }),
-      observedPosition: rawFix,
-      position: metersToCoord(ORIGIN, 50, 50),
-      bearing: 45,
-    });
-    const frame = buildFrame([raw], WIDE, opts(null, { positionMode: 'live' }));
-
-    expect(frame.sections.features).toHaveLength(0);
-    expect(frame.points.features).toHaveLength(1);
-    const point = frame.points.features[0];
-    expect(point.properties.geometryless).toBe(1);
-    expect(haversineM(point.geometry.coordinates as [number, number], rawFix)).toBeLessThan(1e-6);
-  });
-
-  it("'live' keeps the coupled trailer 14.5 m behind the observed anchor", () => {
-    const coupledState = makeState('8123', geo, 300, {
-      model: makeSpec1(),
-      snapshot: makeSnapshot({ key: '8123', shapeDistM: 250 }),
-    });
-    const frame = buildFrame(
-      [coupledState],
-      WIDE,
-      opts(geo, { positionMode: 'live', coupledPairFn: () => true }),
-    );
-    expect(frame.sections.features).toHaveLength(2);
-    const [lead, trail] = frame.sections.features;
-    // Lead center at 250 − 14.1/2, trailer 14.5 m further back.
-    expect(
-      haversineM(
-        lead.geometry.coordinates as [number, number],
-        rightOf(metersToCoord(ORIGIN, 250 - 14.1 / 2, 0), 90),
-      ),
-    ).toBeLessThan(1);
-    const d = haversineM(
-      lead.geometry.coordinates as [number, number],
-      trail.geometry.coordinates as [number, number],
-    );
-    expect(d).toBeCloseTo(COUPLED_OFFSET_M, 1);
-  });
-
-  it("'live' culls sections by the OBSERVED position", () => {
-    // Sim head far east at 900 m; observed fix back at 100 m. A viewport around
-    // x=900 must NOT render sections in live mode (the tram is drawn at 100 m).
-    const drifted = makeState('9201', geo, 900, {
-      snapshot: makeSnapshot({ key: '9201', shapeDistM: 100 }),
-    });
-    const nearSim = buildFrame([drifted], viewportM(700, -200, 1100, 200, 16), {
-      ...opts(geo),
-      positionMode: 'live',
-    });
-    expect(nearSim.sections.features).toHaveLength(0);
-    const nearObserved = buildFrame([drifted], viewportM(-100, -200, 300, 200, 16), {
-      ...opts(geo),
-      positionMode: 'live',
-    });
-    expect(nearObserved.sections.features.length).toBeGreaterThan(0);
-  });
-});
-
-describe("position mode 'raw' (engine-v2.md §2.7 — the fix itself)", () => {
-  const geo = makeGeometry(
-    [
-      [0, 0],
-      [1000, 0],
-    ],
-    [],
-  );
-
-  it('anchors point AND sections at clamp(snapshot.shapeDistM), ignoring sim and predictor', () => {
-    // Smoother at 300, predictor at 400, raw fix back at 250: raw must render
-    // 250 — never either simulated head.
+  it('culls sections by the RENDERED position, not the raw fix', () => {
+    // Rendered at 300 m; the fix is 5 km away. The viewport that CONTAINS the
+    // render keeps the body; one that contains neither (well beyond the 300 m
+    // cull margin) drops it.
     const state = makeState('9201', geo, 300, {
-      snapshot: makeSnapshot({ key: '9201', shapeDistM: 250 }),
-      projectedObservedDistM: 400,
+      snapshot: makeSnapshot({ key: '9201', shapeDistM: 5_000 }),
     });
-    const frame = buildFrame([state], WIDE, opts(geo, { positionMode: 'raw' }));
-
-    const point = frame.points.features[0];
-    expect(
-      haversineM(
-        point.geometry.coordinates as [number, number],
-        rightOf(metersToCoord(ORIGIN, 250, 0), 90),
-      ),
-    ).toBeLessThan(0.5);
-    // Bearing evaluated on the SAME shared shape at the fix distance.
-    expect(angularDiff(point.properties.bearing, 90)).toBeLessThan(1);
-
-    // Sections trail back from the FIX head: centers at 245, 234.5, 224.
-    const pos = frame.sections.features.map((f) => f.geometry.coordinates as [number, number]);
-    expect(pos).toHaveLength(3);
-    expect(haversineM(pos[0], rightOf(metersToCoord(ORIGIN, 245, 0), 90))).toBeLessThan(1);
-    expect(haversineM(pos[1], rightOf(metersToCoord(ORIGIN, 234.5, 0), 90))).toBeLessThan(1);
-    expect(haversineM(pos[2], rightOf(metersToCoord(ORIGIN, 224, 0), 90))).toBeLessThan(1);
+    const inView = buildFrame([state], viewportM(-100, -100, 500, 100, 15.0), opts(geo));
+    expect(inView.sections.features.length).toBeGreaterThan(0);
+    const outOfView = buildFrame([state], viewportM(-2_000, -100, -600, 100, 15.0), opts(geo));
+    expect(outOfView.sections.features).toHaveLength(0);
   });
 
-  it('clamps an out-of-range fix to the geometry end', () => {
-    const past = makeState('9201', geo, 900, {
-      snapshot: makeSnapshot({ key: '9201', shapeDistM: 5000 }),
-    });
-    const frame = buildFrame([past], WIDE, opts(geo, { positionMode: 'raw' }));
-    const point = frame.points.features[0].geometry.coordinates as [number, number];
-    expect(haversineM(point, rightOf(metersToCoord(ORIGIN, 1000, 0), 90))).toBeLessThan(0.5);
+  it('marks a frozen (past-horizon) tram stale on points AND sections', () => {
+    const frozen = makeState('9201', geo, 300, { pastHorizon: true });
+    const frame = buildFrame([frozen], WIDE, opts(geo));
+    expect(frame.points.features[0].properties.stale).toBe(1);
+    for (const s of frame.sections.features) expect(s.properties.stale).toBe(1);
   });
 
-  it('without geometry renders ONLY a dot at observedPosition (no sections, no offset)', () => {
-    const rawFix = metersToCoord(ORIGIN, 100, 0);
-    const state = makeState('9201', null, 0, {
-      snapshot: makeSnapshot({ key: '9201', coordinates: rawFix, bearing: 90 }),
-      observedPosition: rawFix,
-      position: metersToCoord(ORIGIN, 50, 50),
-      bearing: 45,
-    });
-    const frame = buildFrame([state], WIDE, opts(null, { positionMode: 'raw' }));
-    expect(frame.sections.features).toHaveLength(0);
-    expect(frame.points.features).toHaveLength(1);
-    const point = frame.points.features[0];
-    expect(point.properties.geometryless).toBe(1);
-    expect(haversineM(point.geometry.coordinates as [number, number], rawFix)).toBeLessThan(1e-6);
-  });
-
-  it('culls sections by the FIX position, not the sim head', () => {
-    // Sim head far east at 900 m; fix back at 100 m. A viewport around x=900
-    // must NOT render sections in raw mode (the tram is drawn at 100 m).
-    const drifted = makeState('9201', geo, 900, {
-      snapshot: makeSnapshot({ key: '9201', shapeDistM: 100 }),
-    });
-    const nearSim = buildFrame([drifted], viewportM(700, -200, 1100, 200, 16), {
-      ...opts(geo),
-      positionMode: 'raw',
-    });
-    expect(nearSim.sections.features).toHaveLength(0);
-    const nearFix = buildFrame([drifted], viewportM(-100, -200, 300, 200, 16), {
-      ...opts(geo),
-      positionMode: 'raw',
-    });
-    expect(nearFix.sections.features.length).toBeGreaterThan(0);
-  });
-});
-
-describe("'live' projected-observation anchoring", () => {
-  const geo = makeGeometry(
-    [
-      [0, 0],
-      [1000, 0],
-    ],
-    [],
-  );
-
-  it('anchors point and sections at projectedObservedDistM when it differs from the raw fix', () => {
-    // Raw fix at 250, engine dead-reckoned it forward to 400.
-    const state = makeState('9201', geo, 300, {
-      snapshot: makeSnapshot({ key: '9201', shapeDistM: 250 }),
-      projectedObservedDistM: 400,
-    });
-    const frame = buildFrame([state], WIDE, opts(geo, { positionMode: 'live' }));
-
-    const point = frame.points.features[0].geometry.coordinates as [number, number];
-    expect(haversineM(point, rightOf(metersToCoord(ORIGIN, 400, 0), 90))).toBeLessThan(0.5);
-
-    // Sections trail back from the PROJECTED head: centers at 395, 384.5, 374.
-    const pos = frame.sections.features.map((f) => f.geometry.coordinates as [number, number]);
-    expect(haversineM(pos[0], rightOf(metersToCoord(ORIGIN, 395, 0), 90))).toBeLessThan(1);
-    expect(haversineM(pos[1], rightOf(metersToCoord(ORIGIN, 384.5, 0), 90))).toBeLessThan(1);
-    expect(haversineM(pos[2], rightOf(metersToCoord(ORIGIN, 374, 0), 90))).toBeLessThan(1);
-  });
-
-  it('falls back to the raw fix distance when the projection is null', () => {
-    const state = makeState('9201', geo, 300, {
-      snapshot: makeSnapshot({ key: '9201', shapeDistM: 250 }),
-      projectedObservedDistM: null,
-    });
-    const frame = buildFrame([state], WIDE, opts(geo, { positionMode: 'live' }));
-    const point = frame.points.features[0].geometry.coordinates as [number, number];
-    expect(haversineM(point, rightOf(metersToCoord(ORIGIN, 250, 0), 90))).toBeLessThan(0.5);
-  });
-
-  it('clamps a runaway projection to the geometry end', () => {
-    const state = makeState('9201', geo, 900, {
-      snapshot: makeSnapshot({ key: '9201', shapeDistM: 950 }),
-      projectedObservedDistM: 5000,
-    });
-    const frame = buildFrame([state], WIDE, opts(geo, { positionMode: 'live' }));
-    const point = frame.points.features[0].geometry.coordinates as [number, number];
-    expect(haversineM(point, rightOf(metersToCoord(ORIGIN, 1000, 0), 90))).toBeLessThan(0.5);
+  it('a live tram is not stale', () => {
+    const frame = buildFrame([makeState('9201', geo, 300)], WIDE, opts(geo));
+    expect(frame.points.features[0].properties.stale).toBe(0);
+    for (const s of frame.sections.features) expect(s.properties.stale).toBe(0);
   });
 });
 
@@ -746,27 +545,30 @@ describe('doors open only while STANDING AT A PLATFORM (openModelKey)', () => {
     ]);
   });
 
-  it('live mode: doors follow the RENDERED (projected) head, not the smooth sim', () => {
-    // Smooth sim dwells at the 300 m stop, but the projected observation (what
-    // live mode RENDERS) is still 120 m short of it → doors must stay closed.
-    const enRoute = makeState('9201', geo, 300, {
+  it('doors follow the RENDERED head wherever the curve puts it', () => {
+    // The phase says dwell, but the RENDERED head is still 120 m short of the
+    // 300 m stop → doors must stay closed. (Physics v3 has one head, so this
+    // guards the near-stop gate rather than a live/smooth layer mismatch.)
+    const enRoute = makeState('9201', geo, 180, {
       ...atStop,
-      projectedObservedDistM: 180,
+      fixedDistM: 180,
+      pastHorizon: false,
       snapshot: makeSnapshot({ key: '9201', shapeDistM: 180 }),
     });
-    const closed = buildFrame([enRoute], WIDE, opts(geo, { positionMode: 'live' }));
+    const closed = buildFrame([enRoute], WIDE, opts(geo));
     expect(closed.sections.features.map((f) => f.properties.modelKey)).toEqual([
       '15t-a',
       '15t-b',
       '15t-c',
     ]);
-    // Projection reached the platform while the sim still dwells → doors open.
+    // The rendered head reaches the platform → doors open.
     const arrived = makeState('9201', geo, 300, {
       ...atStop,
-      projectedObservedDistM: 300,
+      fixedDistM: 300,
+      pastHorizon: false,
       snapshot: makeSnapshot({ key: '9201', shapeDistM: 300 }),
     });
-    const open = buildFrame([arrived], WIDE, opts(geo, { positionMode: 'live' }));
+    const open = buildFrame([arrived], WIDE, opts(geo));
     expect(open.sections.features.map((f) => f.properties.modelKey)).toEqual([
       '15t-a-open',
       '15t-b',
@@ -864,21 +666,19 @@ describe('fixOverlay (raw last fix + connector)', () => {
     expect(haversineM(line[1] as [number, number], metersToCoord(ORIGIN, 100, 0))).toBeLessThan(0.5);
   });
 
-  it('connects to the projected observation in live mode', () => {
-    const projected = makeState('9201', geo, 300, {
+  it('connects the raw fix to the RENDERED position even when the render is BEHIND the fix', () => {
+    // A curve holding at a stop while the AVL fix has already run ahead: the
+    // connector must still run fix → rendered head, now backwards along the
+    // shape. Physics v3 makes this ordinary rather than exceptional.
+    const behind = makeState('9201', geo, 200, {
       snapshot: makeSnapshot({ key: '9201', shapeDistM: 250 }),
-      projectedObservedDistM: 400,
     });
-    const frame = buildFrame(
-      [projected],
-      WIDE,
-      opts(geo, { selectedKey: '9201', positionMode: 'live' }),
-    );
+    const frame = buildFrame([behind], WIDE, opts(geo, { selectedKey: '9201' }));
     const line = (frame.fixOverlay.features[1].geometry as GeoJSON.LineString)
       .coordinates as [number, number][];
     expect(haversineM(line[0] as [number, number], metersToCoord(ORIGIN, 250, 0))).toBeLessThan(0.5);
     expect(
-      haversineM(line[line.length - 1] as [number, number], metersToCoord(ORIGIN, 400, 0)),
+      haversineM(line[line.length - 1] as [number, number], metersToCoord(ORIGIN, 200, 0)),
     ).toBeLessThan(0.5);
   });
 
@@ -969,15 +769,18 @@ describe('all bands share ONE rendered anchor (dots = badges = sections)', () =>
     expect(haversineM(headFromSections(frame, '9201'), marker)).toBeLessThan(1);
   });
 
-  it('live mode: every band anchors to the PROJECTED observation, not the sim', () => {
+  it('every band anchors to the SAME rendered position, wherever it is', () => {
     const vp = viewportM(-2000, -2000, 2000, 2000, 15.0);
-    // Sim at 300 m; projection (what live mode renders) at 500 m.
-    const state = makeState('9201', geo, 300, { projectedObservedDistM: 500 });
-    const frame = buildFrame([state], vp, opts(geo, { positionMode: 'live' }));
+    // The curve puts the tram at 500 m while its last raw fix says 300 m —
+    // dots, badges and 3D sections must all follow the CURVE, together.
+    const state = makeState('9201', geo, 500, {
+      snapshot: makeSnapshot({ key: '9201', shapeDistM: 300 }),
+    });
+    const frame = buildFrame([state], vp, opts(geo));
     const marker = frame.points.features[0].geometry.coordinates as LngLat;
     const projected = rightOf(metersToCoord(ORIGIN, 500, 0), 90);
     expect(haversineM(marker, projected)).toBeLessThan(0.5);
-    // Badge glued to the same projected marker.
+    // Badge glued to the same marker.
     const badge = frame.badges!.features[0].geometry as GeoJSON.Point;
     expect(haversineM(badge.coordinates as LngLat, marker)).toBeLessThan(1e-6);
     // Section head at the same projected anchor.

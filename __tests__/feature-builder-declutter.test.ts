@@ -60,7 +60,8 @@ function makeState(
     observedPosition: pointAt(geo.coordinates, geo.cumDistM, simDistM),
     observedBearing: bearingAt(geo.coordinates, geo.cumDistM, simDistM),
     deviationM: 0,
-    projectedObservedDistM: simDistM,
+    fixedDistM: simDistM,
+    pastHorizon: false,
     nextStopName: null,
     nextStopEtaS: null,
     hasGeometry: true,
@@ -475,7 +476,7 @@ describe('variable-anchor badge layout (hug the marker, never hide)', () => {
       line: '9',
       modelId: '15t',
       pos: [ORIGIN[0], ORIGIN[1]],
-      pinned: false,
+      pinned: false, stale: false,
     }));
     const feats = declutterBadges(cands, ZOOM, ORIGIN[1]) as BadgeFeature[];
     expect(feats).toHaveLength(3);
@@ -504,10 +505,14 @@ describe('badge metrics', () => {
     expect(long.halfH).toBeCloseTo(short.halfH, 6);
   });
 
-  it('point props payload did NOT grow (badges ship on their own FC)', () => {
+  it('point props payload stays minimal (badges ship on their own FC)', () => {
+    // Every prop here is either an identity the layers key off or a style
+    // discriminator. `stale` is the one physics-v3 addition — a single int per
+    // feature that lets the layers dim a FROZEN tram (connection honesty). No
+    // positions, no speeds, nothing derivable at render time.
     const frame = buildFrame([makeState('9201', geo, 300)], WIDE, opts(geo));
     expect(Object.keys(frame.points.features[0].properties).sort()).toEqual(
-      ['bearing', 'favorite', 'geometryless', 'key', 'line', 'modelId', 'selected'].sort(),
+      ['bearing', 'favorite', 'geometryless', 'key', 'line', 'modelId', 'selected', 'stale'].sort(),
     );
   });
 });

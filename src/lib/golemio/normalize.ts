@@ -13,7 +13,7 @@
 //   • coordinates → [0, 0]        teleported trams to the Gulf of Guinea,
 //   • unknown shape_dist → 0      teleported the sim to the route start,
 //   • missing origin_timestamp → Date.now()  fabricated fresh fixes and fed
-//     false pace samples into calibration/paceBias.
+//     false pace samples into the calibration records.
 // A tram without a valid distance or fix time cannot be simulated anyway;
 // per-reason counters surface through FeedStatus for the health indicator.
 

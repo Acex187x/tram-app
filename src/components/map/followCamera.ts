@@ -25,15 +25,44 @@ export const CAMERA_GLIDE_MS = 170;
 export const CAMERA_RETURN_MS = 600;
 
 /**
- * Raw-mode fix-jump glide (engine-v2.md §2.7). In raw position mode the
- * follow target is the raw AVL fix, which is stationary between fixes (the
- * deadband suppresses every retarget) and leaps tens-to-hundreds of meters
- * when one lands (~45–95 s cadence). Each actual send therefore glides over
- * this longer eased duration — a hard 170 ms snap across a fix jump is
- * unacceptable at follow zoom. Shorter than CAMERA_RETURN_MS's cross-city
- * ease; long enough that a ~100 m jump reads as motion, not a cut.
+ * Discontinuity glide. Physics v3 curves move continuously, but a followed
+ * tram can still LEAP: the «fixed» (raw model opinion) track re-anchors on
+ * every fix, and even the smooth track may fade-teleport once at a
+ * server-flagged `discontinuity` (trip change, >150 m model break). A hard
+ * 170 ms snap across such a jump is unacceptable at follow zoom, so any
+ * retarget that moves the camera more than JUMP_MIN_M glides over this longer
+ * eased duration instead. Shorter than CAMERA_RETURN_MS's cross-city ease;
+ * long enough that a ~100 m jump reads as motion, not a cut.
+ *
+ * Keyed on what actually HAPPENED (how far the target moved), not on which
+ * mode is selected — so a smooth-mode discontinuity is eased too.
  */
-export const RAW_FIX_GLIDE_MS = 800;
+export const JUMP_GLIDE_MS = 800;
+/** Target movement between sends that counts as a jump rather than motion, m. */
+export const JUMP_MIN_M = 40;
+
+/** Squared ground distance between two camera targets, m². */
+function centerDist2M(prev: FollowCameraTarget, next: FollowCameraTarget): number {
+  const dLatM = (next.center[1] - prev.center[1]) * M_PER_DEG_LAT;
+  const dLngM =
+    (next.center[0] - prev.center[0]) *
+    M_PER_DEG_LAT *
+    Math.cos((prev.center[1] * Math.PI) / 180);
+  return dLatM * dLatM + dLngM * dLngM;
+}
+
+/**
+ * True when this retarget is a JUMP (a re-anchor or a flagged discontinuity)
+ * rather than ordinary motion, and should therefore be eased over
+ * JUMP_GLIDE_MS. With no previous send there is nothing to jump from.
+ */
+export function isJumpTarget(
+  prev: FollowCameraTarget | null,
+  next: FollowCameraTarget,
+): boolean {
+  if (!prev) return false;
+  return centerDist2M(prev, next) > JUMP_MIN_M * JUMP_MIN_M;
+}
 
 /**
  * Stationary-target deadband (project-review P2 "follow camera never idles on
@@ -134,10 +163,5 @@ export function withinDeadband(prev: FollowCameraTarget, next: FollowCameraTarge
   if (next.zoom !== prev.zoom || next.pitch !== prev.pitch) return false;
   const rawDeg = Math.abs(next.heading - prev.heading) % 360;
   if (Math.min(rawDeg, 360 - rawDeg) >= CAMERA_DEADBAND_DEG) return false;
-  const dLatM = (next.center[1] - prev.center[1]) * M_PER_DEG_LAT;
-  const dLngM =
-    (next.center[0] - prev.center[0]) *
-    M_PER_DEG_LAT *
-    Math.cos((prev.center[1] * Math.PI) / 180);
-  return dLatM * dLatM + dLngM * dLngM < CAMERA_DEADBAND_M * CAMERA_DEADBAND_M;
+  return centerDist2M(prev, next) < CAMERA_DEADBAND_M * CAMERA_DEADBAND_M;
 }

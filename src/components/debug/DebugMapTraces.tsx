@@ -1,9 +1,16 @@
-// In-world simulation diagnostics for one selected/followed tram.
+// In-world physics diagnostics for one selected/followed tram — THE comparison
+// mechanism (docs/research/physics-v3-protocol.md §"Two render modes": the
+// harness that lets smooth be visibly beaten by fixed, or not).
 //
-// The three positions are intentionally visible at the same time:
-//   FIX    magenta — latest AVL coordinate received from the feed;
-//   LIVE   lime    — that fix advanced by the projection simulation;
-//   SMOOTH cyan    — the main physics simulation shown in smooth mode.
+// Three positions, always visible together:
+//   FIX    magenta — the latest raw AVL coordinate received from the feed;
+//   FIXED  lime    — the server's raw model OPINION curve («более точное
+//                    положение») evaluated now;
+//   SMOOTH cyan    — the server's continuity curve evaluated now.
+//
+// Both curves are evaluated at the SAME server-corrected instant, so the white
+// dashed connector between them is exactly `deviationM` — the number the tram
+// sheet and the debug overlay report, drawn to scale on the map.
 //
 // Histories are sampled at 10 Hz and retained for 20 seconds. They are pushed
 // through ShapeSource.updateShape, never a declarative shape prop, so enabling
@@ -23,7 +30,9 @@ const TRACE_MS = 20_000;
 const MOVE_EPSILON_M = 0.25;
 
 const FIX = '#FF4FA3';
-const LIVE = '#B7FF4A';
+/** The «fixed» (raw model opinion) curve. */
+const FIXED = '#B7FF4A';
+/** The «smooth» (continuity) curve. */
 const SMOOTH = '#4DDBFF';
 
 interface TracePoint {
@@ -35,7 +44,7 @@ interface TraceHistory {
   key: string | null;
   fixAtMs: number;
   fix: TracePoint[];
-  live: TracePoint[];
+  fixed: TracePoint[];
   smooth: TracePoint[];
 }
 
@@ -51,7 +60,7 @@ function appendTrace(trace: TracePoint[], coordinate: LngLat, nowMs: number): vo
 function pointFeature(
   id: string,
   coordinate: LngLat,
-  role: 'fix' | 'live' | 'smooth',
+  role: 'fix' | 'fixed' | 'smooth',
   label: string,
   active: boolean,
 ): GeoJSON.Feature<GeoJSON.Point> {
@@ -66,7 +75,7 @@ function pointFeature(
 function lineFeature(
   id: string,
   coordinates: LngLat[],
-  role: 'fix' | 'live' | 'smooth' | 'delta',
+  role: 'fix' | 'fixed' | 'smooth' | 'delta',
 ): GeoJSON.Feature<GeoJSON.LineString> | null {
   if (coordinates.length < 2) return null;
   return {
@@ -79,33 +88,33 @@ function lineFeature(
 
 function makeFrame(
   history: TraceHistory,
-  positions: { fix: LngLat; live: LngLat; smooth: LngLat },
+  positions: { fix: LngLat; fixed: LngLat; smooth: LngLat },
   fixAgeS: number,
-  activeMode: 'smooth' | 'live' | 'raw' | 'ml',
+  deltaM: number | null,
+  activeMode: 'smooth' | 'fixed',
 ): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
   const traces = [
     lineFeature('debug-fix-trace', history.fix.map((p) => p.coordinate), 'fix'),
-    lineFeature('debug-live-trace', history.live.map((p) => p.coordinate), 'live'),
+    lineFeature('debug-fixed-trace', history.fixed.map((p) => p.coordinate), 'fixed'),
     lineFeature('debug-smooth-trace', history.smooth.map((p) => p.coordinate), 'smooth'),
-    lineFeature('debug-delta', [positions.live, positions.smooth], 'delta'),
+    // The connector IS the smooth↔fixed delta, drawn to scale.
+    lineFeature('debug-delta', [positions.fixed, positions.smooth], 'delta'),
   ];
   for (const trace of traces) if (trace) features.push(trace);
 
+  // Exactly one dot is ACTIVE: the curve the map is actually drawing. The FIX
+  // dot is never active — physics v3 has no render mode that shows the raw
+  // fix, so marking it would claim something untrue.
   features.push(
-    // The FIX dot is the ACTIVE marker in raw position mode — raw renders the
-    // last reported AVL coordinate itself (engine-v2.md §2.7). In the
-    // experimental 'ml' mode NO dot is marked active on purpose: the map's
-    // marker is then the lab's trajectory position, which is none of these
-    // three engine layers, and claiming one of them would be a lie.
+    pointFeature('debug-fix', positions.fix, 'fix', `FIX · ${fixAgeS.toFixed(1)}s`, false),
     pointFeature(
-      'debug-fix',
-      positions.fix,
-      'fix',
-      `FIX · ${fixAgeS.toFixed(1)}s`,
-      activeMode === 'raw',
+      'debug-fixed',
+      positions.fixed,
+      'fixed',
+      deltaM == null ? 'FIXED' : `FIXED · ${deltaM.toFixed(1)}m`,
+      activeMode === 'fixed',
     ),
-    pointFeature('debug-live', positions.live, 'live', 'LIVE', activeMode === 'live'),
     pointFeature('debug-smooth', positions.smooth, 'smooth', 'SMOOTH', activeMode === 'smooth'),
   );
   return { type: 'FeatureCollection', features };
@@ -121,14 +130,14 @@ export function DebugMapTraces() {
     key: null,
     fixAtMs: 0,
     fix: [],
-    live: [],
+    fixed: [],
     smooth: [],
   });
 
   useEffect(() => {
     const runtime = getRuntime();
     if (!key) {
-      historyRef.current = { key: null, fixAtMs: 0, fix: [], live: [], smooth: [] };
+      historyRef.current = { key: null, fixAtMs: 0, fix: [], fixed: [], smooth: [] };
       void sourceRef.current?.updateShape({ type: 'FeatureCollection', features: [] });
       return;
     }
@@ -137,31 +146,31 @@ export function DebugMapTraces() {
     const push = (nowMs: number) => {
       if (nowMs - lastSampleMs < SAMPLE_MS) return;
       lastSampleMs = nowMs;
-      const state = runtime.engine.getState(key, nowMs);
+      // Read the SMOOTH state explicitly (not whichever mode is selected), so
+      // both curves are always sampled and the comparison never depends on the
+      // user's current setting: simDistM is then the smooth curve and
+      // fixedDistM its opinion partner, evaluated at the same instant.
+      const state = runtime.fleet.getState(key, nowMs, 'smooth');
       if (!state) return;
       const history = historyRef.current;
       if (history.key !== key) {
         history.key = key;
         history.fixAtMs = 0;
         history.fix = [];
-        history.live = [];
+        history.fixed = [];
         history.smooth = [];
       }
 
-      const geometry = runtime.engine.getGeometry(key);
+      const geometry = runtime.fleet.getGeometry(key);
       const smooth: LngLat = state.position;
-      let live: LngLat = state.observedPosition;
-      if (geometry && state.projectedObservedDistM != null) {
-        live = pointAt(
-          geometry.coordinates,
-          geometry.cumDistM,
-          state.projectedObservedDistM,
-        );
-      }
+      const fixed: LngLat =
+        geometry && state.fixedDistM != null
+          ? pointAt(geometry.coordinates, geometry.cumDistM, state.fixedDistM)
+          : state.observedPosition;
       const fix: LngLat = [state.snapshot.coordinates[0], state.snapshot.coordinates[1]];
 
       appendTrace(history.smooth, smooth, nowMs);
-      appendTrace(history.live, live, nowMs);
+      appendTrace(history.fixed, fixed, nowMs);
       if (history.fixAtMs !== state.snapshot.observedAtMs) {
         history.fixAtMs = state.snapshot.observedAtMs;
         appendTrace(history.fix, fix, nowMs);
@@ -169,8 +178,9 @@ export function DebugMapTraces() {
 
       const frame = makeFrame(
         history,
-        { fix, live, smooth },
+        { fix, fixed, smooth },
         Math.max(0, nowMs - state.snapshot.observedAtMs) / 1_000,
+        state.deviationM,
         positionMode,
       );
       void sourceRef.current?.updateShape(frame);
@@ -191,7 +201,7 @@ export function DebugMapTraces() {
             'match',
             ['get', 'role'],
             'fix', FIX,
-            'live', LIVE,
+            'fixed', FIXED,
             SMOOTH,
           ] as unknown as string,
           lineOpacity: 0.72,
@@ -218,7 +228,7 @@ export function DebugMapTraces() {
             'match',
             ['get', 'role'],
             'fix', FIX,
-            'live', LIVE,
+            'fixed', FIXED,
             SMOOTH,
           ] as unknown as string,
           circleOpacity: 0.22,
@@ -227,7 +237,7 @@ export function DebugMapTraces() {
             'match',
             ['get', 'role'],
             'fix', FIX,
-            'live', LIVE,
+            'fixed', FIXED,
             SMOOTH,
           ] as unknown as string,
           circleStrokeOpacity: 0.9,
@@ -246,7 +256,7 @@ export function DebugMapTraces() {
             'match',
             ['get', 'role'],
             'fix', FIX,
-            'live', LIVE,
+            'fixed', FIXED,
             SMOOTH,
           ] as unknown as string,
           circleStrokeWidth: 3,

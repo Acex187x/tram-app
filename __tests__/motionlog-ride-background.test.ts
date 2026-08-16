@@ -5,8 +5,9 @@
 // recording active must NOT fully pause the runtime (the ride log would
 // correlate against a frozen sim), but the exception is gated strictly on an
 // active recording:
-//   • background + riding      → rideBackground (slow feed poll, 1 Hz tick,
-//                                 zero render pushes / UI notifications)
+//   • background + riding      → rideBackground (both data sources poll at the
+//                                 slow cadence; zero frame timer, zero render
+//                                 pushes, zero UI notifications)
 //   • background + NOT riding  → full pause (invariant #3 intact, verbatim)
 //   • ride stops in background → immediate full pause
 //   • foreground               → full resume
@@ -45,7 +46,7 @@ class FakeFeed implements TramFeed {
 interface RuntimePrivate {
   refCount: number;
   runMode: 'paused' | 'active' | 'rideBackground';
-  tickTimer: unknown;
+  frameTimer: unknown;
   uiNotifyTimer: unknown;
   resume(): void;
   onAppState(status: string): void;
@@ -75,7 +76,7 @@ describe('TramRuntime rideBackground transitions', () => {
     p.onAppState('background');
     expect(p.runMode).toBe('paused');
     expect(feed.running).toBe(false);
-    expect(p.tickTimer).toBeNull();
+    expect(p.frameTimer).toBeNull();
     expect(p.uiNotifyTimer).toBeNull();
 
     // Absolutely nothing ticks afterwards.
@@ -85,7 +86,7 @@ describe('TramRuntime rideBackground transitions', () => {
     expect(frames).toHaveLength(0);
   });
 
-  it('backgrounding WITH a ride enters rideBackground: slow feed poll, tick alive, no frame pushes', () => {
+  it('backgrounding WITH a ride enters rideBackground: slow feed poll, no frame pushes', () => {
     jest.useFakeTimers();
     const { rt, p, feed } = makeRuntime(() => true);
     p.resume();
@@ -96,10 +97,13 @@ describe('TramRuntime rideBackground transitions', () => {
 
     p.onAppState('background');
     expect(p.runMode).toBe('rideBackground');
-    // Feed restarted on the slow ride-background cadence, engine tick alive.
+    // Feed restarted on the slow ride-background cadence. There is NO frame
+    // timer any more: the ride recorder reads state on demand, and a stateless
+    // evaluator is correct whenever it is asked (strictly less work than the
+    // old 1 Hz engine tick this mode used to need).
     expect(feed.running).toBe(true);
     expect(feed.startCalls).toEqual([undefined, RIDE_BG_POLL_MS]);
-    expect(p.tickTimer).not.toBeNull();
+    expect(p.frameTimer).toBeNull();
     // The UI notifier is off and render pushes NEVER fire in rideBackground.
     expect(p.uiNotifyTimer).toBeNull();
     jest.advanceTimersByTime(5_000);
@@ -119,7 +123,7 @@ describe('TramRuntime rideBackground transitions', () => {
     rt.notifyRideActivity();
     expect(p.runMode).toBe('paused');
     expect(feed.running).toBe(false);
-    expect(p.tickTimer).toBeNull();
+    expect(p.frameTimer).toBeNull();
   });
 
   it('notifyRideActivity while still riding does NOT pause rideBackground', () => {
@@ -158,45 +162,55 @@ describe('TramRuntime rideBackground transitions', () => {
   });
 });
 
-describe('engine tick clock across mode transitions (audit P0)', () => {
-  it('every transition resets the engine clock and a full pause resyncs on foreground', () => {
+// Physics v3 deleted the whole "engine clock across transitions" problem: the
+// evaluator is stateless, so a suspension leaves nothing to reconcile — there
+// is no clock to reset and no seek to perform. What must still hold is that
+// both data sources follow the mode, and that rideBackground runs NO frame
+// timer at all (a strictly smaller budget than the old 1 Hz tick).
+describe('data sources follow the run mode', () => {
+  it('rideBackground polls the feed AND trajectories at the slow cadence', () => {
     jest.useFakeTimers();
-    let riding = true;
-    const { rt, p } = makeRuntime(() => riding);
-    const resets = jest.spyOn(rt.engine, 'resetClock');
-    const resyncs = jest.spyOn(rt.engine, 'resyncAfterSuspension');
+    const { rt, p, feed } = makeRuntime(() => true);
+    const trajStart = jest.spyOn(rt.trajectories, 'start');
+    const trajStop = jest.spyOn(rt.trajectories, 'stop');
 
     p.resume();
-    expect(resets).toHaveBeenCalledTimes(0); // cold start: nothing to reset yet
+    expect(feed.startCalls).toEqual([undefined]);
+    expect(trajStart).toHaveBeenLastCalledWith();
 
-    p.onAppState('background'); // active → rideBackground (halt + slow timers)
-    expect(resets).toHaveBeenCalledTimes(1);
-
-    p.onAppState('active'); // rideBackground → active
-    expect(resets).toHaveBeenCalledTimes(2);
-    expect(resyncs).toHaveBeenCalledTimes(0); // the 1 Hz background sim stayed current
-
-    p.onAppState('background'); // → rideBackground again…
-    riding = false;
-    rt.notifyRideActivity(); // …ride stops in background → full pause
-    expect(resets).toHaveBeenCalledTimes(4);
-
-    p.onAppState('active');
-    expect(resyncs).toHaveBeenCalledTimes(1);
-    // Full suspension is reconciled from absolute wall-clock anchors once;
-    // no minute-long physics loop is replayed (engine-substep covers seeking).
+    p.onAppState('background');
+    expect(p.runMode).toBe('rideBackground');
+    expect(trajStop).toHaveBeenCalled();
+    expect(trajStart).toHaveBeenLastCalledWith(RIDE_BG_POLL_MS);
+    expect(feed.startCalls).toEqual([undefined, RIDE_BG_POLL_MS]);
   });
 
-  it('rideBackground ticks the engine at 1 Hz with real timestamps (substep integration input)', () => {
+  it('rideBackground runs no frame timer — nothing renders while backgrounded', () => {
     jest.useFakeTimers();
     const { rt, p } = makeRuntime(() => true);
+    let frames = 0;
+    rt.subscribeFrame(() => {
+      frames += 1;
+    });
+
+    p.resume();
+    jest.advanceTimersByTime(1_000);
+    expect(frames).toBeGreaterThan(0);
+
+    const beforeBg = frames;
+    p.onAppState('background');
+    expect(p.frameTimer).toBeNull();
+    jest.advanceTimersByTime(10_000);
+    expect(frames).toBe(beforeBg);
+  });
+
+  it('a full pause stops trajectories too (invariant #3: no polling in background)', () => {
+    jest.useFakeTimers();
+    const { rt, p } = makeRuntime(() => false);
+    const trajStop = jest.spyOn(rt.trajectories, 'stop');
     p.resume();
     p.onAppState('background');
-    const ticks = jest.spyOn(rt.engine, 'tick');
-    jest.advanceTimersByTime(5_000);
-    // One engine tick per RIDE_BG_TICK_MS: the engine now substeps each 1 s
-    // interval internally (4 × 250 ms), so this cadence advances the sim at
-    // true wall-clock rate — the old dt clamp made it 4× slow (the P0 bug).
-    expect(ticks).toHaveBeenCalledTimes(5);
+    expect(p.runMode).toBe('paused');
+    expect(trajStop).toHaveBeenCalled();
   });
 });

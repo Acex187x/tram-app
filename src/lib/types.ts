@@ -1,5 +1,5 @@
 // Shared contracts for Tram Spotter. Single source of truth — every module
-// (golemio client, engine, renderer, UI) imports from here. Keep pure types.
+// (golemio client, physics, renderer, UI) imports from here. Keep pure types.
 
 /** Tram model families in active Prague service (+ historic fallback). */
 export type TramModelId = 't3' | 't3rp' | 't3rplf' | 'kt8d5' | '14t' | '15t' | '52t';
@@ -101,14 +101,25 @@ export interface RouteGeometry {
 
 export type ZoomMode = 1 | 2 | 3 | 4;
 
-/** Per-tram public state for UI (detail sheet, lists). */
+/**
+ * Per-tram public state for UI (detail sheet, lists) and rendering.
+ *
+ * Physics v3: every field below is a PURE function of (snapshot, the server's
+ * published curves, trip geometry, the server-corrected instant) — see
+ * `src/lib/physics/adapter.ts`. Nothing here is integrated, remembered or
+ * controller-derived, so two devices produce identical values for the same
+ * bundle at the same wall-clock instant.
+ */
 export interface TramPublicState {
   key: string;
   snapshot: TramSnapshot;
   model: TramModelSpec;
-  /** Simulated distance along shape, m. */
+  /** Rendered distance along shape in the ACTIVE render mode, m. */
   simDistM: number;
-  /** Simulated speed, km/h. */
+  /**
+   * Rendered speed, km/h — the central finite difference of the rendered curve
+   * over ±0.5 s. It is what the tram is drawn moving at, not a modelled pace.
+   */
   simSpeedKmh: number;
   position: [number, number];
   bearing: number;
@@ -117,110 +128,93 @@ export interface TramPublicState {
   observedPosition: [number, number];
   /** Bearing at the observed position (shape tangent; falls back to AVL bearing). */
   observedBearing: number;
-  /** Distance between simulated and observed positions, meters (null w/o geometry). */
+  /**
+   * |smooth − fixed| at this instant, meters — the distance between the
+   * continuity curve and the model's raw opinion. THE comparison metric of the
+   * two render modes. Null when the vehicle has no server trajectory.
+   */
   deviationM: number | null;
   /**
-   * Last observation dead-reckoned forward to `now` by the physics engine
-   * (anchored strictly to the fix — jumps when a new fix arrives). Along-shape
-   * meters; null without geometry. Drives 'live' position mode rendering.
+   * The opinion («fixed» mode) curve's distance along shape, m — the partner
+   * of `simDistM` for the smooth↔fixed comparison. Null without a trajectory.
    */
-  projectedObservedDistM: number | null;
-  /** Next stop name + eta if geometry known. */
+  fixedDistM: number | null;
+  /**
+   * True when the rendered position is FROZEN rather than animating: the
+   * instant is past the curve's last keyframe, or the vehicle has no
+   * trajectory at all and is standing on its last raw fix. The map dims these
+   * trams — the client never animates beyond the data it was given.
+   */
+  pastHorizon: boolean;
+  /** Next stop name + eta if geometry known (eta null past the horizon). */
   nextStopName: string | null;
   nextStopEtaS: number | null;
   hasGeometry: boolean;
-  /**
-   * Learned per-tram pace multiplier (recency-weighted EWMA of real vs
-   * profile-expected inter-fix speed; 1 = profile pace). Undefined without a
-   * sim (no geometry). Optional/additive — telemetry + diagnostics only.
-   */
-  paceBias?: number;
 }
 
 /**
- * Additive, on-demand debug view of one tram's INTERNAL sim state
- * (engine.getDebugInfo — debug overlay only, 10 Hz, never the map frame path).
- * Diagnostics only; nothing here feeds rendering. All distances are
- * along-shape meters; speeds km/h.
+ * Additive, on-demand devtools view of ONE tram's physics inputs
+ * (TramFleet.getDiagnostics — debug overlay only, 10 Hz, never the map frame
+ * path). Diagnostics only; nothing here feeds rendering.
+ *
+ * Physics v3 replaced the old SimDebugInfo's ~30 controller internals (regimes,
+ * pace bias, braking envelopes, stuck/yield holds) with the four things a
+ * trajectory client can actually be wrong about: WHICH curve it is drawing,
+ * HOW FAR APART the two curves are, HOW MUCH horizon is left, and HOW STALE
+ * everything is. Distances are along-shape meters; speeds km/h.
  */
-export interface SimDebugInfo {
-  /** False when the tram has no geometry sim yet (renders as a raw dot). */
-  hasSim: boolean;
-  phase: 'cruise' | 'dwell' | 'terminal' | 'unknown';
+export interface PhysicsDebugInfo {
+  /** False when the server published no usable curves for this tram. */
+  hasTrajectory: boolean;
+  hasGeometry: boolean;
+  /** Curve being rendered right now. */
+  mode: 'smooth' | 'fixed';
+  /** Rendered distance in the active mode, m. */
   simDistM: number;
+  /** Continuity-curve distance, m (null without a trajectory). */
+  smoothDistM: number | null;
+  /** Opinion-curve distance, m (null without a trajectory). */
+  fixedDistM: number | null;
+  /** smooth − fixed, SIGNED m (positive = smooth ahead). Null w/o both curves. */
+  deltaM: number | null;
+  /** Rendered speed in the active mode, km/h. */
   simSpeedKmh: number;
-  /** The smoother's reference (sPred − active trail), m. null w/o sim. */
-  targetDistM: number | null;
-  /** errPred = (sPred − trail) − simDist, m. POSITIVE = smoother BEHIND the
-   *  predictor (catching up), NEGATIVE = smoother ahead (yielding). null w/o
-   *  sim. Replaces v1's schedule-blend-target errorM. */
-  errPredM: number | null;
-  /** Smoother regime chosen by the last tick (engine-v2.md §2.3 table).
-   *  Replaces v1's crawling/deepCrawl/burstActive/skipRollActive latches. */
-  regime: 'hold-follow' | 'track' | 'catchup' | 'yield' | null;
-  /** Learned per-tram pace multiplier (1 = profile pace). null w/o sim. */
-  paceBias: number | null;
-  /** Braking-envelope/curve/stop speed cap at the current position, km/h
-   *  (the hard limit; can reach the network V_MAX on open track). */
-  vAllowedKmh: number | null;
-  /** Zone/curve cruise cap at the current position, km/h (what open-track
-   *  cruising aims at). vAllowed < cruiseCap ⇒ braking for a curve/stop. */
-  cruiseCapKmh: number | null;
-  /** Predictor stuck-hold anchor (jam/light), m along shape, or null. */
-  stuckAtM: number | null;
-  /** Junction-yield hold point on the RENDERED layer, m along shape, or null. */
-  yieldHoldM: number | null;
-  /** Platform the latest fix pins the tram at, m along shape, or null. */
-  fixStopDistM: number | null;
-  /** Whether that fix-pin is still fresh enough to be authoritative. */
-  fixPinActive: boolean;
-  /** Wall-clock ms the current dwell may release (0 outside 'dwell'). */
-  dwellUntilMs: number;
-  /** Latest raw AVL fix distance along shape, m. */
+  /** Smooth-curve speed, km/h — comparison partner (null w/o a smooth curve). */
+  smoothSpeedKmh: number | null;
+  phase: 'cruise' | 'dwell' | 'terminal' | 'unknown';
+  /** True while the rendered position is frozen (past horizon / no curves). */
+  pastHorizon: boolean;
+  /** Seconds of curve left before the freeze (negative = already frozen). */
+  horizonLeftS: number | null;
+  /** Age of the AVL fix the curves were anchored to, s. */
+  anchorAgeS: number | null;
+  /** Age of this trajectory emission (the server's blend anchor), s. */
+  emissionAgeS: number | null;
+  /** Server flagged THIS emission as a sanctioned break in continuity. */
+  discontinuity: boolean;
+  /** Raw AVL fix distance along shape, m. */
   obsDistM: number;
   /** ms epoch of that fix. */
   obsAtMs: number;
-  /** Age of the last fix, ms (now − obsAt). */
-  fixAgeMs: number;
-  /** Last hard-teleport wall-clock ms (0 = never). */
-  lastTeleportMs: number;
-  /** Live-projection (dead-reckoned raw fix) distance, m, or null. */
-  projDistM: number | null;
-
-  // ── additive raw-internals extensions (10 Hz debug overlay) ────────────────
-  // Diagnostics only — nothing below influences rendering or the simulation.
-  // Appended so existing consumers (and the on-disk debug shape) stay valid.
-
-  /** Sim speed, m/s (simSpeedKmh / 3.6, exposed raw alongside km/h). */
-  simSpeedMs: number;
-  /**
-   * The PREDICTOR's cruise product, km/h: min(cruiseCap, V_CRUISE_REF) ·
-   * paceBias · todPace — the pace reality is estimated to move at (still
-   * clamped by vAllowed). null w/o sim.
-   */
-  cruiseTargetKmh: number | null;
-  /** Zone speed cap at the current position (centre 31 vs network 50), km/h. null w/o sim. */
-  zoneCapKmh: number | null;
-  /** Curve speed cap at the current position, km/h (≈V_MAX where straight). null w/o sim. */
-  curveCapKmh: number | null;
-  /** Track curvature at the current position, rad/m (0 = straight). null w/o sim. */
-  curveKappa: number | null;
-  /** Curve radius at the current position, m (null when straight / no sim). */
-  curveRadiusM: number | null;
-  /** Time-of-day pace multiplier folded into the cruise target (1 = neutral). null w/o sim. */
-  todPaceFactor: number | null;
-  /** Latency-adjusted fix age, ms (fixAge + FEED_LATENCY) — the staleness clock. */
-  staleFixAgeMs: number;
-  /** Distance below which stops are ignored as 0-limits (served/passed), m. null w/o sim. */
-  minStopDistM: number | null;
-  /** Skip-roll zone end along shape, m (0 = none). */
-  skipRollUntilM: number;
-  /** Physical tram length incl. any coupled trailer, m. null w/o sim. */
-  lengthM: number | null;
+  /** Age of the raw AVL fix, s (server-corrected clock). */
+  fixAgeS: number;
+  nextStopName: string | null;
+  nextStopEtaS: number | null;
   /** Feed-reported schedule delay, seconds (+ late). */
   delaySeconds: number;
   /** Feed state string (on_track / at_stop / …). */
   statePosition: string;
+
+  // — bundle-level context (same for every tram; carried here so the overlay
+  //   reads one object) —
+  /** Age of the newest trajectory bundle, s (null when none decoded). */
+  bundleAgeS: number | null;
+  /** Smoothed server−device clock offset, ms. */
+  clockOffsetMs: number;
+  /** Connection verdict from bundle age + fetch health. */
+  connection: 'live' | 'degraded' | 'offline';
+  /** Cumulative server-flagged discontinuities observed this session. */
+  discontinuitiesTotal: number;
 }
 
 export interface PointFeatureProps {
@@ -238,12 +232,22 @@ export interface PointFeatureProps {
    * tram stays visible (and tappable) even in the 3D zoom band.
    */
   geometryless: 0 | 1;
+  /**
+   * 1 when this tram's rendered position is FROZEN (`TramPublicState`
+   * .pastHorizon): the server's curve ran out, or none was published for it.
+   * The map layers multiply their opacity by a dim factor on this flag — the
+   * connection-honesty rule made visible per tram, so a frozen tram never
+   * passes for a live one even while the rest of the fleet keeps moving.
+   */
+  stale: 0 | 1;
 }
 
 export interface SectionFeatureProps {
   key: string; // parent tram key
   modelKey: string; // GLB registry key, e.g. '15t-b'
   bearing: number;
+  /** Frozen (past horizon) — the ModelLayer dims the whole body. See PointFeatureProps.stale. */
+  stale: 0 | 1;
 }
 
 export interface EngineFrame {

@@ -29,10 +29,16 @@ export function toCalibrationRecord(s: TramPublicState, t: number): CalibrationR
     line: s.snapshot.line,
     obsDist: r(s.snapshot.shapeDistM),
     simDist: r(s.simDistM),
-    projDist: r(s.projectedObservedDistM),
+    // physics v3: the second curve (the model's raw opinion) took over this
+    // slot from the deleted dead-reckoned projection — still "the other
+    // estimate of where this tram is", so the column stays comparable.
+    projDist: r(s.fixedDistM),
+    // Now the smooth↔fixed gap rather than sim-vs-fix; see TramPublicState.
     devM: r(s.deviationM, 1),
     kmh: r(s.simSpeedKmh, 1),
-    bias: r(s.paceBias, 2),
+    // paceBias died with the client engine — pace is learned server-side now.
+    // The column is kept (on-disk/JSONL prefix contract) and always null.
+    bias: null,
     lat: r(s.position[1], 6),
     lng: r(s.position[0], 6),
     mode: s.phase,

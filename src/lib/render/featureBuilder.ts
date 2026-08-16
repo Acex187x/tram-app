@@ -1,4 +1,4 @@
-// Engine states → GeoJSON render frame:
+// Tram public states → GeoJSON render frame:
 //  - points FC: ALL trams (circle/badge layers + hit testing)
 //  - sections FC: articulated body sections, only for trams inside the viewport
 //    (+300 m margin) at zoom >= 14.8 — drives the ModelLayer. While a tram
@@ -131,13 +131,11 @@ const DEG2RAD = Math.PI / 180;
 
 // ── Doors (sections band) ────────────────────────────────────────────────────
 /**
- * Doors render open only while the tram is STANDING AT A PLATFORM: phase
- * 'dwell' alone is not trusted (in live mode the rendered head is the
- * PROJECTED observation, which can be mid-segment while the smooth sim
- * dwells — the old phase-only condition opened doors between stops), so the
- * rendered head must also be within DOOR_NEAR_STOP_M of a stop and the sim
- * standing. All three signals are stable for whole seconds, so the doors
- * can't flicker.
+ * Doors render open only while the tram is STANDING AT A PLATFORM. Phase
+ * 'dwell' alone is not trusted: the RENDERED head must also be within
+ * DOOR_NEAR_STOP_M of a stop and the tram standing (the old phase-only
+ * condition opened doors between stops). All three signals are stable for
+ * whole seconds, so the doors can't flicker.
  */
 export const DOOR_NEAR_STOP_M = 25;
 /** Doors render open only at/below this sim speed (standing), km/h. */
@@ -229,30 +227,6 @@ export interface BuildFrameOptions {
    * Omitted (tests / one-shot builds) → each solve is cold and pure.
    */
   badgeMemory?: BadgeAnchorMemory;
-  /**
-   * Render anchor per engine-v2.md §2 (three render modes over one engine):
-   * 'smooth' (default): the smoother's cinematic position (simDistM).
-   * 'live': the predictor — the engine's best estimate of the REAL tram now
-   * (TramPublicState.projectedObservedDistM), falling back to the raw fix
-   * (observedPosition / raw shape distance) when no predictor exists.
-   * 'raw': the last AVL fix itself — head at clamp(snapshot.shapeDistM) on
-   * the shape (anchor/bearing evaluated on the same shared geometry), the
-   * plain observedPosition/observedBearing without geometry. A raw frame only
-   * changes when a fix does, so it jumps on every update (~45–95 s cadence);
-   * the follow camera eases those jumps (§2.7).
-   * 'ml': EXPERIMENTAL — the head distance comes from `mlDistM` (the research
-   * lab's published trajectory, dumb-lerped) and is placed through the exact
-   * same geometry path as 'raw'; a vehicle the lab knows nothing about falls
-   * back to the raw fix, so no tram is ever hidden by the experiment.
-   */
-  positionMode?: 'smooth' | 'live' | 'raw' | 'ml';
-  /**
-   * 'ml' mode only: along-shape meters for a vehicle at `nowMs`, or null when
-   * the lab published nothing usable for it (→ raw-fix fallback). Injected so
-   * this render module keeps its zero dependencies on the feed/network stack
-   * (perf invariant #9), like getGeometry/coupledPairFn above.
-   */
-  mlDistM?: (key: string, tripId: string, nowMs: number) => number | null;
   /** Frame timestamp; defaults to Date.now(). */
   nowMs?: number;
 }
@@ -295,12 +269,13 @@ function sectionFeature(
   modelKey: string,
   position: [number, number],
   bearing: number,
+  stale: boolean,
 ): SectionFeature {
   return {
     type: 'Feature',
     id,
     geometry: { type: 'Point', coordinates: offsetRight(position, bearing) },
-    properties: { key, modelKey, bearing },
+    properties: { key, modelKey, bearing, stale: stale ? 1 : 0 },
   };
 }
 
@@ -339,8 +314,8 @@ function sectionModelKey(section: TramModelSpec['sections'][number], dwelling: b
 
 /**
  * Sections for a tram with known geometry: each body section placed along the
- * shape, head anchored at sHead (sim distance in smooth mode, the projected
- * observation in live mode).
+ * shape, head anchored at sHead — the rendered along-shape distance, whichever
+ * curve produced it (the render mode is resolved upstream, in the adapter).
  */
 function sectionsAlongShape(
   state: TramPublicState,
@@ -361,7 +336,14 @@ function sectionsAlongShape(
     // Render safety: a poisoned shape vertex must not sink the sections push.
     if (isFinitePos(placed.position) && Number.isFinite(placed.bearing)) {
       out.push(
-        sectionFeature(`${state.key}#${i}`, state.key, modelKey, placed.position, placed.bearing),
+        sectionFeature(
+          `${state.key}#${i}`,
+          state.key,
+          modelKey,
+          placed.position,
+          placed.bearing,
+          state.pastHorizon,
+        ),
       );
     }
     if (coupled) {
@@ -374,6 +356,7 @@ function sectionsAlongShape(
             modelKey,
             trailed.position,
             trailed.bearing,
+            state.pastHorizon,
           ),
         );
       }
@@ -485,6 +468,8 @@ export interface BadgeCandidate {
    * map draws them from the points FC on the always-visible pinned layer).
    */
   pinned: boolean;
+  /** Rendered position is frozen (past horizon) — the badge dims with its tram. */
+  stale: boolean;
 }
 
 /** Style-px per meter conversion for Mapbox's 512-px tiles at a latitude/zoom. */
@@ -719,6 +704,9 @@ export function declutterBadges(
         line: c.line,
         modelId: c.modelId,
         displaced: pick === 0 ? 0 : 1,
+        // Carried so the bulk badge layer dims a frozen tram exactly like the
+        // points layers do — a stale plate must not look livelier than its dot.
+        stale: c.stale ? 1 : 0,
         off: [r2(dxPx / s), r2(-FACE_GAP_PX + dyPx / s)],
         toff: [
           r2(FACE_TEXT_OFFSET_X_EM + dxPx / textSize),
@@ -745,9 +733,6 @@ export function buildFrame(
   const sectionsEnabled = viewport.zoom >= SECTION_MIN_ZOOM;
   const cullBbox = sectionsEnabled ? expandBbox(viewport.bbox, CULL_MARGIN_M) : viewport.bbox;
   const lineFilter = opts.lineFilter ?? null;
-  const live = opts.positionMode === 'live';
-  const raw = opts.positionMode === 'raw';
-  const ml = opts.positionMode === 'ml';
   const nowMs = opts.nowMs ?? Date.now();
   const overlayKey = opts.followedKey ?? opts.selectedKey;
   let fixOverlay: GeoJSON.FeatureCollection | null = null;
@@ -763,40 +748,19 @@ export function buildFrame(
     if (lineFilter && !lineFilter.has(state.snapshot.line)) continue;
 
     const isOverlayTarget = overlayKey !== null && state.key === overlayKey;
-    // Geometry is needed for sections, for live/raw-mode anchoring along the
-    // shape, and for the fix-overlay connector slice.
+    // Geometry is needed for the 3D sections and for the fix-overlay connector
+    // slice. It is NOT needed to place the head any more: physics v3 resolves
+    // the rendered position in the adapter (curves → pointAt/bearingAt on this
+    // same geometry), so this module is mode-agnostic — switching smooth↔fixed
+    // changes the numbers arriving here, never the code path taken.
     const geometry =
-      state.hasGeometry && (sectionsEnabled || live || raw || ml || isOverlayTarget)
+      state.hasGeometry && (sectionsEnabled || isOverlayTarget)
         ? opts.getGeometry(state.key)
         : undefined;
 
-    // Rendered anchor: the smoother in smooth mode; the predictor
-    // (projectedObservedDistM) in live mode; the raw fix distance in raw mode;
-    // the lab's lerped trajectory distance in ml mode — all evaluated on the
-    // SAME shared geometry, falling back to the plain observed position when
-    // none exists. Both live and ml fall back to the fix distance when their
-    // own source has nothing for this vehicle.
     let sHead = state.simDistM;
     let anchor = state.position;
     let bearing = state.bearing;
-    if (live || raw || ml) {
-      if (geometry) {
-        const modeDist = live
-          ? state.projectedObservedDistM
-          : ml
-            ? (opts.mlDistM?.(state.key, state.snapshot.tripId, nowMs) ?? null)
-            : null;
-        sHead = Math.min(
-          Math.max(modeDist ?? state.snapshot.shapeDistM, 0),
-          geometry.totalM,
-        );
-        anchor = pointAt(geometry.coordinates, geometry.cumDistM, sHead);
-        bearing = bearingAt(geometry.coordinates, geometry.cumDistM, sHead);
-      } else {
-        anchor = state.observedPosition;
-        bearing = state.observedBearing;
-      }
-    }
 
     // Render safety: never let a non-finite position/bearing reach a push —
     // it would poison the whole ShapeSource (see the guard block above).
@@ -836,6 +800,10 @@ export function buildFrame(
           selected,
           favorite,
           geometryless: geometryless ? 1 : 0,
+          // Connection honesty, per tram: a tram whose curve ran out (or which
+          // never got one) is FROZEN on screen, so the layers dim it. The rest
+          // of the fleet keeps moving — the difference has to be visible.
+          stale: state.pastHorizon ? 1 : 0,
         },
       });
       // Badge declutter candidate: visible band-2 badges only. Pinned
@@ -847,6 +815,7 @@ export function buildFrame(
           modelId: state.model.id,
           pos: rendered,
           pinned: selected === 1 || favorite === 1,
+          stale: state.pastHorizon,
         });
       }
     }

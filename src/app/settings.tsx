@@ -2,7 +2,7 @@
 // lock), tram-icon packs, motion-data export, and attribution — re-skinned to
 // Apple Maps' "Preferences" grammar (IMG_0076): a large-title SheetHeader with a
 // circular X, uppercase SectionLabels over rounded InsetGroups, native Switch
-// rows, blue-checkmark selection rows, and a Smooth/Live SegmentedPills control.
+// rows and blue-checkmark selection rows.
 // Every settings-store write is byte-identical to before — this is chrome only.
 import Constants from 'expo-constants';
 import * as Haptics from 'expo-haptics';
@@ -29,27 +29,19 @@ import {
   RowSeparator,
   SectionLabel,
 } from '@/components/ui/Inset';
-import { SegmentedPills } from '@/components/ui/SegmentedPills';
 import { SheetHeader } from '@/components/ui/SheetHeader';
 import { SheetSurface } from '@/components/ui/SheetSurface';
 import { appleScheme, Tram, Type } from '@/constants/theme';
 import { ICON_PACKS, ICON_PACK_IDS } from '@/lib/fleet/iconPacks';
 import { useMotionLog, type MotionFileInfo } from '@/lib/motionlog';
 import type { TramModelId } from '@/lib/types';
-import { useSettingsStore, type LightPreset, type PositionMode } from '@/stores/settings';
+import { useSettingsStore, type LightPreset } from '@/stores/settings';
 
 const LIGHT_PRESETS: { value: LightPreset; label: string; icon: SFSymbol; tint: string }[] = [
   { value: 'auto', label: 'Automatic', icon: 'wand.and.stars', tint: Tram.night },
   { value: 'day', label: 'Day', icon: 'sun.max.fill', tint: Tram.gold },
   { value: 'dusk', label: 'Dusk', icon: 'sunset.fill', tint: Tram.late },
   { value: 'night', label: 'Night', icon: 'moon.stars.fill', tint: Tram.night },
-];
-
-const POSITION_SEGMENTS: { key: PositionMode; label: string }[] = [
-  { key: 'smooth', label: 'Smooth' },
-  { key: 'live', label: 'Live' },
-  { key: 'raw', label: 'Raw' },
-  { key: 'ml', label: 'ML (эксперимент)' },
 ];
 
 const ATTRIBUTIONS: { icon: SFSymbol; iconColor: string; label: string; url: string }[] = [
@@ -107,26 +99,36 @@ function ThemedSwitch({
 
 // ── Positioning ──────────────────────────────────────────────────────────────
 
+/**
+ * The whole positioning UI: one switch between the server's two published
+ * curves (docs/research/physics-v3-protocol.md). Default OFF = the smooth
+ * continuity track; ON = the model's raw opinion, which is more accurate the
+ * instant a fix lands and visibly jumps to get there.
+ */
 function PositionModeSection() {
   const positionMode = useSettingsStore((s) => s.positionMode);
   const setPositionMode = useSettingsStore((s) => s.setPositionMode);
   return (
     <View style={styles.section}>
       <SectionLabel>Tram positions</SectionLabel>
-      <SegmentedPills
-        segments={POSITION_SEGMENTS}
-        selectedKey={positionMode}
-        onChange={(key) => {
-          if (key === positionMode) return;
-          void Haptics.selectionAsync();
-          setPositionMode(key as PositionMode);
-        }}
-      />
+      <InsetGroup>
+        <InsetRow
+          icon="scope"
+          iconTint={Tram.pidRed}
+          title="Более точное положение"
+          trailing={
+            <ThemedSwitch
+              label="Более точное положение"
+              value={positionMode === 'fixed'}
+              onValueChange={(on) => setPositionMode(on ? 'fixed' : 'smooth')}
+            />
+          }
+        />
+      </InsetGroup>
       <Footnote>
-        Smooth animates trams between updates. Live shows the best estimate of where each tram
-        really is right now. Raw shows the last reported position and jumps on every update. ML —
-        экспериментальный прогноз исследовательского сервера; трамваи без прогноза показываются по
-        последней позиции.
+        По умолчанию трамваи движутся по сглаженной траектории — без рывков между обновлениями.
+        Включите, чтобы показывать положение, которое сервер считает наиболее точным: оно ближе к
+        реальности сразу после обновления, но заметно прыгает.
       </Footnote>
     </View>
   );

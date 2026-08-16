@@ -1,10 +1,14 @@
 /// <reference types="jest" />
 //
-// Zoom-adaptive tick cadence (iteration-4 smoothness regression fix): the
-// engine must tick at 30 Hz everywhere the points FC is pushed at the fast
+// Zoom-adaptive frame cadence (iteration-4 smoothness regression fix): the
+// frame loop must run at 30 Hz everywhere the points FC is pushed at the fast
 // cadence — pushing 15 Hz points over 10 Hz motion aliased badge movement into
 // visible stutter in the 14.0–14.6 window. Band changes are hysteretic so
-// camera drift at the boundary can't thrash the tick timer.
+// camera drift at the boundary can't thrash the timer.
+//
+// Physics v3 note: the loop no longer ticks a simulation (there isn't one —
+// positions are evaluated from the server's curves at push time), but the
+// cadence ALIGNMENT invariant is unchanged and still load-bearing.
 
 import {
   DETAIL_ENTER_ZOOM,
@@ -37,41 +41,38 @@ describe('detailModeForZoom hysteresis', () => {
 
   it('band constants are ordered and aligned with the fast points cadence', () => {
     expect(DETAIL_EXIT_ZOOM).toBeLessThan(DETAIL_ENTER_ZOOM);
-    // Everywhere the points FC pushes at ~15 Hz the engine must be at 30 Hz:
-    // two fresh physics steps per source push, without 60 whole-fleet passes.
+    // Everywhere the points FC pushes at ~15 Hz the frame loop must run at
+    // 30 Hz — perf invariant #4: the two thresholds are one constant.
     expect(TICK_MS).toBe(33);
     expect(pointsPushIntervalMs(DETAIL_ENTER_ZOOM)).toBe(TICK_MS * 2);
     expect(pointsPushIntervalMs(DETAIL_ENTER_ZOOM - 0.01)).toBeGreaterThanOrEqual(1000);
   });
 });
 
-// Raw-mode push gate (engine-v2.md §2.7): raw frames change only when a fix
-// changes, so raw pushes ride the SAME due-check plus the runtime's ingest-set
-// dirty flag — no new timer, no new cadence row semantics. Smooth/live keep
-// today's interval-only behavior.
-describe('pointsPushWanted (raw-mode points-push gate)', () => {
+// Points-push gate. Physics v3 deleted the raw-mode dirty-flag special case:
+// BOTH published curves move continuously between bundles, so every frame
+// genuinely differs and the zoom-banded interval is the whole rule. Forced
+// pushes still bypass it (render-mode switch, selection/follow change), which
+// matters most at the 5 s city-scale cadence.
+describe('pointsPushWanted', () => {
   const fastZoom = DETAIL_ENTER_ZOOM; // interval 66 ms
   const due = pointsPushIntervalMs(fastZoom);
 
-  it('smooth/live push on the zoom-banded interval alone (dirty flag irrelevant)', () => {
-    expect(pointsPushWanted('smooth', due, fastZoom, false, false)).toBe(true);
-    expect(pointsPushWanted('live', due, fastZoom, false, false)).toBe(true);
-    expect(pointsPushWanted('smooth', due - 1, fastZoom, true, false)).toBe(false);
-    expect(pointsPushWanted('live', due - 1, fastZoom, true, false)).toBe(false);
+  it('pushes exactly when the zoom-banded interval has elapsed', () => {
+    expect(pointsPushWanted(due, fastZoom, false)).toBe(true);
+    expect(pointsPushWanted(due + 5, fastZoom, false)).toBe(true);
+    expect(pointsPushWanted(due - 1, fastZoom, false)).toBe(false);
   });
 
-  it('raw pushes only when due AND an ingest landed since the last push', () => {
-    expect(pointsPushWanted('raw', due, fastZoom, true, false)).toBe(true);
-    // Identical raw frame: due but nothing changed → stay silent at 15 Hz.
-    expect(pointsPushWanted('raw', due, fastZoom, false, false)).toBe(false);
-    // Fresh fix but the interval hasn't elapsed → the due-check still bounds
-    // the rate (the dirty flag must not be consumed on such frames).
-    expect(pointsPushWanted('raw', due - 1, fastZoom, true, false)).toBe(false);
+  it('respects the slower far-zoom intervals', () => {
+    expect(pointsPushWanted(999, 11, false)).toBe(false); // 5 s band
+    expect(pointsPushWanted(5_000, 11, false)).toBe(true);
+    expect(pointsPushWanted(999, 13, false)).toBe(false); // 1 s band
+    expect(pointsPushWanted(1_000, 13, false)).toBe(true);
   });
 
-  it('a position-mode switch pushes immediately in every mode (even at the 5 s city cadence)', () => {
-    expect(pointsPushWanted('raw', 0, 11, false, true)).toBe(true);
-    expect(pointsPushWanted('smooth', 0, 11, false, true)).toBe(true);
-    expect(pointsPushWanted('live', 0, 11, false, true)).toBe(true);
+  it('a forced push bypasses the interval at every zoom', () => {
+    expect(pointsPushWanted(0, 11, true)).toBe(true);
+    expect(pointsPushWanted(0, fastZoom, true)).toBe(true);
   });
 });

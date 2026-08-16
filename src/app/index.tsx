@@ -48,6 +48,7 @@ import {
   MapStatusTile,
 } from '@/components/map/MapChrome';
 import { DebugOverlay } from '@/components/debug/DebugOverlay';
+import { ConnectionBanner } from '@/components/map/ConnectionBanner';
 import { DebugMapTraces } from '@/components/debug/DebugMapTraces';
 import { MapSheet } from '@/components/maps-kit/MapSheet';
 import {
@@ -413,7 +414,7 @@ export default function MapScreen() {
       return;
     }
     followGestureRef.current = { orientation: orientationFromCamera(cameraStateRef.current) };
-    const state = getRuntime().engine.getState(followTramKey);
+    const state = getRuntime().fleet.getState(followTramKey);
     if (state) getRuntime().prioritizeTrip(state.snapshot.tripId);
   }, [followTramKey]);
 
@@ -558,6 +559,11 @@ export default function MapScreen() {
 
       <MapChromeSchemeContext.Provider value={chromeScheme}>
         <MapStatusTile leftInset={mapLeftInset} />
+        {/* Connection honesty (physics-v3-protocol §"Connection honesty"): an
+            explicit banner when the trajectory bundle has gone stale, so a
+            frozen fleet is never presented as a live one. Renders null — and
+            costs nothing — while the connection is live. */}
+        <ConnectionBanner leftInset={mapLeftInset} />
         <MapControlStack
           is3D={is3D}
           onTogglePitch={onTogglePitch}

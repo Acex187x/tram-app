@@ -45,7 +45,7 @@
 // buffering/flush/eviction logic is unit-testable with in-memory fakes.
 //
 // Entry-point split (feed boundary refactor): the FEED owns WHEN calibration
-// records are produced (LocalGolemioFeed.reportCalibration per batch); this
+// records are produced (TramFeed.reportCalibration per batch); this
 // module owns HOW/WHERE they are stored. `onCalibration(records)` is the
 // storage entry point; `onPoll(states)` remains as the state-based convenience
 // wrapper (it builds the records itself via feed/calibration).
@@ -318,7 +318,9 @@ export function rideRecord(
     simLng: s ? r(s.position[0], 6) : null,
     simKmh: s ? r(s.simSpeedKmh, 1) : null,
     obsDist: s ? r(s.snapshot.shapeDistM) : null,
-    projDist: s ? r(s.projectedObservedDistM) : null,
+    // physics v3: the «fixed» (raw model opinion) curve replaced the deleted
+    // dead-reckoned projection in this column — same role, new source.
+    projDist: s ? r(s.fixedDistM) : null,
     devM: s ? r(s.deviationM, 1) : null,
     model: s ? s.model.id : null,
     line: s ? s.snapshot.line : null,
@@ -331,7 +333,9 @@ export function rideRecord(
     statePos: s ? (s.snapshot.statePosition ?? null) : null,
     delayS: s ? r(s.snapshot.delaySeconds) : null,
     nextSeq: s ? r(s.snapshot.nextStopSequence) : null,
-    bias: s ? r(s.paceBias, 2) : null,
+    // paceBias died with the client engine (pace is learned server-side now);
+    // the column stays for the JSONL prefix contract and is always null.
+    bias: null,
     posMode: posMode ?? null,
     // Ride schema v3 — appended AFTER the v2 fields (old parsers see a strict
     // prefix; detect by presence of `gpsDist`). The rider's GPS projected onto
@@ -473,7 +477,7 @@ export class MotionLog {
 
   /**
    * Storage entry point, called once per snapshot batch by the feed
-   * (LocalGolemioFeed.reportCalibration). Appends every record to the
+   * (TramFeed.reportCalibration). Appends every record to the
    * in-memory buffer and opportunistically flushes. An empty batch still
    * advances the flush clock check. Guaranteed not to throw. `nowMs` defaults
    * to the batch time carried by the records (all records in a batch share it).

@@ -11,18 +11,26 @@ import { fileSystemStorage } from './favorites';
 
 export type LightPreset = 'auto' | 'day' | 'dusk' | 'night';
 /**
- * Tram positioning (engine v2 render anchors, docs/decisions/engine-v2.md §2):
- *   'smooth' — the cinematic smoother (layer 2);
- *   'live'   — the predictor's best estimate of the real tram now (layer 1);
- *   'raw'    — the last reported AVL fix, jumping on every update (layer 0);
- *   'ml'     — EXPERIMENTAL: the research lab's published trajectory keyframes,
- *              dumb-lerped (src/lib/feed/mlTrajectories.ts). Not an engine
- *              layer at all — the engine keeps ticking underneath exactly as in
- *              'raw', and a vehicle without a trajectory renders its raw fix.
- * Persisted as a plain string; older installs stored only 'smooth' | 'live',
- * which remain valid members — no migration needed.
+ * Which of the server's two published curves the map draws
+ * (docs/research/physics-v3-protocol.md §"Two render modes"):
+ *   'smooth' — DEFAULT. The continuity track: the server bakes the join
+ *              between consecutive predictions into the curve, so the tram
+ *              never teleports except at a flagged discontinuity.
+ *   'fixed'  — «Более точное положение». The raw model-opinion track, which
+ *              re-anchors on every fix and is allowed to jump. It exists to be
+ *              visibly beaten by smooth; `TramPublicState.deviationM` measures
+ *              the gap between them.
+ *
+ * The old four-way engine-layer picker ('live'/'raw'/'ml') died with the
+ * engine — see the persist migration below, which folds every retired value
+ * into 'smooth'.
  */
-export type PositionMode = 'smooth' | 'live' | 'raw' | 'ml';
+export type PositionMode = 'smooth' | 'fixed';
+
+/** Coerce any persisted/legacy value to a mode this build understands. */
+export function normalizePositionMode(value: unknown): PositionMode {
+  return value === 'fixed' ? 'fixed' : 'smooth';
+}
 /**
  * Live-data source. INERT since 2026-08-08: the runtime constructs RemoteFeed
  * unconditionally (hooks/tramData.ts) and nothing reads this setting anymore —
@@ -76,7 +84,8 @@ export const useSettingsStore = create<SettingsState>()(
       iconPack: DEFAULT_ICON_PACK,
       debugMode: false,
       setLightPreset: (lightPreset) => set({ lightPreset }),
-      setPositionMode: (positionMode) => set({ positionMode }),
+      setPositionMode: (positionMode) =>
+        set({ positionMode: normalizePositionMode(positionMode) }),
       setShowRouteLines: (showRouteLines) => set({ showRouteLines }),
       setFollowHeadingLock: (followHeadingLock) => set({ followHeadingLock }),
       setPassiveFleetLogging: (passiveFleetLogging) => set({ passiveFleetLogging }),
@@ -87,6 +96,20 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'settings',
       storage: createJSONStorage(() => fileSystemStorage),
+      /**
+       * v2 = physics v3's two-mode picker. Installs persisted 'live' / 'raw' /
+       * 'ml' against the deleted engine layers; rehydrating one of those
+       * verbatim would leave the store holding a mode no code can render.
+       * Every retired value folds into the default.
+       */
+      version: 2,
+      migrate: (persisted, _version) => {
+        const state = (persisted ?? {}) as Partial<SettingsState>;
+        return {
+          ...state,
+          positionMode: normalizePositionMode(state.positionMode),
+        } as SettingsState;
+      },
     },
   ),
 );

@@ -1,4 +1,4 @@
-// DEBUG OVERLAY — a live, utilitarian technical readout of the simulation for
+// DEBUG OVERLAY — a live, utilitarian technical readout of the physics for
 // the followed tram, drawn over the map when Settings ▸ Developer ▸ Debug mode
 // is on. Deliberately NOT styled to the app's guidelines: dense monospace rows,
 // lots of raw numbers — built to evaluate the physics from inside a real tram.
@@ -6,7 +6,7 @@
 // UPDATE CADENCE — 10 Hz, but ONLY in the live readout. Debug mode is EXEMPT
 // from the app's ≤1 Hz perf invariant exactly where the claim holds:
 // `DebugLive` (rendered solely for the followed tram, expanded, not in guide
-// mode) re-reads the engine on a private 100 ms timer. Numeric text cannot make
+// mode) re-reads the fleet on a private 100 ms timer. Numeric text cannot make
 // useful use of display-rate React commits; the former display loop rebuilt four
 // cards and dozens of Text nodes ~60 times/s and could pin Hermes when the
 // persisted debug setting reopened. The GPS on-line position is read at 10 Hz
@@ -17,16 +17,18 @@
 // DebugLive releases the locator and clears the timer.
 //
 // Data sources:
-//   • engine.getDebugInfo(key) — raw INTERNAL sim state (phase, every speed &
-//     cap, curvature, pace bias, the smoother regime + predictor error, and
-//     every active hold with numbers: fix-pin / stuck / junction-yield /
-//     skip-roll / dwell / teleport);
-//   • engine.getState(key)     — next stop + ETA, delay, raw fix;
-//   • OnlineLocator            — the rider's filtered GPS projected onto the
+//   • fleet.getDiagnostics(key) — the physics v3 readout: which curve is being
+//     drawn, BOTH curves' positions and the signed gap between them, how much
+//     horizon is left, how old the anchor/emission/bundle are, the clock offset
+//     and the connection verdict;
+//   • fleet.getState(key)       — next stop + ETA, delay, raw fix;
+//   • runtime.physicsHealth     — fleet-wide fetch health (vehicles in the
+//     bundle, consecutive failures, discontinuity count);
+//   • OnlineLocator             — the rider's filtered GPS projected onto the
 //     followed tram's shape = the REAL on-line position (ground truth: the
 //     rider is physically in this tram).
 //
-// Diffs are signed: POSITIVE lag = the SIM is AHEAD of the real tram.
+// Diffs are signed: POSITIVE lag = the RENDERED tram is AHEAD of the real one.
 import { createContext, useContext, useEffect, useState } from 'react';
 import Constants from 'expo-constants';
 import {
@@ -40,7 +42,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getRuntime, useTramState } from '@/hooks/tramData';
-import { useNowMs } from '@/hooks/uiClock';
+import type { TrajectoryHealth } from '@/lib/physics/trajectoryStore';
 import { Fonts } from '@/constants/theme';
 import {
   projectOnlineDistAt,
@@ -50,7 +52,7 @@ import {
   type OnlineLocator,
   type OnlineProjection,
 } from '@/lib/motionlog';
-import type { SimDebugInfo, TramPublicState } from '@/lib/types';
+import type { PhysicsDebugInfo, TramPublicState } from '@/lib/types';
 import { useSelectionStore } from '@/stores/selection';
 import { useSettingsStore } from '@/stores/settings';
 
@@ -71,18 +73,14 @@ function signed(n: number | null | undefined, digits = 0): string {
   return (n >= 0 ? '+' : '') + n.toFixed(digits);
 }
 
-/** Seconds, 1 decimal (from ms). */
-function sec1(ms: number | null | undefined): string {
-  if (ms == null || !Number.isFinite(ms)) return '—';
-  return (ms / 1000).toFixed(1) + 's';
-}
-
 // ── live snapshot (rebuilt at 10 Hz) ─────────────────────────────────────────
 
 interface DebugSnapshot {
   nowMs: number;
-  dbg: SimDebugInfo | undefined;
+  dbg: PhysicsDebugInfo | undefined;
   state: TramPublicState | undefined;
+  /** Fleet-wide trajectory/fetch health (same for every tram). */
+  health: TrajectoryHealth;
   fix: OnlineFix | null;
   proj: OnlineProjection | null;
   /** Filtered on-line distance, forward-extrapolated to the current sample. */
@@ -98,10 +96,11 @@ interface DebugSnapshot {
 /** Read everything fresh for `key` at the current instant. Pure (no writes). */
 function buildSnapshot(key: string | null, locator: OnlineLocator): DebugSnapshot {
   const nowMs = Date.now();
-  const engine = getRuntime().engine;
-  const dbg = key ? engine.getDebugInfo(key, nowMs) : undefined;
-  const state = key ? engine.getState(key, nowMs) : undefined;
-  const geometry = key ? engine.getGeometry(key) : undefined;
+  const runtime = getRuntime();
+  const fleet = runtime.fleet;
+  const dbg = key ? fleet.getDiagnostics(key, nowMs) : undefined;
+  const state = key ? fleet.getState(key, nowMs) : undefined;
+  const geometry = key ? fleet.getGeometry(key) : undefined;
   const fix = locator.latest();
   const proj = fix ? projectOnlineFix(fix, geometry) : null;
   const baseReal = proj ? (proj.fDistM ?? proj.gpsDistM) : null;
@@ -109,7 +108,7 @@ function buildSnapshot(key: string | null, locator: OnlineLocator): DebugSnapsho
   const realRawDistM = proj ? proj.gpsDistM : null;
 
   let nextStopDistM: number | null = null;
-  if (geometry && dbg?.hasSim) {
+  if (geometry && dbg) {
     for (const st of geometry.stops) {
       if (st.distM > dbg.simDistM + 0.5) {
         nextStopDistM = st.distM - dbg.simDistM;
@@ -121,6 +120,7 @@ function buildSnapshot(key: string | null, locator: OnlineLocator): DebugSnapsho
     nowMs,
     dbg,
     state,
+    health: runtime.physicsHealth,
     fix,
     proj,
     realDistM,
@@ -133,42 +133,38 @@ function buildSnapshot(key: string | null, locator: OnlineLocator): DebugSnapsho
 
 // ── phase / regime words ─────────────────────────────────────────────────────
 
-/** Human-readable phase headline. */
-function phaseLabel(d: SimDebugInfo): string {
+/**
+ * Human-readable headline. The frozen states come FIRST: a tram standing still
+ * because the curve ran out must never be mistaken for one standing at a stop.
+ */
+function phaseLabel(d: PhysicsDebugInfo): string {
+  if (!d.hasGeometry) return 'NO GEOMETRY (raw dot — shape pending)';
+  if (!d.hasTrajectory) return 'NO CURVES — frozen on the last raw fix';
+  if (d.pastHorizon) return 'PAST HORIZON — frozen (no data beyond here)';
   switch (d.phase) {
     case 'terminal':
       return 'AT TERMINAL (end of trip)';
     case 'dwell':
-      return d.fixPinActive ? 'HOLDING AT STOP (fix says standing)' : 'DWELLING AT STOP (boarding)';
+      return 'STANDING AT A STOP';
     case 'cruise':
-      if (d.stuckAtM !== null) return 'STUCK — holding at fix (jam / light)';
-      if (d.yieldHoldM !== null) return 'YIELDING at junction';
-      if (d.regime === 'hold-follow') return 'HOLDING WITH REALITY (predictor standing)';
-      if (d.regime === 'yield') return 'AHEAD OF REALITY — easing off';
-      if (d.regime === 'catchup') return 'BEHIND — catching up';
-      if (d.skipRollUntilM > d.simDistM) return 'ROLLING through skipped stop';
-      if (d.vAllowedKmh != null && d.cruiseCapKmh != null && d.vAllowedKmh < d.cruiseCapKmh - 1)
-        return 'BRAKING for curve / stop';
-      return 'TRACKING the predictor';
+      return d.mode === 'smooth' ? 'RUNNING (smooth curve)' : 'RUNNING (fixed curve)';
     default:
-      return 'NO SIM (raw dot — no geometry)';
+      return 'NO PHASE (no geometry)';
   }
 }
 
-/** Active holds/regimes, plain words + numbers, most-urgent first. */
-function activeNotes(d: SimDebugInfo, nowMs: number): string[] {
+/** Whatever is currently notable about this tram, most-urgent first. */
+function activeNotes(d: PhysicsDebugInfo): string[] {
   const out: string[] = [];
-  if (d.stuckAtM !== null) out.push(`stuck-hold @ ${num(d.stuckAtM)}m`);
-  if (d.yieldHoldM !== null) out.push(`junction-yield → ${num(d.yieldHoldM)}m`);
-  if (d.fixPinActive && d.fixStopDistM !== null) out.push(`fix-pin @ ${num(d.fixStopDistM)}m`);
-  if (d.phase === 'dwell' && d.dwellUntilMs > 0) {
-    const left = d.dwellUntilMs - nowMs;
-    out.push(left > 0 ? `dwell ${sec1(left)} left` : 'dwell (holding for fix)');
+  if (d.connection !== 'live') out.push(d.connection.toUpperCase());
+  if (!d.hasTrajectory) out.push('no published curves');
+  else if (d.pastHorizon) out.push('frozen past horizon');
+  if (d.discontinuity) out.push('discontinuity flagged');
+  if (d.deltaM != null && Math.abs(d.deltaM) >= 1) {
+    out.push(`smooth ${d.deltaM >= 0 ? 'ahead of' : 'behind'} fixed by ${num(Math.abs(d.deltaM), 1)}m`);
   }
-  if (d.regime != null && d.regime !== 'track') out.push(d.regime);
-  if (d.skipRollUntilM > d.simDistM) out.push('skip-roll');
-  if (d.lastTeleportMs > 0 && nowMs - d.lastTeleportMs < 4_000) {
-    out.push(`teleport ${sec1(nowMs - d.lastTeleportMs)} ago`);
+  if (d.horizonLeftS != null && d.horizonLeftS < 15) {
+    out.push(`horizon ${num(d.horizonLeftS, 1)}s left`);
   }
   return out;
 }
@@ -181,8 +177,8 @@ function activeNotes(d: SimDebugInfo, nowMs: number): string[] {
 // drift away from its documentation, and guide mode renders the sections
 // directly without duplicating the list.
 //
-// Sources: docs/decisions/interpolation-engine.md (the engine's decision record)
-// and src/lib/engine/{tramSim,speedProfile}.ts.
+// Sources: docs/research/physics-v3-protocol.md (the frozen client/server
+// contract) and src/lib/physics/*.
 
 interface GuideSection {
   title: string;
@@ -192,114 +188,105 @@ interface GuideSection {
 
 const GUIDE_SECTIONS: GuideSection[] = [
   {
-    title: 'SPEED',
+    title: 'CURVES',
     rows: [
-      ['sim', 'How fast the simulated tram is actually moving right now.'],
       [
-        'cruise target',
-        'The speed the controller is aiming for: the track cruise reference (42 km/h) scaled by the catch-up factor, this car’s learned pace bias and the time-of-day factor.',
+        'drawing',
+        'Which published curve the map is currently showing: smooth (the continuity track) or fixed (the raw model opinion). The Settings switch picks it.',
       ],
       [
-        'vAllowed (envelope)',
-        'The hard braking envelope — the fastest you may go here and still stop at 1.2 m/s² for every limit within 400 m. Pace NEVER multiplies this; it is what stops a late tram sailing into a platform.',
-      ],
-      ['cruiseCap', 'Track speed limit at this point: the lower of the zone cap and the curve cap.'],
-      [
-        'zone cap',
-        'Network default 50 km/h, dropping to 31 km/h inside the city-centre box during the day (07:00–19:00).',
+        'smooth',
+        'Metres along the route on the SMOOTH curve. The server bakes the join between consecutive predictions into it, so it never teleports except at a flagged discontinuity.',
       ],
       [
-        'curve cap',
-        'Speed limit from the rail curvature — slow enough that lateral acceleration stays comfortable, times a 0.85 realism factor. R is the curve radius; small R = tight curve.',
+        'fixed',
+        'Metres along the route on the FIXED curve — the model’s raw opinion, which re-anchors on every fix and is allowed to jump to get there.',
       ],
       [
-        'κ · bias · tod',
-        'Curvature (rad/m) · this car’s learned pace multiplier (1 = profile pace) · the time-of-day factor (peaks slow, nights fast).',
+        'smooth−fixed',
+        'The gap between the two curves right now. THIS is the number the whole comparison exists to produce: positive = the smooth curve is running ahead of the model’s opinion, negative = behind. Large values mean continuity is costing accuracy.',
+      ],
+      [
+        'speed',
+        'How fast the drawn tram is moving — measured from the curve itself (its slope over ±0.5 s), not modelled. Nothing on the client decides this.',
       ],
     ],
   },
   {
-    title: 'ERROR (m)',
+    title: 'HORIZON',
     rows: [
       [
-        'e = tgt−sim',
-        'Target minus simulated position. Positive = the sim is BEHIND where it should be and will catch up; negative = ahead, and it will ease off.',
+        'horizon left',
+        'Seconds of curve remaining. At zero the tram FREEZES where the data ended and dims — the client never animates beyond what the server predicted.',
       ],
       [
-        'lag  sim−real',
-        'The honest one: simulated position minus YOUR GPS position along the line. Positive = the app is drawing the tram ahead of the one you are sitting in.',
+        'emission age',
+        'How long ago the server published this trajectory. It is also the blend anchor: continuity is measured from this instant.',
       ],
-      ['sim−golemio', 'Simulated position minus the last real AVL fix, dead-reckoned forward.'],
-      ['real−golemio', 'Your GPS position minus the AVL fix — how stale or wrong the feed itself is.'],
       [
-        'deviation |sim−obs|',
-        'Unsigned sim-vs-observation gap — the number the tram card shows as “sim offset”.',
+        'anchor age',
+        'How old the AVL fix underneath these curves is. The curves are the server’s answer to "where is it now", given a fix this old.',
+      ],
+      ['AVL age', 'Age of the last raw reported position from the feed, independently of the curves.'],
+      [
+        'discontinuity',
+        'Whether the server flagged THIS emission as a sanctioned break in continuity (trip change, or the model moved more than 150 m), plus how many have been seen this session. Smooth mode may jump once on a flagged emission; otherwise it must not.',
       ],
     ],
   },
   {
-    title: 'POSITIONS (m along shape)',
+    title: 'CONNECTION',
     rows: [
-      ['target', 'Where the controller currently wants the tram to be.'],
-      ['golemio fix (obs)', 'Last real reported position from the AVL feed, as metres along the shape.'],
-      ['projection (live)', 'That fix dead-reckoned forward to now — what “Live” position mode draws.'],
       [
-        'real (GPS filt)',
-        'Your filtered GPS projected onto the tram’s shape. Ground truth: you are physically in this tram.',
+        'state',
+        'live (bundle under 15 s), degraded (15–45 s — trams keep following their curves), or offline (over 45 s, or fetches failing — banner shown, trams freeze at the end of their curves).',
       ],
-      ['real (GPS raw)', 'The same, unfiltered — compare with the filtered value to see the filter working.'],
       [
-        'minStopDist',
-        'Stops closer than this are ignored by the braking envelope, so an already-served stop cannot pin the tram in place.',
+        'bundle age',
+        'Age of the newest trajectory bundle in server time. This — not "did the last fetch throw" — is what decides the state above, so a server answering 200 OK with stale data still reads as offline.',
+      ],
+      [
+        'clock offset',
+        'serverNow − this device’s clock, smoothed over the last few fetches. Every curve is evaluated at the CORRECTED time, which is what makes two phones draw identical trams.',
+      ],
+      ['vehicles', 'How many vehicles the newest bundle carried.'],
+      ['fetch', 'Whether a fetch is in flight, or how many consecutive attempts have failed.'],
+    ],
+  },
+  {
+    title: 'RIDER GPS (m)',
+    rows: [
+      [
+        'smooth−rider',
+        'The honest one: the drawn position minus YOUR GPS position along the line. Positive = the app is drawing the tram ahead of the one you are sitting in.',
+      ],
+      ['smooth−fix', 'Drawn position minus the last real AVL fix.'],
+      ['rider−fix', 'Your GPS position minus the AVL fix — how stale or wrong the feed itself is.'],
+      [
+        'rider filt / raw',
+        'Your filtered GPS projected onto the shape, then the unfiltered value — compare them to see the outlier filter working.',
+      ],
+      ['GPS watch', 'Whether the phone’s location watch is running. Every rider row above needs it.'],
+      ['accuracy', 'GPS horizontal accuracy. Above roughly 30 m the lag numbers get noisy.'],
+      [
+        'track offset',
+        'How far off the rail your GPS is — filtered, then raw. Large values mean the projection is guessing.',
       ],
     ],
   },
   {
-    title: 'HOLDS / REGIME',
+    title: 'NEXT STOP',
     rows: [
-      ['fix-pin', 'The feed says the tram is standing at a stop, so the sim is pinned there instead of rolling on.'],
-      ['stuck @', 'The tram has not moved between fixes (jam or a long light), so the sim holds at that distance.'],
-      ['yield hold @', 'Holding short of a junction to let the crossing movement clear.'],
-      ['dwell left', 'Time remaining in the boarding dwell at the current stop.'],
+      ['stop', 'Next stop ahead of the drawn position.'],
       [
-        'regime',
-        'How the smooth marker chases the predictor: track (in-band), catchup (behind, bounded by observed free-running pace), yield (ahead, easing off), hold-follow (reality is standing — close onto it and stand too).',
+        'distance / eta',
+        'Along-shape distance to it, then when the SMOOTH curve crosses that distance. The ETA is blank past the horizon — beyond the data we genuinely do not know.',
       ],
-      [
-        'teleport ago',
-        'How long since the sim was hard-snapped to a fix — the last resort when it is hopelessly wrong.',
-      ],
-    ],
-  },
-  {
-    title: 'NEXT STOP / SCHEDULE',
-    rows: [
-      ['name', 'Next stop ahead of the simulated position.'],
-      ['dist', 'Along-shape distance from the sim to that stop.'],
-      ['eta', 'Estimated seconds to it at the current pace.'],
       ['delay', 'Schedule delay reported by the feed. Positive = late.'],
       [
         'state / phase',
-        'Feed-reported state, then the sim’s own phase: cruise, dwell (at a stop), terminal (end of trip), or unknown (no geometry — raw dot only).',
+        'Feed-reported state, then the derived phase: cruise, dwell (standing within 30 m of a stop), terminal (the last one), or unknown (no curves or no geometry).',
       ],
-      [
-        'fix age (lat-adj)',
-        'Age of the last fix, and in brackets the latency-adjusted age the controller actually uses.',
-      ],
-    ],
-  },
-  {
-    title: 'GPS ON-LINE',
-    rows: [
-      ['watch', 'Whether the phone’s location watch is running. Every “real” row above needs it.'],
-      ['accuracy', 'GPS horizontal accuracy. Above roughly 30 m the lag numbers get noisy.'],
-      ['gps / filt speed', 'Raw GPS speed, then the filtered speed the projection uses.'],
-      [
-        'offset filt / raw',
-        'How far off the rail your GPS is — filtered, then raw. Large values mean the projection is guessing.',
-      ],
-      ['filter', 'Whether the last fix was accepted, or why the outlier filter rejected it.'],
-      ['gps fix age', 'How long since the last accepted GPS fix.'],
     ],
   },
 ];
@@ -310,27 +297,31 @@ const GUIDE: Record<string, string> = Object.fromEntries(GUIDE_SECTIONS.flatMap(
 const PRIMER: [string, string][] = [
   [
     'THE PROBLEM',
-    'The feed reports each tram only every ~20 s, and those positions are already seconds old. Everything you see moving is simulated between fixes.',
+    'The feed reports each tram only every ~20 s, and those positions are already seconds old. Everything you see moving between fixes has to be predicted.',
   ],
   [
-    'ONE NUMBER',
-    'Each tram is simulated as a single distance along its route polyline, so it is always exactly on the rails and can never reverse or cut a corner.',
+    'WHO PREDICTS',
+    'The SERVER does, for the whole fleet, every 5 s. It publishes each tram’s next ~120 seconds as a short list of (time, metres-along-route) keyframes. The app downloads one bundle for all trams.',
   ],
   [
-    'SPEED',
-    'The predictor estimates the REAL tram: it cruises at its learned pace under the braking envelope. The smooth marker then chases the predictor. The envelope always wins, which is why a late tram still brakes properly into stops.',
+    'WHAT THE APP DOES',
+    'Almost nothing: it finds the two keyframes around "now", interpolates between them, and places that distance on the route polyline. No simulation, no controllers, no state — which is why the tram is always exactly on the rails and why backgrounding the app needs no catch-up.',
   ],
   [
-    'CATCH-UP',
-    'The smoother compares the predictor position with its own (that is "errPred"). Behind → it speeds up, bounded by observed free-running pace; ahead → it eases off; reality standing → it closes onto the platform and stands too. It never jumps unless hopelessly wrong, which shows up as a teleport.',
+    'TWO CURVES',
+    'Each tram gets two: SMOOTH (continuity baked in — never teleports) and FIXED (the model’s raw opinion — re-anchors on every fix and jumps). The map draws one; this overlay always shows both, and their gap is the "smooth−fixed" number.',
   ],
   [
-    'HOLDS',
-    'Stops, jams, junctions and departures are modelled as explicit holds. The HOLDS section names whichever one is active and the number it is holding at.',
+    'ONE CLOCK',
+    'Curves are stamped in the server’s time, so the app measures its own clock error and evaluates at the corrected instant. Two phones with different clocks therefore draw the same tram in the same place.',
+  ],
+  [
+    'HONESTY',
+    'When the data stops arriving the trams follow their curves to the end and then FREEZE, dimmed, behind an explicit banner. Nothing is ever animated beyond what the server actually predicted.',
   ],
   [
     'GROUND TRUTH',
-    'While you ride, your own GPS is projected onto the same line. "lag sim−real" is then the real error: positive means the app is drawing the tram ahead of the one you are in.',
+    'While you ride, your own GPS is projected onto the same line. "smooth−rider" is then the real error: positive means the app is drawing the tram ahead of the one you are in.',
   ],
 ];
 
@@ -407,12 +398,13 @@ export function DebugOverlay() {
               {header}
             </Text>
           </Pressable>
+          {/* Matches the in-world traces (DebugMapTraces). `*` marks the curve
+              the map is actually drawing; FIX never gets one — no render mode
+              shows the raw fix, and claiming otherwise would be a lie. */}
           <View style={styles.legend} pointerEvents="none">
-            <Text style={[styles.legendText, styles.legendFix]}>
-              ● FIX{positionMode === 'raw' ? '*' : ''}
-            </Text>
-            <Text style={[styles.legendText, styles.legendLive]}>
-              ● LIVE{positionMode === 'live' ? '*' : ''}
+            <Text style={[styles.legendText, styles.legendFix]}>● FIX</Text>
+            <Text style={[styles.legendText, styles.legendFixed]}>
+              ● FIXED{positionMode === 'fixed' ? '*' : ''}
             </Text>
             <Text style={[styles.legendText, styles.legendSmooth]}>
               ● SMOOTH{positionMode === 'smooth' ? '*' : ''}
@@ -459,10 +451,10 @@ export function DebugOverlay() {
  * only value that needed one — it lives in the expanded readout).
  */
 function DebugCollapsed({ tramKey }: { tramKey: string }) {
-  const [dbg, setDbg] = useState<SimDebugInfo | undefined>(undefined);
+  const [dbg, setDbg] = useState<PhysicsDebugInfo | undefined>(undefined);
 
   useEffect(() => {
-    const read = () => setDbg(getRuntime().engine.getDebugInfo(tramKey, Date.now()));
+    const read = () => setDbg(getRuntime().fleet.getDiagnostics(tramKey, Date.now()));
     read();
     const id = setInterval(read, 1_000);
     return () => clearInterval(id);
@@ -514,20 +506,16 @@ function DebugLive({ tramKey }: { tramKey: string }) {
     return () => clearInterval(id);
   }, [tramKey, locator]);
 
-  // Pre-first-sample fallback only (the timer stamps every later nowMs): the
-  // shared 1 Hz clock, since Date.now() during render is an impure read.
-  const clockNowMs = useNowMs();
-  const nowMs = snap?.nowMs ?? clockNowMs;
   const dbg = snap?.dbg;
-  const state = snap?.state;
+  const health = snap?.health;
   const fix = snap?.fix ?? null;
   const proj = snap?.proj ?? null;
   const realDistM = snap?.realDistM ?? null;
   const realRawDistM = snap?.realRawDistM ?? null;
 
-  // Signed diffs (+ = sim ahead of the real tram).
-  const lagM = dbg?.hasSim && realDistM != null ? dbg.simDistM - realDistM : null;
-  const simVsObs = dbg?.hasSim ? dbg.simDistM - dbg.obsDistM : null;
+  // Signed diffs (+ = the RENDERED tram is ahead of the real one).
+  const lagM = dbg && realDistM != null ? dbg.simDistM - realDistM : null;
+  const simVsObs = dbg ? dbg.simDistM - dbg.obsDistM : null;
   const realVsObs = realDistM != null && dbg ? realDistM - dbg.obsDistM : null;
 
   return (
@@ -538,49 +526,74 @@ function DebugLive({ tramKey }: { tramKey: string }) {
       showsHorizontalScrollIndicator={false}
     >
       {!dbg && <Text style={styles.note}>No state yet (waiting for a fix).</Text>}
-      {dbg && (
+      {dbg && health && (
         <>
           <View style={styles.debugCard}>
             <Text style={styles.phase}>{phaseLabel(dbg)}</Text>
-            {!dbg.hasSim && <Text style={styles.note}>Raw AVL only — geometry pending.</Text>}
-            <SectionTitle>MOTION</SectionTitle>
-            <Row label="sim" value={`${num(dbg.simSpeedKmh, 1)} km/h`} />
-            <Row label="target" value={`${num(dbg.cruiseTargetKmh, 1)} km/h`} />
-            <Row label="allowed / cruise" value={`${num(dbg.vAllowedKmh, 0)} / ${num(dbg.cruiseCapKmh, 0)}`} />
-            <Row label="zone / curve" value={`${num(dbg.zoneCapKmh, 0)} / ${num(dbg.curveCapKmh, 0)}`} />
-            <Row label="bias · tod" value={`${num(dbg.paceBias, 2)} · ${num(dbg.todPaceFactor, 2)}`} />
+            <SectionTitle>CURVES</SectionTitle>
+            <Row label="drawing" value={dbg.mode} />
+            <Row label="smooth" value={num(dbg.smoothDistM)} />
+            <Row label="fixed" value={num(dbg.fixedDistM)} />
+            <Row
+              label="smooth−fixed"
+              value={signed(dbg.deltaM, 1)}
+              warn={dbg.deltaM != null && Math.abs(dbg.deltaM) > 80}
+            />
+            <Row label="speed" value={`${num(dbg.simSpeedKmh, 1)} km/h`} />
           </View>
 
           <View style={styles.debugCard}>
-            <SectionTitle>TRACKING Δm</SectionTitle>
-            <Row label="target−smooth" value={signed(dbg.errPredM)} warn={dbg.errPredM != null && Math.abs(dbg.errPredM) > 60} />
+            <SectionTitle>HORIZON</SectionTitle>
+            <Text style={styles.notes}>{activeNotes(dbg).join(' · ') || 'nominal'}</Text>
+            <Row
+              label="horizon left"
+              value={dbg.horizonLeftS != null ? `${num(dbg.horizonLeftS, 1)}s` : '—'}
+              warn={dbg.pastHorizon}
+            />
+            <Row label="emission age" value={dbg.emissionAgeS != null ? `${num(dbg.emissionAgeS, 1)}s` : '—'} />
+            <Row label="anchor age" value={dbg.anchorAgeS != null ? `${num(dbg.anchorAgeS, 1)}s` : '—'} />
+            <Row label="AVL age" value={`${num(dbg.fixAgeS, 1)}s`} />
+            <Row label="discontinuity" value={`${dbg.discontinuity ? 'THIS' : 'no'} · ${dbg.discontinuitiesTotal} total`} />
+          </View>
+
+          <View style={styles.debugCard}>
+            <SectionTitle>CONNECTION</SectionTitle>
+            <Row
+              label="state"
+              value={dbg.connection}
+              warn={dbg.connection !== 'live'}
+            />
+            <Row
+              label="bundle age"
+              value={dbg.bundleAgeS != null ? `${num(dbg.bundleAgeS, 1)}s` : 'none'}
+              warn={dbg.bundleAgeS == null || dbg.bundleAgeS >= 15}
+            />
+            <Row label="clock offset" value={`${signed(dbg.clockOffsetMs)}ms`} warn={health.clockImplausible} />
+            <Row label="vehicles" value={num(health.vehicleCount)} />
+            <Row
+              label="fetch"
+              value={health.consecutiveFailures > 0 ? `fail ×${health.consecutiveFailures}` : health.inFlight ? 'in flight' : 'ok'}
+              warn={health.consecutiveFailures > 0}
+            />
+          </View>
+
+          <View style={styles.debugCard}>
+            <SectionTitle>RIDER GPS Δm</SectionTitle>
             <Row label="smooth−rider" value={signed(lagM)} warn={lagM != null && Math.abs(lagM) > 60} />
             <Row label="smooth−fix" value={signed(simVsObs)} />
             <Row label="rider−fix" value={signed(realVsObs)} />
-            <Row label="smooth" value={num(dbg.simDistM)} />
-            <Row label="live / fix" value={`${num(dbg.projDistM)} / ${num(dbg.obsDistM)}`} />
             <Row label="rider filt / raw" value={`${num(realDistM)} / ${num(realRawDistM)}`} />
-          </View>
-
-          <View style={styles.debugCard}>
-            <SectionTitle>REGIME</SectionTitle>
-            <Text style={styles.notes}>{activeNotes(dbg, nowMs).join(' · ') || 'free cruise'}</Text>
-            <Row label="fix pin" value={dbg.fixStopDistM != null ? `@${num(dbg.fixStopDistM)} ${dbg.fixPinActive ? 'ON' : 'stale'}` : '—'} />
-            <Row label="stuck / yield" value={`${num(dbg.stuckAtM)} / ${num(dbg.yieldHoldM)}`} />
-            <Row label="regime" value={dbg.regime ?? '—'} />
-            <Row label="dwell left" value={dbg.phase === 'dwell' ? sec1(dbg.dwellUntilMs - nowMs) : '—'} />
-            <Row label="teleport ago" value={dbg.lastTeleportMs > 0 ? sec1(nowMs - dbg.lastTeleportMs) : '—'} />
-          </View>
-
-          <View style={styles.debugCard}>
-            <SectionTitle>NEXT / DEVICE GPS</SectionTitle>
-            <Row label="stop" value={state?.nextStopName ?? '—'} />
-            <Row label="distance / eta" value={`${num(snap?.nextStopDistM)}m / ${num(state?.nextStopEtaS)}s`} />
-            <Row label="delay" value={`${signed(dbg.delaySeconds)}s`} />
-            <Row label="AVL age" value={`${sec1(dbg.fixAgeMs)} (${sec1(dbg.staleFixAgeMs)})`} />
             <Row label="GPS watch" value={snap?.watchActive ? (fix ? 'live' : 'starting') : (snap?.watchError ?? 'off')} warn={!snap?.watchActive} />
             <Row label="accuracy" value={fix?.accuracyM != null ? `${num(fix.accuracyM)}m` : '—'} warn={fix?.accuracyM != null && fix.accuracyM > 30} />
             <Row label="track offset" value={`${num(proj?.fOffM, 1)} / ${num(proj?.gpsOffM, 1)}m`} />
+          </View>
+
+          <View style={styles.debugCard}>
+            <SectionTitle>NEXT STOP</SectionTitle>
+            <Row label="stop" value={dbg.nextStopName ?? '—'} />
+            <Row label="distance / eta" value={`${num(snap?.nextStopDistM)}m / ${dbg.nextStopEtaS != null ? `${num(dbg.nextStopEtaS)}s` : '—'}`} />
+            <Row label="delay" value={`${signed(dbg.delaySeconds)}s`} />
+            <Row label="state / phase" value={`${dbg.statePosition} / ${dbg.phase}`} />
           </View>
         </>
       )}
@@ -649,7 +662,7 @@ const styles = StyleSheet.create({
   legend: { flexDirection: 'row', gap: 6, marginHorizontal: 8 },
   legendText: { fontFamily: MONO, fontSize: 9, fontWeight: '800' },
   legendFix: { color: '#FF4FA3' },
-  legendLive: { color: '#B7FF4A' },
+  legendFixed: { color: '#B7FF4A' },
   legendSmooth: { color: '#4DDBFF' },
   buildNumber: {
     color: '#FFD479',

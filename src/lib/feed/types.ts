@@ -3,12 +3,12 @@
 // Everything the interpolation engine + UI need from "the outside world" flows
 // through this interface: fresh vehicle snapshots (push semantics), trip
 // geometry resolution, calibration telemetry (deviation records), and feed
-// health. Today the only implementation is LocalGolemioFeed (the "backend"
-// runs on the client: a 5 s Golemio poll loop + on-device shape cache +
-// on-device motion log). A future RemoteFeed talks WebSocket/HTTP to a real
-// server that polls Golemio at ~1–2 s and aggregates calibration fleet-wide —
-// see docs/decisions/backend-plan.md. The engine and hooks must never care
-// which one is behind the interface.
+// health. The sole implementation is RemoteFeed, a thin client over the
+// Convex backend, which polls Golemio server-side and aggregates calibration
+// fleet-wide. The on-client LocalGolemioFeed was deleted with physics v3: it
+// existed to keep the app "working" offline by simulating locally, which is
+// exactly the dishonesty the protocol forbids (see feed/nullFeed.ts). Note
+// this feed supplies IDENTITY only — motion comes from src/lib/physics.
 
 import type { RouteGeometry, TramSnapshot } from '@/lib/types';
 
@@ -95,8 +95,8 @@ export interface CalibrationRecord {
 }
 
 /**
- * The tram data service. Implemented today by LocalGolemioFeed (client-side),
- * later by RemoteFeed (thin client over the backend). Lifecycle: subscribe,
+ * The tram data service. Implemented by RemoteFeed (thin client over the
+ * Convex backend); NullFeed is the inert no-backend case. Lifecycle: subscribe,
  * then start(); stop() must abort all in-flight work so no callback fires
  * afterwards (implementations use a generation guard for late completions).
  */

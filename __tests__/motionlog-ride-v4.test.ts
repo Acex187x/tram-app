@@ -152,11 +152,11 @@ function makeState(key: string, over: Partial<TramPublicState> = {}): TramPublic
     observedPosition: [14.42, 50.08],
     observedBearing: 90,
     deviationM: 34,
-    projectedObservedDistM: 1250,
+    fixedDistM: 1250,
+    pastHorizon: false,
     nextStopName: 'Anděl',
     nextStopEtaS: 40,
     hasGeometry: true,
-    paceBias: 1.072,
     ...over,
   } as unknown as TramPublicState;
 }
@@ -279,9 +279,12 @@ describe('ride schema v4 — completeness contract', () => {
     expect(rec.fDist).toBeCloseTo(715, 0);
     expect(rec.fOffM).toBeCloseTo(0, 0);
     expect(rec.fLagM).toBeCloseTo(1200 - 715, 0);
-    // Rendering-judgment context.
+    // Rendering-judgment context. `bias` is retained as a column but is now
+    // always null: the learned pace multiplier died with the client engine
+    // (physics v3 learns pace server-side), and faking a value here would put
+    // a fabricated number into the calibration record.
     expect(rec.posMode).toBe('smooth');
-    expect(rec.bias).toBe(1.07);
+    expect(rec.bias).toBeNull();
   });
 
   it('v3 lines remain a strict prefix of v4 lines (old parsers unaffected)', async () => {

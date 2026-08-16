@@ -1,10 +1,10 @@
 // Deterministic Europe/Prague timezone helpers — the ONE shared source of the
-// CET/CEST offset rule. Imported by both the engine (speedProfile's TOD/hour
-// fallback) and golemio/gtfs (service-day resolution), which must agree on the
-// Prague hour or TOD buckets and schedule anchors drift apart by an hour.
+// CET/CEST offset rule, used by everything Prague-local (today golemio/gtfs
+// service-day resolution and the map's light preset). A second, drifting copy
+// of this rule is precisely the failure this module exists to prevent.
 // Pure TS, no Intl dependency: Intl timezone support is unreliable on Hermes,
 // and a host-timezone or fixed-offset fallback is wrong half the year
-// (audit 2026-07-13: the engine's old fallback hardcoded UTC+2 — an hour off
+// (audit 2026-07-13: the old engine fallback hardcoded UTC+2 — an hour off
 // through the whole CET winter).
 
 /**

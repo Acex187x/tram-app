@@ -69,8 +69,7 @@ import {
 } from 'react';
 
 import { Tram } from '@/constants/theme';
-import { DETAIL_ENTER_ZOOM, getRuntime, pointsPushIntervalMs, pointsPushWanted } from '@/hooks/tramData';
-import { mlDistM } from '@/lib/feed/mlTrajectories';
+import { DETAIL_ENTER_ZOOM, getRuntime, pointsPushWanted } from '@/hooks/tramData';
 import {
   FACE_SPRITE_SCALE,
   ICON_PACKS,
@@ -78,7 +77,6 @@ import {
   type IconPackId,
 } from '@/lib/fleet/iconPacks';
 import { MAP_ICON_ASSETS, MAP_ICON_SCALE } from '@/lib/fleet/modelSpecs';
-import { bearingAt, pointAt } from '@/lib/geo/polyline';
 import {
   buildFrame,
   BADGE_CULL_MARGIN_M,
@@ -102,7 +100,8 @@ import {
   CAMERA_GLIDE_MS,
   CAMERA_RETARGET_MS,
   CAMERA_RETURN_MS,
-  RAW_FIX_GLIDE_MS,
+  JUMP_GLIDE_MS,
+  isJumpTarget,
   leadTarget,
   withinDeadband,
   type FollowCameraTarget,
@@ -155,6 +154,25 @@ const NIGHT_LINE = ['>=', ['to-number', ['get', 'line']], 90];
 
 /** The line's PID color (day red / night navy) as a style expression. */
 const LINE_COLOR = ['case', NIGHT_LINE, Tram.night, Tram.pidRed] as unknown as string;
+
+/**
+ * Connection honesty, rendered (docs/research/physics-v3-protocol.md §"Connection
+ * honesty"): a tram whose curve ran out — or which the server published none for
+ * — is FROZEN on screen, so it must not look as alive as the ones still moving.
+ * `stale` is a per-feature prop set from TramPublicState.pastHorizon, and every
+ * tram layer multiplies its opacity by this factor. Dim enough to read as
+ * "this one is not updating", solid enough to stay findable and tappable.
+ *
+ * Pure style expression over a prop the FC already carries: zero per-frame JS
+ * and zero payload growth (perf invariants #1/#5).
+ */
+const STALE_DIM = 0.42;
+const STALE_FACTOR = ['case', ['==', ['get', 'stale'], 1], STALE_DIM, 1];
+
+/** Multiply an opacity expression by the stale dim factor. */
+function dimIfStale(base: unknown): number {
+  return ['*', base, STALE_FACTOR] as unknown as number;
+}
 
 // Geometry-less trams (no loaded shape yet) are excluded from the bearing-
 // rotated teardrop / capsule sprites via an inline `['!=', ['get',
@@ -254,7 +272,7 @@ function faceBadgeStyle(pack: IconPackId, dataDrivenOffsets: boolean): BadgeSymb
       BAND_BADGES_TO_MODELS,
       FACE_MAX_ICON_SIZE,
     ] as unknown as number,
-    iconOpacity: BADGE_BAND_OPACITY,
+    iconOpacity: dimIfStale(BADGE_BAND_OPACITY),
     textField: ['get', 'line'] as unknown as string,
     textFont: ['DIN Pro Bold', 'Arial Unicode MS Regular'],
     textSize: [
@@ -275,7 +293,7 @@ function faceBadgeStyle(pack: IconPackId, dataDrivenOffsets: boolean): BadgeSymb
     textOffset: dataDrivenOffsets
       ? (['get', 'toff'] as unknown as number[])
       : [FACE_TEXT_OFFSET_X_EM, FACE_TEXT_OFFSET_Y_EM],
-    textOpacity: BADGE_BAND_OPACITY,
+    textOpacity: dimIfStale(BADGE_BAND_OPACITY),
     iconAllowOverlap: true,
     iconIgnorePlacement: true,
     textAllowOverlap: true,
@@ -396,7 +414,7 @@ export function TramLayers({
   // Per-frame push: engine states → GeoJSON → direct native update. Refs only.
   useEffect(() => {
     const rt = getRuntime();
-    const getGeometry = (key: string) => rt.engine.getGeometry(key);
+    const getGeometry = (key: string) => rt.fleet.getGeometry(key);
 
     // Viewport supplier for the runtime's geometry warm-up: missing shapes of
     // ON-SCREEN trams load at raised priority so a visible tram doesn't sit as
@@ -411,40 +429,26 @@ export function TramLayers({
       // changes rarely; no subscription bookkeeping needed.
       const positionMode = useSettingsStore.getState().positionMode;
 
-      // Zoom-adaptive push cadences (thermal): sections every tick but ONLY
-      // inside the model band; points at pointsPushIntervalMs(zoom). Raw mode
-      // (engine-v2.md §2.7): a raw frame changes only when a fix changes, so
-      // raw pushes ride the SAME due-check gated by the runtime's ingest-set
-      // dirty flag — no new timer, and identical frames are never re-pushed at
-      // 15 Hz. The flag is consumed only on due frames (consuming it early
-      // would swallow a fix update). A mode switch pushes immediately.
-      const isRaw = positionMode === 'raw';
-      // Forced pushes (bypass interval + dirty gate): a position-mode switch
-      // in any mode; a selection/follow change in raw mode (the halo, pinned
-      // badge and fix overlay ride the points FC — a tap must not wait ~5 s
-      // for the next poll's ingest to light up).
+      // Zoom-adaptive push cadences (thermal): sections every frame but ONLY
+      // inside the model band; points at pointsPushIntervalMs(zoom). Physics v3
+      // removed the old raw-mode dirty-flag gate — BOTH published curves move
+      // continuously between bundles, so every frame genuinely differs and the
+      // plain interval is the whole rule. Forced pushes still bypass it: a
+      // render-mode switch (the fleet re-anchors onto the other curve), and a
+      // selection/follow change at the 5 s city-scale cadence (the halo, pinned
+      // badge and fix overlay ride the points FC — a tap must not wait for it).
       const lastSel = lastPushedSelectionRef.current;
       const forcePush =
         lastPushedModeRef.current !== positionMode ||
-        (isRaw &&
-          (lastSel.sel !== selection.selectedTramKey ||
-            lastSel.fol !== selection.followTramKey));
-      const pointsDue =
-        forcePush ||
-        nowMs - lastPointsPushMsRef.current >= pointsPushIntervalMs(viewport.zoom);
-      const rawDirty = isRaw && pointsDue ? rt.takeRawFrameDirty() : false;
+        lastSel.sel !== selection.selectedTramKey ||
+        lastSel.fol !== selection.followTramKey;
       const wantPoints = pointsPushWanted(
-        positionMode,
         nowMs - lastPointsPushMsRef.current,
         viewport.zoom,
-        rawDirty,
         forcePush,
       );
-      // Raw sections are frozen between fixes too: push them on points frames
-      // (fix landed / mode switch) and on band entry, never every tick.
       const inSectionsBand = viewport.zoom >= SECTIONS_FEED_MIN_ZOOM;
-      const wantSections =
-        inSectionsBand && (!isRaw || wantPoints || !sectionsFedRef.current);
+      const wantSections = inSectionsBand;
 
       // On leaving the band the sections source is cleared once so stale
       // models never linger — no frame build needed for that.
@@ -475,17 +479,14 @@ export function TramLayers({
         // city-scale frames stay whole-fleet but run only every 1–5 seconds.
         const states =
           viewport.zoom >= DETAIL_ENTER_ZOOM
-            ? rt.engine.getStatesInBounds(
+            ? rt.fleet.getStatesInBounds(
                 nowMs,
                 expandBbox(viewport.bbox, BADGE_CULL_MARGIN_M),
                 selection.selectedTramKey,
                 selection.followTramKey,
                 positionMode,
-                // Only read in 'ml' mode; a stable module-level reference, so
-                // no closure is allocated per push (perf invariant #8).
-                mlDistM,
               )
-            : rt.engine.getStates(nowMs);
+            : rt.fleet.getStates(nowMs, positionMode);
         const frame = buildFrame(states, viewport, {
           selectedKey: selection.selectedTramKey,
           // The follow target gets selected:1 too — the declutter solve pins
@@ -498,8 +499,6 @@ export function TramLayers({
           lineFilter: lineFilterRef.current.set,
           skipPoints: !wantPoints,
           badgeMemory: badgeMemoryRef.current,
-          positionMode,
-          mlDistM,
           nowMs,
         });
 
@@ -591,7 +590,7 @@ export function TramLayers({
       // retargets immediately; otherwise hold the eval cadence.
       const resuming = wasPausedRef.current;
       if (!resuming && lastSent?.key === followKey && nowMs < cameraEvalDueMsRef.current) return;
-      const state = rt.engine.getState(followKey, nowMs);
+      const state = rt.fleet.getState(followKey, nowMs);
       if (!state) {
         // The followed tram disappeared (left service / pruned) — end follow.
         selection.setFollowTramKey(null);
@@ -599,54 +598,23 @@ export function TramLayers({
         wasPausedRef.current = false;
         return;
       }
-      // Track where the tram is RENDERED. In live mode that is the predictor
-      // (the engine's estimate of the real tram now) — anchoring to the raw
-      // fix left the camera parked while the tram drove away. In raw mode the
-      // fix IS the rendered anchor: the camera sits on observedPosition and
-      // eases across each fix jump (see the send below). In the experimental
-      // ml mode the lab's lerped distance is the rendered anchor, placed
-      // through the same geometry path, with the same raw-fix fallback the
-      // feature builder uses.
-      const isLive = positionMode === 'live';
-      const isMl = positionMode === 'ml';
-      let anchor = state.position;
-      let bearing = state.bearing;
-      if (isRaw) {
-        anchor = state.observedPosition;
-        bearing = state.observedBearing;
-      } else if (isMl) {
-        const geometry = rt.engine.getGeometry(followKey);
-        const dist = mlDistM(followKey, state.snapshot.tripId, nowMs);
-        if (geometry && dist != null) {
-          anchor = pointAt(geometry.coordinates, geometry.cumDistM, dist);
-          bearing = bearingAt(geometry.coordinates, geometry.cumDistM, dist);
-        } else {
-          anchor = state.observedPosition;
-          bearing = state.observedBearing;
-        }
-      } else if (isLive) {
-        const geometry = rt.engine.getGeometry(followKey);
-        const projDist = state.projectedObservedDistM;
-        if (geometry && projDist != null) {
-          anchor = pointAt(geometry.coordinates, geometry.cumDistM, projDist);
-          bearing = bearingAt(geometry.coordinates, geometry.cumDistM, projDist);
-        } else {
-          anchor = state.observedPosition;
-          bearing = state.observedBearing;
-        }
-      }
+      // Track where the tram is RENDERED. Physics v3 resolves that once, in the
+      // adapter — `state.position` IS the rendered anchor in whichever mode is
+      // selected, so there is no per-mode camera branch left to keep in sync
+      // with the feature builder (a class of bug that produced a camera parked
+      // on the fix while the tram drove away).
+      const anchor = state.position;
+      const bearing = state.bearing;
       // FIXED orientation captured on engage/return (map screen snapshots the
       // live camera). Fallbacks only fire in the impossible null case; heading
       // falls back to the tram bearing (behind-view) purely defensively.
       const orientation = followGestureRef.current?.orientation ?? null;
       const target: FollowCameraTarget = {
         // Lead slightly toward where the tram will be at the next retarget.
-        // Raw anchors only move on fix jumps — zero lead (leading a parked
-        // point by a stale sim speed would aim the camera off the marker).
-        // Ml is observed-style for the same reason: the smoother's speed says
-        // nothing about the lab trajectory's, so leading by it would aim the
-        // camera off the ml marker.
-        center: isRaw || isMl ? anchor : leadTarget(anchor, bearing, state.simSpeedKmh),
+        // Safe in BOTH modes now: simSpeedKmh is the finite difference of the
+        // very curve being rendered, so it always describes this marker's own
+        // motion. A frozen tram (past horizon) reports 0 and is not led.
+        center: leadTarget(anchor, bearing, state.simSpeedKmh),
         zoom: orientation?.zoom ?? FOLLOW_ZOOM,
         pitch: orientation?.pitch ?? FOLLOW_PITCH,
         heading: orientation?.heading ?? (((bearing % 360) + 360) % 360),
@@ -678,6 +646,12 @@ export function TramLayers({
           (state.simSpeedKmh < CAMERA_DWELL_SPEED_KMH ? CAMERA_DWELL_EVAL_MS : CAMERA_RETARGET_MS);
         return;
       }
+      // A send that moves the camera further than ordinary motion could is a
+      // JUMP — the «fixed» curve re-anchoring on a fresh fix, or a
+      // server-flagged discontinuity on the smooth one. Ease those over the
+      // longer glide; a hard 170 ms snap across hundreds of meters at follow
+      // zoom reads as a cut. Keyed on the movement, not on the mode.
+      const jumped = isJumpTarget(lastSent && lastSent.key === followKey ? lastSent : null, target);
       cameraEvalDueMsRef.current = nowMs + CAMERA_RETARGET_MS;
       lastSentCameraRef.current = { key: followKey, ...target };
       cameraRef.current?.setCamera({
@@ -686,13 +660,7 @@ export function TramLayers({
         pitch: target.pitch,
         heading: target.heading,
         animationMode: 'linearTo',
-        // Raw mode: between fixes the target is deadband-suppressed, so every
-        // actual send IS a fix jump (~45–95 s apart, possibly hundreds of
-        // meters) — glide it over RAW_FIX_GLIDE_MS instead of the 170 ms
-        // steady-state overlap glide, which would read as a hard snap (§2.7).
-        // Ml keeps the steady-state glide: its anchor moves continuously
-        // between keyframes, so it retargets like smooth/live, not in jumps.
-        animationDuration: isRaw ? RAW_FIX_GLIDE_MS : CAMERA_GLIDE_MS,
+        animationDuration: jumped ? JUMP_GLIDE_MS : CAMERA_GLIDE_MS,
       });
     });
 
@@ -712,7 +680,7 @@ export function TramLayers({
     if (!key) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const rt = getRuntime();
-    const state = rt.engine.getState(key);
+    const state = rt.fleet.getState(key);
     if (state) rt.prioritizeTrip(state.snapshot.tripId);
     useSelectionStore.getState().openTram(key);
   }, []);
@@ -766,7 +734,7 @@ export function TramLayers({
             MODEL_COMIC_REAL_SCALE_ZOOM,
             ['literal', [1, 1, 1]],
           ],
-          modelOpacity: [
+          modelOpacity: dimIfStale([
             'interpolate',
             ['linear'],
             ['zoom'],
@@ -774,7 +742,7 @@ export function TramLayers({
             0,
             BAND_BADGES_TO_MODELS + BAND_FADE,
             1,
-          ],
+          ]),
           modelEmissiveStrength: 1.2,
           modelElevationReference: 'ground',
           // Shadows OFF (thermal): per-model shadow passes are the biggest GPU
@@ -893,7 +861,7 @@ export function TramLayers({
           iconAllowOverlap: true,
           iconIgnorePlacement: true,
           iconSize: ['interpolate', ['linear'], ['zoom'], 10, 0.55, BAND_DOTS_TO_BADGES, 0.8],
-          iconOpacity: [
+          iconOpacity: dimIfStale([
             'interpolate',
             ['linear'],
             ['zoom'],
@@ -901,7 +869,7 @@ export function TramLayers({
             1,
             BAND_DOTS_TO_BADGES + BAND_FADE,
             0,
-          ],
+          ]),
         }}
       />,
       // Band 2 (13.2–14.8): the tram MARKER — a map-aligned teardrop at the
@@ -924,7 +892,7 @@ export function TramLayers({
           iconIgnorePlacement: true,
           // MARKER_OBSTACLE_HALF_PX models this size — change both together.
           iconSize: 0.6,
-          iconOpacity: BADGE_BAND_OPACITY,
+          iconOpacity: dimIfStale(BADGE_BAND_OPACITY),
         }}
       />,
       // Band 2: PINNED face badges — selected/followed/favorite trams. Drawn
@@ -979,6 +947,7 @@ export function TramLayers({
         style={{
           circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 3, 14.8, 6],
           circleColor: LINE_COLOR,
+          circleOpacity: dimIfStale(1),
           circleStrokeWidth: 1.5,
           circleStrokeColor: '#FFFFFF',
         }}

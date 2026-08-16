@@ -129,11 +129,11 @@ function makeState(key: string, over: Partial<TramPublicState> = {}): TramPublic
     observedPosition: [14.42, 50.08],
     observedBearing: 90,
     deviationM: 34,
-    projectedObservedDistM: 1250,
+    fixedDistM: 1250,
+    pastHorizon: false,
     nextStopName: 'Anděl',
     nextStopEtaS: 40,
     hasGeometry: true,
-    paceBias: 1.072,
     ...over,
   } as unknown as TramPublicState;
 }
@@ -412,13 +412,16 @@ describe('MotionLog ride recording', () => {
     expect(JSON.parse(lines[3])).toMatchObject({ type: 'ride-end', points: 2 });
     const rec = JSON.parse(lines[1]);
     expect(rec).toMatchObject({ gpsLat: 50.081, gpsSpeed: 6.2, model: '15t', line: '9', simDist: 1200 });
-    // Ride schema v2: raw AVL context + learned bias + active position mode.
+    // Ride schema v2: raw AVL context + the (now always null) bias column +
+    // the active render mode. paceBias died with the client engine — pace is
+    // learned server-side — but the COLUMN stays so old JSONL parsers keep
+    // seeing a strict prefix.
     expect(rec).toMatchObject({
       obsAt: 999_500,
       statePos: 'at_stop',
       delayS: 42,
       nextSeq: 7,
-      bias: 1.07,
+      bias: null,
       posMode: 'live',
     });
     // v3 fields are null without geometry.

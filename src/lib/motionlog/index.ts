@@ -2,8 +2,8 @@
 // filesystem + location seams and the live tram runtime, and exposes a React
 // hook for the UI.
 //
-// Passive daily logging is driven by the FEED: LocalGolemioFeed
-// (src/lib/feed/localGolemioFeed.ts) hands each batch's CalibrationRecords to
+// Passive daily logging is driven by the FEED: the active TramFeed
+// (src/lib/feed/remoteFeed.ts) hands each batch's CalibrationRecords to
 // getMotionLog().onCalibration(...). The feed owns WHEN records are produced;
 // this module owns HOW/WHERE they are stored (buffering, flush, disk caps,
 // export UX — all unchanged).
@@ -63,8 +63,8 @@ export function getMotionLog(): MotionLog {
       location: createExpoLocationWatcher(),
       motion: createExpoDeviceMotionWatcher(),
       now: () => Date.now(),
-      stateProvider: (key) => getRuntime().engine.getState(key, Date.now()),
-      geometry: (key) => getRuntime().engine.getGeometry(key),
+      stateProvider: (key) => getRuntime().fleet.getState(key, Date.now()),
+      geometry: (key) => getRuntime().fleet.getGeometry(key),
       positionMode: () => useSettingsStore.getState().positionMode,
     });
     instance = log;

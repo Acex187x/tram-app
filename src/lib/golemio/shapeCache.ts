@@ -186,7 +186,7 @@ function recordFailure(tripId: string, err: unknown): void {
 }
 
 /**
- * Geometry-landed listeners (LocalGolemioFeed.subscribeGeometry → the
+ * Geometry-landed listeners (TramFeed.subscribeGeometry → the
  * runtime's debounced re-ingest): fired after every memCache.set, i.e. the
  * moment getLoaded()/has() starts returning the trip. Listener errors are
  * swallowed — a bad subscriber must never fail the fetch path.

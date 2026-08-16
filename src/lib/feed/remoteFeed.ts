@@ -14,7 +14,8 @@
 // passing a diff through would silently shrink the fleet (recon §6 / §1).
 //
 // Phase 1 scope: vehicle streaming only. Geometry still resolves client-side
-// through the existing Golemio shape cache — exactly as LocalGolemioFeed does
+// through the existing Golemio shape cache — exactly as the deleted
+// on-client feed did
 // — because Convex geometry serving is rollout step 4 (design §7). Likewise
 // calibration records keep going to the local motion log; server-side folding
 // is fed by the poller's own AVL stream and needs nothing from the client.
@@ -134,7 +135,7 @@ export interface ConvexStreamClient {
 type SnapshotListener = (snapshots: TramSnapshot[], atMs: number) => void;
 
 // ————————————————————————————————————————————————————————————————
-// Calibration sink — same lazy-require discipline as LocalGolemioFeed: the
+// Calibration sink — the same lazy-require discipline the on-client feed used:
 // feed stays importable without the store/motionlog stack, and telemetry
 // failures never reach the ingest path.
 // ————————————————————————————————————————————————————————————————
@@ -205,7 +206,7 @@ export class RemoteFeed implements TramFeed {
   /**
    * Bumped on every start()/stop(). Every async continuation (seed query,
    * subscription callback, retry/throttle timer) captures it and no-ops on a
-   * mismatch — the same discipline LocalGolemioFeed uses for its poll.
+   * mismatch — the standard generation-guard discipline for a poll loop.
    */
   private generation = 0;
   /** Session lifecycle for geometry prefetches: aborted + dropped on stop(). */
@@ -247,7 +248,7 @@ export class RemoteFeed implements TramFeed {
 
   /**
    * Connect, seed from fullFleet, then stream diffs. Idempotent (a second
-   * start() while running is a no-op, matching LocalGolemioFeed). Every start
+   * start() while running is a no-op). Every start
    * is a fresh session: new client, new abort controller, empty fleet.
    */
   start(pollMs?: number): void {
@@ -578,7 +579,7 @@ export class RemoteFeed implements TramFeed {
     try {
       this.listeners.forEach((l) => l(snapshots, atMs));
     } catch (e) {
-      // A subscriber throw surfaces as a feed error (LocalGolemioFeed
+      // A subscriber throw surfaces as a feed error (the on-client feed
       // semantics) instead of escaping into Convex's callback dispatch.
       this.lastError = errorMessage(e);
     }
