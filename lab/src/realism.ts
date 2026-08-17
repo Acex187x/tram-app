@@ -337,7 +337,10 @@ export class PerceptualCounters {
   private jerkHist = new Histogram(0, 2, 0.01);
   private flipRateHist = new Histogram(0, 12, 0.05);
   private knotHist = new Histogram(0, 26, 1);
-  private convNearHist = new Histogram(0, 180, 1); // BEHIND, gap 20–120 m, s
+  /** BEHIND, gap 20–120 m, split by start state (G5 re-spec 2026-08-17): a
+   *  standing smooth pays the jerk spin-up, so its latency gate differs. */
+  private convNearMovingHist = new Histogram(0, 180, 1);
+  private convNearStandingHist = new Histogram(0, 180, 1);
   private convFarHist = new Histogram(0, 300, 1); // BEHIND, gap 120 m–T_disc, s
   /** AHEAD episodes (smooth ahead of the fresh opinion): §6 doctrine says the
    *  lead is repaid where it is natural — at the next platform hold — so the
@@ -432,9 +435,14 @@ export class PerceptualCounters {
           if (convS === null) this.aheadUnconverged++;
           else this.aheadRepaidHist.add(convS);
         } else {
+          // Start-state split: standing = first emitted smooth segment's
+          // chord < 1 m/s (byte-identical to the check-v2 classification).
+          const sdt = (e.smooth[1].t - e.smooth[0].t) / 1000;
+          const sv0 = sdt > 0 ? (e.smooth[1].s - e.smooth[0].s) / sdt : 0;
           if (convS === null) this.unconverged++;
           else if (gap > 120) this.convFarHist.add(convS);
-          else this.convNearHist.add(convS);
+          else if (sv0 < 1.0) this.convNearStandingHist.add(convS);
+          else this.convNearMovingHist.add(convS);
           if (convS !== null) {
             // G6: sign changes of (smooth − opinion) after first convergence,
             // 2 m deadband so cm-rounding noise never counts as hunting.
@@ -487,10 +495,15 @@ export class PerceptualCounters {
       },
       g5catchup: {
         tolM: TRAJ_CONV_TOL_M,
-        near: {
-          n: this.convNearHist.n,
-          p50s: this.convNearHist.pct(50),
-          p90s: this.convNearHist.pct(90),
+        nearMoving: {
+          n: this.convNearMovingHist.n,
+          p50s: this.convNearMovingHist.pct(50),
+          p90s: this.convNearMovingHist.pct(90),
+        },
+        nearStanding: {
+          n: this.convNearStandingHist.n,
+          p50s: this.convNearStandingHist.pct(50),
+          p90s: this.convNearStandingHist.pct(90),
         },
         far: {
           n: this.convFarHist.n,
