@@ -49,7 +49,14 @@ import {
 } from './config';
 import { fetchBatchesSince, fetchFullFleet, fetchHealth, type PollerHealth } from './convex';
 import { openDb, pct, round2, Store, type ScoreRow } from './db';
-import { buildDriveVehicle, type DriveBuilt } from './drive';
+import {
+  buildDriveVehicle,
+  COUPLED_TRAILER_OFFSET_M,
+  QUEUE_GAP_M,
+  STUCK_FIX_EPS_M,
+  STUCK_NEAR_STOP_M,
+  type DriveBuilt,
+} from './drive';
 import { GeometryStore } from './geometry';
 import { LearnedModel } from './learned';
 import { buildMlFeatures, MlClient } from './ml';
@@ -80,7 +87,7 @@ const LIMITS = { vMaxMs: TRAJ_V_MAX_MS, aAccMs2: TRAJ_A_ACC, aBrkMs2: TRAJ_A_BRK
 const { TramEngine } = require('../vendor/engine/engine') as {
   TramEngine: import('../vendor/engine-api').FrozenTramEngineCtor;
 };
-const { getModelSpec, regNumberToModelId } =
+const { getModelSpec, isLikelyCoupledPair, regNumberToModelId } =
   require('@/lib/fleet/registry') as typeof import('@/lib/fleet/registry');
 
 const DAY_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' });
@@ -91,6 +98,11 @@ interface LastFix {
   /** Observed gap between the last two genuinely-new fixes, s (0 = only one
    *  seen). Feeds the curvegen-v3 gap-aware discontinuity threshold T_disc. */
   fixGapS: number;
+  /** §14.3 jam evidence (descends from tramSim.updateStuckHold): two-plus
+   *  genuinely-new same-trip fixes flat within STUCK_FIX_EPS_M, away from
+   *  platforms and not at_stop ⇒ the tram is physically stuck HERE. Cleared
+   *  by any fix that moved. null = moving / no evidence. */
+  stuckAtM: number | null;
 }
 
 interface ScoringEvent {
@@ -379,7 +391,32 @@ export function start(): void {
     // ── learning + reseed (after prediction capture — never peek the answer)
     if (prev && sameTrip) learned.update(prev.snap, snap, geom);
     learned.reseed(snap);
-    lastFix.set(snap.key, { snap, cycle, fixGapS: gapS > 0 ? round2(gapS) : 0 });
+
+    // §14.3 jam evidence (descends from tramSim.updateStuckHold): a
+    // genuinely-new same-trip fix that has NOT moved (≤ STUCK_FIX_EPS_M) is
+    // standing evidence — unless the feed says at_stop (the modal rule owns
+    // platforms) or the fix rests within STUCK_NEAR_STOP_M of one (platform
+    // semantics win). Any moved fix clears it, and the very next refresh
+    // cycle re-emits — a jam exit reaches the screen within one poll.
+    let stuckAtM: number | null = null;
+    if (
+      prev &&
+      sameTrip &&
+      geom &&
+      snap.statePosition !== 'at_stop' &&
+      Math.abs(snap.shapeDistM - prev.snap.shapeDistM) <= STUCK_FIX_EPS_M
+    ) {
+      let nearStop = geom.totalM - snap.shapeDistM <= STUCK_NEAR_STOP_M;
+      for (const st of geom.stops) {
+        if (st.distM > snap.shapeDistM + STUCK_NEAR_STOP_M) break;
+        if (Math.abs(st.distM - snap.shapeDistM) <= STUCK_NEAR_STOP_M) {
+          nearStop = true;
+          break;
+        }
+      }
+      if (!nearStop) stuckAtM = snap.shapeDistM;
+    }
+    lastFix.set(snap.key, { snap, cycle, fixGapS: gapS > 0 ? round2(gapS) : 0, stuckAtM });
   }
 
   async function resolveEvents(events: ScoringEvent[]): Promise<void> {
@@ -431,7 +468,13 @@ export function start(): void {
       if (!lastFix.has(key)) markDropped(key);
     }
 
-    const stale: { key: string; snap: TramSnapshot; geom: RouteGeometry; fixGapS: number }[] = [];
+    const stale: {
+      key: string;
+      snap: TramSnapshot;
+      geom: RouteGeometry;
+      fixGapS: number;
+      stuckAtM: number | null;
+    }[] = [];
     for (const [key, lf] of lastFix) {
       const entry = trajectories.get(key);
       // Recompute when the fix changed OR the trajectory itself is aging out:
@@ -444,12 +487,65 @@ export function start(): void {
         markDropped(key); // no geometry ⇒ no s-axis to predict along
         continue;
       }
-      stale.push({ key, snap: lf.snap, geom, fixGapS: lf.fixGapS });
+      stale.push({ key, snap: lf.snap, geom, fixGapS: lf.fixGapS, stuckAtM: lf.stuckAtM });
     }
     if (stale.length === 0) {
       trajBuiltAtMs = tCompute; // set validated, nothing to recompute
       return;
     }
+
+    // §14.4 anti-collision: same-shape ordering by fix positions. Leaders
+    // (larger fix s) are rebuilt FIRST within a shape, so a same-cycle
+    // follower always clips against its leader's freshest curve — the cascade
+    // is bounded because emitted curves are static once built.
+    stale.sort((a, b) =>
+      a.geom.shapeId === b.geom.shapeId
+        ? b.snap.shapeDistM - a.snap.shapeDistM
+        : a.geom.shapeId < b.geom.shapeId
+          ? -1
+          : 1,
+    );
+    const byShape = new Map<string, { key: string; fixS: number; snap: TramSnapshot }[]>();
+    for (const [key, lf] of lastFix) {
+      const g = geometry.resolve(lf.snap.tripId);
+      if (!g) continue;
+      let arr = byShape.get(g.shapeId);
+      if (!arr) byShape.set(g.shapeId, (arr = []));
+      arr.push({ key, fixS: lf.snap.shapeDistM, snap: lf.snap });
+    }
+    for (const arr of byShape.values()) arr.sort((x, y) => x.fixS - y.fixS);
+    /** Immediate same-shape leader's CURRENT curves from `chain` + the
+     *  clearance to keep (QUEUE_GAP_M + leader length, coupled-aware). */
+    const leaderFor = (
+      chain: Map<string, { v2: V2Vehicle }>,
+      key: string,
+      shapeId: string,
+      fixS: number,
+    ): { key: string; opinion: TrajectoryPoint[]; smooth: TrajectoryPoint[]; gapM: number } | null => {
+      const arr = byShape.get(shapeId);
+      if (!arr) return null;
+      let best: { key: string; fixS: number; snap: TramSnapshot } | null = null;
+      for (const c of arr) {
+        if (c.fixS <= fixS + 0.5 || c.key === key) continue;
+        best = c; // sorted ascending — first past us is the immediate leader
+        break;
+      }
+      if (best === null || best.fixS - fixS > 1500) return null; // never binds
+      const entry = chain.get(best.key);
+      if (!entry) return null;
+      const lg = geometry.resolve(entry.v2.tripId);
+      if (!lg || lg.shapeId !== shapeId) return null; // stale curve, other rail
+      const modelId = regNumberToModelId(best.snap.registrationNumber);
+      const lenM =
+        (getModelSpec(modelId)?.totalLengthM ?? 14.1) +
+        (isLikelyCoupledPair(modelId, best.snap.line) ? COUPLED_TRAILER_OFFSET_M : 0);
+      return {
+        key: best.key,
+        opinion: entry.v2.opinion,
+        smooth: entry.v2.smooth,
+        gapM: QUEUE_GAP_M + lenM,
+      };
+    };
 
     // Chunk on VEHICLE boundaries so a failed chunk drops whole vehicles only.
     const perChunk = Math.max(1, Math.floor(TRAJ_ML_MAX_ROWS / TRAJ_POINTS));
@@ -528,7 +624,7 @@ export function start(): void {
         const surfaces = {
           paceAt: (sM: number, atMs: number) =>
             learned.paceAt(v.geom.shapeId, v.geom.routeId, sM, atMs),
-          dwellAt: (stopId: string, atMs: number) => learned.dwellAt(stopId, atMs),
+          dwellStats: (stopId: string, atMs: number) => learned.dwellStats(stopId, atMs),
         };
 
         // Anchor-floor hotfix, age-refresh clause: on a SAME-ANCHOR (age)
@@ -557,6 +653,8 @@ export function start(): void {
           surfaces,
           fixGapS: v.fixGapS,
           ageFloorS: ageFloorShadowS,
+          stuckAtM: v.stuckAtM,
+          leader: leaderFor(shadowTrajectories, v.key, v.geom.shapeId, v.snap.shapeDistM),
           chainBroken: shadowChainBroken.has(v.key),
           prev: prevShadow
             ? {
@@ -590,6 +688,9 @@ export function start(): void {
             opinion: shadowBuilt.vehicle.opinion,
             smooth: shadowBuilt.vehicle.smooth,
             prevSmooth: prevShadow ? prevShadow.v2.smooth : null,
+            requestSkips: shadowBuilt.meta.requestSkips,
+            jamHolding: shadowBuilt.meta.jamHolding,
+            leaderKey: shadowBuilt.meta.leaderKey,
             perTrack: { opinion: shadowBuilt.meta.opinion, smooth: shadowBuilt.meta.smooth },
           });
           shadowTrajectories.set(v.key, {
@@ -620,6 +721,8 @@ export function start(): void {
               surfaces,
               fixGapS: v.fixGapS,
               ageFloorS: ageFloorPubS,
+              stuckAtM: v.stuckAtM,
+              leader: leaderFor(trajectories, v.key, v.geom.shapeId, v.snap.shapeDistM),
               chainBroken: publishedChainBroken.has(v.key),
               prev: prevPub,
             })
@@ -851,7 +954,7 @@ export function start(): void {
       for (const v of full.vehicles) {
         fleet.set(v.key, v);
         learned.reseed(v);
-        lastFix.set(v.key, { snap: v, cycle, fixGapS: 0 });
+        lastFix.set(v.key, { snap: v, cycle, fixGapS: 0, stuckAtM: null });
       }
       cursor = full.seq;
       pollerHealth = full.poller;

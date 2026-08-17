@@ -380,9 +380,18 @@ function synthGeometry(opts: {
   };
 }
 
+/** Constant learned surfaces. Dwell stub is TRUSTED with mean > the §14.2
+ *  request bar (busy-stop semantics), so plan stops are served unless a test
+ *  opts into the skippable class via `surfSkippable`. sd = mean/4 ⇒ p10/p90 ≈
+ *  mean ∓ 0.32·mean under the drive's Normal quantiles. */
 const surf = (paceMs: number, dwellS = 20): DriveSurfaces => ({
   paceAt: () => paceMs,
-  dwellAt: () => dwellS,
+  dwellStats: () => ({ mean: dwellS, sd: dwellS * 0.25, trusted: true }),
+});
+/** §14.2 skippable class: no trusted dwell evidence (rare-holds stop). */
+const surfSkippable = (paceMs: number): DriveSurfaces => ({
+  paceAt: () => paceMs,
+  dwellStats: () => ({ mean: 18, sd: 7.2, trusted: false }),
 });
 
 /** Wire contract + kinematic limits + the v3 jerk gate + generator meta. */
@@ -399,6 +408,11 @@ function driveContract(name: string, b: DriveBuilt): void {
     b.meta.opinion.phantomDips === 0 && b.meta.smooth.phantomDips === 0,
     `G4 ${b.meta.opinion.curveViolations}/${b.meta.smooth.curveViolations}, ` +
     `G7 ${b.meta.opinion.phantomDips}/${b.meta.smooth.phantomDips}`);
+  check(`${name}: no model-invented mid-segment stops (G11) / collisions (G12)`,
+    b.meta.opinion.midSegmentStops === 0 && b.meta.smooth.midSegmentStops === 0 &&
+    b.meta.opinion.collisionViolations === 0 && b.meta.smooth.collisionViolations === 0,
+    `G11 ${b.meta.opinion.midSegmentStops}/${b.meta.smooth.midSegmentStops}, ` +
+    `G12 ${b.meta.opinion.collisionViolations}/${b.meta.smooth.collisionViolations}`);
 }
 
 /** Independent G4 recompute from the geometry (design §8, G4 second column). */
@@ -484,14 +498,14 @@ const mkDrive = (over: Partial<Parameters<typeof buildDriveVehicle>[0]> &
     `${before.toFixed(1)} → dip → ${after.toFixed(1)} m/s`);
 }
 
-// ── D3. downstream stop is SERVED, timed by the ML's τ, not the surface ─────
+// ── D3. downstream stop is SERVED; §14.1 hierarchy absorbs ML pressure ──────
 {
   const geom = synthGeometry({ totalM: 4000, stops: [{ atM: 500, id: 'S1' }, { atM: 2600, id: 'S2' }] });
   // The learned surface says 4 m/s (arrival would be +100 s); the ML curve
-  // runs 6 m/s (τ = +66.7 s). The ML has leg-timing authority inside the
-  // ±50 % trust region, so the drive must arrive on the ML's clock. The ±15 %
-  // positional trim (equilibrium gap ≈ 18 m, §4.3) keeps arrival within a few
-  // seconds of τ itself; −0.5·D moves it earlier when the ladder is unbound.
+  // runs 6 m/s (τ = +66.7 s). v3.1 doctrine (§14.1): the pressure is absorbed
+  // FIRST by shrinking the dwell toward p10 (20 → 13.6 s), then by the ±20 %
+  // pace band (≤ 4.8 m/s, ±15 % trim on top) — the drive lands between the
+  // ML clock and the learned clock, never at either extreme.
   const b = mkDrive({ raw: raw(100, 6), geom, surfaces: surf(4, 20) });
   driveContract('drive/stop', b);
   const o = b.vehicle.opinion;
@@ -504,12 +518,14 @@ const mkDrive = (over: Partial<Parameters<typeof buildDriveVehicle>[0]> &
     if (tArr !== null && tDep === null && s > 500 + 3) tDep = dt / 1000;
   }
   const tauS = (mlCrossingMs(raw(100, 6), 500)! - T0) / 1000; // +66.7 s
-  check('drive/stop: arrival rides the ML timetable, not the slow surface',
-    tArr !== null && tArr >= tauS - 14 && tArr <= tauS + 6 && tArr <= 80,
+  check('drive/stop: arrival between the ML clock and the learned clock (§14.1 band)',
+    tArr !== null && tArr >= tauS - 5 && tArr <= 88,
     `arrived +${tArr}s; τ = +${tauS.toFixed(1)}s, learned-pace arrival would be +100s`);
-  check('drive/stop: stands the learned dwell (20 s), then departs',
-    tArr !== null && tDep !== null && tDep - tArr >= 18 && tDep - tArr <= 32,
-    `stood ${(tDep ?? 0) - (tArr ?? 0)}s`);
+  // The ±3 m stand window includes ~6 s of brake-in/accel-out tails on top of
+  // the dwell budget: p10 13.6 measures ≈ 20 s, an unshrunk p50 20 ≈ 26 s.
+  check('drive/stop: dwell shrunk toward p10 to absorb the ML pressure (§14.1)',
+    tArr !== null && tDep !== null && tDep - tArr >= 14 && tDep - tArr <= 23,
+    `stood ${(tDep ?? 0) - (tArr ?? 0)}s (dwell budget p10 ≈ 13.6, p50 20)`);
   check('drive/stop: stops AT the platform, not past it',
     tArr !== null && tDep !== null &&
       Math.abs(evalTrack(o, T0 + (tArr + ((tDep - tArr) / 2)) * 1000) - 500) <= 2.5);
@@ -817,6 +833,99 @@ const mkDrive = (over: Partial<Parameters<typeof buildDriveVehicle>[0]> &
   check('floor: drive age re-emission floored at the previously rendered opinion',
     d2.vehicle.opinion[0].s >= prevOD - 0.05 && d2.meta.ageFloorApplied,
     `opinion[0].s = ${d2.vehicle.opinion[0].s.toFixed(1)}, floor ${prevOD.toFixed(1)}`);
+}
+
+// ── D15. §14.2 request-stop skip: evidence-gated, never random ──────────────
+{
+  const geom = synthGeometry({ totalM: 4000, stops: [{ atM: 500, id: 'REQ' }, { atM: 2600, id: 'S2' }] });
+  // Skippable class (no trusted dwell evidence) + ML shows no dwell (constant
+  // pace through the stop) ⇒ the platform is passed at pace, doors closed.
+  const b = mkDrive({ raw: raw(100, 6), geom, surfaces: surfSkippable(6) });
+  driveContract('drive/request-skip', b);
+  check('drive/request-skip: the stop leaves the plan and is counted',
+    b.meta.requestSkips.length === 1 && b.meta.requestSkips[0].stopId === 'REQ',
+    JSON.stringify(b.meta.requestSkips));
+  let tCross: number | null = null;
+  for (let dt = 0; dt <= 120_000; dt += 500) {
+    if (evalTrack(b.vehicle.opinion, T0 + dt) >= 500) { tCross = dt; break; }
+  }
+  const vThrough = tCross === null ? 0 :
+    (evalTrack(b.vehicle.opinion, T0 + tCross + 3000) - evalTrack(b.vehicle.opinion, T0 + tCross - 3000)) / 6;
+  check('drive/request-skip: rolls THROUGH the platform at pace (no stand)',
+    tCross !== null && vThrough > 3, `v through the stop = ${vThrough.toFixed(2)} m/s`);
+  // Control: trusted busy-stop evidence vetoes the skip even with the same ML.
+  const c = mkDrive({ raw: raw(100, 6), geom, surfaces: surf(6, 20) });
+  check('drive/request-skip: trusted long-dwell evidence vetoes the skip (serves)',
+    c.meta.requestSkips.length === 0, JSON.stringify(c.meta.requestSkips));
+}
+
+// ── D16. §14.3 jam hold: evidence-backed mid-segment stand, smooth exit ─────
+{
+  const geom = synthGeometry({ totalM: 4000, stops: [{ atM: 1500, id: 'S1' }] });
+  // Two flat fixes mid-segment (run.ts evidence) ⇒ stuckAtM = 600; the ML
+  // nowcast says 620 and moving — reality wins, ML pressure suspended.
+  const b = mkDrive({ raw: raw(620, 5), geom, surfaces: surf(5), stuckAtM: 600 });
+  driveContract('drive/jam', b);
+  check('drive/jam: holds AT the observed stuck position, not the ML nowcast',
+    [0, 30_000, 60_000, 100_000].every((d) => Math.abs(evalTrack(b.vehicle.opinion, T0 + d) - 600) < 0.1),
+    `s at +0/+60 s = ${evalTrack(b.vehicle.opinion, T0).toFixed(1)}/${evalTrack(b.vehicle.opinion, T0 + 60_000).toFixed(1)}`);
+  check('drive/jam: classified jamHold, NOT a G11 violation',
+    b.meta.jamHolding && b.meta.opinion.jamHolds >= 1 && b.meta.opinion.midSegmentStops === 0,
+    `jamHolds ${b.meta.opinion.jamHolds}`);
+  // Staleness release at anchor + 120 s (anchor = T0 − 5 s): departs by +119 s.
+  check('drive/jam: staleness clock releases the hold with a smooth departure',
+    speedAt(b.opinion, T0 + 119_000) > 0.3,
+    `v at +119 s = ${speedAt(b.opinion, T0 + 119_000).toFixed(2)} m/s`);
+}
+
+// ── D17. §14.4 anti-collision: follower never passes through its leader ─────
+{
+  const geom = synthGeometry({ totalM: 6000 });
+  const lead = mkDrive({ key: 'L', raw: raw(1300, 2), geom, surfaces: surf(2) });
+  const gapM = 3 + 14.1;
+  const leader = { key: 'L', opinion: lead.vehicle.opinion, smooth: lead.vehicle.smooth, gapM };
+  const b = mkDrive({ raw: raw(1200, 8), geom, surfaces: surf(8), leader });
+  driveContract('drive/queue', b); // includes G12 = 0
+  let minClear = Infinity;
+  for (let dt = 0; dt <= 120_000; dt += 1000) {
+    minClear = Math.min(minClear,
+      evalTrack(lead.vehicle.opinion, T0 + dt) - evalTrack(b.vehicle.opinion, T0 + dt));
+  }
+  check('drive/queue: follower stays ≥ gap behind the leader at every instant',
+    minClear >= gapM - 1.0, `min clearance ${minClear.toFixed(1)} m (gap ${gapM.toFixed(1)})`);
+  // Control: unconstrained, the same follower drives THROUGH the leader —
+  // proving the scenario actually bites.
+  const u = mkDrive({ raw: raw(1200, 8), geom, surfaces: surf(8) });
+  let minClearU = Infinity;
+  for (let dt = 0; dt <= 120_000; dt += 1000) {
+    minClearU = Math.min(minClearU,
+      evalTrack(lead.vehicle.opinion, T0 + dt) - evalTrack(u.vehicle.opinion, T0 + dt));
+  }
+  check('drive/queue: control without the constraint would collide', minClearU < 0,
+    `unconstrained min clearance ${minClearU.toFixed(1)} m`);
+}
+
+// ── D18. §6/§14.1 creep: ahead of a standing reality — no phantom stand ─────
+{
+  const geom = synthGeometry({ totalM: 6000, stops: [{ atM: 1000, id: 'S1' }, { atM: 2000, id: 'S2' }] });
+  const prev = mkDrive({
+    raw: raw(1150, 6, T0 - 20_000), geom, surfaces: surf(6),
+    emittedAtMs: T0 - 20_000, anchorMs: T0 - 25_000,
+  });
+  const sSeam = evalTrack(prev.vehicle.smooth, T0); // ≈ 1270 — mid-segment
+  // Fresh at-stop fix pins the opinion at S1 (modal hold, +60 s): the smooth
+  // is ~270 m AHEAD of a standing reality, far outside any stop zone.
+  const b = mkDrive({
+    raw: raw(1000, 0.5), geom, surfaces: surf(6),
+    modal: { stopS: 1000, releaseAtMs: T0 + 60_000 },
+    prev: { tripId: 'tSynth', smooth: prev.smooth, opinion: prev.opinion },
+  });
+  driveContract('drive/creep', b); // includes G11 = 0
+  check('drive/creep: not a discontinuity (gap under T_disc floor)', !b.vehicle.discontinuity,
+    `seam gap ${(sSeam - 1000).toFixed(0)} m, T_disc ${b.meta.tDiscM?.toFixed(0)}`);
+  const adv = evalTrack(b.vehicle.smooth, T0 + 60_000) - evalTrack(b.vehicle.smooth, T0);
+  check('drive/creep: creeps at traffic-column pace instead of standing mid-street',
+    adv > 50 && adv < 130, `advanced ${adv.toFixed(0)} m in 60 s (creep 1.5 m/s ⇒ ~90)`);
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

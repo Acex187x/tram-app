@@ -34,6 +34,8 @@
 //     oscillation after convergence, G8 discontinuity honesty, G9 seams.
 //     Percentile gates need n ≥ a floor to bind; below it they print advisory.
 
+import zlib from 'node:zlib';
+
 const BASE = process.env.LAB_URL ?? 'https://tram-lab.acex.sh';
 const GEN = process.argv[2] ?? process.env.GEN ?? '';
 if (GEN !== '' && GEN !== 'current' && GEN !== 'v3' && GEN !== 'mix') {
@@ -267,9 +269,41 @@ function readFlipsWire(track) {
   return { flips, minutes };
 }
 
+// ── §14 doctrine gates (G11/G12) need geometry: stops per shape + trip→shape.
+// Fetched once from /api/geometry-pack (Content-Encoding: gzip — undici may
+// or may not have decompressed it already, so try both readings).
+let geo = null;
+try {
+  const res = await fetch(`${BASE}/api/geometry-pack`);
+  if (res.ok) {
+    const buf = Buffer.from(await res.arrayBuffer());
+    let json;
+    try {
+      json = JSON.parse(buf.toString('utf8'));
+    } catch {
+      json = JSON.parse(zlib.gunzipSync(buf).toString('utf8'));
+    }
+    const tripShape = new Map(Object.entries(json.trips));
+    const stopsByShape = new Map();
+    const totalByShape = new Map();
+    for (const shp of json.shapes) {
+      stopsByShape.set(shp.shapeId, shp.stops.map((s) => s.distM).sort((a, b) => a - b));
+      totalByShape.set(shp.shapeId, shp.totalM);
+    }
+    geo = { tripShape, stopsByShape, totalByShape };
+  }
+} catch {
+  geo = null;
+}
+if (geo === null) console.log('~ geometry-pack unavailable — G11/G12 bytes gates skipped');
+
 const sh = {
   bundles: 0,
   vehicles: 0,
+  g11Checked: 0,
+  g11Violations: 0,
+  g12Pairs: 0,
+  g12Violations: 0,
   realism: { tracks: 0, segments: 0, violations: 0, allSpeeds: [], allAccels: [] },
   seen: new Set(),
   last: new Map(),
@@ -296,12 +330,57 @@ const sh = {
   minHorizonS: Infinity,
 };
 
-function checkShadowVehicle(v, bundleAtMs, wasPresent) {
+function checkShadowVehicle(v, bundleAtMs, wasPresent, liveByKey, bundleVehicles) {
   const id = `sh:${v.key}@${v.emittedAtMs}`;
   if (sh.seen.has(id)) return; // dense polling sees each emission many times
   sh.seen.add(id);
   sh.vehicles++;
   if (!checkVehicle(v, bundleAtMs, 'sh:')) return;
+
+  // ── G11 (bytes side): stand segments (chord < 0.5 m/s spanning ≥ 3 s) must
+  // sit in a stop zone — 60 m of a platform / shape end — or be evidence-
+  // backed: at the vehicle's own live fix (modal hold / observed jam), or in
+  // the queue shadow of a same-shape vehicle standing just ahead. The
+  // generator-side counter is the exact reading; this is the independent one.
+  if (geo) {
+    const shapeId = geo.tripShape.get(v.tripId);
+    const stops = shapeId ? geo.stopsByShape.get(shapeId) : undefined;
+    if (stops) {
+      const total = geo.totalByShape.get(shapeId) ?? Infinity;
+      const lv = liveByKey.get(v.key);
+      for (const name of ['opinion', 'smooth']) {
+        const tr = v[name];
+        for (let i = 1; i < tr.length; i++) {
+          const dtS = (tr[i].t - tr[i - 1].t) / 1000;
+          if (dtS < 3) continue;
+          const vSeg = (tr[i].s - tr[i - 1].s) / dtS;
+          if (vSeg >= 0.5) continue;
+          const sMid = (tr[i].s + tr[i - 1].s) / 2;
+          sh.g11Checked++;
+          const inZone =
+            stops.some((d) => Math.abs(d - sMid) <= 60) ||
+            total - sMid <= 60 ||
+            (lv ? Math.abs(lv.fixDistM - sMid) <= 60 : false);
+          let queueShadow = false;
+          if (!inZone && Array.isArray(bundleVehicles)) {
+            const tMid = (tr[i].t + tr[i - 1].t) / 2;
+            for (const w of bundleVehicles) {
+              if (w.key === v.key || geo.tripShape.get(w.tripId) !== shapeId) continue;
+              const ws = evalTrack(w[name], tMid);
+              if (ws >= sMid && ws - sMid <= 60) {
+                queueShadow = true;
+                break;
+              }
+            }
+          }
+          if (!inZone && !queueShadow) {
+            sh.g11Violations++;
+            fail(`${id}: G11 ${name} stands at s=${sMid.toFixed(0)} (${vSeg.toFixed(2)} m/s over ${dtS}s) outside stop zones`);
+          }
+        }
+      }
+    }
+  }
   for (const name of ['opinion', 'smooth']) {
     const tr = v[name];
     sh.maxPoints = Math.max(sh.maxPoints, tr.length);
@@ -426,6 +505,52 @@ function checkShadowVehicle(v, bundleAtMs, wasPresent) {
   sh.last.set(v.key, v);
 }
 
+// ── G12 (bytes side): same-shape curves must never cross (§14.4 — "a
+// follower's curve must never pass through its leader's"). Ordering comes
+// from /api/live fix positions (the generator's own basis); only pairs where
+// BOTH emissions are anchored to their current live fixes are judged — a
+// stale emission predating the pair's leadership cannot have known it. The
+// generator-side counter covers the full population with exact leader data.
+const g12Seen = new Set();
+function checkShadowCollisions(sb, liveByKey) {
+  const byShape = new Map();
+  for (const v of sb.vehicles) {
+    const lv = liveByKey.get(v.key);
+    if (!lv) continue;
+    if (Math.abs(lv.fixAgeS - (sb.serverNowMs - v.anchorMs) / 1000) > 4) continue; // stale
+    const shapeId = geo.tripShape.get(v.tripId);
+    if (!shapeId) continue;
+    let arr = byShape.get(shapeId);
+    if (!arr) byShape.set(shapeId, (arr = []));
+    arr.push({ v, fixS: lv.fixDistM });
+  }
+  for (const [shapeId, arr] of byShape) {
+    if (arr.length < 2) continue;
+    arr.sort((a, b) => a.fixS - b.fixS);
+    for (let i = 0; i + 1 < arr.length; i++) {
+      const f = arr[i].v;
+      const l = arr[i + 1].v;
+      const id = `g12:${f.key}@${f.emittedAtMs}|${l.key}@${l.emittedAtMs}`;
+      if (g12Seen.has(id)) continue;
+      g12Seen.add(id);
+      for (const name of ['opinion', 'smooth']) {
+        sh.g12Pairs++;
+        const t0p = Math.max(f[name][0].t, l[name][0].t);
+        const tEnd = Math.min(f[name][f[name].length - 1].t, l[name][l[name].length - 1].t);
+        let worst = 0;
+        for (let t = t0p; t <= tEnd; t += 2000) {
+          const pen = evalTrack(f[name], t) - evalTrack(l[name], t);
+          if (pen > worst) worst = pen;
+        }
+        if (worst > 0.5) {
+          sh.g12Violations++;
+          fail(`G12 ${name}: ${f.key} passes THROUGH ${l.key} by ${worst.toFixed(1)} m (shape ${shapeId})`);
+        }
+      }
+    }
+  }
+}
+
 // ── run ──────────────────────────────────────────────────────────────────────
 const last = new Map(); // key → last seen vehicle
 let pubPrevPresent = null; // key set of the previous v2 bundle (re-appearance guard)
@@ -479,9 +604,16 @@ while (Date.now() - t0 < DURATION_S * 1000) {
     if (Array.isArray(sb.vehicles)) {
       const present = new Set(sb.vehicles.map((v) => v.key));
       for (const v of sb.vehicles) {
-        checkShadowVehicle(v, sb.atMs, shadowPrevPresent === null || shadowPrevPresent.has(v.key));
+        checkShadowVehicle(
+          v,
+          sb.atMs,
+          shadowPrevPresent === null || shadowPrevPresent.has(v.key),
+          liveByKey,
+          sb.vehicles,
+        );
         checkAnchorFloorBytes(v, liveByKey, sb.serverNowMs, 'sh:');
       }
+      if (geo) checkShadowCollisions(sb, liveByKey);
       shadowPrevPresent = present;
     } else {
       fail('shadow bundle has no vehicles array');
@@ -671,6 +803,10 @@ if (sh.bundles === 0) {
   gate('G8 age-driven discontinuity ≈ 0 (≤ 2 %)', sh.ageTrans, 50, ageRate <= 2,
     `${ageRate.toFixed(1)} % (${sh.ageDisc}/${sh.ageTrans})`);
   console.log(`G9 seams |Δsmooth(E)| ${fmt(sh.contDelta)}  [≤ ${CONTINUITY_TOL_M} m, violations fail inline]`);
+  if (geo) {
+    console.log(`G11 mid-segment stands: ${sh.g11Violations} violations / ${sh.g11Checked} stand-segments checked  [target 0]`);
+    console.log(`G12 same-shape crossings: ${sh.g12Violations} violations / ${sh.g12Pairs} fresh pair-tracks checked  [target 0]`);
+  }
   console.log(`advisory raw dip-rate (G7 without generator context): ${sh.dips} dips / ${sh.dipTracks} tracks`);
 }
 

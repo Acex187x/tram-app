@@ -64,10 +64,50 @@ export const TRAIL_LIMIT_M = 15;
 /** Accel/brake build times under J_MAX, s (derived: A/J, design §5). */
 export const T_ACC_BUILD_S = TRAJ_A_ACC / TRAJ_J_MAX; // ≈ 1.63
 export const T_BRK_BUILD_S = TRAJ_A_BRK / TRAJ_J_MAX; // = 1.75
-/** ML leg-pace trust region around the learned surface (new, tightened from
- *  the paceBias ratio clamp [0.4, 1.6]). */
-export const PACE_CLAMP_LO = 0.5;
-export const PACE_CLAMP_HI = 1.5;
+/** ML leg-pace trust region around the learned surface. v3.1 doctrine §14.1:
+ *  tightened ±50 % → ±20 % — the driver absorbs timing pressure FIRST in
+ *  dwell stretch (within the learned p10..p90 bounds), and only mildly in
+ *  pace; the ±15 % trim still rides on top. Floors/caps always win. */
+export const PACE_CLAMP_LO = 0.8;
+export const PACE_CLAMP_HI = 1.2;
+/** §14.1 dwell-quantile z for p10/p90 under the cell's Normal(mean, sd). */
+export const DWELL_Z_1090 = 1.2816;
+/** §14.2 request-stop (na znamení) skip: a stop is UNskippable only with
+ *  trusted evidence of real boarding — dwell p50 above this, s. */
+export const REQUEST_DWELL_P50_MAX_S = 10;
+/** §14.2 active evidence: the ML curve's crossing-time excess through the
+ *  stop (± REQUEST_SKIP_DELTA_M) must show less than this of dwell, s. */
+export const REQUEST_SKIP_ML_DWELL_MAX_S = 5;
+export const REQUEST_SKIP_DELTA_M = 15;
+/** §14.5 innovation gate: an AGE re-emission's forward nowcast jitter at or
+ *  below this continues the previous curve instead of hopping, m. Fix-driven
+ *  re-anchors are NEVER gated — fresh evidence reaches the screen. */
+export const AGE_INNOV_GATE_M = 25;
+/** §14.3 jam holds (descend from tramSim stuck-hold, constants verbatim):
+ *  two genuinely-new fixes within this are standing evidence, m. */
+export const STUCK_FIX_EPS_M = 8;
+/** ...suppressed within this of a platform (platform semantics win), m. */
+export const STUCK_NEAR_STOP_M = 40;
+/** §14.3 staleness release: an observed-stuck hold outlives the evidence by
+ *  at most this much true fix age, s — a silent feed must not pin forever. */
+export const STUCK_HOLD_MAX_AGE_S = 120;
+/** G11 stop zone: stands within this of a platform / modal hold / shape end
+ *  are platform semantics, not mid-segment stops, m. */
+export const STOP_ZONE_M = 50;
+/** G11 stand definition: v below this sustained longer than G11_STAND_MIN_S. */
+export const G11_STAND_V_MS = 0.5;
+export const G11_STAND_MIN_S = 3;
+/** §14.1/§6 creep: ahead of a STANDING reality outside any stop zone the
+ *  smooth track creeps (traffic-column pace) to the next planned stop and
+ *  repays the lead there — never a phantom mid-street stand, m/s. */
+export const CREEP_AHEAD_V_MS = 1.5;
+/** §14.4 anti-collision (engine-verbatim): min clearance follower nose →
+ *  leader tail, m; and the coupled-set trailer offset, m. */
+export const QUEUE_GAP_M = 3;
+export const COUPLED_TRAILER_OFFSET_M = 14.5;
+/** G12 measurement grace over the enforced gap (integration + compression
+ *  slop; the enforced clearance is QUEUE_GAP_M + leader length ≈ 17–32 m). */
+export const G12_TOL_M = 1.0;
 /** ML positional trim gain, m (port: smoother PACE_GAIN_M). */
 export const G_ML = 120;
 /** Trim authority: the smoother's track clamp tightened to ±15 % (new). */
@@ -365,8 +405,25 @@ export function legKinFloorS(legLenM: number, vStartMs: number, vEndMs: number, 
 export interface DriveSurfaces {
   /** Learned pace surface at (s, wall time), m/s (LearnedModel.paceAt). */
   paceAt(sM: number, atMs: number): number;
-  /** Learned per-stop dwell at wall time, s, UNclamped (LearnedModel.dwellAt). */
-  dwellAt(stopId: string, atMs: number): number;
+  /** Learned per-stop dwell distribution (LearnedModel.dwellStats): mean/sd
+   *  in seconds; `trusted` is the §14.2 skip-class permission bit (trusted
+   *  long-dwell stops are unskippable). The drive derives clamped p10/p50/p90
+   *  quantiles from these. */
+  dwellStats(stopId: string, atMs: number): { mean: number; sd: number; trusted: boolean };
+}
+
+/** Clamped §14.1 dwell quantiles from a cell's (mean, sd). */
+export function dwellQuantiles(stats: { mean: number; sd: number }): {
+  p10: number;
+  p50: number;
+  p90: number;
+} {
+  const c = (x: number): number => Math.min(DWELL_CAP_S, Math.max(DWELL_MIN_S, x));
+  return {
+    p10: c(stats.mean - DWELL_Z_1090 * stats.sd),
+    p50: c(stats.mean),
+    p90: c(stats.mean + DWELL_Z_1090 * stats.sd),
+  };
 }
 
 export interface DriveArgs {
@@ -392,6 +449,15 @@ export interface DriveArgs {
    *  re-anchor BEHIND the previously rendered opinion position — a backward
    *  jump with no new fix is model jitter, not evidence. 0 = no floor. */
   ageFloorS?: number;
+  /** §14.3 jam hold: evidence-backed stuck position (two-plus genuinely-new
+   *  fixes flat within STUCK_FIX_EPS_M, away from platforms — run.ts detects,
+   *  descending from tramSim.updateStuckHold), m along shape. null = moving. */
+  stuckAtM?: number | null;
+  /** §14.4 anti-collision: the immediate same-shape leader's CURRENT emitted
+   *  curves + the clearance to keep behind them (QUEUE_GAP_M + leader length,
+   *  coupled-aware). The follower's opinion clips against the leader's
+   *  opinion, smooth against smooth. null = no leader / leader unknown. */
+  leader?: { key: string; opinion: TrackPoint[]; smooth: TrackPoint[]; gapM: number } | null;
   /** True when this chain HAD an emission that was dropped (ML outage,
    *  geometry loss, build failure) — the re-appearance may land anywhere, so
    *  it must carry the honest discontinuity flag even though prev is null
@@ -419,6 +485,17 @@ export interface TrackBuildMeta {
   /** Planned holds rolled through because the seam state made them
    *  kinematically unreachable (see HOLD_ENTRY_V_MAX). */
   infeasibleSkips: number;
+  /** G11: stand episodes (v < G11_STAND_V_MS sustained > G11_STAND_MIN_S)
+   *  outside stop zones with NO evidence backing — model-invented stops.
+   *  Target literal 0. */
+  midSegmentStops: number;
+  /** §14.3 telemetry: evidence-backed jam-stand episodes (not violations). */
+  jamHolds: number;
+  /** §14.4 telemetry: stand episodes pressed against a standing leader. */
+  queueHolds: number;
+  /** G12: sampled instants where this emitted track penetrates the leader's
+   *  clearance beyond G12_TOL_M. Target literal 0; 0 when no leader. */
+  collisionViolations: number;
   /** 'regimes' runs only: why the smooth track drove the speed it drove —
    *  the G5 latency drill-down (which limiter actually bound). */
   regime: RegimeStats | null;
@@ -485,9 +562,41 @@ export interface DriveBuilt {
     seamGapM: number | null;
     /** Anchor-floor hotfix telemetry: the age-refresh floor lifted s0. */
     ageFloorApplied: boolean;
+    /** §14.2: request stops excluded from this emission's plan (telemetry). */
+    requestSkips: { stopId: string; distM: number }[];
+    /** §14.3: the emission holds at an evidence-backed jam position. */
+    jamHolding: boolean;
+    /** §14.4: the leader this emission was clipped against, if any. */
+    leaderKey: string | null;
     opinion: TrackBuildMeta;
     smooth: TrackBuildMeta;
   };
+}
+
+/**
+ * §14.2 request-stop (na znamení) skip decision. Two keys must both turn:
+ * the learned dwell evidence does NOT prove real boarding (a stop is
+ * unskippable only with a trusted cell whose mean dwell exceeds
+ * REQUEST_DWELL_P50_MAX_S — rare holds never accumulate trust, short holds
+ * fail the bar), AND the ML curve's own timing shows no dwell through the
+ * stop: crossing-time excess over ±REQUEST_SKIP_DELTA_M at the learned pace
+ * below REQUEST_SKIP_ML_DWELL_MAX_S. Beyond the ML horizon: always serve
+ * (generic-tram degradation, §13). Terminals are excluded by the caller.
+ */
+export function requestStopSkippable(
+  raw: TrackPoint[],
+  surfaces: DriveSurfaces,
+  stopId: string,
+  distM: number,
+): boolean {
+  const tauA = mlCrossingMs(raw, distM - REQUEST_SKIP_DELTA_M);
+  const tauB = mlCrossingMs(raw, distM + REQUEST_SKIP_DELTA_M);
+  if (tauA === null || tauB === null) return false;
+  const ds = surfaces.dwellStats(stopId, tauA);
+  if (ds.trusted && ds.mean > REQUEST_DWELL_P50_MAX_S) return false;
+  const paceRef = Math.max(1, surfaces.paceAt(distM, tauA));
+  const mlDwellS = (tauB - tauA) / 1000 - (2 * REQUEST_SKIP_DELTA_M) / paceRef;
+  return mlDwellS < REQUEST_SKIP_ML_DWELL_MAX_S;
 }
 
 /** Gap-aware discontinuity threshold (§7), re-anchored on the learned surface. */
@@ -511,10 +620,16 @@ interface FineRun {
   /** Standing position per step (NaN = moving) — the smooth run's hold-follow
    *  reference and the compressor's hold knots. */
   holdPos: number[];
-  /** Which constraint bound each step: envelope terms ('curve'/'hold'), a
-   *  commanded regime reduction ('regime' — yield / hold-follow braking, a
-   *  documented manoeuvre, not noise), or 'none' = plain guidance. */
-  binding: ('none' | 'curve' | 'hold' | 'regime')[];
+  /** Which constraint bound each step: envelope terms ('curve'/'hold'), the
+   *  §14.4 leader clearance ('queue'), a commanded regime reduction ('regime'
+   *  — yield / hold-follow braking, a documented manoeuvre, not noise), or
+   *  'none' = plain guidance. */
+  binding: ('none' | 'curve' | 'hold' | 'regime' | 'queue')[];
+  /** Per-step stand evidence class for the G11 scan: 0 = none (a stand here
+   *  outside a stop zone is model-invented), 1 = jam (observed-stuck hold or
+   *  standing with/behind a jam-holding reference), 2 = queue (pressed
+   *  against a standing leader). */
+  standKind: (0 | 1 | 2)[];
   /** Per plan-stop index: sim ms the drive DEPARTS it (Infinity = not reached
    *  within the horizon; 0 = not part of this run's plan / already behind). */
   departMs: number[];
@@ -558,8 +673,15 @@ function runDrive(args: {
   surfaces: DriveSurfaces;
   raw: TrackPoint[];
   plan: PlanStop[];
-  /** Initial hold (modal anchor): stand at s0 until this ms (null = moving). */
+  /** Initial hold (modal anchor / §14.3 jam): stand at s0 until this ms. */
   initialHoldEndMs: number | null;
+  /** §14.3: the initial hold is an evidence-backed JAM hold (not a platform). */
+  initialHoldJam?: boolean;
+  /** Modal anchor stop position (stop-zone semantics for the G11 scan and the
+   *  §6 creep rule), or null. */
+  modalS: number | null;
+  /** §14.4: the same-track leader curve this run must stay behind. */
+  leader?: { track: TrackPoint[]; gapM: number } | null;
   s0: number;
   v0: number;
   a0: number;
@@ -567,7 +689,7 @@ function runDrive(args: {
   /** 'regimes' only: the opinion run + per-stop gates. */
   ref?: OpinionRef;
 }): FineRun | null {
-  const { grid, geom, profile, surfaces, raw, plan, mode, ref } = args;
+  const { grid, geom, profile, surfaces, raw, plan, mode, ref, leader, modalS } = args;
   const n = grid.length - 1;
   const cum = geom.cumDistM;
   const total = geom.totalM;
@@ -576,11 +698,26 @@ function runDrive(args: {
   const s = new Array<number>(n + 1);
   const v = new Array<number>(n + 1);
   const holdPos = new Array<number>(n + 1).fill(NaN);
-  const binding = new Array<'none' | 'curve' | 'hold' | 'regime'>(n + 1).fill('none');
+  const binding = new Array<'none' | 'curve' | 'hold' | 'regime' | 'queue'>(n + 1).fill('none');
+  const standKind = new Array<0 | 1 | 2>(n + 1).fill(0);
   const departMs = new Array<number>(plan.length).fill(mode === 'ladder' ? Infinity : 0);
   const protectedSteps = new Set<number>();
   let infeasibleSkips = 0;
   const regime = zeroRegimeStats();
+
+  /** Stop-zone test (G11 / §6 creep): platforms, the modal hold, shape end. */
+  const inStopZone = (sPos: number): boolean => {
+    if (total - sPos <= STOP_ZONE_M) return true;
+    if (modalS !== null && Math.abs(sPos - modalS) <= STOP_ZONE_M) return true;
+    for (const st of geom.stops) {
+      if (st.distM > sPos + STOP_ZONE_M) break;
+      if (Math.abs(st.distM - sPos) <= STOP_ZONE_M) return true;
+    }
+    return false;
+  };
+  /** Leader speed at t — chord over the next second of its emitted curve. */
+  const leaderSpeedAt = (tMs: number): number =>
+    leader ? Math.max(0, evalTrack(leader.track, tMs + 1000) - evalTrack(leader.track, tMs)) / 1 : 0;
 
   s[0] = clamp(args.s0, 0, total);
   v[0] = clamp(args.v0, 0, TRAJ_V_MAX_MS);
@@ -594,10 +731,12 @@ function runDrive(args: {
   let mode2: 'drive' | 'hold' = args.initialHoldEndMs !== null ? 'hold' : 'drive';
   let holdEndMs = args.initialHoldEndMs ?? 0;
   let holdAtM = s[0];
+  let holdIsJam = args.initialHoldJam === true && mode2 === 'hold';
   if (mode2 === 'hold') {
     v[0] = 0;
     a = 0;
     holdPos[0] = holdAtM;
+    if (holdIsJam) standKind[0] = 1;
     protectedSteps.add(0);
   }
   /** Which plan stop the current hold belongs to (−1 = modal anchor hold). */
@@ -620,22 +759,30 @@ function runDrive(args: {
     const legLen = Math.max(0, target.distM - sFrom);
     const paceRef = surfaces.paceAt(sFrom + legLen / 2, tDepMs);
     const tau = mlCrossingMs(raw, target.distM);
-    legDwellS = clamp(surfaces.dwellAt(target.stopId, tau ?? tDepMs), DWELL_MIN_S, DWELL_CAP_S);
+    const dq = dwellQuantiles(surfaces.dwellStats(target.stopId, tau ?? tDepMs));
     if (legLen < 1) {
       legPace = paceRef;
+      legDwellS = dq.p50;
       return;
     }
-    let p: number;
     if (tau === null) {
-      p = tailPace; // past the last ML-crossed stop: the tail carries the pace
-    } else {
-      // 0.5·D: the ML expectation crosses a platform mid-dwell on average, so
-      // half the budgeted dwell belongs to the crossing itself (§4.3).
-      const tKin = legKinFloorS(legLen, vAtDep, 0);
-      const tAvail = Math.max(tKin, (tau - tDepMs) / 1000 - 0.5 * legDwellS);
-      p = legLen / Math.max(1e-3, tAvail);
+      // Past the last ML-crossed stop: the tail carries the pace, the learned
+      // p50 carries the dwell.
+      legDwellS = dq.p50;
+      legPace = clamp(tailPace, PACE_CLAMP_LO * paceRef, PACE_CLAMP_HI * paceRef);
+      return;
     }
-    legPace = clamp(p, PACE_CLAMP_LO * paceRef, PACE_CLAMP_HI * paceRef);
+    // §14.1 time-absorption hierarchy: schedule pressure vs the ML crossing
+    // time τ is absorbed FIRST by the dwell budget within [p10, p90] (0.5·D:
+    // the ML expectation crosses a platform mid-dwell on average, so half the
+    // dwell belongs to the crossing itself), and only the residual by the
+    // ±20 % pace band. Kinematic floors and the envelope always win in-sim.
+    const tKin = legKinFloorS(legLen, vAtDep, 0);
+    const tLegS = (tau - tDepMs) / 1000;
+    const nominalTravelS = Math.max(tKin, legLen / Math.max(0.5, paceRef));
+    legDwellS = clamp(2 * (tLegS - nominalTravelS), dq.p10, dq.p90);
+    const tAvail = Math.max(tKin, tLegS - 0.5 * legDwellS);
+    legPace = clamp(legLen / Math.max(1e-3, tAvail), PACE_CLAMP_LO * paceRef, PACE_CLAMP_HI * paceRef);
   };
   if (mode2 === 'drive') startLeg(s[0], t0, v[0]);
 
@@ -649,6 +796,7 @@ function runDrive(args: {
     if (mode2 === 'hold') {
       if (tMs >= holdEndMs) {
         mode2 = 'drive';
+        holdIsJam = false;
         protectedSteps.add(i);
         if (holdStopIdx >= 0 && mode === 'ladder') departMs[holdStopIdx] = tMs;
         holdStopIdx = -1;
@@ -659,6 +807,7 @@ function runDrive(args: {
         v[i + 1] = 0;
         a = 0;
         holdPos[i + 1] = holdAtM;
+        if (holdIsJam) standKind[i + 1] = 1;
         continue;
       }
     }
@@ -702,7 +851,20 @@ function runDrive(args: {
           regime.hfBehindSteps++;
           if (ceil < brake) regime.hfCeilBound++;
         } else {
-          vCmd = 0; // at/ahead of a standing reality: stand (honest)
+          // At/ahead of a standing reality. Standing is honest only where a
+          // tram may stand (v3.1 doctrine): at/near the hold point or inside
+          // any stop zone (platform semantics), or when the reality's stand
+          // is itself evidence-backed (jam — the street is a traffic column).
+          const refJam = rf.fine.standKind[i] === 1;
+          if (refJam || d > -STOP_ZONE_M || inStopZone(sI)) {
+            vCmd = 0;
+            if (refJam) standKind[i + 1] = 1;
+          } else {
+            // §6/§14.1 creep: never a phantom mid-street stand — roll at
+            // traffic-column pace to the NEXT planned (gated) stop and repay
+            // the lead by dwelling there; the envelope owns the brake-in.
+            vCmd = CREEP_AHEAD_V_MS;
+          }
         }
       } else {
         if (yielding) {
@@ -803,9 +965,27 @@ function runDrive(args: {
         }
       }
     }
-    const env = Math.min(envCurve, envHold);
+    // §14.4 leader clearance: never drive into the same-rail leader's curve.
+    // Same shape ⇒ same s-axis; the cap is the leader's own speed plus the
+    // braking envelope onto the clearance boundary (with the §5 jerk-onset
+    // margin via slack()), i.e. classic car-following re-hosted onto the
+    // leader's EMITTED curve. At/past the boundary (inherited seam overlap)
+    // the follower may at most match the leader's speed — the overlap decays,
+    // never grows.
+    let envQueue = Infinity;
+    if (leader) {
+      const lim = evalTrack(leader.track, tMs) - leader.gapM;
+      const vLead = leaderSpeedAt(tMs);
+      envQueue = lim - sI <= 0 ? vLead : vLead + Math.sqrt(2 * TRAJ_A_BRK * slack(lim));
+      if (envQueue < 0.5 && vLead < 0.5) standKind[i + 1] = 2; // queue stand
+    }
+    const env = Math.min(envCurve, envHold, envQueue);
     if (env < vCmd) {
-      binding[i] = envHold <= envCurve ? 'hold' : 'curve';
+      binding[i] = envQueue <= envCurve && envQueue <= envHold
+        ? 'queue'
+        : envHold <= envCurve
+          ? 'hold'
+          : 'curve';
       vCmd = env;
       if (inCatch) regime.catchEnvBound++;
     }
@@ -957,7 +1137,74 @@ function runDrive(args: {
     }
   }
 
-  return { s, v, holdPos, binding, departMs, protectedSteps, infeasibleSkips, regime };
+  return { s, v, holdPos, binding, standKind, departMs, protectedSteps, infeasibleSkips, regime };
+}
+
+/**
+ * G11 / §14.3 / §14.4 stand-episode scan over one fine run: episodes of
+ * v < G11_STAND_V_MS sustained > G11_STAND_MIN_S are classified as platform
+ * stands (inside a stop zone — not counted), jam holds (evidence-backed,
+ * standKind 1), queue holds (pressed against a standing leader, standKind 2),
+ * or — the G11 violation class — model-invented mid-segment stops.
+ */
+function scanStands(
+  fine: FineRun,
+  geom: RouteGeometry,
+  modalS: number | null,
+): { midSegmentStops: number; jamHolds: number; queueHolds: number } {
+  const total = geom.totalM;
+  const inZone = (sPos: number): boolean => {
+    if (total - sPos <= STOP_ZONE_M) return true;
+    if (modalS !== null && Math.abs(sPos - modalS) <= STOP_ZONE_M) return true;
+    for (const st of geom.stops) {
+      if (st.distM > sPos + STOP_ZONE_M) break;
+      if (Math.abs(st.distM - sPos) <= STOP_ZONE_M) return true;
+    }
+    return false;
+  };
+  let midSegmentStops = 0;
+  let jamHolds = 0;
+  let queueHolds = 0;
+  const n = fine.v.length;
+  let runStart = -1;
+  let runKind: 0 | 1 | 2 = 0;
+  const flush = (endIdx: number): void => {
+    if (runStart < 0) return;
+    const durS = (endIdx - runStart) * DT_S;
+    if (durS > G11_STAND_MIN_S) {
+      if (runKind === 1) jamHolds++;
+      else if (runKind === 2) queueHolds++;
+      else if (!inZone(fine.s[runStart])) midSegmentStops++;
+    }
+    runStart = -1;
+    runKind = 0;
+  };
+  for (let i = 0; i < n; i++) {
+    if (fine.v[i] < G11_STAND_V_MS) {
+      if (runStart < 0) runStart = i;
+      if (fine.standKind[i] > runKind) runKind = fine.standKind[i];
+    } else {
+      flush(i);
+    }
+  }
+  flush(n);
+  return { midSegmentStops, jamHolds, queueHolds };
+}
+
+/** G12: sampled 1 s instants where an emitted track penetrates the leader's
+ *  clearance beyond G12_TOL_M. The builder's cap makes this structurally
+ *  zero; the count is the measurement, not the guarantee. */
+function measureCollision(
+  track: TrackPoint[],
+  leader: { track: TrackPoint[]; gapM: number } | null | undefined,
+): number {
+  if (!leader || track.length === 0) return 0;
+  let violations = 0;
+  const tEnd = track[track.length - 1].t;
+  for (let t = track[0].t; t <= tEnd; t += 1000) {
+    if (evalTrack(track, t) > evalTrack(leader.track, t) - leader.gapM + G12_TOL_M) violations++;
+  }
+  return violations;
 }
 
 // ── constraint-aware compression (§11) ───────────────────────────────────────
@@ -979,7 +1226,7 @@ function emitCompressed(
   vFine: number[],
   sFine: number[],
   protectedSteps: Set<number>,
-  bindingSteps: ('none' | 'curve' | 'hold' | 'regime')[],
+  bindingSteps: ('none' | 'curve' | 'hold' | 'regime' | 'queue')[],
   profile: DriveProfile,
   geom: RouteGeometry,
 ): { track: KinTrack; pressureDrops: number; budgetForced: boolean; knotStep: number[] } | null {
@@ -1260,13 +1507,30 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
   // forward-only, so flooring s0 floors the whole curve.
   const ageFloor = clamp(args.ageFloorS ?? 0, 0, geom.totalM);
   const holdingNow = modal !== null && modal.releaseAtMs > t0;
+  // §14.3 jam hold: evidence-backed stuck position wins over the ML nowcast
+  // (the dispatcher yields to reality) — hold there until movement evidence
+  // (which arrives as a fix-driven re-emission) or the staleness release.
+  const stuckHoldEndMs =
+    !holdingNow && args.stuckAtM != null ? args.anchorMs + STUCK_HOLD_MAX_AGE_S * 1000 : 0;
+  const jamHolding = stuckHoldEndMs > t0;
   const s0Base = holdingNow
     ? clamp(modal.stopS, 0, geom.totalM)
-    : modal !== null
-      ? clamp(Math.max(modal.stopS, raw[0].s), 0, geom.totalM)
-      : clamp(raw[0].s, 0, geom.totalM);
+    : jamHolding
+      ? clamp(args.stuckAtM!, 0, geom.totalM)
+      : modal !== null
+        ? clamp(Math.max(modal.stopS, raw[0].s), 0, geom.totalM)
+        : clamp(raw[0].s, 0, geom.totalM);
   const ageFloorApplied = ageFloor > s0Base;
-  const s0 = ageFloorApplied ? ageFloor : s0Base;
+  let s0 = ageFloorApplied ? ageFloor : s0Base;
+  // §14.5 innovation gate (asymmetric by design): only an AGE re-emission's
+  // small FORWARD nowcast jitter is held back — it continues the previous
+  // curve instead of hopping. Backward is already floored above; fix-driven
+  // re-anchors never reach this branch (ageFloor = 0), so fresh evidence —
+  // including a jam-exit departure — is never dampened.
+  if (!holdingNow && !jamHolding && ageFloor > 0 && s0 > ageFloor && s0 - ageFloor <= AGE_INNOV_GATE_M) {
+    s0 = ageFloor;
+  }
+  const standingStart = holdingNow || jamHolding;
   const samePrevTrip = prev !== null && prev.tripId === args.tripId;
   // The opinion RE-ANCHORS its position on every fix (protocol), so inheriting
   // the previous speed is a smoothness nicety, not a continuity contract — and
@@ -1277,23 +1541,36 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
   // two segments in (measured live 2026-08-17, age-seam prevChord 9.99 capped
   // to raw 9.56 and still 7.37 across a 6.72 cap). If the cap bites, the
   // inherited accel must not stay positive (it would push v back over).
-  const a0Raw = holdingNow ? 0 : samePrevTrip ? accelAt(prev.opinion, t0) : 0;
+  const a0Raw = standingStart ? 0 : samePrevTrip ? accelAt(prev.opinion, t0) : 0;
   const vSeamCap = seamSpeedCap(profile, geom, s0, a0Raw);
   const vInherit = samePrevTrip
     ? speedAt(prev.opinion, t0)
     : Math.max(0, Math.min(TRAJ_V_MAX_MS, (evalTrack(raw, t0 + TRAJ_SIM_STEP_MS) - raw[0].s) / DT_S));
-  const v0 = holdingNow ? 0 : Math.min(vSeamCap, vInherit);
-  const a0 = holdingNow ? 0 : vInherit > vSeamCap ? Math.min(a0Raw, 0) : a0Raw;
+  const v0 = standingStart ? 0 : Math.min(vSeamCap, vInherit);
+  const a0 = standingStart ? 0 : vInherit > vSeamCap ? Math.min(a0Raw, 0) : a0Raw;
+  const modalS = modal !== null ? clamp(modal.stopS, 0, geom.totalM) : null;
 
-  // ── stop plan: every platform ahead is SERVED (§4.2) ─────────────────────
+  // ── stop plan: every platform ahead is SERVED (§4.2) — except §14.2
+  // request stops the evidence says the real tram passes without holding.
   // s0 ≥ modal.stopS in every branch (incl. the age-floored hold), so the
   // plan starts from wherever the drive actually stands.
   const planFrom = s0;
   const plan: PlanStop[] = [];
+  const requestSkips: { stopId: string; distM: number }[] = [];
+  const lastStop = geom.stops.length > 0 ? geom.stops[geom.stops.length - 1] : null;
   for (const st of geom.stops) {
     if (st.distM <= planFrom + STOP_REACH_M) continue;
-    plan.push({ distM: Math.min(st.distM, geom.totalM), stopId: st.stopId });
+    const distM = Math.min(st.distM, geom.totalM);
+    const isTerminal = st.isTerminal || st === lastStop;
+    if (!isTerminal && requestStopSkippable(raw, surfaces, st.stopId, distM)) {
+      requestSkips.push({ stopId: st.stopId, distM });
+      continue;
+    }
+    plan.push({ distM, stopId: st.stopId });
   }
+
+  const leaderO = args.leader ? { track: args.leader.opinion, gapM: args.leader.gapM } : null;
+  const leaderS = args.leader ? { track: args.leader.smooth, gapM: args.leader.gapM } : null;
 
   // ── opinion: the drive ───────────────────────────────────────────────────
   const oFine = runDrive({
@@ -1303,7 +1580,10 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     surfaces,
     raw,
     plan,
-    initialHoldEndMs: holdingNow ? modal.releaseAtMs : null,
+    initialHoldEndMs: holdingNow ? modal.releaseAtMs : jamHolding ? stuckHoldEndMs : null,
+    initialHoldJam: jamHolding,
+    modalS,
+    leader: leaderO,
     s0,
     v0,
     a0,
@@ -1313,11 +1593,14 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
   const oEmit = emitCompressed(grid, oFine.v, oFine.s, oFine.protectedSteps, oFine.binding, profile, geom);
   if (oEmit === null) return null;
   const oMeasure = measureTrack(oEmit, oFine, profile, geom);
+  const oStands = scanStands(oFine, geom, modalS);
   const opinionMeta: TrackBuildMeta = {
     knots: oEmit.track.points.length,
     pressureDrops: oEmit.pressureDrops,
     budgetForced: oEmit.budgetForced,
     ...oMeasure,
+    ...oStands,
+    collisionViolations: measureCollision(oEmit.track.points, leaderO),
     infeasibleSkips: oFine.infeasibleSkips,
     regime: null,
   };
@@ -1368,6 +1651,8 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
         raw,
         plan,
         initialHoldEndMs: null,
+        modalS,
+        leader: leaderS,
         s0: sSm,
         v0: Math.min(vSmCap, vSmInherit),
         a0: vSmInherit > vSmCap ? Math.min(aSmRaw, 0) : aSmRaw,
@@ -1384,6 +1669,8 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
         pressureDrops: fittedEmit.pressureDrops,
         budgetForced: fittedEmit.budgetForced,
         ...sMeasure,
+        ...scanStands(fitted, geom, modalS),
+        collisionViolations: measureCollision(fittedEmit.track.points, leaderS),
         infeasibleSkips: fitted.infeasibleSkips,
         regime: fitted.regime,
       };
@@ -1403,6 +1690,16 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     },
     opinion: oEmit.track,
     smooth: sEmit.track,
-    meta: { discKind, tDiscM, seamGapM, ageFloorApplied, opinion: opinionMeta, smooth: smoothMeta },
+    meta: {
+      discKind,
+      tDiscM,
+      seamGapM,
+      ageFloorApplied,
+      requestSkips,
+      jamHolding,
+      leaderKey: args.leader?.key ?? null,
+      opinion: opinionMeta,
+      smooth: smoothMeta,
+    },
   };
 }

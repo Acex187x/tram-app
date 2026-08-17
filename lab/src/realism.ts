@@ -301,6 +301,12 @@ export interface PerceptualEmission {
   smooth: TrackPoint[];
   /** Previous emission's smooth track (same chain), for the G9 seam. */
   prevSmooth: TrackPoint[] | null;
+  /** §14.2: request stops excluded from this emission's plan (telemetry). */
+  requestSkips: { stopId: string; distM: number }[];
+  /** §14.3: this emission holds at an evidence-backed jam position. */
+  jamHolding: boolean;
+  /** §14.4: the same-shape leader this emission was clipped against. */
+  leaderKey: string | null;
   perTrack: {
     opinion: PerceptualTrackMeta;
     smooth: PerceptualTrackMeta;
@@ -315,6 +321,12 @@ export interface PerceptualTrackMeta {
   curveDetail: CurveViolationDetail[];
   phantomDips: number;
   infeasibleSkips: number;
+  /** G11 (model-invented mid-segment stands) + evidence-backed stand telemetry. */
+  midSegmentStops: number;
+  jamHolds: number;
+  queueHolds: number;
+  /** G12 leader-clearance penetrations of the emitted track. */
+  collisionViolations: number;
   regime: RegimeStats | null;
 }
 
@@ -338,6 +350,21 @@ export class PerceptualCounters {
   curveViolations = 0;
   phantomDips = 0;
   infeasibleSkips = 0;
+  /** G11 (target 0) + evidence-backed stand telemetry (§14.3/§14.4). */
+  midSegmentStops = 0;
+  jamHolds = 0;
+  queueHolds = 0;
+  /** G12 (target 0). */
+  collisionViolations = 0;
+  /** §14.2 request-stop skips (telemetry, not violations). */
+  requestSkipsTotal = 0;
+  /** Emissions holding at an observed jam / clipped behind a leader. */
+  jamEmissions = 0;
+  leaderClippedEmissions = 0;
+  /** Recent examples for /physics spot-checks (most recent first, capped). */
+  recentRequestSkips: { key: string; stopId: string; emittedAtMs: number }[] = [];
+  recentJamHolds: { key: string; emittedAtMs: number }[] = [];
+  recentLeaderClips: { key: string; leaderKey: string; emittedAtMs: number }[] = [];
   /** G4 drill-down: where the violating segments sit (seg ≤ 2 = right at the
    *  seam — inherited-state mechanism) + the worst offenders. */
   private g4Seg12 = 0;
@@ -399,6 +426,23 @@ export class PerceptualCounters {
       if (e.discKind !== 'none') this.discByKind[e.discKind]++;
     }
 
+    // §14 doctrine telemetry + recent examples for /physics spot-checks.
+    this.requestSkipsTotal += e.requestSkips.length;
+    for (const rs of e.requestSkips) {
+      this.recentRequestSkips.unshift({ key: e.key, stopId: rs.stopId, emittedAtMs: e.emittedAtMs });
+    }
+    if (this.recentRequestSkips.length > 8) this.recentRequestSkips.length = 8;
+    if (e.jamHolding) {
+      this.jamEmissions++;
+      this.recentJamHolds.unshift({ key: e.key, emittedAtMs: e.emittedAtMs });
+      if (this.recentJamHolds.length > 8) this.recentJamHolds.length = 8;
+    }
+    if (e.leaderKey !== null) {
+      this.leaderClippedEmissions++;
+      this.recentLeaderClips.unshift({ key: e.key, leaderKey: e.leaderKey, emittedAtMs: e.emittedAtMs });
+      if (this.recentLeaderClips.length > 8) this.recentLeaderClips.length = 8;
+    }
+
     for (const name of ['opinion', 'smooth'] as const) {
       const track = e[name];
       const meta = e.perTrack[name];
@@ -407,6 +451,10 @@ export class PerceptualCounters {
       this.curveViolations += meta.curveViolations;
       this.phantomDips += meta.phantomDips;
       this.infeasibleSkips += meta.infeasibleSkips;
+      this.midSegmentStops += meta.midSegmentStops;
+      this.jamHolds += meta.jamHolds;
+      this.queueHolds += meta.queueHolds;
+      this.collisionViolations += meta.collisionViolations;
       for (const d of meta.curveDetail) {
         if (d.seg <= 2) this.g4Seg12++;
         else this.g4Later++;
@@ -562,6 +610,22 @@ export class PerceptualCounters {
         max: this.maxOscillations,
       },
       g7phantomDips: this.phantomDips,
+      g11midSegmentStops: {
+        violations: this.midSegmentStops,
+        jamHolds: this.jamHolds,
+        queueHolds: this.queueHolds,
+      },
+      g12collision: {
+        violations: this.collisionViolations,
+        leaderClippedEmissions: this.leaderClippedEmissions,
+      },
+      doctrine: {
+        requestSkips: this.requestSkipsTotal,
+        jamEmissions: this.jamEmissions,
+        recentRequestSkips: this.recentRequestSkips,
+        recentJamHolds: this.recentJamHolds,
+        recentLeaderClips: this.recentLeaderClips,
+      },
       g8discontinuity: {
         fix: { n: this.fixReemissions, flagged: this.discFix },
         age: { n: this.ageReemissions, flagged: this.discAge },

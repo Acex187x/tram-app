@@ -267,6 +267,24 @@ export class LearnedModel {
     return this.trusted('stopDwell', stopKey(stopId, atMs), MIN_CELL_WEIGHT, atMs) ?? DEFAULT_DWELL_S;
   }
 
+  /** Learned dwell distribution (mean, sd) + the trust bit, for the drive's
+   * §14.1 dwell-stretch hierarchy and the §14.2 request-stop skip class
+   * (curvegen-v3 design). Untrusted cells (decayed weight below
+   * MIN_CELL_WEIGHT — note dwell runs < 5 s are never even folded, so
+   * rarely-held request stops stay untrusted by construction) fall back to
+   * the generic defaults with a wide sd. */
+  dwellStats(stopId: string, atMs: number): { mean: number; sd: number; trusted: boolean } {
+    const c = this.cell('stopDwell', stopKey(stopId, atMs));
+    const decayed = c
+      ? c.weight * Math.pow(0.5, Math.max(0, atMs - c.updatedAtMs) / EWMA_HALF_LIFE_MS)
+      : 0;
+    if (!c || decayed < MIN_CELL_WEIGHT) {
+      return { mean: DEFAULT_DWELL_S, sd: DEFAULT_DWELL_S * 0.4, trusted: false };
+    }
+    const variance = c.weight > 1 ? c.s / c.weight : 0;
+    return { mean: c.mean, sd: Math.max(2, Math.sqrt(variance)), trusted: true };
+  }
+
   releaseAt(stopId: string, atMs: number): number {
     return this.trusted('stopRelease', stopKey(stopId, atMs), MIN_CELL_WEIGHT, atMs) ?? DEFAULT_RELEASE_S;
   }
