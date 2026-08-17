@@ -79,9 +79,16 @@ export const REQUEST_DWELL_P50_MAX_S = 10;
  *  stop (± REQUEST_SKIP_DELTA_M) must show less than this of dwell, s. */
 export const REQUEST_SKIP_ML_DWELL_MAX_S = 5;
 export const REQUEST_SKIP_DELTA_M = 15;
-/** §14.2 trim blindness half-window around a skipped stop's ML crossing, ms:
- *  covers the expectation's dwell smear (~15 s) plus slope transitions. */
-export const SKIP_TRIM_BLIND_MS = 20_000;
+/** §14.2 trim blindness around a skipped stop's ML crossing τ: the
+ *  expectation's dwell smear DEPRESSES the ML curve starting well BEFORE τ
+ *  (the smear is what delays the crossing) and releases just after, so the
+ *  neutral-trim core is asymmetric [τ−BEFORE, τ+AFTER], and the authority
+ *  ramps linearly over FEATHER at both edges — a hard window boundary steps
+ *  vCmd by up to ±15 % of pace and prints the very dip class it exists to
+ *  kill (measured live 2026-08-17, second boot: dips at window entry). */
+export const SKIP_TRIM_BLIND_BEFORE_MS = 40_000;
+export const SKIP_TRIM_BLIND_AFTER_MS = 15_000;
+export const SKIP_TRIM_FEATHER_MS = 10_000;
 /** §14.5 innovation gate: an AGE re-emission's forward nowcast jitter at or
  *  below this continues the previous curve instead of hopping, m. Fix-driven
  *  re-anchors are NEVER gated — fresh evidence reaches the screen. */
@@ -833,15 +840,17 @@ function runDrive(args: {
       const m = evalTrack(raw, tMs);
       let trim = clamp(1 + (m - sI) / G_ML, 1 - TRIM_AUTH, 1 + TRIM_AUTH);
       // §14.2 trim blindness: the ML curve is known-wrong (dwell-smeared)
-      // while it crosses a stop the drive decided to SKIP — neutral trim
-      // there, or the driver brakes for a hold that will not happen (G7).
-      if (args.skipTauMs !== undefined) {
+      // while it approaches and crosses a stop the drive decided to SKIP —
+      // neutral trim there (feathered, see SKIP_TRIM_BLIND_*), or the driver
+      // brakes for a hold that will not happen (G7).
+      if (args.skipTauMs !== undefined && args.skipTauMs.length > 0) {
+        let w = 1; // 1 = full trim authority, 0 = neutral
         for (const tau of args.skipTauMs) {
-          if (Math.abs(tMs - tau) < SKIP_TRIM_BLIND_MS) {
-            trim = 1;
-            break;
-          }
+          const out = Math.max(tau - SKIP_TRIM_BLIND_BEFORE_MS - tMs, tMs - tau - SKIP_TRIM_BLIND_AFTER_MS);
+          const wk = clamp(out / SKIP_TRIM_FEATHER_MS, 0, 1);
+          if (wk < w) w = wk;
         }
+        trim = 1 + (trim - 1) * w;
       }
       vCmd = legPace * trim;
     } else {
