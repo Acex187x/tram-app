@@ -45,6 +45,20 @@ export function trajectoriesUrl(gen: PhysicsGen, base: string = TRAJECTORIES_URL
   return gen === 'current' ? base : `${base}?gen=${gen}`;
 }
 
+/**
+ * The generation a bundle's `generator` field says it came from.
+ *
+ * Requesting an unknown generation is deliberately served the PUBLISHED bundle
+ * instead of an error, so the request is not evidence of what arrived — this
+ * mapping is. A readout comparing this against the requested generation is the
+ * only way a silent fallback becomes visible.
+ */
+export function genFromGenerator(generator: string | null): PhysicsGen {
+  if (generator === 'drive-v3') return 'v3';
+  if (generator === 'mix') return 'mix';
+  return 'current';
+}
+
 /** Fetch/staleness health for the devtools and the connection banner. */
 export interface TrajectoryHealth {
   connection: ConnectionState;
@@ -61,8 +75,14 @@ export interface TrajectoryHealth {
   lastError: string | null;
   /** Vehicles in the newest bundle. */
   vehicleCount: number;
-  /** Server physics generation these curves came from (devtools readout). */
+  /** Generation being REQUESTED (mirrors the setting) — not proof of arrival. */
   gen: PhysicsGen;
+  /**
+   * The newest bundle's own `generator` field: what the server says it served,
+   * or null when there is no bundle or the field is absent (= published). Read
+   * THIS for the active generation; `gen` above is only the ask.
+   */
+  serverGen: string | null;
   /** Server-flagged discontinuities observed since start or the last gen swap. */
   discontinuities: number;
   /** Local ms of the last successful decode (0 = never). */
@@ -148,9 +168,14 @@ export class TrajectoryStore {
    *   start — 'degraded' ("connecting…"), NOT a false 'offline' banner. It
    *   returns to 'live' on the first bundle of the new generation.
    *
-   * The clock offset SURVIVES: it measures this server's wall clock, which no
-   * change of physics can move. Resetting it would flash `clockSynced: false`
-   * and re-sync to the same number.
+   * The clock samples are DROPPED too. Not because the server's wall clock
+   * moved — it did not — but because each generation's bundle cache freezes
+   * independently, so their `serverNowMs` stamps can sit up to ~2 s apart. The
+   * offset is an EWMA over the last three fetches, and letting it span the
+   * swap would average two generations' stamps into a clock that matches
+   * neither for the next few polls. Re-seeding costs nothing: the refetch
+   * below re-syncs from the new generation's own stamp before there is any
+   * bundle to evaluate.
    */
   setGen(gen: PhysicsGen): void {
     if (gen === this.gen) return;
@@ -164,6 +189,7 @@ export class TrajectoryStore {
     this.failures = 0;
     this.lastError = null;
     this.discontinuities = 0;
+    this.clock.reset();
     this.listeners.forEach((l) => l());
     if (this.running) void this.refresh();
   }
@@ -211,6 +237,7 @@ export class TrajectoryStore {
       lastError: this.lastError,
       vehicleCount: this.current?.vehicles.size ?? 0,
       gen: this.gen,
+      serverGen: this.current?.generator ?? null,
       discontinuities: this.discontinuities,
       lastBundleAtMs: this.lastBundleAtMs,
       inFlight: this.inFlight,

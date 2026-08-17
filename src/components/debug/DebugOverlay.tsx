@@ -42,7 +42,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getRuntime, useTramState } from '@/hooks/tramData';
-import type { TrajectoryHealth } from '@/lib/physics/trajectoryStore';
+import { genFromGenerator, type TrajectoryHealth } from '@/lib/physics/trajectoryStore';
 import { Fonts } from '@/constants/theme';
 import {
   projectOnlineDistAt,
@@ -364,6 +364,25 @@ const GEN_SHORT: Record<PhysicsEngine, string> = {
   mix: 'mix',
 };
 
+/**
+ * The active-generation readout, derived from the BUNDLE's `generator` field
+ * rather than the setting that asked for it.
+ *
+ * The distinction is the whole point of the row. A `gen` the server does not
+ * recognise is deliberately served the published bundle instead of an error,
+ * so a client that printed its own request would show a confident "v3" while
+ * rendering current physics — the one failure this readout exists to catch.
+ * When the two disagree the row says so and warns; with no bundle yet (the
+ * moment after a swap) it shows what is being waited for, which is not a fault.
+ */
+function genReadout(health: TrajectoryHealth): { value: string; warn: boolean } {
+  if (health.bundleAgeS == null) return { value: `— want ${health.gen}`, warn: false };
+  const confirmed = genFromGenerator(health.serverGen);
+  const served = health.serverGen ?? 'published';
+  if (confirmed !== health.gen) return { value: `${served} ≠ want ${health.gen}`, warn: true };
+  return { value: served, warn: confirmed !== 'current' };
+}
+
 export function DebugOverlay() {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -418,16 +437,16 @@ export function DebugOverlay() {
               ● SMOOTH{positionMode === 'smooth' ? '*' : ''}
             </Text>
           </View>
-          {/* Active server physics generation. Also on the CONNECTION card
-              next to the bundle age; repeated here because this band is the
-              one part of the overlay visible with no tram followed and while
-              collapsed — so every debug screenshot states which engine drew
-              the trams in it. */}
+          {/* The REQUESTED generation — labelled `req:` because that is all it
+              is. This band is the only part of the overlay visible while
+              collapsed and with no tram followed, so it belongs here; what the
+              server actually SERVED is on the CONNECTION card, read from the
+              bundle. Never merge the two into one number. */}
           <Text
             style={[styles.genChip, physicsEngine !== 'current' && styles.genChipAlt]}
             numberOfLines={1}
           >
-            G:{GEN_SHORT[physicsEngine]}
+            req:{GEN_SHORT[physicsEngine]}
           </Text>
           <Text style={styles.buildNumber}>B{buildNumber}</Text>
           {/* Guide mode: swaps every live value for a sentence explaining what
@@ -587,10 +606,11 @@ function DebugLive({ tramKey }: { tramKey: string }) {
               value={dbg.bundleAgeS != null ? `${num(dbg.bundleAgeS, 1)}s` : 'none'}
               warn={dbg.bundleAgeS == null || dbg.bundleAgeS >= 15}
             />
-            {/* Which server physics generation built the bundle above — right
-                next to its age, because after an engine swap the two are read
-                together ("no bundle yet, gen=v3" is the swap, not a fault). */}
-            <Row label="engine gen" value={health.gen} warn={health.gen !== 'current'} />
+            {/* Which generation built the bundle above — right next to its
+                age, because after a swap the two are read together ("no
+                bundle yet" is the swap, not a fault). Read from the payload,
+                never from the setting: see genReadout. */}
+            <Row label="engine gen" {...genReadout(health)} />
             <Row label="clock offset" value={`${signed(dbg.clockOffsetMs)}ms`} warn={health.clockImplausible} />
             <Row label="vehicles" value={num(health.vehicleCount)} />
             <Row

@@ -43,6 +43,17 @@ export interface ParsedBundle {
   atMs: number;
   horizonS: number;
   vehicles: Map<string, ParsedVehicle>;
+  /**
+   * Which predictor generation actually built this bundle, as the SERVER names
+   * it ('drive-v3', 'mix', …), or null when the field is absent — which means
+   * the published/current chain.
+   *
+   * This is the only trustworthy answer to "what am I looking at". Asking for
+   * an unknown generation is deliberately served the published bundle rather
+   * than an error, so a client that reported the generation it REQUESTED would
+   * confidently mislabel exactly the case worth catching.
+   */
+  generator: string | null;
   /** Local Date.now() when the response was decoded (clock-offset partner). */
   receivedAtMs: number;
 }
@@ -98,6 +109,7 @@ export function parseBundle(payload: unknown, receivedAtMs: number): ParsedBundl
     atMs?: unknown;
     horizonS?: unknown;
     vehicles?: unknown;
+    generator?: unknown;
   } | null;
   if (body == null || typeof body !== 'object') return null;
   const serverNowMs = num(body.serverNowMs);
@@ -144,6 +156,8 @@ export function parseBundle(payload: unknown, receivedAtMs: number): ParsedBundl
     atMs: Number.isNaN(atMsRaw) ? serverNowMs : atMsRaw,
     horizonS: Number.isNaN(num(body.horizonS)) ? 0 : (body.horizonS as number),
     vehicles,
+    generator:
+      typeof body.generator === 'string' && body.generator.length > 0 ? body.generator : null,
     receivedAtMs,
   };
 }

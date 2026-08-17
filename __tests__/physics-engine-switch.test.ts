@@ -19,10 +19,12 @@
 //      from the engine just left, and leaves the connection machine telling the
 //      truth ('degraded' = connecting, never a false 'offline' banner).
 
+import { parseBundle } from '@/lib/physics/bundle';
 import { connectionState } from '@/lib/physics/connection';
 import {
   TRAJECTORIES_URL,
   TrajectoryStore,
+  genFromGenerator,
   trajectoriesUrl,
   type PhysicsGen,
 } from '@/lib/physics/trajectoryStore';
@@ -173,7 +175,44 @@ describe('trajectoriesUrl', () => {
   });
 });
 
-// ── 3. the swap ──────────────────────────────────────────────────────────────
+// ── 3. confirming the generation from the DATA ───────────────────────────────
+
+describe('genFromGenerator', () => {
+  it('maps the server’s own names onto the client’s generations', () => {
+    expect(genFromGenerator('drive-v3')).toBe('v3');
+    expect(genFromGenerator('mix')).toBe('mix');
+  });
+
+  it('reads an absent generator as the published chain', () => {
+    expect(genFromGenerator(null)).toBe('current');
+  });
+
+  it('reads an unrecognised generator as published, because that is what it is', () => {
+    // Asking for a `gen` the server does not know is deliberately served the
+    // published bundle rather than an error, so an unfamiliar name must resolve
+    // to something honest instead of being echoed back as if it had been served.
+    expect(genFromGenerator('drive-v4')).toBe('current');
+    expect(genFromGenerator('')).toBe('current');
+  });
+});
+
+describe('parseBundle generator field', () => {
+  it('keeps what the server called itself', () => {
+    const parsed = parseBundle({ ...wireBundle(), generator: 'drive-v3' }, T0);
+    expect(parsed?.generator).toBe('drive-v3');
+  });
+
+  it('is null when absent — the published bundle does not name itself', () => {
+    expect(parseBundle(wireBundle(), T0)?.generator).toBeNull();
+  });
+
+  it('ignores a non-string generator rather than trusting it', () => {
+    expect(parseBundle({ ...wireBundle(), generator: 3 }, T0)?.generator).toBeNull();
+    expect(parseBundle({ ...wireBundle(), generator: '' }, T0)?.generator).toBeNull();
+  });
+});
+
+// ── 4. the swap ──────────────────────────────────────────────────────────────
 
 describe('TrajectoryStore generation swap', () => {
   const base = 'https://example.invalid/api/trajectories/v2';
@@ -353,7 +392,7 @@ describe('TrajectoryStore generation swap', () => {
     s.stop();
   });
 
-  it('keeps the clock offset across a swap — the server’s wall clock did not move', async () => {
+  it('re-seeds the clock from the new generation instead of averaging across the swap', async () => {
     const s = new TrajectoryStore(base);
     fetchMock.mockResolvedValue({
       ok: true,
@@ -361,12 +400,70 @@ describe('TrajectoryStore generation swap', () => {
     });
     s.start(5_000);
     await jest.advanceTimersByTimeAsync(0);
-    expect(s.clock.synced).toBe(true);
-    const offset = s.clock.offsetMs;
+    expect(s.clock.offsetMs).toBeCloseTo(4_000, -1);
+
+    // Each generation's bundle cache freezes independently, so their
+    // serverNowMs stamps can sit ~2 s apart. The offset is an EWMA over the
+    // last three fetches: blending the two would give a clock matching neither.
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => wireBundle({ serverNowMs: Date.now() + 2_000 }),
+    });
+    s.setGen('mix');
+    expect(s.clock.synced).toBe(false); // dropped, and nothing to evaluate yet
+
+    await jest.advanceTimersByTimeAsync(0);
+    // Exactly the new generation's offset — not the 2 s–4 s average an
+    // un-reset window would have produced for the next three polls.
+    expect(s.clock.offsetMs).toBeCloseTo(2_000, -1);
+    s.stop();
+  });
+
+  it('reports the generation the BUNDLE names, not the one requested', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ ...wireBundle({ serverNowMs: Date.now() }), generator: 'drive-v3' }),
+    });
+    const s = new TrajectoryStore(base);
+    s.setGen('v3');
+    s.start(5_000);
+    await jest.advanceTimersByTimeAsync(0);
+    const health = s.health(Date.now());
+    expect(health.serverGen).toBe('drive-v3');
+    expect(genFromGenerator(health.serverGen)).toBe(health.gen); // asked, and got
+    s.stop();
+  });
+
+  it('makes a silent fallback to the published bundle detectable', async () => {
+    // The server answers an unknown generation with the published bundle on
+    // purpose. Nothing fails, nothing 404s — the ONLY evidence is that the
+    // bundle does not name itself while v3 was asked for.
+    const s = new TrajectoryStore(base);
+    s.setGen('v3');
+    s.start(5_000);
+    await jest.advanceTimersByTimeAsync(0);
+    const health = s.health(Date.now());
+    expect(health.gen).toBe('v3');
+    expect(health.serverGen).toBeNull();
+    expect(genFromGenerator(health.serverGen)).not.toBe(health.gen);
+    s.stop();
+  });
+
+  it('has no generation to report before the first bundle of a swap lands', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ ...wireBundle({ serverNowMs: Date.now() }), generator: 'mix' }),
+    });
+    const s = new TrajectoryStore(base);
+    s.start(5_000);
+    await jest.advanceTimersByTimeAsync(0);
 
     s.setGen('mix');
-    expect(s.clock.synced).toBe(true);
-    expect(s.clock.offsetMs).toBe(offset);
+    // Dropping the bundle drops the claim with it — better than reporting the
+    // generation of curves that are no longer on screen.
+    expect(s.health(Date.now()).serverGen).toBeNull();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(s.health(Date.now()).serverGen).toBe('mix');
     s.stop();
   });
 
