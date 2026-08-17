@@ -29,6 +29,7 @@ import {
   legKinFloorS,
   mlCrossingMs,
   mlTailPace,
+  seamSpeedCap,
   type DriveBuilt,
   type DriveSurfaces,
 } from '../src/drive';
@@ -663,6 +664,96 @@ const mkDrive = (over: Partial<Parameters<typeof buildDriveVehicle>[0]> &
     `final s = ${end.toFixed(1)} of ${geom.totalM.toFixed(1)} m`);
   check('drive/terminal: flat once latched',
     Math.abs(evalTrack(b.vehicle.opinion, T0 + 60_000) - end) < 1);
+}
+
+// ── D11. catch-up ceiling: dwell-contaminated slow bucket must not stall it ──
+// The 2026-08-17 G5 root cause: paceAt at the SMOOTH's own position is the
+// stop-zone bucket (dwell-contaminated, e.g. 1.6 m/s) at exactly the moments
+// catch-up starts, and the lone-bucket ceiling 1.9×1.6 = 3.04 sat BELOW the
+// reference's own speed — the smooth was commanded slower than the thing it
+// chases. The reformed ceiling spans both ends of the corridor and never drops
+// below vO + CATCH_DV_MIN.
+{
+  const geom = synthGeometry({ totalM: 6000 });
+  const prev = mkDrive({
+    raw: raw(1000, 6, T0 - 40_000), geom, surfaces: surf(6),
+    emittedAtMs: T0 - 40_000, anchorMs: T0 - 45_000,
+  });
+  const sSeam = evalTrack(prev.vehicle.smooth, T0); // ≈ 1240, running 6 m/s
+  const slowUntil = sSeam + 120;
+  const surfaces: DriveSurfaces = {
+    paceAt: (sM: number) => (sM < slowUntil ? 1.6 : 6),
+    dwellAt: () => 20,
+  };
+  const b = mkDrive({
+    raw: raw(sSeam + 100, 6), geom, surfaces, fixGapS: 40,
+    prev: { tripId: 'tSynth', smooth: prev.smooth, opinion: prev.opinion },
+  });
+  driveContract('drive/slow-bucket', b);
+  let convS: number | null = null;
+  for (let dt = 0; dt <= 120; dt++) {
+    if (Math.abs(evalTrack(b.vehicle.smooth, T0 + dt * 1000) - evalTrack(b.vehicle.opinion, T0 + dt * 1000)) < 15) {
+      convS = dt;
+      break;
+    }
+  }
+  // ≤32 s: ramp + min(DV, g/T_CLOSE) demand has a first-order tail below
+  // g = DV·T_CLOSE, so a full 100 m episode runs ~26–30 s even unclamped;
+  // the OLD lone-bucket ceiling (1.9×1.6 = 3.04 < vO) took ~80 s on this
+  // exact scenario — the bound discriminates the mechanism, not the noise.
+  check('drive/slow-bucket: 100 m gap closes decisively THROUGH the slow cell',
+    convS !== null && convS <= 32,
+    `converged at +${convS ?? '∅'}s (lone-bucket ceiling would take ~80 s)`);
+}
+
+// ── D12. yield never outruns a crawling reference ───────────────────────────
+// The 3.0 m/s yield floor is honest only while reality itself does ≥ 3.0;
+// against a 2 m/s reference the old floor made the lead GROW (measured live:
+// 21 % of yield steps commanded more than vO).
+{
+  const geom = synthGeometry({ totalM: 6000 });
+  const prev = mkDrive({
+    raw: raw(1000, 2, T0 - 40_000), geom, surfaces: surf(2),
+    emittedAtMs: T0 - 40_000, anchorMs: T0 - 45_000,
+  });
+  const sSeam = evalTrack(prev.vehicle.smooth, T0); // crawling at ≈ 2 m/s
+  const b = mkDrive({
+    raw: raw(sSeam - 80, 2), geom, surfaces: surf(2), fixGapS: 40,
+    prev: { tripId: 'tSynth', smooth: prev.smooth, opinion: prev.opinion },
+  });
+  driveContract('drive/yield-crawl', b);
+  const gap0 = evalTrack(b.vehicle.smooth, T0) - evalTrack(b.vehicle.opinion, T0);
+  const gap90 = evalTrack(b.vehicle.smooth, T0 + 90_000) - evalTrack(b.vehicle.opinion, T0 + 90_000);
+  check('drive/yield-crawl: the lead never grows while ahead of a 2 m/s reality',
+    gap90 <= gap0 + 5, `lead ${gap0.toFixed(0)} m → ${gap90.toFixed(0)} m at +90 s`);
+  check('drive/yield-crawl: never reverses',
+    b.vehicle.smooth.every((p, i, a) => i === 0 || p.s >= a[i - 1].s));
+}
+
+// ── D13. hot seam into a curve zone: the margin-aware seam cap (G4) ─────────
+// A previous emission's CHORD speed at t_E can exceed the local curve envelope
+// (legal on the wire at its own midpoint); importing it printed G4 violations
+// decaying off the seam. The seam cap must bite BEFORE the sim starts.
+{
+  const geom = synthGeometry({ totalM: 4000, curveAtM: 1500, curveR: 25 });
+  const prev = mkDrive({
+    raw: raw(1350, 9, T0 - 16_000), geom, surfaces: surf(9),
+    emittedAtMs: T0 - 16_000, anchorMs: T0 - 21_000,
+  });
+  const sSeam = evalTrack(prev.vehicle.smooth, T0);
+  const chordAtSeam = speedAt(prev.smooth, T0);
+  const b = mkDrive({
+    raw: raw(sSeam + 8, 6), geom, surfaces: surf(6), fixGapS: 30,
+    prev: { tripId: 'tSynth', smooth: prev.smooth, opinion: prev.opinion },
+  });
+  driveContract('drive/hot-seam', b);
+  checkCurveGate('drive/hot-seam/opinion', geom, b.vehicle.opinion);
+  checkCurveGate('drive/hot-seam/smooth', geom, b.vehicle.smooth);
+  const cap = seamSpeedCap(driveProfileFor(geom), geom, sSeam, accelAt(prev.smooth, T0));
+  check('drive/hot-seam: smooth seam speed obeys the margin-aware cap',
+    speedAt(b.smooth, T0) <= Math.min(chordAtSeam, cap) + 1e-6,
+    `inherited ${chordAtSeam.toFixed(2)} m/s, cap ${cap.toFixed(2)}, took ${speedAt(b.smooth, T0).toFixed(2)} ` +
+    `(seam ${(1500 - sSeam).toFixed(0)} m before the curve apex)`);
 }
 
 // ── D10. knot budget under a dense-centre stop ladder ───────────────────────

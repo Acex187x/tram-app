@@ -86,8 +86,28 @@ export const YIELD_FACTOR = 0.5;
 export const YIELD_MIN_V_MS = 3.0;
 /** Catch-up ceiling anchor: measured p90/p50 free-running ratio (port). The
  *  ceiling is CATCH_HEADROOM × the learned pace surface — observed sprint
- *  pace, never the legal cap (the night-centre lesson). */
+ *  pace, never the legal cap (the night-centre lesson). Since 2026-08-17 the
+ *  pace reference spans BOTH ends of the gap corridor (the smooth's own bucket
+ *  AND the reference's), and two observation-anchored floors apply — see the
+ *  regime table. Measured live (12 h drill-down): paceAt at the smooth's own
+ *  position is the dwell-contaminated stop-zone bucket at exactly the moments
+ *  catch-up starts, and the lone-bucket ceiling bound 62 % of catch-up steps
+ *  (mean 3.3 m/s of closing speed clipped; 5 % of bound steps commanded the
+ *  smooth SLOWER than the reference it chases). */
 export const CATCH_HEADROOM = 1.9;
+/** Catch-up may always close at at least this surplus above the reference's
+ *  own speed (envelope permitting): the reference (opinion) is itself
+ *  ML-timed, learned-clamped and envelope-legal — an observed-pace quantity —
+ *  so vO + a modest closing rate never sprints past what reality supports.
+ *  Without a floor the ceiling can sit BELOW vO and the regime diverges. */
+export const CATCH_DV_MIN = 2.5;
+/** Hold-follow approach floor toward a STANDING reference, m/s: rolling into
+ *  a platform where reality already stands is a normal tram roll-in at no
+ *  less than the network default pace (= DEFAULT_PACE_MS); the brake parabola
+ *  owns the last metres regardless. Measured live: 42 % of hold-follow
+ *  approach steps were ceiling-bound below the brake envelope by the
+ *  stop-zone bucket's own contaminated pace. */
+export const HOLD_APPROACH_MIN_MS = DEFAULT_PACE_MS;
 /** Catch-up demand: surplus = min(DV_CATCH_MAX, gap / T_CLOSE) (new — replaces
  *  the 30 s blend window as the *demand* constant; §6 math: 40 m → ~10 s).
  *  Both tuned to the decisive edge of their pre-registered bands (T_CLOSE
@@ -190,6 +210,17 @@ export function cruiseCapAt(profile: DriveProfile, geom: RouteGeometry, sM: numb
  * jerk-onset margin out of the distance — conservatism, not the gate.
  */
 export function curveEnvAt(profile: DriveProfile, geom: RouteGeometry, sM: number): number {
+  return curveEnvMarginAt(profile, geom, sM, 0);
+}
+
+/** Curve envelope with the braking slack bitten by `marginM` metres — the
+ *  runtime (§4.1/§5) view of the same constraint; margin 0 IS the gate. */
+function curveEnvMarginAt(
+  profile: DriveProfile,
+  geom: RouteGeometry,
+  sM: number,
+  marginM: number,
+): number {
   const cum = geom.cumDistM;
   const n = cum.length;
   if (n === 0) return V_LIMIT_MAX;
@@ -202,10 +233,49 @@ export function curveEnvAt(profile: DriveProfile, geom: RouteGeometry, sM: numbe
     if (d > horizon) break;
     const lim = profile.vLimit[j];
     if (lim >= v) continue;
-    const cand = d <= s ? lim : Math.sqrt(lim * lim + 2 * TRAJ_A_BRK * (d - s));
+    const cand =
+      d <= s
+        ? lim
+        : Math.sqrt(lim * lim + 2 * TRAJ_A_BRK * Math.max(0, d - s - marginM));
     if (cand < v) v = cand;
   }
   return v;
+}
+
+/**
+ * Largest seam speed the local curve envelope admits GIVEN the seam accel
+ * state. The raw envelope assumes braking is ALREADY at full A_BRK; a seam
+ * teleports state (v, a0) into the approach, and building that braking under
+ * jerk J first costs the §5 onset margin v·((max(0,a0)+A_BRK)²/(2·J·A_BRK) +
+ * dt). Importing a chord speed above THIS cap repaints a speed the fine
+ * profile never drove and prints G4 violations decaying off the seam
+ * (measured live 2026-08-17: capped-but-marginless opinion seams and uncapped
+ * smooth seams were the seg#1–2 offender class). The admissible v solves
+ * v ≤ env(s; margin(v, a0)) — the right side is non-increasing in v, so one
+ * bisection finds the fixed point (deterministic, 25 iterations).
+ */
+export function seamSpeedCap(
+  profile: DriveProfile,
+  geom: RouteGeometry,
+  sM: number,
+  a0: number,
+): number {
+  // 2·DT_S where the sim margin uses DT_S: a seam lands mid-grid with no
+  // preceding step that already honoured the margin, so it gets one extra
+  // step of slack (the first live window's residual was a seam segment 0.02
+  // m/s over the gate — exactly the half-step discretization slop).
+  const marginOf = (v: number): number =>
+    v * ((Math.max(0, a0) + TRAJ_A_BRK) ** 2 / (2 * TRAJ_J_MAX * TRAJ_A_BRK) + 2 * DT_S);
+  const hi0 = curveEnvAt(profile, geom, sM);
+  if (hi0 <= curveEnvMarginAt(profile, geom, sM, marginOf(hi0))) return hi0;
+  let lo = 0;
+  let hi = hi0;
+  for (let i = 0; i < 25; i++) {
+    const mid = (lo + hi) / 2;
+    if (mid <= curveEnvMarginAt(profile, geom, sM, marginOf(mid))) lo = mid;
+    else hi = mid;
+  }
+  return lo;
 }
 
 // ── ML-as-timetable adapter (design §3, §4.3) ────────────────────────────────
@@ -322,13 +392,68 @@ export interface TrackBuildMeta {
   /** G4, generator-exact: emitted segments whose mean speed exceeds the curve
    *  envelope at the segment midpoint by more than cap·1.05 + 0.3. */
   curveViolations: number;
+  /** G4 drill-down: one entry per violating segment (seg index, chord speed,
+   *  cap at the positional midpoint, seconds from the emission instant). */
+  curveDetail: CurveViolationDetail[];
   /** G7: emitted-knot local v-minima ≥1 m/s below both neighbours with no
    *  binding constraint tagged and not at a hold. */
   phantomDips: number;
   /** Planned holds rolled through because the seam state made them
    *  kinematically unreachable (see HOLD_ENTRY_V_MAX). */
   infeasibleSkips: number;
+  /** 'regimes' runs only: why the smooth track drove the speed it drove —
+   *  the G5 latency drill-down (which limiter actually bound). */
+  regime: RegimeStats | null;
 }
+
+export interface CurveViolationDetail {
+  /** Emitted segment index (1 = the first segment after the seam knot). */
+  seg: number;
+  vSeg: number;
+  cap: number;
+  /** Segment start relative to emittedAtMs, s. */
+  atS: number;
+}
+
+/** Per-step classification of the smooth run's speed limiters (G5 diagnosis —
+ *  design §6 names the levers; this measures which one actually binds). */
+export interface RegimeStats {
+  /** Steps in the catch-up regime (g > CATCH_ENTER, reference moving). */
+  catchSteps: number;
+  /** ...where the observed-pace ceiling clipped the demanded surplus. */
+  catchCeilBound: number;
+  /** ...where the ceiling sat below the reference's OWN speed — the smooth was
+   *  commanded slower than the thing it chases (divergence, not honesty). */
+  catchCeilBelowRef: number;
+  /** ...where the envelope (curve cap / hold) clipped below the regime demand. */
+  catchEnvBound: number;
+  /** ...where v still lagged the command by > 0.3 m/s (accel/jerk ramp-up). */
+  catchRampBound: number;
+  /** Σ max(0, demand − ceiling) over catch-up steps, m/s — closing speed the
+   *  pace anchor took away. */
+  ceilShortfallSum: number;
+  /** Hold-follow steps with the stand point still ahead. */
+  hfBehindSteps: number;
+  /** ...where the pace ceiling (not the brake parabola) set the approach. */
+  hfCeilBound: number;
+  yieldSteps: number;
+  /** Yield steps commanding MORE than the reference's own speed (outrunning
+   *  the opinion while ahead — the ahead-divergence mechanism). */
+  yieldOutrun: number;
+}
+
+const zeroRegimeStats = (): RegimeStats => ({
+  catchSteps: 0,
+  catchCeilBound: 0,
+  catchCeilBelowRef: 0,
+  catchEnvBound: 0,
+  catchRampBound: 0,
+  ceilShortfallSum: 0,
+  hfBehindSteps: 0,
+  hfCeilBound: 0,
+  yieldSteps: 0,
+  yieldOutrun: 0,
+});
 
 export interface DriveBuilt {
   vehicle: V2Vehicle;
@@ -376,6 +501,8 @@ interface FineRun {
   /** Modal-release / dwell-exit / hold-entry steps — protected knots (§11). */
   protectedSteps: Set<number>;
   infeasibleSkips: number;
+  /** 'regimes' runs: which limiter actually bound (all-zero for 'ladder'). */
+  regime: RegimeStats;
 }
 
 interface OpinionRef {
@@ -433,6 +560,7 @@ function runDrive(args: {
   const departMs = new Array<number>(plan.length).fill(mode === 'ladder' ? Infinity : 0);
   const protectedSteps = new Set<number>();
   let infeasibleSkips = 0;
+  const regime = zeroRegimeStats();
 
   s[0] = clamp(args.s0, 0, total);
   v[0] = clamp(args.v0, 0, TRAJ_V_MAX_MS);
@@ -520,6 +648,7 @@ function runDrive(args: {
 
     // ── guidance: commanded speed before constraints ─────────────────────────
     let vCmd: number;
+    let inCatch = false; // this step is a catch-up step (G5 drill-down)
     if (mode === 'ladder') {
       const m = evalTrack(raw, tMs);
       const trim = clamp(1 + (m - sI) / G_ML, 1 - TRIM_AUTH, 1 + TRIM_AUTH);
@@ -538,11 +667,20 @@ function runDrive(args: {
         binding[i] = 'regime';
         const d = oHold - sI;
         if (d > 0) {
+          // Approach ceiling: observed sprint pace over the corridor being
+          // closed (BOTH ends — the smooth's own bucket is the dwell-
+          // contaminated stop zone exactly when this fires), floored at the
+          // network default roll-in pace. The brake parabola owns the last
+          // metres; the envelope stack still clamps below all of this.
+          const paceCeil = Math.max(surfaces.paceAt(sI, tMs), surfaces.paceAt(oHold, tMs));
           const ceil = Math.min(
-            CATCH_HEADROOM * surfaces.paceAt(sI, tMs),
+            Math.max(CATCH_HEADROOM * paceCeil, HOLD_APPROACH_MIN_MS),
             TRAJ_V_MAX_MS,
           );
-          vCmd = Math.min(Math.sqrt(2 * TRAJ_A_BRK * Math.max(0, d)), ceil);
+          const brake = Math.sqrt(2 * TRAJ_A_BRK * Math.max(0, d));
+          vCmd = Math.min(brake, ceil);
+          regime.hfBehindSteps++;
+          if (ceil < brake) regime.hfCeilBound++;
         } else {
           vCmd = 0; // at/ahead of a standing reality: stand (honest)
         }
@@ -553,12 +691,33 @@ function runDrive(args: {
           yielding = true;
         }
         if (yielding) {
-          // never pedestrian, never reverse, never a phantom mid-street stand
+          // Never pedestrian, never reverse, never a phantom mid-street stand
+          // — and never OUTRUN the reference: the 3.0 floor is honest only
+          // while reality itself does at least 3.0 (measured live: 21 % of
+          // yield steps commanded more than vO — the lead GREW while ahead).
           binding[i] = 'regime';
-          vCmd = Math.max(YIELD_MIN_V_MS, YIELD_FACTOR * vO);
+          vCmd = Math.max(YIELD_FACTOR * vO, Math.min(YIELD_MIN_V_MS, vO));
+          regime.yieldSteps++;
+          if (vCmd > vO + 1e-9) regime.yieldOutrun++;
         } else if (g > CATCH_ENTER_M) {
-          const ceil = Math.min(CATCH_HEADROOM * surfaces.paceAt(sI, tMs), TRAJ_V_MAX_MS);
-          vCmd = Math.min(vO + Math.min(DV_CATCH_MAX, g / T_CLOSE_S), ceil);
+          // Catch-up ceiling: observed sprint pace over the gap corridor
+          // (both ends), never below the reference's own already-credible
+          // speed plus a modest closing rate — commanded-slower-than-the-
+          // reference is divergence, not honesty.
+          const paceCeil = Math.max(surfaces.paceAt(sI, tMs), surfaces.paceAt(o, tMs));
+          const ceil = Math.min(
+            Math.max(CATCH_HEADROOM * paceCeil, vO + CATCH_DV_MIN),
+            TRAJ_V_MAX_MS,
+          );
+          const demand = vO + Math.min(DV_CATCH_MAX, g / T_CLOSE_S);
+          vCmd = Math.min(demand, ceil);
+          inCatch = true;
+          regime.catchSteps++;
+          if (ceil < demand) {
+            regime.catchCeilBound++;
+            regime.ceilShortfallSum += demand - ceil;
+            if (ceil < vO) regime.catchCeilBelowRef++;
+          }
         } else {
           vCmd = vO * clamp(1 + g / PACE_GAIN_M, TRACK_MIN_FACTOR, TRACK_MAX_FACTOR);
         }
@@ -628,6 +787,7 @@ function runDrive(args: {
     if (env < vCmd) {
       binding[i] = envHold <= envCurve ? 'hold' : 'curve';
       vCmd = env;
+      if (inCatch) regime.catchEnvBound++;
     }
 
     // ── accel: rate-, jerk- and landing-limited; integrate (exact, linear v) ─
@@ -638,6 +798,13 @@ function runDrive(args: {
     // into the S-tail — without it the demand pins a at full brake while v
     // crosses zero and the release prints a >J wire jerk at every platform.
     aDes = Math.max(aDes, -Math.sqrt(2 * TRAJ_J_MAX * Math.max(0, vI)));
+    // S-curve approach ceiling — the accel-side mirror: the steepest accel
+    // from which jerk-J decay still reaches vCmd with a → 0 is +√(2·J·Δv).
+    // Without it a full-throttle ramp arriving at a demand PLATEAU (a curve
+    // cap, the catch-up ceiling) overshoots by up to A_ACC²/2J ≈ 1.06 m/s —
+    // measured live 2026-08-17 as marginal G4 excess when the plateau was a
+    // curve dip (4.40 across a 3.89 cap, seam cool at 1.95).
+    aDes = Math.min(aDes, Math.sqrt(2 * TRAJ_J_MAX * Math.max(0, vCmd - vI)));
     aDes = clamp(aDes, a - TRAJ_J_MAX * DT_S, a + TRAJ_J_MAX * DT_S);
     let vN = vI + aDes * DT_S;
     if (vN < 0) {
@@ -652,7 +819,49 @@ function runDrive(args: {
       aDes = (TRAJ_V_MAX_MS - vI) / DT_S;
       vN = TRAJ_V_MAX_MS;
     }
+    // One-step-ahead feasibility: the envelope margin is a-DEPENDENT, so a
+    // hard ramp can collapse its own demand — a vertex that looked far at
+    // a = 0 suddenly bites at a = +1.3, AFTER jerk can no longer comply
+    // (measured live 2026-08-17: 3-consecutive-step overshoots up to +1.3
+    // m/s entering dips during ceiling-unlocked catch-up). Test the POST
+    // state (vN, aDes) against its own margin; if it fails, bisect aDes down
+    // within the jerk window — the discrete form of "never enter a state you
+    // cannot brake out of". The jerk floor stays absolute: if even it fails
+    // (pre-existing infeasible seam), physics does its best and the gate
+    // counts the residue.
+    {
+      const post = (aC: number): boolean => {
+        const vP = Math.max(0, vI + aC * DT_S);
+        const mP = vP * ((Math.max(0, aC) + TRAJ_A_BRK) ** 2 / (2 * TRAJ_J_MAX * TRAJ_A_BRK) + DT_S);
+        let envP = Math.min(V_LIMIT_MAX, cruiseCapAt(profile, geom, sI));
+        const horizon = sI + DEFAULT_LOOKAHEAD_M;
+        const nV = cum.length;
+        for (let j = segmentIndexAt(cum, Math.max(0, sI - TRAIL_LIMIT_M)); j < nV; j++) {
+          const d = cum[j];
+          if (d < sI - TRAIL_LIMIT_M) continue;
+          if (d > horizon) break;
+          const lim = profile.vLimit[j];
+          if (lim >= envP) continue;
+          const cand = d <= sI ? lim : Math.sqrt(lim * lim + 2 * TRAJ_A_BRK * Math.max(0, d - sI - mP));
+          if (cand < envP) envP = cand;
+        }
+        return vP <= envP + 1e-9;
+      };
+      const aFloor = a - TRAJ_J_MAX * DT_S;
+      if (aDes > aFloor && !post(aDes)) {
+        let lo = aFloor;
+        let hi = aDes;
+        for (let k = 0; k < 12; k++) {
+          const mid = (lo + hi) / 2;
+          if (post(mid)) lo = mid;
+          else hi = mid;
+        }
+        aDes = post(lo) ? lo : aFloor;
+        vN = Math.max(0, vI + aDes * DT_S);
+      }
+    }
     a = aDes;
+    if (inCatch && vCmd - vN > 0.3) regime.catchRampBound++;
     const sN = sI + ((vI + vN) / 2) * DT_S;
     if (!Number.isFinite(sN) || !Number.isFinite(vN)) return null;
 
@@ -724,7 +933,7 @@ function runDrive(args: {
     }
   }
 
-  return { s, v, holdPos, binding, departMs, protectedSteps, infeasibleSkips };
+  return { s, v, holdPos, binding, departMs, protectedSteps, infeasibleSkips, regime };
 }
 
 // ── constraint-aware compression (§11) ───────────────────────────────────────
@@ -747,6 +956,8 @@ function emitCompressed(
   sFine: number[],
   protectedSteps: Set<number>,
   bindingSteps: ('none' | 'curve' | 'hold' | 'regime')[],
+  profile: DriveProfile,
+  geom: RouteGeometry,
 ): { track: KinTrack; pressureDrops: number; budgetForced: boolean; knotStep: number[] } | null {
   const n = grid.length - 1;
   const t0 = grid[0];
@@ -782,11 +993,38 @@ function emitCompressed(
 
   let pressureDrops = 0;
   let budgetForced = false;
+  // Merges whose RESULTING chord would cross the curve envelope at its own
+  // positional midpoint (the G4 inequality, pre-checked with a slightly
+  // tighter guard and a ±2 m probe against compression position drift) are
+  // FORBIDDEN: the §11 corner protection alone provably misses monotone
+  // descents THROUGH a dip — braking into a hold across a curve zone has no
+  // local v-minimum to protect, yet the merged chord's midpoint lands in the
+  // dip with a mean above its cap (measured live 2026-08-17: the interior
+  // offender class, e.g. 6.05 m/s across a 3.91 cap at t+63 s). The emitted
+  // chord speed IS (vFine[l]+vFine[r])/2 exactly, so the check is exact in
+  // speed. Rejections re-evaluate after every merge (neighbours changed).
+  const forbidden = new Set<number>();
+  // The guard evaluates the cap at the EMITTED positional midpoint — the
+  // accumulated endpoint-trapezoid position, exactly what measureTrack and
+  // the wire will see. Fine-position approximations drifted metres apart deep
+  // in budget-forced horizons and let a far-horizon chord slip the guard yet
+  // fail the gate (measured live 2026-08-17: opinion seg#21 at t+99 s).
+  const capGuardOk = (jBound: number): boolean => {
+    const l = bounds[jBound - 1];
+    const r = bounds[jBound + 1];
+    const chord = (vFine[l] + vFine[r]) / 2;
+    let sEmL = sFine[0];
+    for (let k = 1; k < jBound; k++) {
+      sEmL += ((vFine[bounds[k - 1]] + vFine[bounds[k]]) / 2) * (bounds[k] - bounds[k - 1]) * DT_S;
+    }
+    const mid = sEmL + (chord * (r - l) * DT_S) / 2;
+    return chord <= curveEnvAt(profile, geom, mid) * 1.05 + 0.25;
+  };
   while (bounds.length > 2) {
     let best = -1;
     let bestCost = Infinity;
     for (let j = 1; j < bounds.length - 1; j++) {
-      if (prot.has(bounds[j])) continue;
+      if (prot.has(bounds[j]) || forbidden.has(bounds[j])) continue;
       const c = cost(j);
       if (c < bestCost) {
         bestCost = c;
@@ -794,24 +1032,44 @@ function emitCompressed(
       }
     }
     if (best === -1) {
-      // Every interior knot is protected. Over budget ⇒ drop protection
-      // farthest-first (pathological, counted); at/under budget ⇒ done.
+      // Every interior knot is protected or forbidden. Over budget ⇒ merge
+      // the farthest such knot anyway — directly, so the guard cannot
+      // re-reject it forever (pathological, counted; far-horizon fidelity is
+      // repainted by the next emission). Forbidden marks go first: they are
+      // the weaker guarantee. At/under budget ⇒ done.
       if (bounds.length <= TRAJ_MAX_POINTS) break;
-      let farthest = -1;
+      let fj = -1;
       for (let j = bounds.length - 2; j >= 1; j--) {
-        if (prot.has(bounds[j])) {
-          farthest = bounds[j];
+        if (forbidden.has(bounds[j])) {
+          fj = j;
           break;
         }
       }
-      if (farthest < 0) break; // only endpoints left — cannot happen over budget
-      prot.delete(farthest);
+      if (fj < 0) {
+        for (let j = bounds.length - 2; j >= 1; j--) {
+          if (prot.has(bounds[j])) {
+            fj = j;
+            break;
+          }
+        }
+      }
+      if (fj < 0) break; // only endpoints left — cannot happen over budget
+      forbidden.delete(bounds[fj]);
+      prot.delete(bounds[fj]);
+      bounds.splice(fj, 1);
       pressureDrops++;
+      budgetForced = true;
+      if (forbidden.size > 0) forbidden.clear();
       continue;
     }
     if (bounds.length <= TRAJ_MAX_POINTS && bestCost > FREE_M) break;
+    if (!capGuardOk(best)) {
+      forbidden.add(bounds[best]);
+      continue;
+    }
     if (bounds.length > TRAJ_MAX_POINTS && bestCost > FREE_M) budgetForced = true;
     bounds.splice(best, 1);
+    if (forbidden.size > 0) forbidden.clear();
   }
 
   const points: TrackPoint[] = [];
@@ -840,15 +1098,24 @@ function measureTrack(
   fine: FineRun,
   profile: DriveProfile,
   geom: RouteGeometry,
-): { curveViolations: number; phantomDips: number } {
+): { curveViolations: number; curveDetail: CurveViolationDetail[]; phantomDips: number } {
   const { points, v } = emitted.track;
   let curveViolations = 0;
+  const curveDetail: CurveViolationDetail[] = [];
   for (let i = 1; i < points.length; i++) {
     const dtS = (points[i].t - points[i - 1].t) / 1000;
     if (dtS <= 0) continue;
     const vSeg = (points[i].s - points[i - 1].s) / dtS;
     const cap = curveEnvAt(profile, geom, (points[i].s + points[i - 1].s) / 2);
-    if (vSeg > cap * 1.05 + 0.3) curveViolations++;
+    if (vSeg > cap * 1.05 + 0.3) {
+      curveViolations++;
+      curveDetail.push({
+        seg: i,
+        vSeg: round2(vSeg),
+        cap: round2(cap),
+        atS: Math.round((points[i - 1].t - points[0].t) / 1000),
+      });
+    }
   }
   let phantomDips = 0;
   // A dip knot is phantom only when NO constraint or regime was active at the
@@ -871,7 +1138,7 @@ function measureTrack(
       phantomDips++;
     }
   }
-  return { curveViolations, phantomDips };
+  return { curveViolations, curveDetail, phantomDips };
 }
 
 // ── the builder ──────────────────────────────────────────────────────────────
@@ -896,20 +1163,20 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
   const samePrevTrip = prev !== null && prev.tripId === args.tripId;
   // The opinion RE-ANCHORS its position on every fix (protocol), so inheriting
   // the previous speed is a smoothness nicety, not a continuity contract — and
-  // a re-anchor INTO a curve zone must not import a speed above the local cap
-  // (live G4 probe: every residual violation was seg#1/2 of a fresh seam).
-  // The smooth track's position IS continuous, so its seam speed was already
-  // legal at its own position and stays exactly C¹.
-  const vSeamCap = curveEnvAt(profile, geom, s0);
-  const v0 = holdingNow
-    ? 0
-    : Math.min(
-        vSeamCap,
-        samePrevTrip
-          ? speedAt(prev.opinion, t0)
-          : Math.max(0, Math.min(TRAJ_V_MAX_MS, (evalTrack(raw, t0 + TRAJ_SIM_STEP_MS) - raw[0].s) / DT_S)),
-      );
-  const a0 = holdingNow ? 0 : samePrevTrip ? accelAt(prev.opinion, t0) : 0;
+  // a re-anchor INTO a curve zone must not import a speed above the local cap.
+  // The cap is the MARGIN-AWARE seam cap, not the raw envelope: the raw value
+  // assumes braking already at full A_BRK, while the inherited accel still has
+  // to build under jerk — a raw-capped seam kept printing G4 violations one to
+  // two segments in (measured live 2026-08-17, age-seam prevChord 9.99 capped
+  // to raw 9.56 and still 7.37 across a 6.72 cap). If the cap bites, the
+  // inherited accel must not stay positive (it would push v back over).
+  const a0Raw = holdingNow ? 0 : samePrevTrip ? accelAt(prev.opinion, t0) : 0;
+  const vSeamCap = seamSpeedCap(profile, geom, s0, a0Raw);
+  const vInherit = samePrevTrip
+    ? speedAt(prev.opinion, t0)
+    : Math.max(0, Math.min(TRAJ_V_MAX_MS, (evalTrack(raw, t0 + TRAJ_SIM_STEP_MS) - raw[0].s) / DT_S));
+  const v0 = holdingNow ? 0 : Math.min(vSeamCap, vInherit);
+  const a0 = holdingNow ? 0 : vInherit > vSeamCap ? Math.min(a0Raw, 0) : a0Raw;
 
   // ── stop plan: every platform ahead is SERVED (§4.2) ─────────────────────
   const planFrom = holdingNow ? modal.stopS : s0;
@@ -934,7 +1201,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     mode: 'ladder',
   });
   if (oFine === null) return null;
-  const oEmit = emitCompressed(grid, oFine.v, oFine.s, oFine.protectedSteps, oFine.binding);
+  const oEmit = emitCompressed(grid, oFine.v, oFine.s, oFine.protectedSteps, oFine.binding, profile, geom);
   if (oEmit === null) return null;
   const oMeasure = measureTrack(oEmit, oFine, profile, geom);
   const opinionMeta: TrackBuildMeta = {
@@ -943,6 +1210,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     budgetForced: oEmit.budgetForced,
     ...oMeasure,
     infeasibleSkips: oFine.infeasibleSkips,
+    regime: null,
   };
 
   // ── smooth: same drive re-run from the C¹⁺ seam under the regime table ───
@@ -971,6 +1239,18 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
       // its release gates nothing here because the anchor stop is not in
       // `plan` — the hold-follow regime handles it via holdPos.
       const gateMs = oFine.departMs.slice();
+      // The smooth seam keeps POSITION exactly (G9 ≤ 2 m, untouched); its
+      // inherited speed is a C¹ nicety with the same trap as the opinion's:
+      // the previous emission's CHORD speed at t_E can exceed the local curve
+      // envelope when that chord spans a dip (legal on the wire at its own
+      // midpoint), and importing it prints G4 violations decaying off the
+      // seam (measured live 2026-08-17: the seg#1–4 smooth offender class).
+      // Cap by the margin-aware seam cap; if it bites, the inherited accel
+      // must not stay positive.
+      const sSm = clamp(sStart, 0, geom.totalM);
+      const aSmRaw = accelAt(prev.smooth, t0);
+      const vSmCap = seamSpeedCap(profile, geom, sSm, aSmRaw);
+      const vSmInherit = speedAt(prev.smooth, t0);
       const fitted = runDrive({
         grid,
         geom,
@@ -979,14 +1259,14 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
         raw,
         plan,
         initialHoldEndMs: null,
-        s0: clamp(sStart, 0, geom.totalM),
-        v0: speedAt(prev.smooth, t0),
-        a0: accelAt(prev.smooth, t0),
+        s0: sSm,
+        v0: Math.min(vSmCap, vSmInherit),
+        a0: vSmInherit > vSmCap ? Math.min(aSmRaw, 0) : aSmRaw,
         mode: 'regimes',
         ref: { fine: oFine, gateMs },
       });
       if (fitted === null) return null;
-      const fittedEmit = emitCompressed(grid, fitted.v, fitted.s, fitted.protectedSteps, fitted.binding);
+      const fittedEmit = emitCompressed(grid, fitted.v, fitted.s, fitted.protectedSteps, fitted.binding, profile, geom);
       if (fittedEmit === null) return null;
       sEmit = fittedEmit;
       const sMeasure = measureTrack(fittedEmit, fitted, profile, geom);
@@ -996,6 +1276,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
         budgetForced: fittedEmit.budgetForced,
         ...sMeasure,
         infeasibleSkips: fitted.infeasibleSkips,
+        regime: fitted.regime,
       };
     }
   }

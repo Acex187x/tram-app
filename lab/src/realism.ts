@@ -17,6 +17,7 @@ import {
   TRAJ_J_GATE,
   TRAJ_V_MAX_GATE_MS,
 } from './config';
+import type { CurveViolationDetail, RegimeStats } from './drive';
 import { evalTrack, type TrackPoint } from './trajectory';
 
 export interface RealismReading {
@@ -274,8 +275,17 @@ export interface PerceptualTrackMeta {
   pressureDrops: number;
   budgetForced: boolean;
   curveViolations: number;
+  curveDetail: CurveViolationDetail[];
   phantomDips: number;
   infeasibleSkips: number;
+  regime: RegimeStats | null;
+}
+
+/** One G4 offender, kept for drill-down (worst by excess over the gate). */
+interface CurveOffender extends CurveViolationDetail {
+  key: string;
+  track: 'opinion' | 'smooth';
+  emittedAtMs: number;
 }
 
 /** Lifetime perceptual counters over every SHADOW (later: published) emission. */
@@ -291,6 +301,25 @@ export class PerceptualCounters {
   curveViolations = 0;
   phantomDips = 0;
   infeasibleSkips = 0;
+  /** G4 drill-down: where the violating segments sit (seg ≤ 2 = right at the
+   *  seam — inherited-state mechanism) + the worst offenders. */
+  private g4Seg12 = 0;
+  private g4Later = 0;
+  private g4ByTrack = { opinion: 0, smooth: 0 };
+  private g4Worst: CurveOffender[] = [];
+  /** G5 drill-down: lifetime sums of the smooth run's limiter classification. */
+  private regimeSum = {
+    catchSteps: 0,
+    catchCeilBound: 0,
+    catchCeilBelowRef: 0,
+    catchEnvBound: 0,
+    catchRampBound: 0,
+    ceilShortfallSum: 0,
+    hfBehindSteps: 0,
+    hfCeilBound: 0,
+    yieldSteps: 0,
+    yieldOutrun: 0,
+  };
   /** §11 gauges. */
   knotPressureDrops = 0;
   budgetForcedEmissions = 0;
@@ -338,6 +367,27 @@ export class PerceptualCounters {
       this.curveViolations += meta.curveViolations;
       this.phantomDips += meta.phantomDips;
       this.infeasibleSkips += meta.infeasibleSkips;
+      for (const d of meta.curveDetail) {
+        if (d.seg <= 2) this.g4Seg12++;
+        else this.g4Later++;
+        this.g4ByTrack[name]++;
+        this.g4Worst.push({ ...d, key: e.key, track: name, emittedAtMs: e.emittedAtMs });
+        this.g4Worst.sort((a, b) => b.vSeg - b.cap * 1.05 - (a.vSeg - a.cap * 1.05));
+        if (this.g4Worst.length > 10) this.g4Worst.length = 10;
+      }
+      if (meta.regime !== null) {
+        const r = this.regimeSum;
+        r.catchSteps += meta.regime.catchSteps;
+        r.catchCeilBound += meta.regime.catchCeilBound;
+        r.catchCeilBelowRef += meta.regime.catchCeilBelowRef;
+        r.catchEnvBound += meta.regime.catchEnvBound;
+        r.catchRampBound += meta.regime.catchRampBound;
+        r.ceilShortfallSum += meta.regime.ceilShortfallSum;
+        r.hfBehindSteps += meta.regime.hfBehindSteps;
+        r.hfCeilBound += meta.regime.hfCeilBound;
+        r.yieldSteps += meta.regime.yieldSteps;
+        r.yieldOutrun += meta.regime.yieldOutrun;
+      }
       if (meta.budgetForced) this.budgetForcedEmissions++;
       for (const j of readJerk(track)) {
         const aj = Math.abs(j);
@@ -428,7 +478,13 @@ export class PerceptualCounters {
         trackP95: this.flipRateHist.pct(95),
         n: this.flipRateHist.n,
       },
-      g4curve: { violations: this.curveViolations },
+      g4curve: {
+        violations: this.curveViolations,
+        seg12: this.g4Seg12,
+        later: this.g4Later,
+        byTrack: this.g4ByTrack,
+        worst: this.g4Worst,
+      },
       g5catchup: {
         tolM: TRAJ_CONV_TOL_M,
         near: {
@@ -448,6 +504,7 @@ export class PerceptualCounters {
           p90s: this.aheadRepaidHist.pct(90),
           unconverged: this.aheadUnconverged,
         },
+        limiter: { ...this.regimeSum, ceilShortfallSum: round3(this.regimeSum.ceilShortfallSum) },
       },
       g6oscillation: {
         episodes: this.oscHist.n,
