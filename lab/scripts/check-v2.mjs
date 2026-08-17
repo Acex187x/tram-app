@@ -522,16 +522,20 @@ function checkShadowCollisions(sb, liveByKey) {
     if (!shapeId) continue;
     let arr = byShape.get(shapeId);
     if (!arr) byShape.set(shapeId, (arr = []));
-    arr.push({ v, fixS: lv.fixDistM });
+    // Ordering basis mirrors the generator (§14.4): a FRESH fix (≤ 30 s) is
+    // the evidence; a stale fix falls back to the emitted nowcast — a stale
+    // fix places the vehicle where it was, not where it is, and inverts
+    // pairs exactly like the generator's first live window measured.
+    arr.push({ v, ordS: lv.fixAgeS <= 30 ? lv.fixDistM : v.opinion[0].s });
   }
   for (const [shapeId, arr] of byShape) {
     if (arr.length < 2) continue;
-    arr.sort((a, b) => a.fixS - b.fixS);
+    arr.sort((a, b) => a.ordS - b.ordS);
     for (let i = 0; i + 1 < arr.length; i++) {
-      // Alias pair (same consist double-reported): fixes closer than a tram
-      // length cannot be two ordered trams on one rail — skip, mirroring the
-      // generator's own §14.4 exclusion.
-      if (arr[i + 1].fixS - arr[i].fixS < 15) continue;
+      // Alias pair (same consist double-reported): positions closer than a
+      // tram length cannot be two ordered trams on one rail — skip, mirroring
+      // the generator's own §14.4 exclusion.
+      if (arr[i + 1].ordS - arr[i].ordS < 15) continue;
       const f = arr[i].v;
       const l = arr[i + 1].v;
       const id = `g12:${f.key}@${f.emittedAtMs}|${l.key}@${l.emittedAtMs}`;
