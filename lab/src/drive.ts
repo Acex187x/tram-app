@@ -465,6 +465,9 @@ export interface DriveArgs {
    *  re-anchor BEHIND the previously rendered opinion position — a backward
    *  jump with no new fix is model jitter, not evidence. 0 = no floor. */
   ageFloorS?: number;
+  /** The anchor fix's shapeDistM (the G10 floor), m — the §14.4 seam clamp
+   *  may reduce the nowcast toward the leader curve but never below this. */
+  anchorFixS?: number;
   /** §14.3 jam hold: evidence-backed stuck position (two-plus genuinely-new
    *  fixes flat within STUCK_FIX_EPS_M, away from platforms — run.ts detects,
    *  descending from tramSim.updateStuckHold), m along shape. null = moving. */
@@ -1660,6 +1663,19 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
   // including a jam-exit departure — is never dampened.
   if (!holdingNow && !jamHolding && ageFloor > 0 && s0 > ageFloor && s0 - ageFloor <= AGE_INNOV_GATE_M) {
     s0 = ageFloor;
+  }
+  // §14.4 seam clamp: the opinion may never re-anchor THROUGH its leader's
+  // curve. When the ML nowcast claims an overtake the fix ordering denies
+  // (measured live 2026-08-17: a curve "overtaking" a real leader by 289 m),
+  // physical consistency wins — beauty constraints are hard, accuracy adapts.
+  // Floored at the own anchor fix (G10): if the fixes themselves sit closer
+  // than the nominal gap, the residual overlap is frozen by the queue cap.
+  if (args.leader && !holdingNow && !jamHolding) {
+    const cap = Math.max(
+      clamp(args.anchorFixS ?? 0, 0, geom.totalM),
+      evalTrack(args.leader.opinion, t0) - args.leader.gapM,
+    );
+    if (s0 > cap) s0 = cap;
   }
   const standingStart = holdingNow || jamHolding;
   const samePrevTrip = prev !== null && prev.tripId === args.tripId;

@@ -537,7 +537,9 @@ export function start(): void {
           shadowTrajectories,
           key,
           g.shapeId,
-          Math.max(evalTrack(entry.v2.opinion, tCompute), lf.snap.shapeDistM),
+          (tCompute - lf.snap.observedAtMs) / 1000 <= 30
+            ? lf.snap.shapeDistM
+            : Math.max(evalTrack(entry.v2.opinion, tCompute), lf.snap.shapeDistM),
         );
         if (!lead) continue;
         for (const dt of [0, 30_000, 60_000]) {
@@ -574,8 +576,15 @@ export function start(): void {
       const cands: { c: { key: string; fixS: number; snap: TramSnapshot }; cOrd: number }[] = [];
       for (const c of arr) {
         if (c.key === key) continue;
+        // Ordering basis per §14.4: FIXES are the evidence ("overtaking is
+        // rare" — a fresh fix outranks any model belief; the first live
+        // window measured an ML curve "overtaking" a real leader by 289 m).
+        // Only a STALE fix (> 30 s) falls back to the chain nowcast — raw
+        // stale fixes inverted pairs the other way (the 200 m phantom cap).
         const ce = chain.get(c.key);
-        const cOrd = ce ? Math.max(evalTrack(ce.v2.opinion, tCompute), c.fixS) : c.fixS;
+        const cAgeS = (tCompute - c.snap.observedAtMs) / 1000;
+        const cOrd =
+          cAgeS <= 30 || !ce ? c.fixS : Math.max(evalTrack(ce.v2.opinion, tCompute), c.fixS);
         if (cOrd <= ordS + 0.5) continue;
         cands.push({ c, cOrd });
       }
@@ -731,8 +740,14 @@ export function start(): void {
           surfaces,
           fixGapS: v.fixGapS,
           ageFloorS: ageFloorShadowS,
+          anchorFixS: v.snap.shapeDistM,
           stuckAtM: v.stuckAtM,
-          leader: leaderFor(shadowTrajectories, v.key, v.geom.shapeId, points[0].s),
+          leader: leaderFor(
+            shadowTrajectories,
+            v.key,
+            v.geom.shapeId,
+            (tCompute - v.snap.observedAtMs) / 1000 <= 30 ? v.snap.shapeDistM : points[0].s,
+          ),
           chainBroken: shadowChainBroken.has(v.key),
           prev: prevShadow
             ? {
@@ -799,8 +814,14 @@ export function start(): void {
               surfaces,
               fixGapS: v.fixGapS,
               ageFloorS: ageFloorPubS,
+              anchorFixS: v.snap.shapeDistM,
               stuckAtM: v.stuckAtM,
-              leader: leaderFor(trajectories, v.key, v.geom.shapeId, points[0].s),
+              leader: leaderFor(
+                trajectories,
+                v.key,
+                v.geom.shapeId,
+                (tCompute - v.snap.observedAtMs) / 1000 <= 30 ? v.snap.shapeDistM : points[0].s,
+              ),
               chainBroken: publishedChainBroken.has(v.key),
               prev: prevPub,
             })
