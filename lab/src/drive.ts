@@ -79,6 +79,9 @@ export const REQUEST_DWELL_P50_MAX_S = 10;
  *  stop (± REQUEST_SKIP_DELTA_M) must show less than this of dwell, s. */
 export const REQUEST_SKIP_ML_DWELL_MAX_S = 5;
 export const REQUEST_SKIP_DELTA_M = 15;
+/** §14.2 trim blindness half-window around a skipped stop's ML crossing, ms:
+ *  covers the expectation's dwell smear (~15 s) plus slope transitions. */
+export const SKIP_TRIM_BLIND_MS = 20_000;
 /** §14.5 innovation gate: an AGE re-emission's forward nowcast jitter at or
  *  below this continues the previous curve instead of hopping, m. Fix-driven
  *  re-anchors are NEVER gated — fresh evidence reaches the screen. */
@@ -680,6 +683,14 @@ function runDrive(args: {
   /** Modal anchor stop position (stop-zone semantics for the G11 scan and the
    *  §6 creep rule), or null. */
   modalS: number | null;
+  /** §14.2: ML crossing instants of SKIPPED request stops. Within
+   *  ±SKIP_TRIM_BLIND_MS of one, the ML positional trim goes NEUTRAL: the
+   *  expectation there is smeared by the counterfactual hold the skip decision
+   *  just rejected — chasing it prints a phantom mid-segment brake dip (G7,
+   *  measured live 2026-08-17: 49 dips / 1 949 emissions on the first v3.1
+   *  boot, all at skipped-stop smears). The driver ignores known-wrong
+   *  dispatcher noise. */
+  skipTauMs?: number[];
   /** §14.4: the same-track leader curve this run must stay behind. */
   leader?: { track: TrackPoint[]; gapM: number } | null;
   s0: number;
@@ -820,7 +831,18 @@ function runDrive(args: {
     let inCatch = false; // this step is a catch-up step (G5 drill-down)
     if (mode === 'ladder') {
       const m = evalTrack(raw, tMs);
-      const trim = clamp(1 + (m - sI) / G_ML, 1 - TRIM_AUTH, 1 + TRIM_AUTH);
+      let trim = clamp(1 + (m - sI) / G_ML, 1 - TRIM_AUTH, 1 + TRIM_AUTH);
+      // §14.2 trim blindness: the ML curve is known-wrong (dwell-smeared)
+      // while it crosses a stop the drive decided to SKIP — neutral trim
+      // there, or the driver brakes for a hold that will not happen (G7).
+      if (args.skipTauMs !== undefined) {
+        for (const tau of args.skipTauMs) {
+          if (Math.abs(tMs - tau) < SKIP_TRIM_BLIND_MS) {
+            trim = 1;
+            break;
+          }
+        }
+      }
       vCmd = legPace * trim;
     } else {
       const rf = ref!;
@@ -1557,6 +1579,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
   const planFrom = s0;
   const plan: PlanStop[] = [];
   const requestSkips: { stopId: string; distM: number }[] = [];
+  const skipTauMs: number[] = [];
   const lastStop = geom.stops.length > 0 ? geom.stops[geom.stops.length - 1] : null;
   for (const st of geom.stops) {
     if (st.distM <= planFrom + STOP_REACH_M) continue;
@@ -1564,6 +1587,8 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     const isTerminal = st.isTerminal || st === lastStop;
     if (!isTerminal && requestStopSkippable(raw, surfaces, st.stopId, distM)) {
       requestSkips.push({ stopId: st.stopId, distM });
+      const tauSkip = mlCrossingMs(raw, distM);
+      if (tauSkip !== null) skipTauMs.push(tauSkip);
       continue;
     }
     plan.push({ distM, stopId: st.stopId });
@@ -1583,6 +1608,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     initialHoldEndMs: holdingNow ? modal.releaseAtMs : jamHolding ? stuckHoldEndMs : null,
     initialHoldJam: jamHolding,
     modalS,
+    skipTauMs,
     leader: leaderO,
     s0,
     v0,
