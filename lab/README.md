@@ -40,6 +40,8 @@ imported live from `src/` via tsx + tsconfig paths.
 | `ml-mlp` | small neural net (MLP 64×32) on the same features — the honest "нейронка" probe |
 | `ml-mode` | the physics-v3 **opinion** track AS PUBLISHED to phones — ml-gbdt keyframes + the modal stop rule — evaluated with the client's own pure evaluator. Measures what modal (honest-looking) rendering COSTS against a mean-optimal metric |
 | `ml-smooth` | the physics-v3 **smooth** track as published: opinion + server-owned continuity. Measures what never teleporting costs |
+| `ml-drive` | curvegen-v3 **opinion**: the virtual-tram drive (design §2 + the v3.1 driver doctrine §14 — ML as timetable, learned dwell/pace absorption hierarchy, evidence-gated request-stop skips, jam holds, same-rail anti-collision). Runs as the shadow chain and serves phones that select `?gen=v3` (build 15 «Движок физики») |
+| `ml-drive-smooth` | curvegen-v3 **smooth**: the smoother regime table (track/catch-up/yield/hold-follow + §6 creep) re-run over the drive's own opinion |
 
 `ml-mode`/`ml-smooth` are deliberately NOT recomputed at scoring time: they are
 read out of the currently published `/api/trajectories/v2` bundle, so the lab
@@ -103,6 +105,31 @@ as a lerping client experiences it; `RealismCounters` runs it over everything
 published and exposes lifetime counts + distributions at `/api/summary` →
 `realism`, and `check-v2.mjs` asserts the same thing against the served bytes
 and exits non-zero on any violation.
+
+**Doctrine gates (2026-08-17, design §14).** Three additive gates joined
+G1–G9, each measured twice (generator counters with full context under
+`/api/summary → perceptual`, and independently from served bytes by
+`check-v2.mjs` via `/api/live` + `/api/geometry-pack`):
+
+- **G10 behindFix = 0** (every gen, incl. `current` — hotfix class): the
+  opinion/fixed track never starts behind its anchor fix, and a same-anchor
+  AGE re-emission never falls behind the previously rendered opinion. Counted
+  under `realism.g10behindFix` / `shadow.realism.g10behindFix`; the
+  anchor-floor firing population (where published bytes may differ from the
+  pre-hotfix builders) is under `trajectories.anchorFloor`.
+- **G11 midSegmentStops = 0** (v3): stand episodes (v < 0.5 m/s sustained
+  > 3 s) outside stop zones with no evidence backing. Evidence-backed stands
+  are telemetry, not violations: `jamHolds` (observed-stuck, §14.3) and
+  `queueHolds` (pressed behind a standing leader, §14.4).
+- **G12 collisionViolations = 0** (v3): a follower's curve never penetrates
+  its leader's clearance (generator, exact) / same-shape curves never cross
+  (bytes). Ordering evidence is fresh fixes (≤ 30 s), stale fixes fall back
+  to the nowcast; near-tied pairs get leadership hysteresis; alias pairs
+  (< 15 m separation — one double-reported consist) are excluded.
+
+Doctrine telemetry rides beside them under `perceptual.doctrine`: request-stop
+skips with recent examples (§14.2), jam emissions (§14.3), leader-clipped
+emissions (§14.4), plus drill-down offender lists for G7/G11/G12.
 
 ## Other endpoints
 
@@ -407,6 +434,79 @@ TSX_TSCONFIG_PATH=$PWD/tsconfig.runtime.json ./node_modules/.bin/tsx src/main.ts
   the OLD generator's known dropped-chain-rebuild class (no chainBroken);
   the v3 shadow flagged its 112 equivalent breaks honestly in the same
   window — an argument FOR the flip, not against it.
+
+- **2026-08-17 (drive-v3 cycles 1–2): the honest-price theorem + the published
+  feed caught lying.** After two tuning cycles every control defect in the
+  smooth track is dead (divergences 0, ceil-below-ref 0, behind-unconverged
+  22/6,586, G1/G2/G3/G8 green). The residual −57.6 bias / +10.8 m vs the
+  published smooth is CDF-provably not recoverable by the discontinuity
+  threshold: the carry mass lives in 120–300 m model re-anchors too frequent
+  to teleport within any honest budget. Meanwhile check-v2 caught the
+  PUBLISHED generator emitting 16 unflagged 170–630 m seams during a feed/ML
+  drop (the dropped-chain-rebuild class) — the incumbent's metric advantage
+  is partly silent teleportation. Deep levers identified: (a) ML nowcast
+  noise reduction (filter the re-anchor sequence — attacks the root, helps
+  every variant), (b) owner-level product call on the metric-vs-honesty
+  trade. Opinion track ml-drive is flip-grade regardless: 81.7 m, −10.7 m vs
+  published, all gates green. G4=13 isolated to compression positional drift
+  (fix: pin knots to fine-sim positions — queued); G5 re-specced by start
+  state (§8 erratum dc60d11) after the spin-up floor measurement.
+
+- **2026-08-17 (drive-v3.1): the driver doctrine, the anchor-floor hotfix, and
+  a day of measured shakedowns.** Owner build-15 field directive encoded as
+  design §14 (driver vs dispatcher) and implemented in the v3 generator; the
+  published gen took exactly ONE shared correctness hotfix. Verified over a
+  41-min bytes window (15:52–16:33Z checker) + 46 min of server counters on
+  the final code (n=12,774 matched events, evening peak):
+  - **Anchor-floor hotfix (all gens): the fixed track can no longer teleport
+    behind the latest fix.** ML Δs < 0 clamped at the single point the
+    samples are built; age re-emissions floored at the previously rendered
+    opinion, per chain. G10 = **0 / 35,314** emissions (bytes) and 0/0 on
+    both generator chains. Published-gen byte impact measured, not asserted:
+    Δs-clamp fired on 1,886 of 19,303 emissions (5,680 samples), the age
+    floor on 3,876 — everywhere else the builders are pure functions of
+    unchanged inputs. Published bundle stayed pristine through the window:
+    0 kinematic violations / 773k segments, seams ≤ 0.15 m, byte-determinism
+    intact.
+  - **Doctrine mechanisms live** (v3 only): dwell-first absorption within
+    learned p10..p90 + pace band ±20 % (was ±50 %); evidence-gated
+    na-znamení skips (6,743 skips; trusted-long-dwell veto; ML no-dwell
+    test); jam holds descending from tramSim stuck-hold (38 observed-jam
+    emissions; ML pressure suspended; smooth S-curve exits); anti-collision
+    with fix-evidence ordering, leadership hysteresis, alias-pair (< 15 m)
+    exclusion and an opinion seam that never re-anchors through its leader
+    (1,214 leader-clipped emissions). Every step of tuning was driven by
+    live drill-downs (`perceptual.g7recent/g11.../g12...`), five measured
+    classes killed in-session (trim smear-chase, blindness boundary step,
+    horizon-end trim starvation, stale-fix pair inversion, ML phantom
+    overtake).
+  - **Gates:** G1 0 / 707k segs · G2 p99 0.800, 0 > 1.0 · G3 1.03/min ·
+    G4 5 (compression-drift class, was 13) · G8 1.2 % · G9 max 2.81 m
+    (geometry-refresh class, 8 in-window) · **G10 0** · G11 17 gen-side
+    (jam/queue stands correctly classified: 75/44) · G12 117 gen-side
+    (0.6 % of emissions; bytes 96 — concentrated in one line-9 terminus
+    cluster of overlapping/aliased vehicles). G5 near/standing green
+    (30.0/48.8 ≤ 32/55); near/moving 18/39 vs 16/32 and far p90 68 vs 60
+    MISSED (evening peak; envelope-forced tails — counted, not excused);
+    G6 p95 2.0 (pre-existing miss, measured on the pre-v3.1 code at the
+    same rate).
+  - **Accuracy (matched n=12,774): the doctrine costs ≈ nothing and fixes
+    the bias.** ml-drive 81.8 m mean / −13.8 signed — BEATS the published
+    ml-mode (85.9 / −31.0) on mean, p90 (185 vs 216) and bias despite the
+    tighter pace band. ml-drive-smooth 95.7 / −37.0 vs ml-smooth 86.1 /
+    −32.6: the +9.6 m continuity gap holds from cycle 2 (+10.8), while the
+    signed bias recovered −57.6 → −37.0 — the anchor floor and the doctrine
+    absorbed 20 m of the systematic lateness. Both v3 variants clear the
+    ship bar vs learned (103.3 / −54.1) by 8–22 m.
+  - **Residual list (ranked):** (1) G7 442 dips / 19,303 emissions (2.3 %,
+    all smooth-track, shallow 1–2 m/s ease-offs — the reference-mirroring
+    class at g ≤ 25 m and seam transients; opinion-side is clean); (2) the
+    line-9 terminus cluster's G11/G12 residuals (stand-classification
+    thresholds and smooth transitional crossings among semi-aliased
+    vehicles); (3) G5 near/moving + far peak-hour tails; (4) G6 hunting
+    p95 2 (pre-existing); (5) ahead-unconverged 327/1,773 — grew by design:
+    creep-instead-of-phantom-stand repays leads at the next platform,
+    sometimes beyond the horizon.
 
 ## Teardown
 
