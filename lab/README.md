@@ -387,6 +387,26 @@ TSX_TSCONFIG_PATH=$PWD/tsconfig.runtime.json ./node_modules/.bin/tsx src/main.ts
   (fix queued: bound it by −A_BRK). Next lever within the design's own
   tunables: tighten T_disc so the largest gap-carriers teleport honestly
   instead of dragging −200 m errors for 60–90 s — G8 has 7× headroom.
+  **Cycle 2 (same day, 41 min fresh window 10:23–11:04Z, matched n=9 004):**
+  queued fixes landed (feasibility floor bounded by −A_BRK → shadow G1 back
+  to 0 over 618 k segments; check-v2 long-run crash fixed) and T_disc went
+  300/900/1.1 (G8 1.72 %, inside the ≤3 % budget). Result: bias −60.8 →
+  −57.6 (the lever's projected ~3 m), mean gap vs ml-smooth +10.1 → +10.8
+  (window-differenced ≈ flat) — the T_disc lever is EXHAUSTED per its own
+  CDF math (bias ≥ −45 would need 16–20 % teleports). Re-specced G5 (bytes):
+  near/moving p50 15.0 ✓ (≤16) / p90 42.0 ✗ (≤32); near/standing 32.0 ✓ /
+  47.0 ✓; far p90 72.0 ✗ (≤60) — the tails are envelope-forced extensions
+  (27 % of catch-up steps envelope-bound), the §8 clause's counted-not-
+  excused case. G4 10 → 13: NOT the repaired class — consecutive SINGLE-step
+  segments at 9–11 m/s across 7–8.8 caps, i.e. compression positional drift
+  relocating the sim's legal speeds into capped zones (unsplittable by the
+  repair pass); fix direction: pin emitted knot s to the fine sim's s
+  instead of re-integrating endpoint trapezoids — needs its own cycle (it
+  changes the chord/knot-speed consistency the seams read). Also caught
+  live: 16 unflagged 170–630 m PUBLISHED-feed seams during a feed/ML drop —
+  the OLD generator's known dropped-chain-rebuild class (no chainBroken);
+  the v3 shadow flagged its 112 equivalent breaks honestly in the same
+  window — an argument FOR the flip, not against it.
 
 ## Teardown
 
