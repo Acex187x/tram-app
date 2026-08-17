@@ -184,6 +184,12 @@ export function start(): void {
   const trajectories = new Map<string, TrajectoryEntry>();
   /** key → curvegen-v3 shadow emission, chained on its own seam state. */
   const shadowTrajectories = new Map<string, ShadowEntry>();
+  /** §14.4 leadership memory for NEAR-TIED same-shape pairs: two nowcasts
+   *  within ~30 m flip order on model noise every cycle, and a flip-flopping
+   *  pair mutually clips into interleaved curves (measured live 2026-08-17:
+   *  9373↔9441 alternating as each other's leader). The first observed order
+   *  sticks until a genuine > 30 m overtake. */
+  const leaderMemory = new Map<string, string>();
   /** Chains whose emission was dropped (ML outage / geometry loss / build
    *  failure): the next successful drive build carries the honest
    *  discontinuity flag — an absence shorter than a client's fetch interval
@@ -514,25 +520,88 @@ export function start(): void {
       arr.push({ key, fixS: lf.snap.shapeDistM, snap: lf.snap });
     }
     for (const arr of byShape.values()) arr.sort((x, y) => x.fixS - y.fixS);
+    // §14.4 crossing repair: a leader that re-anchored BACKWARD can invalidate
+    // follower curves built before it (the follower could not have known).
+    // Any non-stale shadow entry whose curve now penetrates its current
+    // leader's is re-emitted this cycle — the seam machinery keeps continuity
+    // and the effective-gap clamp freezes (never grows) the overlap.
+    const staleKeys = new Set(stale.map((x) => x.key));
+    const probeCrossing = (): void => {
+      for (const [key, entry] of shadowTrajectories) {
+        if (staleKeys.has(key)) continue;
+        const lf = lastFix.get(key);
+        if (!lf) continue;
+        const g = geometry.resolve(lf.snap.tripId);
+        if (!g) continue;
+        const lead = leaderFor(
+          shadowTrajectories,
+          key,
+          g.shapeId,
+          Math.max(evalTrack(entry.v2.opinion, tCompute), lf.snap.shapeDistM),
+        );
+        if (!lead) continue;
+        for (const dt of [0, 30_000, 60_000]) {
+          const t = tCompute + dt;
+          if (
+            evalTrack(entry.v2.opinion, t) > evalTrack(lead.opinion, t) - 0.5 ||
+            evalTrack(entry.v2.smooth, t) > evalTrack(lead.smooth, t) - 0.5
+          ) {
+            stale.push({ key, snap: lf.snap, geom: g, fixGapS: lf.fixGapS, stuckAtM: lf.stuckAtM });
+            staleKeys.add(key);
+            break;
+          }
+        }
+      }
+    };
+
     /** Immediate same-shape leader's CURRENT curves from `chain` + the
-     *  clearance to keep (QUEUE_GAP_M + leader length, coupled-aware). */
+     *  clearance to keep (QUEUE_GAP_M + leader length, coupled-aware).
+     *  Ordering uses each vehicle's CURRENT NOWCAST (its chain curve at
+     *  tCompute, itself fix-floored), not raw fix positions: fixes of unequal
+     *  age invert pairs — a stale-fix vehicle's real position can be far past
+     *  a "leader" whose fresh fix is only nominally ahead (measured live
+     *  2026-08-17: one inverted pair chained a vehicle to a phantom 200 m
+     *  behind it). `ordS` is the caller's own nowcast on the same basis. */
     const leaderFor = (
-      chain: Map<string, { v2: V2Vehicle }>,
+      chain: Map<string, { v2: V2Vehicle; fixObsAtMs: number }>,
       key: string,
       shapeId: string,
-      fixS: number,
+      ordS: number,
     ): { key: string; opinion: TrajectoryPoint[]; smooth: TrajectoryPoint[]; gapM: number } | null => {
       const arr = byShape.get(shapeId);
       if (!arr) return null;
-      let best: { key: string; fixS: number; snap: TramSnapshot } | null = null;
+      if (leaderMemory.size > 20_000) leaderMemory.clear(); // bounded memory
+      const cands: { c: { key: string; fixS: number; snap: TramSnapshot }; cOrd: number }[] = [];
       for (const c of arr) {
-        if (c.fixS <= fixS + 0.5 || c.key === key) continue;
-        best = c; // sorted ascending — first past us is the immediate leader
+        if (c.key === key) continue;
+        const ce = chain.get(c.key);
+        const cOrd = ce ? Math.max(evalTrack(ce.v2.opinion, tCompute), c.fixS) : c.fixS;
+        if (cOrd <= ordS + 0.5) continue;
+        cands.push({ c, cOrd });
+      }
+      cands.sort((x, y) => x.cOrd - y.cOrd);
+      let best: { key: string; fixS: number; snap: TramSnapshot } | null = null;
+      let bestOrd = Infinity;
+      for (const { c, cOrd } of cands) {
+        const pairKey = key < c.key ? `${key}|${c.key}` : `${c.key}|${key}`;
+        if (cOrd - ordS < 30) {
+          const mem = leaderMemory.get(pairKey);
+          if (mem === key) continue; // near-tied and memory says I lead
+          if (mem === undefined) leaderMemory.set(pairKey, c.key);
+        } else {
+          leaderMemory.set(pairKey, c.key); // genuine separation — update
+        }
+        best = c;
+        bestOrd = cOrd;
         break;
       }
-      if (best === null || best.fixS - fixS > 1500) return null; // never binds
+      if (best === null || bestOrd - ordS > 1500) return null; // never binds
       const entry = chain.get(best.key);
       if (!entry) return null;
+      // Freshness: the leader's curve must reflect its NEWEST fix — a stale
+      // curve can sit behind the follower's fresh position and would cap the
+      // follower onto a phantom (the leader rebuilds within one poll cycle).
+      if (entry.fixObsAtMs !== best.snap.observedAtMs) return null;
       const lg = geometry.resolve(entry.v2.tripId);
       if (!lg || lg.shapeId !== shapeId) return null; // stale curve, other rail
       const modelId = regNumberToModelId(best.snap.registrationNumber);
@@ -546,6 +615,15 @@ export function start(): void {
         gapM: QUEUE_GAP_M + lenM,
       };
     };
+    probeCrossing();
+    // Re-sort: the crossing probe may have appended followers; leaders first.
+    stale.sort((a, b) =>
+      a.geom.shapeId === b.geom.shapeId
+        ? b.snap.shapeDistM - a.snap.shapeDistM
+        : a.geom.shapeId < b.geom.shapeId
+          ? -1
+          : 1,
+    );
 
     // Chunk on VEHICLE boundaries so a failed chunk drops whole vehicles only.
     const perChunk = Math.max(1, Math.floor(TRAJ_ML_MAX_ROWS / TRAJ_POINTS));
@@ -654,7 +732,7 @@ export function start(): void {
           fixGapS: v.fixGapS,
           ageFloorS: ageFloorShadowS,
           stuckAtM: v.stuckAtM,
-          leader: leaderFor(shadowTrajectories, v.key, v.geom.shapeId, v.snap.shapeDistM),
+          leader: leaderFor(shadowTrajectories, v.key, v.geom.shapeId, points[0].s),
           chainBroken: shadowChainBroken.has(v.key),
           prev: prevShadow
             ? {
@@ -722,7 +800,7 @@ export function start(): void {
               fixGapS: v.fixGapS,
               ageFloorS: ageFloorPubS,
               stuckAtM: v.stuckAtM,
-              leader: leaderFor(trajectories, v.key, v.geom.shapeId, v.snap.shapeDistM),
+              leader: leaderFor(trajectories, v.key, v.geom.shapeId, points[0].s),
               chainBroken: publishedChainBroken.has(v.key),
               prev: prevPub,
             })

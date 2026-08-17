@@ -118,6 +118,12 @@ export const COUPLED_TRAILER_OFFSET_M = 14.5;
 /** G12 measurement grace over the enforced gap (integration + compression
  *  slop; the enforced clearance is QUEUE_GAP_M + leader length ≈ 17–32 m). */
 export const G12_TOL_M = 1.0;
+/** Extra clearance the SIM keeps under the leader cap beyond the measured
+ *  gap, m: ≤24-knot compression can shift emitted positions by metres deep
+ *  in budget-forced horizons (the G4 saga), and a fine sim riding the exact
+ *  boundary then reads as penetration from bytes. The cushion is invisible
+ *  product-wise and keeps the emitted curve clear of the measured gap. */
+export const QUEUE_SIM_CUSHION_M = 3.0;
 /** ML positional trim gain, m (port: smoother PACE_GAIN_M). */
 export const G_ML = 120;
 /** Trim authority: the smoother's track clamp tightened to ±15 % (new). */
@@ -492,6 +498,9 @@ export interface TrackBuildMeta {
   /** G7: emitted-knot local v-minima ≥1 m/s below both neighbours with no
    *  binding constraint tagged and not at a hold. */
   phantomDips: number;
+  /** G7 drill-down: one entry per counted dip (knot index, seconds from the
+   *  emission, position, the v triple) — the offender-class telemetry. */
+  dipDetail: DipDetail[];
   /** Planned holds rolled through because the seam state made them
    *  kinematically unreachable (see HOLD_ENTRY_V_MAX). */
   infeasibleSkips: number;
@@ -499,6 +508,8 @@ export interface TrackBuildMeta {
    *  outside stop zones with NO evidence backing — model-invented stops.
    *  Target literal 0. */
   midSegmentStops: number;
+  /** G11 drill-down: position + duration of each counted stand. */
+  midSegmentDetail: { sM: number; durS: number }[];
   /** §14.3 telemetry: evidence-backed jam-stand episodes (not violations). */
   jamHolds: number;
   /** §14.4 telemetry: stand episodes pressed against a standing leader. */
@@ -506,6 +517,8 @@ export interface TrackBuildMeta {
   /** G12: sampled instants where this emitted track penetrates the leader's
    *  clearance beyond G12_TOL_M. Target literal 0; 0 when no leader. */
   collisionViolations: number;
+  /** G12 drill-down: deepest penetration of the measured gap, m (≤ 0 clear). */
+  collisionMaxPenM: number;
   /** 'regimes' runs only: why the smooth track drove the speed it drove —
    *  the G5 latency drill-down (which limiter actually bound). */
   regime: RegimeStats | null;
@@ -518,6 +531,15 @@ export interface CurveViolationDetail {
   cap: number;
   /** Segment start relative to emittedAtMs, s. */
   atS: number;
+}
+
+export interface DipDetail {
+  seg: number;
+  atS: number;
+  sM: number;
+  vPrev: number;
+  vDip: number;
+  vNext: number;
 }
 
 /** Per-step classification of the smooth run's speed limiters (G5 diagnosis —
@@ -852,6 +874,12 @@ function runDrive(args: {
         }
         trim = 1 + (trim - 1) * w;
       }
+      // Horizon-end decay: past the last ML knot evalTrack freezes M, so
+      // (M − s) collapses and the trim starves the final segments — a twin
+      // end-of-horizon dip on both tracks (G7 drill-down class, measured
+      // live). Authority ramps to neutral over the last 20 s of the raw
+      // horizon; the ladder pace carries the tail.
+      trim = 1 + (trim - 1) * clamp((raw[raw.length - 1].t - tMs) / 20_000, 0, 1);
       vCmd = legPace * trim;
     } else {
       const rf = ref!;
@@ -865,6 +893,11 @@ function runDrive(args: {
         // manoeuvre — its release transient must never read as a phantom dip.
         yielding = false;
         binding[i] = 'regime';
+        // The reference's stand class carries over: a smooth standing at/near
+        // a jam or queue tail is the same evidence-backed column, not a
+        // model-invented stop (G11 drill-down 2026-08-17: 56 s smooth stands
+        // at a jam point were counted as violations).
+        if (rf.fine.standKind[i] > 0) standKind[i + 1] = rf.fine.standKind[i];
         const d = oHold - sI;
         if (d > 0) {
           // Approach ceiling: observed sprint pace over the corridor being
@@ -933,6 +966,39 @@ function runDrive(args: {
           }
         } else {
           vCmd = vO * clamp(1 + g / PACE_GAIN_M, TRACK_MIN_FACTOR, TRACK_MAX_FACTOR);
+          // Departure-transient guard (G7, measured live 2026-08-17: the
+          // whole counted dip class was smooth-track): while a plan stop the
+          // smooth has NOT yet served lies between it and the reference, the
+          // reference's own speed — braking into / ramping out of THAT stop —
+          // describes the wrong stretch of track. The smooth keeps its own
+          // approach pace toward the stop; the envelope + the per-stop gate
+          // own the stop itself (brake-in when the gate is closed, roll
+          // through when it opened). Without this the track regime yanks the
+          // smooth down to the reference's departure ramp mid-segment — a
+          // phantom brake with no binding constraint.
+          const stopBetween =
+            nextStop < plan.length &&
+            plan[nextStop].distM > sI + STOP_REACH_M &&
+            plan[nextStop].distM <= o + STOP_REACH_M;
+          // Same wrong-stretch logic for the reference's OWN envelope: while
+          // the opinion brakes for a curve/hold/queue at ITS position well
+          // ahead (g > 25 m), its speed describes track the smooth has not
+          // reached — the smooth keeps pace; its own envelope owns its own
+          // curves (G7 drill-down: the mirrored-curve-dip class).
+          const refBound = rf.fine.binding[i] !== 'none' && g > 25;
+          if (stopBetween || refBound) {
+            // Floor at the normal cruise pace over the corridor (never the
+            // sprint ceiling — this is a roll, not a catch-up), with the
+            // dwell-contamination floor HOLD_APPROACH_MIN.
+            const floor = Math.min(
+              Math.max(
+                Math.max(surfaces.paceAt(sI, tMs), surfaces.paceAt(o, tMs)),
+                HOLD_APPROACH_MIN_MS,
+              ),
+              TRAJ_V_MAX_MS,
+            );
+            if (floor > vCmd) vCmd = floor;
+          }
         }
       }
     }
@@ -1005,7 +1071,7 @@ function runDrive(args: {
     // never grows.
     let envQueue = Infinity;
     if (leader) {
-      const lim = evalTrack(leader.track, tMs) - leader.gapM;
+      const lim = evalTrack(leader.track, tMs) - leader.gapM - QUEUE_SIM_CUSHION_M;
       const vLead = leaderSpeedAt(tMs);
       envQueue = lim - sI <= 0 ? vLead : vLead + Math.sqrt(2 * TRAJ_A_BRK * slack(lim));
       if (envQueue < 0.5 && vLead < 0.5) standKind[i + 1] = 2; // queue stand
@@ -1182,7 +1248,12 @@ function scanStands(
   fine: FineRun,
   geom: RouteGeometry,
   modalS: number | null,
-): { midSegmentStops: number; jamHolds: number; queueHolds: number } {
+): {
+  midSegmentStops: number;
+  jamHolds: number;
+  queueHolds: number;
+  midSegmentDetail: { sM: number; durS: number }[];
+} {
   const total = geom.totalM;
   const inZone = (sPos: number): boolean => {
     if (total - sPos <= STOP_ZONE_M) return true;
@@ -1196,6 +1267,7 @@ function scanStands(
   let midSegmentStops = 0;
   let jamHolds = 0;
   let queueHolds = 0;
+  const midSegmentDetail: { sM: number; durS: number }[] = [];
   const n = fine.v.length;
   let runStart = -1;
   let runKind: 0 | 1 | 2 = 0;
@@ -1205,7 +1277,10 @@ function scanStands(
     if (durS > G11_STAND_MIN_S) {
       if (runKind === 1) jamHolds++;
       else if (runKind === 2) queueHolds++;
-      else if (!inZone(fine.s[runStart])) midSegmentStops++;
+      else if (!inZone(fine.s[runStart])) {
+        midSegmentStops++;
+        midSegmentDetail.push({ sM: round2(fine.s[runStart]), durS });
+      }
     }
     runStart = -1;
     runKind = 0;
@@ -1219,7 +1294,15 @@ function scanStands(
     }
   }
   flush(n);
-  return { midSegmentStops, jamHolds, queueHolds };
+  return { midSegmentStops, jamHolds, queueHolds, midSegmentDetail };
+}
+
+/** Spread helper: measureCollision result → the two TrackBuildMeta fields. */
+function collisionMeta(m: { violations: number; maxPenM: number }): {
+  collisionViolations: number;
+  collisionMaxPenM: number;
+} {
+  return { collisionViolations: m.violations, collisionMaxPenM: m.maxPenM };
 }
 
 /** G12: sampled 1 s instants where an emitted track penetrates the leader's
@@ -1228,14 +1311,17 @@ function scanStands(
 function measureCollision(
   track: TrackPoint[],
   leader: { track: TrackPoint[]; gapM: number } | null | undefined,
-): number {
-  if (!leader || track.length === 0) return 0;
+): { violations: number; maxPenM: number } {
+  if (!leader || track.length === 0) return { violations: 0, maxPenM: 0 };
   let violations = 0;
+  let maxPenM = 0;
   const tEnd = track[track.length - 1].t;
   for (let t = track[0].t; t <= tEnd; t += 1000) {
-    if (evalTrack(track, t) > evalTrack(leader.track, t) - leader.gapM + G12_TOL_M) violations++;
+    const pen = evalTrack(track, t) - (evalTrack(leader.track, t) - leader.gapM);
+    if (pen > G12_TOL_M) violations++;
+    if (pen > maxPenM) maxPenM = pen;
   }
-  return violations;
+  return { violations, maxPenM: round2(maxPenM) };
 }
 
 // ── constraint-aware compression (§11) ───────────────────────────────────────
@@ -1476,7 +1562,12 @@ function measureTrack(
   fine: FineRun,
   profile: DriveProfile,
   geom: RouteGeometry,
-): { curveViolations: number; curveDetail: CurveViolationDetail[]; phantomDips: number } {
+): {
+  curveViolations: number;
+  curveDetail: CurveViolationDetail[];
+  phantomDips: number;
+  dipDetail: DipDetail[];
+} {
   const { points, v } = emitted.track;
   let curveViolations = 0;
   const curveDetail: CurveViolationDetail[] = [];
@@ -1496,6 +1587,7 @@ function measureTrack(
     }
   }
   let phantomDips = 0;
+  const dipDetail: DipDetail[] = [];
   // A dip knot is phantom only when NO constraint or regime was active at the
   // knot or its neighbouring sim steps: the minimum of a commanded dip lands
   // one step after the constraint releases (hold-release / yield-exit
@@ -1514,9 +1606,17 @@ function measureTrack(
       unconstrained(step + 1)
     ) {
       phantomDips++;
+      dipDetail.push({
+        seg: k,
+        atS: Math.round((points[k].t - points[0].t) / 1000),
+        sM: round2(points[k].s),
+        vPrev: round2(v[k - 1]),
+        vDip: round2(v[k]),
+        vNext: round2(v[k + 1]),
+      });
     }
   }
-  return { curveViolations, curveDetail, phantomDips };
+  return { curveViolations, curveDetail, phantomDips, dipDetail };
 }
 
 // ── the builder ──────────────────────────────────────────────────────────────
@@ -1603,8 +1703,28 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     plan.push({ distM, stopId: st.stopId });
   }
 
-  const leaderO = args.leader ? { track: args.leader.opinion, gapM: args.leader.gapM } : null;
-  const leaderS = args.leader ? { track: args.leader.smooth, gapM: args.leader.gapM } : null;
+  // §14.4 effective gap: never demand more clearance than actually existed at
+  // the seam — reality sometimes runs tighter than the registry length (fix
+  // noise, uncoupled sets, stale leader curves), and charging that inherited
+  // spacing as a violation every sampled second is measurement error, not a
+  // collision (measured live 2026-08-17: 254 "violations" in 4 min, all
+  // pre-existing-overlap class). The constraint prevents CROSSING and never
+  // lets an inherited overlap grow; it does not teleport followers backward.
+  const effLeader = (
+    track: TrackPoint[],
+    sStart: number,
+  ): { track: TrackPoint[]; gapM: number } | null => {
+    if (!args.leader) return null;
+    const clear0 = evalTrack(track, t0) - sStart;
+    // Inverted pair: the "follower" already sits well past this leader curve —
+    // an ordering artifact (stale fixes / just-overtaken), not a queue. A cap
+    // here would chain the vehicle to a phantom behind it (measured live
+    // 2026-08-17: one inverted pair printed 202 m of "penetration" per
+    // emission and stood the follower mid-street).
+    if (clear0 < -5) return null;
+    return { track, gapM: Math.min(args.leader.gapM, Math.max(0, clear0 - 0.5)) };
+  };
+  const leaderO = args.leader ? effLeader(args.leader.opinion, s0) : null;
 
   // ── opinion: the drive ───────────────────────────────────────────────────
   const oFine = runDrive({
@@ -1635,7 +1755,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     budgetForced: oEmit.budgetForced,
     ...oMeasure,
     ...oStands,
-    collisionViolations: measureCollision(oEmit.track.points, leaderO),
+    ...collisionMeta(measureCollision(oEmit.track.points, leaderO)),
     infeasibleSkips: oFine.infeasibleSkips,
     regime: null,
   };
@@ -1675,6 +1795,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
       // Cap by the margin-aware seam cap; if it bites, the inherited accel
       // must not stay positive.
       const sSm = clamp(sStart, 0, geom.totalM);
+      const leaderS = args.leader ? effLeader(args.leader.smooth, sSm) : null;
       const aSmRaw = accelAt(prev.smooth, t0);
       const vSmCap = seamSpeedCap(profile, geom, sSm, aSmRaw);
       const vSmInherit = speedAt(prev.smooth, t0);
@@ -1705,7 +1826,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
         budgetForced: fittedEmit.budgetForced,
         ...sMeasure,
         ...scanStands(fitted, geom, modalS),
-        collisionViolations: measureCollision(fittedEmit.track.points, leaderS),
+        ...collisionMeta(measureCollision(fittedEmit.track.points, leaderS)),
         infeasibleSkips: fitted.infeasibleSkips,
         regime: fitted.regime,
       };

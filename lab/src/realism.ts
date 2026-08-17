@@ -17,7 +17,7 @@ import {
   TRAJ_J_GATE,
   TRAJ_V_MAX_GATE_MS,
 } from './config';
-import type { CurveViolationDetail, RegimeStats } from './drive';
+import type { CurveViolationDetail, DipDetail, RegimeStats } from './drive';
 import { evalTrack, type TrackPoint } from './trajectory';
 
 export interface RealismReading {
@@ -320,13 +320,16 @@ export interface PerceptualTrackMeta {
   curveViolations: number;
   curveDetail: CurveViolationDetail[];
   phantomDips: number;
+  dipDetail: DipDetail[];
   infeasibleSkips: number;
   /** G11 (model-invented mid-segment stands) + evidence-backed stand telemetry. */
   midSegmentStops: number;
+  midSegmentDetail: { sM: number; durS: number }[];
   jamHolds: number;
   queueHolds: number;
   /** G12 leader-clearance penetrations of the emitted track. */
   collisionViolations: number;
+  collisionMaxPenM: number;
   regime: RegimeStats | null;
 }
 
@@ -356,6 +359,11 @@ export class PerceptualCounters {
   queueHolds = 0;
   /** G12 (target 0). */
   collisionViolations = 0;
+  /** G7 drill-down: the most recent counted dips, with context. */
+  g7Recent: (DipDetail & { key: string; track: 'opinion' | 'smooth'; emittedAtMs: number })[] = [];
+  /** G11/G12 drill-downs: recent violations with context. */
+  g11Recent: { key: string; track: 'opinion' | 'smooth'; emittedAtMs: number; sM: number; durS: number }[] = [];
+  g12Recent: { key: string; leaderKey: string | null; track: 'opinion' | 'smooth'; emittedAtMs: number; maxPenM: number }[] = [];
   /** §14.2 request-stop skips (telemetry, not violations). */
   requestSkipsTotal = 0;
   /** Emissions holding at an observed jam / clipped behind a leader. */
@@ -450,11 +458,29 @@ export class PerceptualCounters {
       this.knotPressureDrops += meta.pressureDrops;
       this.curveViolations += meta.curveViolations;
       this.phantomDips += meta.phantomDips;
+      for (const dd of meta.dipDetail) {
+        this.g7Recent.unshift({ ...dd, key: e.key, track: name, emittedAtMs: e.emittedAtMs });
+      }
+      if (this.g7Recent.length > 10) this.g7Recent.length = 10;
       this.infeasibleSkips += meta.infeasibleSkips;
       this.midSegmentStops += meta.midSegmentStops;
       this.jamHolds += meta.jamHolds;
       this.queueHolds += meta.queueHolds;
       this.collisionViolations += meta.collisionViolations;
+      for (const md of meta.midSegmentDetail) {
+        this.g11Recent.unshift({ key: e.key, track: name, emittedAtMs: e.emittedAtMs, ...md });
+      }
+      if (this.g11Recent.length > 8) this.g11Recent.length = 8;
+      if (meta.collisionViolations > 0) {
+        this.g12Recent.unshift({
+          key: e.key,
+          leaderKey: e.leaderKey,
+          track: name,
+          emittedAtMs: e.emittedAtMs,
+          maxPenM: meta.collisionMaxPenM,
+        });
+        if (this.g12Recent.length > 8) this.g12Recent.length = 8;
+      }
       for (const d of meta.curveDetail) {
         if (d.seg <= 2) this.g4Seg12++;
         else this.g4Later++;
@@ -610,14 +636,17 @@ export class PerceptualCounters {
         max: this.maxOscillations,
       },
       g7phantomDips: this.phantomDips,
+      g7recent: this.g7Recent,
       g11midSegmentStops: {
         violations: this.midSegmentStops,
         jamHolds: this.jamHolds,
         queueHolds: this.queueHolds,
+        recent: this.g11Recent,
       },
       g12collision: {
         violations: this.collisionViolations,
         leaderClippedEmissions: this.leaderClippedEmissions,
+        recent: this.g12Recent,
       },
       doctrine: {
         requestSkips: this.requestSkipsTotal,
