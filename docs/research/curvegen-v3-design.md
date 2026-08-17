@@ -623,7 +623,135 @@ Phase C — **visual review** (owner-facing, before the app points at it):
 | regression only visible in feel, not metrics | that is exactly what G2–G7 + Phase C exist for; do not ship on metrics alone (the 2026-08-16 lesson: caps alone made metrics fine and the product worse) |
 | night request-stops (tram genuinely skips empty platforms) | dwell floor 5 s at night bands via learned `dwellAt` (band-keyed); accepted residual — the ML leg times still carry the true pace |
 
-## 14. Source index
+## 14. v3.1 driver doctrine (owner field directive, 2026-08-17)
+
+Build-15 field verdict, distilled: the on-screen tram is a careful **DRIVER**
+obeying the old engine's behavior rules — realistic speeds, never stops
+between stops, brisk approach + smooth stop + dwell + smooth departure at
+platforms, slows for curves. The backend/ML is the **DISPATCHER** sending
+predicted timings. The driver absorbs schedule pressure ONLY in permitted
+ways; beauty constraints are hard, accuracy adapts inside them. Observed
+violations to kill: mid-segment stops, randomly skipped stops, F1 acceleration
+through curves. Plus one correctness rule (own hotfix commit, all gens): a
+rendered position may NEVER be behind the newest fix — the fix is a hard
+floor, `s(t) ≥ s_anchorFix ∀ t ≥ anchor` (the tram was there and does not
+reverse).
+
+### 14.1 Time-absorption hierarchy
+
+Schedule pressure (ML leg times vs the learned-pace drive) is absorbed in
+strict order; each stage's authority is bounded and the constraint stack
+(curve caps, envelope, A/J limits) always wins over all of them:
+
+1. **Dwell stretch/shrink at stops**, within the learned per-stop bounds
+   `[dwell p10 … dwell p90]` (Normal quantiles from the stopDwell cell's
+   mean/variance; untrusted cells fall back to `DEFAULT_DWELL_S ± spread`,
+   all clamped to `[DWELL_MIN 5, DWELL_CAP 40] s`). Per leg: the dwell budget
+   `D_k` is chosen first so that travel at the learned pace plus `0.5·D_k`
+   meets the ML crossing time τ_k.
+2. **Inter-stop pace band**, `p_k ∈ [0.8, 1.2] × paceAt(leg)` — tightened
+   from v3.0's ±50 %: the residual timing error after dwell absorption is
+   folded into pace only mildly (the ±15 % ML trim still rides on top).
+   `T_kin` floors and the envelope still outrank the band.
+3. **Request-stop skip (na znamení)** — §14.2. A stop the real tram provably
+   passed without holding is not served.
+
+Whatever pressure remains after all three is honest model error; the drive
+carries it and the at-fix probe prices it — never absorbed by breaking a
+beauty rule.
+
+### 14.2 Request-stop skip criterion
+
+Two keys must BOTH turn:
+
+- **Skippable class (learned evidence)**: holds at this stop×band×dayType are
+  rare or short. Rare holds ⇒ the stopDwell cell never accumulates trust
+  (dwell runs < 5 s are not even folded), so the class is defined negatively:
+  a stop is UNskippable only when its dwell cell is trusted AND its p50 dwell
+  exceeds `REQUEST_DWELL_P50_MAX_S` (positive evidence of real boarding).
+  Terminals are never skippable. New/unknown stops therefore default to
+  skippable-class-with-ML-veto, and the ML veto (below) protects them.
+- **ML says no dwell (active evidence)**: the ML curve's own timing through
+  the stop shows no hold — measured as the crossing-time excess
+  `mlDwellS = (τ(stop+δ) − τ(stop−δ)) − 2δ/paceRef` (δ = 15 m); the leg is
+  skipped only when `mlDwellS < REQUEST_SKIP_ML_DWELL_MAX_S`. Expectation
+  smear makes genuinely served stops show partial dwell mass, so a served
+  stop fails this test even at modest P(stop).
+
+A skipped stop leaves the plan entirely (no envelope 0-limit, no dwell): the
+drive rolls through at leg pace under the curve caps — the exact visual of a
+tram passing an empty platform. Counted per emission (`requestSkips`, with
+stop detail) — telemetry, not a violation. This kills the "randomly skipped
+stops" class by making every skip evidence-backed and every serve deliberate.
+
+### 14.3 Jam holds — evidence-driven mid-segment stands (owner refinement)
+
+Trams DO sometimes stop between stops (jams; rare but real). Detection is
+EVIDENCE, descending from the vendored engine's stuck-hold (`tramSim.ts`
+`updateStuckHold`): two-plus genuinely-new fixes with `|Δs| ≤ STUCK_FIX_EPS_M
+(8 m)`, suppressed within `STUCK_NEAR_STOP_M (40 m)` of a platform (platform
+semantics win there) and on `at_stop` states (the modal rule owns those).
+Behavior: the driver brakes SMOOTHLY onto the observed stuck position (same
+jerk/decel limits as everywhere), stands, and departs smoothly the moment
+evidence says movement (a fix advancing > eps triggers a fix-driven
+re-emission within one poll cycle) or the staleness clock releases
+(`STUCK_HOLD_MAX_AGE_S` of true fix age — a feed gone silent must not pin a
+tram forever). While observed-stuck, ML timing pressure is SUSPENDED — the
+tram is where it is; the dispatcher yields to reality. The smooth track
+hold-follows onto the stuck point like any stand. Jam stands are counted as
+`jamHolds` (telemetry), never as G11 violations.
+
+### 14.4 Anti-collision (same-rail ordering)
+
+Same-line ordering is inferred from fixes (overtaking is rare): vehicles on
+the SAME shapeId, ordered by fix `shapeDistM`, form leader→follower chains at
+generation time from the fleet the lab already holds. A follower's curve must
+never pass through its leader's:
+
+```
+s_follower(t) ≤ s_leader(t) − (QUEUE_GAP_M 3 + leader length)   ∀ t
+leader length = totalLengthM (+ COUPLED_TRAILER_OFFSET_M 14.5 for likely
+                coupled T3 sets — registry heuristic, engine-verbatim)
+```
+
+Enforced inside the drive as a moving constraint (speed cap
+`vLead(t) + brakeTowards(slack)` with the same jerk-onset margin as every
+envelope term, per track: opinion clips against the leader's opinion, smooth
+against the leader's smooth). Leaders are built before followers within one
+refresh cycle (stale set sorted by shape + fix position), so the cascade is
+bounded: each build clips against an already-emitted leader curve, curves are
+static once emitted, no oscillation. Followers absorb the constraint through
+the pace band and stop dwells; a follower pressed against a STANDING leader
+stands as a queue stand (`queueHolds` telemetry — a traffic column, jam-class,
+legal), and against a MOVING leader the cap keeps it rolling. `collisionViolations`
+(G12) measures the emitted curves against the leader constraint — target 0.
+
+### 14.5 Nowcast anchor filter (asymmetric by design)
+
+The filter rejects ONLY backward jumps and no-evidence jitter — legitimate
+forward evidence is NEVER dampened, and fix-driven re-emissions always land
+within one server poll cycle (~2 s):
+
+- **Fix-driven re-emissions**: accepted verbatim, floored at the fresh fix
+  (the hotfix). A backward re-anchor down TO the fix is honest correction; a
+  jam-exit fix produces a decisive-but-physical departure (v0 = 0 S-curve
+  from the stuck point) — never filtered.
+- **Age re-emissions (no new fix)**: backward moves are rejected outright
+  (floored at the previously rendered opinion, hotfix clause); forward moves
+  below `AGE_INNOV_GATE_M` continue the previous curve (jitter), above it
+  they are accepted (the model genuinely moved, e.g. surfaces updated).
+
+### 14.6 New gates (additive — no re-spec of G1–G9)
+
+| # | metric | definition | PASS | computed |
+|---|---|---|---|---|
+| G10 | behind-fix | emitted opinion `s(t) ≥ s_anchorFix` (monotone ⇒ first knot bounds all t); age re-emissions additionally ≥ previously rendered opinion | **0 violations**, every gen | realism counters (exact, 5 cm slack) + check-v2 via /api/live (0.5 m bytes slack) |
+| G11 | mid-segment stops | stand episodes (v < 0.5 m/s sustained > 3 s) outside stop zones (50 m of a platform / modal hold / shape end) and NOT evidence-backed (jam/queue stands count separately as `jamHolds`/`queueHolds`) | **0** (model-invented stands only) | generator (full context) + check-v2 (zones from geometry-pack, fix from /api/live) |
+| G12 | collision violations | follower curve crossing `leader(t) − gap` at any sampled t | **0** | generator (has the leader curve) + check-v2 same-shape non-crossing from bytes |
+
+Curve/kinematic/perceptual gates G1–G9 unchanged.
+
+## 15. Source index
 
 Repo: `docs/research/physics-v3-protocol.md` (contract);
 `lab/src/trajectory.ts`, `lab/src/run.ts`, `lab/src/ml.ts`,
