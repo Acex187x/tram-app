@@ -31,6 +31,25 @@ export type PositionMode = 'smooth' | 'fixed';
 export function normalizePositionMode(value: unknown): PositionMode {
   return value === 'fixed' ? 'fixed' : 'smooth';
 }
+
+/**
+ * Which server-side physics GENERATION publishes the curves — a different axis
+ * from `positionMode`, which picks between the two tracks inside whichever
+ * bundle arrives:
+ *   'current' — DEFAULT. Today's shipped predictor; sent as a bare request.
+ *   'v3'      — the new drive-v3 physics (both tracks regenerated).
+ *   'mix'     — fixed(opinion) from v3, smooth from current.
+ *
+ * Structurally identical to `PhysicsGen` in src/lib/physics/trajectoryStore.ts,
+ * which is where the wire meaning lives; the physics lib does not import app
+ * stores (same split as RenderMode / PositionMode above).
+ */
+export type PhysicsEngine = 'current' | 'v3' | 'mix';
+
+/** Coerce any persisted/unknown value to a generation this build can request. */
+export function normalizePhysicsEngine(value: unknown): PhysicsEngine {
+  return value === 'v3' || value === 'mix' ? value : 'current';
+}
 /**
  * Live-data source. INERT since 2026-08-08: the runtime constructs RemoteFeed
  * unconditionally (hooks/tramData.ts) and nothing reads this setting anymore —
@@ -42,6 +61,8 @@ export type FeedSource = 'local' | 'remote';
 export interface SettingsState {
   lightPreset: LightPreset;
   positionMode: PositionMode;
+  /** Server physics generation the trajectory bundle is fetched from. */
+  physicsEngine: PhysicsEngine;
   showRouteLines: boolean;
   followHeadingLock: boolean;
   /**
@@ -64,6 +85,7 @@ export interface SettingsState {
   debugMode: boolean;
   setLightPreset: (preset: LightPreset) => void;
   setPositionMode: (mode: PositionMode) => void;
+  setPhysicsEngine: (engine: PhysicsEngine) => void;
   setShowRouteLines: (show: boolean) => void;
   setFollowHeadingLock: (lock: boolean) => void;
   setPassiveFleetLogging: (on: boolean) => void;
@@ -77,6 +99,7 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       lightPreset: 'auto',
       positionMode: 'smooth',
+      physicsEngine: 'current',
       showRouteLines: true,
       followHeadingLock: false,
       passiveFleetLogging: true,
@@ -86,6 +109,8 @@ export const useSettingsStore = create<SettingsState>()(
       setLightPreset: (lightPreset) => set({ lightPreset }),
       setPositionMode: (positionMode) =>
         set({ positionMode: normalizePositionMode(positionMode) }),
+      setPhysicsEngine: (physicsEngine) =>
+        set({ physicsEngine: normalizePhysicsEngine(physicsEngine) }),
       setShowRouteLines: (showRouteLines) => set({ showRouteLines }),
       setFollowHeadingLock: (followHeadingLock) => set({ followHeadingLock }),
       setPassiveFleetLogging: (passiveFleetLogging) => set({ passiveFleetLogging }),
@@ -108,6 +133,7 @@ export const useSettingsStore = create<SettingsState>()(
         return {
           ...state,
           positionMode: normalizePositionMode(state.positionMode),
+          physicsEngine: normalizePhysicsEngine(state.physicsEngine),
         } as SettingsState;
       },
     },

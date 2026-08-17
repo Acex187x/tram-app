@@ -19,6 +19,32 @@ export const TRAJECTORIES_URL = 'https://tram-lab.acex.sh/api/trajectories/v2';
 /** Publication cadence of the predictor service; polling faster only re-reads its cache. */
 export const TRAJECTORY_POLL_MS = 5_000;
 
+/**
+ * Which server-side physics generation publishes the curves we fetch:
+ *   'current' — today's shipped bundle. The server default, so NO query param.
+ *   'v3'      — the new drive-v3 physics (both tracks regenerated).
+ *   'mix'     — fixed(opinion) from v3, smooth from current.
+ *
+ * The WIRE FORMAT is identical across generations (physics-v3 protocol §Wire),
+ * which is the whole point: `parseBundle`, the evaluator and every renderer are
+ * untouched by this switch — only the URL changes.
+ *
+ * Structurally mirrored by `PhysicsEngine` in src/stores/settings.ts; the
+ * physics lib deliberately does not import the app's stores (same layering as
+ * RenderMode / PositionMode).
+ */
+export type PhysicsGen = 'current' | 'v3' | 'mix';
+
+/**
+ * The bundle URL for one generation. 'current' is the server's default and is
+ * sent WITHOUT the param, so a client on the default setting produces byte-for
+ * byte the same request it always did (and stays compatible with any server
+ * that has never heard of `gen`).
+ */
+export function trajectoriesUrl(gen: PhysicsGen, base: string = TRAJECTORIES_URL): string {
+  return gen === 'current' ? base : `${base}?gen=${gen}`;
+}
+
 /** Fetch/staleness health for the devtools and the connection banner. */
 export interface TrajectoryHealth {
   connection: ConnectionState;
@@ -35,7 +61,9 @@ export interface TrajectoryHealth {
   lastError: string | null;
   /** Vehicles in the newest bundle. */
   vehicleCount: number;
-  /** Cumulative server-flagged discontinuities observed since start. */
+  /** Server physics generation these curves came from (devtools readout). */
+  gen: PhysicsGen;
+  /** Server-flagged discontinuities observed since start or the last gen swap. */
   discontinuities: number;
   /** Local ms of the last successful decode (0 = never). */
   lastBundleAtMs: number;
@@ -51,6 +79,8 @@ export class TrajectoryStore {
   private inFlight = false;
   private generation = 0;
   private pollMs = TRAJECTORY_POLL_MS;
+  /** Server physics generation requested by the settings store (see setGen). */
+  private gen: PhysicsGen = 'current';
 
   private current: ParsedBundle | null = null;
   private failures = 0;
@@ -61,6 +91,7 @@ export class TrajectoryStore {
 
   readonly clock = new ClockSync();
 
+  /** `url` is the BASE endpoint; the active generation is appended per fetch. */
   constructor(private readonly url: string = TRAJECTORIES_URL) {}
 
   /** Start polling + fetch immediately. Idempotent. */
@@ -90,6 +121,51 @@ export class TrajectoryStore {
     this.abort?.abort();
     this.abort = null;
     this.inFlight = false;
+  }
+
+  /** Server physics generation currently being fetched. */
+  get generationId(): PhysicsGen {
+    return this.gen;
+  }
+
+  /**
+   * Switch server physics generation (settings → runtime → here). No-op when
+   * unchanged, so the runtime can call it on every settings write.
+   *
+   * A swap is a HARD cut, not a cross-fade, and that is deliberate:
+   *
+   * - The in-flight reply belongs to the OLD engine. It is aborted and its
+   *   generation counter bumped so it cannot land (same guard start/stop uses).
+   * - The decoded bundle is DROPPED. Unlike a background pause — where keeping
+   *   the curves is right because they are still the same server's opinion —
+   *   curves from the engine the user just left are not the answer to the
+   *   question now being asked, and continuing to animate them would be a
+   *   frozen ghost of the previous physics. With no bundle every tram falls
+   *   back to its raw AVL fix (adapter.ts), so the fleet stays on screen,
+   *   stationary and honest, for the ~1 fetch it takes the new gen to land.
+   * - The connection machine is left to tell the truth on its own: bundleAgeS
+   *   is null again with zero failures, which is exactly its documented cold
+   *   start — 'degraded' ("connecting…"), NOT a false 'offline' banner. It
+   *   returns to 'live' on the first bundle of the new generation.
+   *
+   * The clock offset SURVIVES: it measures this server's wall clock, which no
+   * change of physics can move. Resetting it would flash `clockSynced: false`
+   * and re-sync to the same number.
+   */
+  setGen(gen: PhysicsGen): void {
+    if (gen === this.gen) return;
+    this.gen = gen;
+    this.generation += 1;
+    this.abort?.abort();
+    this.abort = this.running ? new AbortController() : null;
+    this.inFlight = false;
+    this.current = null;
+    this.lastBundleAtMs = 0;
+    this.failures = 0;
+    this.lastError = null;
+    this.discontinuities = 0;
+    this.listeners.forEach((l) => l());
+    if (this.running) void this.refresh();
   }
 
   /** Notified after each successfully decoded bundle (runtime → UI bump). */
@@ -134,6 +210,7 @@ export class TrajectoryStore {
       consecutiveFailures: this.failures,
       lastError: this.lastError,
       vehicleCount: this.current?.vehicles.size ?? 0,
+      gen: this.gen,
       discontinuities: this.discontinuities,
       lastBundleAtMs: this.lastBundleAtMs,
       inFlight: this.inFlight,
@@ -180,7 +257,7 @@ export class TrajectoryStore {
     const signal = this.abort?.signal;
     this.inFlight = true;
     try {
-      const response = await fetch(this.url, { signal });
+      const response = await fetch(trajectoriesUrl(this.gen, this.url), { signal });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const payload: unknown = await response.json();
       if (gen !== this.generation) return; // stopped / restarted while in flight

@@ -78,6 +78,8 @@ export {
   TrajectoryStore,
   TRAJECTORIES_URL,
   TRAJECTORY_POLL_MS,
+  trajectoriesUrl,
+  type PhysicsGen,
   type TrajectoryHealth,
 } from './trajectoryStore';
 

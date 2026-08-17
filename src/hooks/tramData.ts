@@ -272,10 +272,15 @@ export class TramRuntime {
       this.geometryUnsub = this.feed.subscribeGeometry?.(this.onGeometryLoaded) ?? null;
       // A fresh bundle changes every tram's position: refresh the 1 Hz hooks.
       this.trajectoryUnsub = this.trajectories.subscribe(this.onBundle);
-      this.applyRenderMode(useSettingsStore.getState().positionMode);
-      this.settingsUnsub = useSettingsStore.subscribe((s) =>
-        this.applyRenderMode(s.positionMode),
-      );
+      const settings = useSettingsStore.getState();
+      this.applyRenderMode(settings.positionMode);
+      this.trajectories.setGen(settings.physicsEngine);
+      this.settingsUnsub = useSettingsStore.subscribe((s) => {
+        this.applyRenderMode(s.positionMode);
+        // Both are no-ops when unchanged, so an unrelated settings write costs
+        // two comparisons. A real change refetches immediately (setGen).
+        this.trajectories.setGen(s.physicsEngine);
+      });
       const state = AppState.currentState;
       if (state !== 'background' && state !== 'inactive') this.resume();
     }

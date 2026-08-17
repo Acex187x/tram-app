@@ -54,7 +54,7 @@ import {
 } from '@/lib/motionlog';
 import type { PhysicsDebugInfo, TramPublicState } from '@/lib/types';
 import { useSelectionStore } from '@/stores/selection';
-import { useSettingsStore } from '@/stores/settings';
+import { useSettingsStore, type PhysicsEngine } from '@/stores/settings';
 
 const MONO = Fonts?.mono ?? 'monospace';
 /** Fast enough for numeric diagnostics, ~6x fewer React commits than display rate. */
@@ -357,12 +357,20 @@ function SectionTitle({ children }: { children: string }) {
 /** collapsed → one summary line · live → the readout · guide → what it all means. */
 type DebugMode = 'collapsed' | 'live' | 'guide';
 
+/** Header-band abbreviations for the physics generation (the band is tight). */
+const GEN_SHORT: Record<PhysicsEngine, string> = {
+  current: 'cur',
+  v3: 'v3',
+  mix: 'mix',
+};
+
 export function DebugOverlay() {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const followKey = useSelectionStore((s) => s.followTramKey);
   const selectedKey = useSelectionStore((s) => s.selectedTramKey);
   const positionMode = useSettingsStore((s) => s.positionMode);
+  const physicsEngine = useSettingsStore((s) => s.physicsEngine);
   const key = followKey ?? selectedKey;
   // 1 Hz — the header only needs line + model, not a per-frame read.
   const state = useTramState(key);
@@ -410,6 +418,17 @@ export function DebugOverlay() {
               ● SMOOTH{positionMode === 'smooth' ? '*' : ''}
             </Text>
           </View>
+          {/* Active server physics generation. Also on the CONNECTION card
+              next to the bundle age; repeated here because this band is the
+              one part of the overlay visible with no tram followed and while
+              collapsed — so every debug screenshot states which engine drew
+              the trams in it. */}
+          <Text
+            style={[styles.genChip, physicsEngine !== 'current' && styles.genChipAlt]}
+            numberOfLines={1}
+          >
+            G:{GEN_SHORT[physicsEngine]}
+          </Text>
           <Text style={styles.buildNumber}>B{buildNumber}</Text>
           {/* Guide mode: swaps every live value for a sentence explaining what
               that variable means, plus a primer on how the engine works. */}
@@ -568,6 +587,10 @@ function DebugLive({ tramKey }: { tramKey: string }) {
               value={dbg.bundleAgeS != null ? `${num(dbg.bundleAgeS, 1)}s` : 'none'}
               warn={dbg.bundleAgeS == null || dbg.bundleAgeS >= 15}
             />
+            {/* Which server physics generation built the bundle above — right
+                next to its age, because after an engine swap the two are read
+                together ("no bundle yet, gen=v3" is the swap, not a fault). */}
+            <Row label="engine gen" value={health.gen} warn={health.gen !== 'current'} />
             <Row label="clock offset" value={`${signed(dbg.clockOffsetMs)}ms`} warn={health.clockImplausible} />
             <Row label="vehicles" value={num(health.vehicleCount)} />
             <Row
@@ -671,6 +694,10 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     fontWeight: '800',
   },
+  // Muted while on the shipped engine, hot when the trams on screen are being
+  // drawn by an experimental one — a screenshot should not need a caption.
+  genChip: { color: '#7FB2D9', fontFamily: MONO, fontSize: 11, fontWeight: '800', marginRight: 6 },
+  genChipAlt: { color: '#B7FF4A' },
   hint: { color: '#7FB2D9', fontFamily: MONO, fontSize: 11 },
   collapsed: { color: '#DDE6EE', fontFamily: MONO, fontSize: 10.5, marginTop: 3 },
   phase: { color: '#FFD479', fontFamily: MONO, fontSize: 11, fontWeight: '700', marginTop: 4 },

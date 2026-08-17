@@ -124,6 +124,14 @@ export interface InsetRowProps {
    */
   label?: string;
   subtitle?: string;
+  /**
+   * Lines the subtitle may wrap to. Defaults to 1 — the settings/report rows
+   * this kit was built for carry a short secondary value that must never push
+   * a row taller. Raise it only for rows whose subtitle is prose the user is
+   * meant to READ (the engine picker explains each option), where truncating
+   * mid-sentence would be worse than a taller row.
+   */
+  subtitleLines?: number;
   /** Right-aligned grey value, e.g. 'Driving', '09:00–21:00'. */
   value?: string;
   valueTint?: string;
@@ -154,6 +162,7 @@ export function InsetRow({
   title,
   label,
   subtitle,
+  subtitleLines = 1,
   value,
   valueTint,
   chevron,
@@ -187,7 +196,7 @@ export function InsetRow({
           {title}
         </Text>
         {subtitle != null && (
-          <Text style={[styles.rowSubtitle, { color: c.secondary }]} numberOfLines={1}>
+          <Text style={[styles.rowSubtitle, { color: c.secondary }]} numberOfLines={subtitleLines}>
             {subtitle}
           </Text>
         )}
