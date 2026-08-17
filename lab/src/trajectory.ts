@@ -216,14 +216,24 @@ export interface BuildV2Args {
   line: string;
   anchorMs: number;
   emittedAtMs: number;
-  /** ML target positions for this fix (already monotone-clamped + rounded).
-   *  These are TARGETS, not the emitted curve: the profile tracks them as
-   *  closely as the kinematic limits allow. */
+  /** ML target positions for this fix (already monotone-clamped + rounded,
+   *  and — anchor-floor hotfix 2026-08-17 — floored at the anchor fix's
+   *  shapeDistM by the caller: the fix is a hard floor, the tram was there
+   *  and does not reverse). These are TARGETS, not the emitted curve: the
+   *  profile tracks them as closely as the kinematic limits allow. */
   raw: TrackPoint[];
   /** null when the anchor fix is not at_stop (or the stop is unknown). */
   modal: ModalHold | null;
   /** The vehicle's PREVIOUS published emission, or null for a first emission. */
   prev: PrevTrack | null;
+  /** Anchor-floor hotfix, age-refresh clause: on an AGE re-emission (same
+   *  anchor fix as `prev`) the fresh ML nowcast may jitter BACKWARD with no
+   *  new evidence, and the previously rendered opinion position would teleport
+   *  back. The caller passes the previously rendered opinion position at
+   *  `emittedAtMs`; the whole target curve is floored at it. 0 = no floor
+   *  (fix-driven or first emission — a fix-driven re-anchor may honestly move
+   *  back TO the fresh fix, never behind it, which the floored `raw` covers). */
+  ageFloorS?: number;
 }
 
 export interface BuiltV2 {
@@ -231,6 +241,10 @@ export interface BuiltV2 {
   /** Knot speeds for the two emitted tracks — memory only, never on the wire. */
   opinion: KinTrack;
   smooth: KinTrack;
+  /** Anchor-floor hotfix telemetry: the age-refresh floor actually lifted at
+   *  least one target sample (i.e. this emission's bytes differ from the
+   *  pre-hotfix builder). False whenever ageFloorS is 0/absent. */
+  ageFloorApplied: boolean;
 }
 
 /** Build both tracks for one vehicle. Returns null if any sample is
@@ -242,12 +256,27 @@ export function buildV2Vehicle(args: BuildV2Args): BuiltV2 | null {
   if (!(tEnd > t0)) return null;
 
   // ── the model's target curve (modal stop rule applied) ───────────────────
-  const targetAt = (t: number): number =>
-    modal === null
-      ? evalTrack(raw, t)
-      : t <= modal.releaseAtMs
-        ? modal.stopS
-        : Math.max(modal.stopS, modal.walk(t));
+  // Anchor-floor hotfix (age-refresh clause): the target never falls behind
+  // the previously rendered opinion position on a same-anchor re-emission —
+  // a backward jump there is pure model jitter, not evidence. The floor can
+  // exceed a still-armed modal hold's stopS only when the release estimate
+  // moved later across the refresh; the marker then stands where it was
+  // already rendered instead of teleporting back to the platform.
+  const floorS = args.ageFloorS ?? 0;
+  let ageFloorApplied = false;
+  const targetAt = (t: number): number => {
+    const base =
+      modal === null
+        ? evalTrack(raw, t)
+        : t <= modal.releaseAtMs
+          ? modal.stopS
+          : Math.max(modal.stopS, modal.walk(t));
+    if (base < floorS) {
+      ageFloorApplied = true;
+      return floorS;
+    }
+    return base;
+  };
 
   const grid = makeGrid(t0, tEnd);
   const target = sampleMonotone(grid, targetAt);
@@ -311,6 +340,7 @@ export function buildV2Vehicle(args: BuildV2Args): BuiltV2 | null {
     },
     opinion,
     smooth,
+    ageFloorApplied,
   };
 }
 

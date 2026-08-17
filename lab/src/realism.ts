@@ -111,6 +111,14 @@ export interface RealismViolation {
   atMs: number;
 }
 
+/** One G10 offender: an emitted opinion curve starting BEHIND the anchor fix. */
+export interface BehindFixViolation {
+  key: string;
+  /** anchor fix position − opinion(emittedAtMs), m (> 0 = behind the fix). */
+  behindM: number;
+  atMs: number;
+}
+
 /** Lifetime counters over everything the lab has published. */
 export class RealismCounters {
   tracksChecked = 0;
@@ -121,6 +129,13 @@ export class RealismCounters {
   maxSpeed = 0;
   maxAccel = 0;
   minAccel = 0;
+  /** G10 anchor-floor gate (owner field report 2026-08-17: the fixed track
+   *  teleported BEHIND the latest fix — the fix is a hard floor, the tram was
+   *  there and does not reverse). Target: literal 0. */
+  behindFixViolations = 0;
+  behindFixChecked = 0;
+  maxBehindFixM = 0;
+  worstBehindFix: BehindFixViolation[] = [];
   /** Worst offenders ever seen, by absolute excess over the limit. */
   worst: RealismViolation[] = [];
 
@@ -156,6 +171,22 @@ export class RealismCounters {
     if (r.minAccel < this.minAccel) this.minAccel = r.minAccel;
   }
 
+  /** G10: the emitted OPINION curve must satisfy s(t) ≥ s_anchorFix for all
+   *  t ≥ anchor time. The curve is monotone non-decreasing, so checking its
+   *  first knot checks every instant. 0.05 m slack absorbs cm wire rounding. */
+  checkAnchorFloor(key: string, opinion: TrackPoint[], anchorFixS: number, atMs: number): void {
+    if (opinion.length === 0) return;
+    this.behindFixChecked++;
+    const behindM = anchorFixS - opinion[0].s;
+    if (behindM > 0.05) {
+      this.behindFixViolations++;
+      if (behindM > this.maxBehindFixM) this.maxBehindFixM = behindM;
+      this.worstBehindFix.push({ key, behindM: round3(behindM), atMs });
+      this.worstBehindFix.sort((a, b) => b.behindM - a.behindM);
+      if (this.worstBehindFix.length > 5) this.worstBehindFix.length = 5;
+    }
+  }
+
   private note(v: RealismViolation): void {
     this.worst.push(v);
     this.worst.sort((a, b) => Math.abs(b.value - b.limit) - Math.abs(a.value - a.limit));
@@ -173,6 +204,12 @@ export class RealismCounters {
         vMaxMs: TRAJ_V_MAX_GATE_MS,
         aAccMs2: TRAJ_A_ACC_GATE,
         aBrkMs2: -TRAJ_A_BRK_GATE,
+      },
+      g10behindFix: {
+        checked: this.behindFixChecked,
+        violations: this.behindFixViolations,
+        maxBehindM: round3(this.maxBehindFixM),
+        worst: this.worstBehindFix,
       },
       observed: {
         maxSpeedMs: round3(this.maxSpeed),

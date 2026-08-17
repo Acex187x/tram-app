@@ -387,6 +387,11 @@ export interface DriveArgs {
   prev: PrevTrack | null;
   /** Observed gap between the last two fixes, s (0 when unknown) — T_disc. */
   fixGapS: number;
+  /** Anchor-floor hotfix, age-refresh clause (same semantics as
+   *  BuildV2Args.ageFloorS): on a same-anchor re-emission the opinion may not
+   *  re-anchor BEHIND the previously rendered opinion position — a backward
+   *  jump with no new fix is model jitter, not evidence. 0 = no floor. */
+  ageFloorS?: number;
   /** True when this chain HAD an emission that was dropped (ML outage,
    *  geometry loss, build failure) — the re-appearance may land anywhere, so
    *  it must carry the honest discontinuity flag even though prev is null
@@ -478,6 +483,8 @@ export interface DriveBuilt {
     tDiscM: number | null;
     /** |prev smooth(t_E) − new opinion(t_E)| before the decision, m. */
     seamGapM: number | null;
+    /** Anchor-floor hotfix telemetry: the age-refresh floor lifted s0. */
+    ageFloorApplied: boolean;
     opinion: TrackBuildMeta;
     smooth: TrackBuildMeta;
   };
@@ -1247,12 +1254,19 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
   const grid = makeGrid(t0, tEnd);
 
   // ── anchor state (§4.2 / §4.3 v0/a0-at-the-seam) ─────────────────────────
+  // Anchor-floor hotfix: `raw` arrives floored at the anchor fix (the fix is
+  // a hard floor), and on age re-emissions s0 is additionally floored at the
+  // previously rendered opinion position (ageFloorS) — the drive integrates
+  // forward-only, so flooring s0 floors the whole curve.
+  const ageFloor = clamp(args.ageFloorS ?? 0, 0, geom.totalM);
   const holdingNow = modal !== null && modal.releaseAtMs > t0;
-  const s0 = holdingNow
+  const s0Base = holdingNow
     ? clamp(modal.stopS, 0, geom.totalM)
     : modal !== null
       ? clamp(Math.max(modal.stopS, raw[0].s), 0, geom.totalM)
       : clamp(raw[0].s, 0, geom.totalM);
+  const ageFloorApplied = ageFloor > s0Base;
+  const s0 = ageFloorApplied ? ageFloor : s0Base;
   const samePrevTrip = prev !== null && prev.tripId === args.tripId;
   // The opinion RE-ANCHORS its position on every fix (protocol), so inheriting
   // the previous speed is a smoothness nicety, not a continuity contract — and
@@ -1272,7 +1286,9 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
   const a0 = holdingNow ? 0 : vInherit > vSeamCap ? Math.min(a0Raw, 0) : a0Raw;
 
   // ── stop plan: every platform ahead is SERVED (§4.2) ─────────────────────
-  const planFrom = holdingNow ? modal.stopS : s0;
+  // s0 ≥ modal.stopS in every branch (incl. the age-floored hold), so the
+  // plan starts from wherever the drive actually stands.
+  const planFrom = s0;
   const plan: PlanStop[] = [];
   for (const st of geom.stops) {
     if (st.distM <= planFrom + STOP_REACH_M) continue;
@@ -1387,6 +1403,6 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     },
     opinion: oEmit.track,
     smooth: sEmit.track,
-    meta: { discKind, tDiscM, seamGapM, opinion: opinionMeta, smooth: smoothMeta },
+    meta: { discKind, tDiscM, seamGapM, ageFloorApplied, opinion: opinionMeta, smooth: smoothMeta },
   };
 }

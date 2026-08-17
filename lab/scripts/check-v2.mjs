@@ -136,6 +136,32 @@ const realism = {
 };
 const realismSeen = new Set();
 
+// ── G10 anchor floor (hotfix 2026-08-17): the fixed/opinion track may NEVER
+// start behind the anchor fix — the tram provably was there and does not
+// reverse; the emitted curve is monotone, so its first knot bounds every
+// instant. Bytes carry anchorMs but not the fix position, so the checker
+// matches /api/live (which exposes fixDistM + fixAgeS) by key and only
+// compares when the ages agree — i.e. live and the bundle describe the SAME
+// fix. 0.5 m slack: live serves the raw unclamped shapeDistM while the curve
+// is geometry-clamped and cm-rounded (generator-side counter is exact at 5 cm).
+const g10 = { checked: 0, violations: 0 };
+const g10Seen = new Set();
+function checkAnchorFloorBytes(v, liveByKey, serverNowMs, prefix = '') {
+  const id = `${prefix}${v.key}@${v.emittedAtMs}`;
+  if (g10Seen.has(id)) return;
+  const lv = liveByKey.get(v.key);
+  if (!lv || !Array.isArray(v.opinion) || v.opinion.length === 0) return;
+  const anchorAgeS = (serverNowMs - v.anchorMs) / 1000;
+  if (Math.abs(lv.fixAgeS - anchorAgeS) > 4) return; // a different fix — skip
+  g10Seen.add(id);
+  g10.checked++;
+  const behind = lv.fixDistM - v.opinion[0].s;
+  if (behind > 0.5) {
+    g10.violations++;
+    fail(`${id}: G10 opinion starts ${behind.toFixed(1)} m BEHIND its anchor fix (${lv.fixDistM.toFixed(1)})`);
+  }
+}
+
 function checkRealism(v, name) {
   const id = `${v.key}@${v.emittedAtMs}:${name}`;
   if (realismSeen.has(id)) return; // each emission is polled many times
@@ -437,12 +463,16 @@ function maxSpeedWithin(track, tFrom, tTo) {
 
 const t0 = Date.now();
 while (Date.now() - t0 < DURATION_S * 1000) {
-  const [b, v1, sb] = await Promise.all([
+  const [b, v1, sb, live] = await Promise.all([
     get(V2_PATH),
     get('/api/trajectories'),
     get('/api/shadow-trajectories').catch(() => null),
+    get('/api/live').catch(() => null),
   ]);
   bundles++;
+  const liveByKey = new Map(
+    live && Array.isArray(live.vehicles) ? live.vehicles.map((lv) => [lv.key, lv]) : [],
+  );
   if (sb !== null) {
     sh.bundles++;
     if (sb.shadow !== true) fail('shadow bundle missing shadow:true');
@@ -450,6 +480,7 @@ while (Date.now() - t0 < DURATION_S * 1000) {
       const present = new Set(sb.vehicles.map((v) => v.key));
       for (const v of sb.vehicles) {
         checkShadowVehicle(v, sb.atMs, shadowPrevPresent === null || shadowPrevPresent.has(v.key));
+        checkAnchorFloorBytes(v, liveByKey, sb.serverNowMs, 'sh:');
       }
       shadowPrevPresent = present;
     } else {
@@ -472,6 +503,7 @@ while (Date.now() - t0 < DURATION_S * 1000) {
     if (!checkVehicle(v, b.atMs)) continue;
     checkRealism(v, 'opinion');
     checkRealism(v, 'smooth');
+    checkAnchorFloorBytes(v, liveByKey, b.serverNowMs);
     maxPoints = Math.max(maxPoints, v.opinion.length, v.smooth.length);
     minHorizonS = Math.min(minHorizonS, (v.opinion[v.opinion.length - 1].t - v.emittedAtMs) / 1000);
 
@@ -566,6 +598,9 @@ const dist = (arr, unit) =>
   `p99=${pct(arr, 99).toFixed(2)} min=${arrMin(arr).toFixed(2)} max=${arrMax(arr).toFixed(2)} ${unit}`;
 console.log(`per-segment speed     ${dist(realism.allSpeeds, 'm/s')}`);
 console.log(`between-segment accel ${dist(realism.allAccels, 'm/s²')}`);
+console.log(`\n── G10 anchor floor (opinion never behind its fix; every gen) ─────`);
+console.log(`checked ${g10.checked} emissions (bundle + shadow, live-fix matched), ` +
+  `VIOLATIONS ${g10.violations}  [target literal 0]`);
 
 console.log(`\n── catch-up: how fast does smooth actually drive to converge? ─────`);
 console.log(`episodes (gap ≥ ${CATCHUP_MIN_M} m)  ${catchupGap.length}`);

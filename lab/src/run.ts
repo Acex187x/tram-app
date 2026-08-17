@@ -207,6 +207,14 @@ export function start(): void {
   let trajDiscontinuities = 0;
   /** Kinematic-limits gate over every track ever published (protocol contract). */
   const realism = new RealismCounters();
+  /** Anchor-floor hotfix telemetry (owner field report 2026-08-17: the fixed
+   *  track teleported BEHIND the latest fix). Counts exactly where published
+   *  bytes may differ from the pre-hotfix builders — everywhere else the
+   *  builders are pure functions of unchanged inputs, so bytes are identical. */
+  let anchorDsClampedPoints = 0; // raw ML Δs < 0 samples floored at the fix
+  let anchorDsClampedEmissions = 0; // emissions with ≥ 1 floored sample
+  let ageFloorPubApplied = 0; // published-chain age-refresh floors engaged
+  let ageFloorShadowApplied = 0; // shadow/v3-chain age-refresh floors engaged
   /** Why an at-fix probe could/couldn't score the PUBLISHED v2 tracks. */
   let probeOk = 0;
   let probeMissing = 0;
@@ -463,15 +471,28 @@ export function start(): void {
       group.forEach((v, gi) => {
         const drop = (): void => markDropped(v.key);
         const points: TrajectoryPoint[] = [];
+        // Anchor-floor hotfix (2026-08-17, owner field report: the fixed track
+        // teleported BEHIND the latest fix): the anchor fix is a hard floor —
+        // the tram provably was at shapeDistM at anchor time and does not
+        // reverse, so an ML Δs < 0 is model error, clamped to 0. Applies to
+        // every consumer of `points` (v1 feed, current gen, v3, mix) at the
+        // single place the samples are built.
+        const anchorS = Math.min(v.geom.totalM, Math.max(0, v.snap.shapeDistM));
+        let dsClampedHere = 0;
         let maxS = 0;
         for (let k = 0; k < TRAJ_POINTS; k++) {
           const ds = pred.gbdt[gi * TRAJ_POINTS + k];
           if (ds === null || !Number.isFinite(ds)) return drop();
-          const s = Math.min(v.geom.totalM, Math.max(0, v.snap.shapeDistM + ds));
+          if (ds < 0) dsClampedHere++;
+          const s = Math.min(v.geom.totalM, Math.max(anchorS, v.snap.shapeDistM + ds));
           // Each horizon is predicted independently, so the sequence can jitter
           // backwards; the app lerps it blindly, so clamp it monotone here.
           maxS = k === 0 ? s : Math.max(maxS, s);
           points.push({ t: tCompute + k * TRAJ_STEP_MS, s: round2(maxS) });
+        }
+        if (dsClampedHere > 0) {
+          anchorDsClampedPoints += dsClampedHere;
+          anchorDsClampedEmissions++;
         }
         // ── physics v3: opinion (+ modal stops) and smooth (+ continuity) ──
         // The modal hold mirrors learned-2h's probability model exactly (same
@@ -510,16 +531,32 @@ export function start(): void {
           dwellAt: (stopId: string, atMs: number) => learned.dwellAt(stopId, atMs),
         };
 
+        // Anchor-floor hotfix, age-refresh clause: on a SAME-ANCHOR (age)
+        // re-emission the fresh ML nowcast may jitter backward with no new
+        // evidence; the opinion is floored at the previously rendered opinion
+        // position, PER CHAIN (published and shadow chains re-emit from their
+        // own previous curves). Fix-driven re-emissions get no such floor —
+        // fresh evidence is never dampened; the floored `raw` already bounds
+        // them at the new fix itself.
+        const prevShadow = shadowTrajectories.get(v.key);
+        const prevEntry = trajectories.get(v.key);
+        const ageFloorOf = (pv: V2Vehicle | undefined, pFixObsAtMs: number | undefined): number =>
+          pv !== undefined && pv.tripId === v.snap.tripId && pFixObsAtMs === v.snap.observedAtMs
+            ? evalTrack(pv.opinion, tCompute)
+            : 0;
+        const ageFloorShadowS = ageFloorOf(prevShadow?.v2, prevShadow?.fixObsAtMs);
+        const ageFloorPubS = ageFloorOf(prevEntry?.v2, prevEntry?.fixObsAtMs);
+
         // ── curvegen-v3 SHADOW build (design §12 phase A): its own seam
         // chain, its own realism gate + perceptual counters, never published
         // while TRAJ_V3_PUBLISH is off.
-        const prevShadow = shadowTrajectories.get(v.key);
         const shadowBuilt: DriveBuilt | null = buildDriveVehicle({
           ...baseArgs,
           modal: modal ? { stopS: modal.stopS, releaseAtMs: modal.releaseAtMs } : null,
           geom: v.geom,
           surfaces,
           fixGapS: v.fixGapS,
+          ageFloorS: ageFloorShadowS,
           chainBroken: shadowChainBroken.has(v.key),
           prev: prevShadow
             ? {
@@ -536,8 +573,10 @@ export function start(): void {
         } else {
           shadowEmissions++;
           if (shadowBuilt.vehicle.discontinuity) shadowDiscontinuities++;
+          if (shadowBuilt.meta.ageFloorApplied) ageFloorShadowApplied++;
           realismShadow.check(v.key, 'opinion', shadowBuilt.vehicle.opinion, tCompute);
           realismShadow.check(v.key, 'smooth', shadowBuilt.vehicle.smooth, tCompute);
+          realismShadow.checkAnchorFloor(v.key, shadowBuilt.vehicle.opinion, anchorS, tCompute);
           perceptual.record({
             key: v.key,
             emittedAtMs: tCompute,
@@ -566,7 +605,6 @@ export function start(): void {
         // ── the PUBLISHED bundle: the current generator until the flip flag
         // turns, then the v3 drive on the published chain's own seam state
         // (phase B: ml-mode/ml-smooth then measure the published v3 pixels).
-        const prevEntry = trajectories.get(v.key);
         const prevPub = prevEntry
           ? {
               tripId: prevEntry.v2.tripId,
@@ -581,14 +619,18 @@ export function start(): void {
               geom: v.geom,
               surfaces,
               fixGapS: v.fixGapS,
+              ageFloorS: ageFloorPubS,
               chainBroken: publishedChainBroken.has(v.key),
               prev: prevPub,
             })
-          : buildV2Vehicle({ ...baseArgs, modal, prev: prevPub });
+          : buildV2Vehicle({ ...baseArgs, modal, prev: prevPub, ageFloorS: ageFloorPubS });
         if (built === null) {
           trajectories.delete(v.key);
           publishedChainBroken.add(v.key);
           return;
+        }
+        if ('meta' in built ? built.meta.ageFloorApplied : built.ageFloorApplied) {
+          ageFloorPubApplied++;
         }
         const v2 = built.vehicle;
         trajEmissions++;
@@ -598,6 +640,7 @@ export function start(): void {
         // limits). Counters are lifetime, so a regression surfaces in digests.
         realism.check(v.key, 'opinion', v2.opinion, tCompute);
         realism.check(v.key, 'smooth', v2.smooth, tCompute);
+        realism.checkAnchorFloor(v.key, v2.opinion, anchorS, tCompute);
 
         trajectories.set(v.key, {
           fixObsAtMs: v.snap.observedAtMs,
@@ -954,6 +997,14 @@ export function start(): void {
         emissions: trajEmissions,
         discontinuities: trajDiscontinuities,
         probe: { ok: probeOk, missing: probeMissing, staleAnchor: probeStaleAnchor, tripMismatch: probeTripMismatch },
+        /** Anchor-floor hotfix telemetry: exactly where bytes may differ from
+         *  the pre-hotfix builders (everywhere else: pure fn, same inputs). */
+        anchorFloor: {
+          dsClampedPoints: anchorDsClampedPoints,
+          dsClampedEmissions: anchorDsClampedEmissions,
+          ageFloorPublished: ageFloorPubApplied,
+          ageFloorShadow: ageFloorShadowApplied,
+        },
       },
       realism: realism.gauges(),
       shadow: {

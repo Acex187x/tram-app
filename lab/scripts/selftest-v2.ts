@@ -770,5 +770,54 @@ const mkDrive = (over: Partial<Parameters<typeof buildDriveVehicle>[0]> &
     `pressureDrops ${b.meta.opinion.pressureDrops}, budgetForced ${b.meta.opinion.budgetForced}`);
 }
 
+// ── D14. anchor floor (hotfix 2026-08-17): never behind fix / prev render ───
+// Owner field report: the fixed track teleported BEHIND the latest fix. The
+// fix is a hard floor (the tram was there and does not reverse): run.ts floors
+// raw at the anchor fix (ML ds < 0 → 0), and a same-anchor AGE re-emission is
+// additionally floored at the previously rendered opinion (backward nowcast
+// jitter is not evidence). Both builders must honour ageFloorS.
+{
+  const fixS = 1000;
+  // (a) floored raw ⇒ the monotone opinion can never start behind the fix.
+  const bv = buildV2Vehicle({
+    key: 'F', tripId: 't1', line: '22', anchorMs: T0 - 5000, emittedAtMs: T0,
+    raw: raw(fixS, 8), modal: null, prev: null,
+  })!;
+  check('floor: current-gen opinion starts at/after the anchor fix',
+    bv.vehicle.opinion[0].s >= fixS - 0.05, `opinion[0].s = ${bv.vehicle.opinion[0].s}`);
+
+  // (b) age-refresh floor, current gen: same anchor, nowcast 50 m backward.
+  const T1 = T0 + 60_000;
+  const prevO = evalTrack(bv.vehicle.opinion, T1); // previously rendered position
+  const bv2 = buildV2Vehicle({
+    key: 'F', tripId: 't1', line: '22', anchorMs: T0 - 5000, emittedAtMs: T1,
+    raw: raw(prevO - 50, 8, T1), modal: null, ageFloorS: prevO,
+    prev: { tripId: 't1', smooth: bv.smooth, opinion: bv.opinion },
+  })!;
+  contract('floor/age/opinion', bv2.vehicle.opinion, T1);
+  contract('floor/age/smooth', bv2.vehicle.smooth, T1);
+  check('floor: age re-emission never falls behind the previously rendered opinion',
+    bv2.vehicle.opinion[0].s >= prevO - 0.05 && bv2.ageFloorApplied,
+    `opinion[0].s = ${bv2.vehicle.opinion[0].s.toFixed(1)}, floor ${prevO.toFixed(1)}, applied=${bv2.ageFloorApplied}`);
+  check('floor: no floor ⇒ flag stays false (byte-stability witness)',
+    !bv.ageFloorApplied);
+
+  // (c) the same clauses on the v3 drive.
+  const geom = synthGeometry({ totalM: 4000 });
+  const d1 = mkDrive({ raw: raw(fixS, 8), geom, surfaces: surf(8) });
+  check('floor: drive opinion starts at/after the anchor fix',
+    d1.vehicle.opinion[0].s >= fixS - 0.05 && d1.meta.ageFloorApplied === false);
+  const prevOD = evalTrack(d1.vehicle.opinion, T1);
+  const d2 = mkDrive({
+    raw: raw(prevOD - 50, 8, T1), geom, surfaces: surf(8), emittedAtMs: T1,
+    ageFloorS: prevOD,
+    prev: { tripId: 'tSynth', smooth: d1.smooth, opinion: d1.opinion },
+  });
+  driveContract('floor/age/drive', d2);
+  check('floor: drive age re-emission floored at the previously rendered opinion',
+    d2.vehicle.opinion[0].s >= prevOD - 0.05 && d2.meta.ageFloorApplied,
+    `opinion[0].s = ${d2.vehicle.opinion[0].s.toFixed(1)}, floor ${prevOD.toFixed(1)}`);
+}
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
