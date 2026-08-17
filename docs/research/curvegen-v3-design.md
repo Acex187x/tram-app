@@ -297,9 +297,32 @@ smoother.ts regime table transplanted to generation time, with the gap
 | regime | condition | commanded speed | descends from |
 |---|---|---|---|
 | **track** | \|g\| ≤ 40 m | `vO(t) · clamp(1 + g/PACE_GAIN, 0.7, 1.35)` where `vO` = opinion's own speed at t | smoother track regime, verbatim constants |
-| **catch-up** | g > 40 m | `vO + min(DV_CATCH_MAX, g/T_CLOSE)`, capped by `CEIL = min(vAllowed, CATCH_HEADROOM·paceAt(s,t))` | smoother catch-up; `CATCH_HEADROOM 1.9` = measured p90/p50 free-running ratio (the ceiling is anchored on observed sprint pace, never the legal cap — the night-centre lesson) |
-| **yield** | g < −40 m enter / −12 m exit (hysteresis) while opinion is MOVING | `max(YIELD_MIN 3.0, 0.5·vO)` — slow tram, never pedestrian, never reverse | smoother yield + the v1 «пешеходная скорость» field fix |
-| **hold-follow** | opinion standing (anchor hold / downstream dwell / terminal) | behind: brake onto the hold point at ≤ CEIL (envelope captures the platform); at/ahead: stand (reality itself is standing) | smoother hold-follow (the r2 blocker fix) |
+| **catch-up** | g > 40 m | `vO + min(DV_CATCH_MAX, g/T_CLOSE)`, capped by `CEIL = min(vAllowed, max(CATCH_HEADROOM·paceCorr, vO + CATCH_DV_MIN))` where `paceCorr = max(paceAt(s,t), paceAt(o,t))` — the surface over BOTH ends of the gap corridor | smoother catch-up; `CATCH_HEADROOM 1.9` = measured p90/p50 free-running ratio (the ceiling is anchored on observed sprint pace, never the legal cap — the night-centre lesson). **Tuning deviation 2026-08-17**, see note below |
+| **yield** | g < −40 m enter / −12 m exit (hysteresis) while opinion is MOVING | `max(YIELD_FACTOR·vO, min(YIELD_MIN 3.0, vO))` — slow tram, never pedestrian **and never faster than the reality it yields to**, never reverse | smoother yield + the v1 «пешеходная скорость» field fix; **tuning deviation 2026-08-17** |
+| **hold-follow** | opinion standing (anchor hold / downstream dwell / terminal) | behind: brake onto the hold point at ≤ `min(vAllowed, max(CATCH_HEADROOM·paceCorr, HOLD_APPROACH_MIN))` (envelope captures the platform); at/ahead: stand (reality itself is standing) | smoother hold-follow (the r2 blocker fix); **tuning deviation 2026-08-17** |
+
+**Tuning deviation (2026-08-17) — the ceiling and yield formulas.** The original
+single-bucket ceiling `CATCH_HEADROOM·paceAt(s,t)` was measured live (12 h
+shadow + per-step limiter drill-down) binding **62 % of all catch-up steps**
+(mean 3.3 m/s of demanded closing speed clipped), and in 5 % of bound steps it
+sat **below the reference's own speed** — the smooth was commanded slower than
+the thing it chases, i.e. divergence, not honesty. Root cause: `paceAt` at the
+smooth's own position is the stop-zone bucket at exactly the moments catch-up
+starts (fix re-anchors cluster at departures), and stop-zone cells are
+dwell-contaminated (moving→moving spans that cross a stop fold dwell time into
+pace; the R13 guard only drops at_stop endpoints). G5 read p50 22.5 s / p90
+45.5 s against the 12/28 design gates, and tuning the demand constants to
+their band edges (T_CLOSE 10→8, DV 6→7) had already moved nothing — the
+demand was never the binder. The reform keeps the observed-pace anchor but (a)
+takes the pace surface over BOTH ends of the corridor being closed, (b) floors
+the catch-up ceiling at `vO + CATCH_DV_MIN 2.5` — the reference's speed is
+itself an observed-pace quantity (ML-timed, learned-clamped, envelope-legal),
+so a modest surplus above it never sprints past what reality supports — and
+(c) floors the hold-follow approach at `HOLD_APPROACH_MIN = DEFAULT_PACE`
+(the brake parabola owns the last metres regardless; 42 % of approach steps
+had been ceiling-bound below the brake envelope). The yield floor 3.0 is kept
+only while the reference itself does ≥ 3.0 (21 % of yield steps had been
+commanded ABOVE `vO`, growing the lead they were meant to repay).
 
 All regimes then pass the same constraint stack (envelope, accel, jerk,
 v ≥ 0, monotone s). Notes:
@@ -435,9 +458,11 @@ new = introduced here, pre-registered for tuning by the gates.
 | `PACE_GAIN_M` (smooth track band) | 120 m | smoother | port |
 | track clamp | 0.7 / 1.35 | smoother | port |
 | `CATCH_ENTER` / `YIELD_ENTER` / `YIELD_EXIT` | +40 / −40 / −12 m | smoother TRACK_BAND / hysteresis | port |
-| `T_CLOSE` | 10 s | new (replaces the 30 s blend window as the *demand* constant) | new, tunable 8–15 |
-| `DV_CATCH_MAX` | 6.0 m/s | new (bounds surplus; the CATCH_HEADROOM ceiling binds first on slow corridors) | new, tunable 4–7 |
-| `CATCH_HEADROOM` | 1.9 ×`paceAt` | smoother CATCHUP_HEADROOM (measured p90/p50 free-running) | port |
+| `T_CLOSE` | 8 s | new (replaces the 30 s blend window as the *demand* constant); tuned to its band edge after the first live G5 window (was 10) | new, tunable 8–15 |
+| `DV_CATCH_MAX` | 7.0 m/s | new (bounds surplus; the CATCH_HEADROOM ceiling binds first on slow corridors); tuned to its band edge after the first live G5 window (was 6.0) | new, tunable 4–7 |
+| `CATCH_HEADROOM` | 1.9 ×`paceCorr` (both corridor ends — §6 deviation note) | smoother CATCHUP_HEADROOM (measured p90/p50 free-running) | port, amended 2026-08-17 |
+| `CATCH_DV_MIN` | 2.5 m/s | 2026-08-17 deviation (§6 note): ceiling floor above the reference's own speed | new, tunable 2–3.5 |
+| `HOLD_APPROACH_MIN` | 5.5 m/s = `DEFAULT_PACE` | 2026-08-17 deviation (§6 note): hold-follow approach floor | new |
 | `YIELD_FACTOR` / `YIELD_MIN_V` | 0.5 / 3.0 m/s | smoother | port |
 | `DISC_FLOOR` / `DISC_CAP` / margin / gap clamp | 350 / 1200 m / 1.25 / [45, 240] s | tramSim teleportThresholdM (500/1500 floor/cap rescaled to the drive's close-out ability) | new, tunable |
 | `CONV_TOL_M` (G5 target) | 15 m | new (≈ one tram length) | new |
@@ -459,6 +484,38 @@ The existing greedy position-error-minimal merge stays, with two changes:
    cap local minimum*. Rationale: merging across a curve dip re-lerps the
    client's speed OVER the dip — a wire-level curvature violation (G4) that
    the fine profile never committed. With protection, G4 = 0 by construction.
+   **Erratum (2026-08-17, measured live):** corner protection alone does NOT
+   give structural zero — four additional mechanisms produced ~40 violations
+   per day: (a) *cornerless descents*: braking into a hold ACROSS a curve
+   zone is monotone in v, so no local minimum exists to protect, yet the
+   merged chord's positional midpoint lands in the dip with a mean above its
+   cap; fixed by an **envelope guard in the merge loop** — a merge whose
+   resulting chord would cross `cap·1.05 + 0.25` at the chord's EMITTED
+   positional midpoint (accumulated endpoint-trapezoid position — fine-grid
+   approximations drifted metres apart deep in budget-forced horizons and
+   let a t+99 s chord slip through) is forbidden, re-evaluated after every
+   accepted merge; the over-budget escape merges farthest-first anyway and
+   counts it in the §11 pressure gauge; (b) *hot seams*: the previous
+   emission's CHORD speed at `t_E` can exceed the local curve envelope (it
+   was legal at its own midpoint), and both tracks now cap the inherited
+   seam speed with a **margin-aware seam cap** — the largest v satisfying
+   `v ≤ env(s; jerk-onset margin(v, a0) + 2·dt)` (bisected), with the
+   inherited accel clamped ≤ 0 whenever the cap bites (§4.3, §6); the
+   opinion's earlier raw-envelope seam cap was necessary but not sufficient
+   (measured: a raw-capped age-seam still printed 7.37 m/s across a 6.72 cap
+   one segment in); (c) *plateau overshoot*: a full-throttle ramp arriving
+   at any demand plateau overshoots by up to `A_ACC²/2J ≈ 1.06 m/s` under
+   the jerk window; fixed by the **S-curve approach ceiling**
+   `a ≤ +√(2·J·(vCmd − v))` — the exact accel-side mirror of the §4.3
+   landing floor; (d) *the margin cliff*: the §5 onset margin is
+   a-dependent, so a hard ramp COLLAPSES its own envelope demand — a vertex
+   that looked far at a = 0 suddenly bites at a = +1.3, after jerk can no
+   longer comply (measured: 3-consecutive-step overshoots up to +1.3 m/s
+   entering dips during ceiling-unlocked catch-up); fixed by a
+   **one-step-ahead feasibility clamp** — each step's accel is bisected down
+   (within the jerk window) until the post state `(v', a')` passes its own
+   margin test, the discrete form of "never enter a state you cannot brake
+   out of".
 2. **Near-term weighting**: merge cost × `w(t)` (table above). The far half
    of the horizon is routinely superseded by the next emission (~50 s
    cadence); spending knot budget there at the expense of the next 30 s is
