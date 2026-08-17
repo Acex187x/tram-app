@@ -440,9 +440,9 @@ const mkDrive = (over: Partial<Parameters<typeof buildDriveVehicle>[0]> &
   const tk = legKinFloorS(100, 0, 0);
   check('drive/adapter: kinematic floor — 100 m stop-to-stop ≈ 19 s S-curve', Math.abs(tk - 19) < 1.2,
     `${tk.toFixed(1)}s`);
-  check('drive/adapter: T_disc policy values',
-    Math.abs(discThresholdM(60, 5.5) - 412.5) < 1e-6 && discThresholdM(0, 1) === 350 &&
-    discThresholdM(1e6, 100) === 1200,
+  check('drive/adapter: T_disc policy values (2026-08-17 deviation: 300/900/1.1)',
+    Math.abs(discThresholdM(60, 5.5) - 363) < 1e-6 && discThresholdM(0, 1) === 300 &&
+    discThresholdM(1e6, 100) === 900,
     `T_disc(60s, 5.5) = ${discThresholdM(60, 5.5)}`);
 }
 
@@ -638,8 +638,8 @@ const mkDrive = (over: Partial<Parameters<typeof buildDriveVehicle>[0]> &
   const at = (gapM: number): DriveBuilt =>
     mkDrive({ raw: raw(sSeam + gapM, 5.5), geom, surfaces: surf(5.5), fixGapS: 60, prev: prevRef });
   const b300 = at(300);
-  check('drive/disc: 300 m < T_disc(60 s, 5.5) = 412.5 ⇒ DRIVEN OFF, not a teleport',
-    !b300.vehicle.discontinuity && b300.meta.tDiscM !== null && Math.abs(b300.meta.tDiscM - 412.5) < 1e-6,
+  check('drive/disc: 300 m < T_disc(60 s, 5.5) = 363 ⇒ DRIVEN OFF, not a teleport',
+    !b300.vehicle.discontinuity && b300.meta.tDiscM !== null && Math.abs(b300.meta.tDiscM - 363) < 1e-6,
     `T_disc = ${b300.meta.tDiscM}`);
   driveContract('drive/disc-300', b300);
   const b500 = at(500);

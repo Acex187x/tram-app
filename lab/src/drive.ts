@@ -120,10 +120,23 @@ export const T_CLOSE_S = 8;
 export const DV_CATCH_MAX = 7.0;
 /** Gap-aware discontinuity threshold (design §7; descends from tramSim's
  *  teleportThresholdM with floor/cap rescaled to the drive's close-out
- *  ability). Replaces the flat TRAJ_DISCONTINUITY_M = 150 for the v3 drive. */
-export const DISC_FLOOR_M = 350;
-export const DISC_CAP_M = 1200;
-export const DISC_MARGIN = 1.25;
+ *  ability). Replaces the flat TRAJ_DISCONTINUITY_M = 150 for the v3 drive.
+ *  Tuning deviation 2026-08-17 (measured gap CDF at fix re-emissions: p50 83
+ *  / p90 237 / p98 357 m; flag rate 1.10 % at floor 350): floor 350 → 300 and
+ *  cap 1200 → 900 teleport the largest gap-carriers honestly within the
+ *  coordinator's ≤ 3 % G8 budget (projected ~2–3 % with the pace scaling
+ *  intact — the scaling still lifts thresholds for long-fix-gap vehicles, the
+ *  feed-degradation lesson). The lever's measured ceiling: deleting the ~45 %
+ *  of gap-carry that the smooth-accuracy flip bar implies would need a flat
+ *  ~180–200 m threshold = 16–20 % teleports — dishonesty the design exists to
+ *  prevent; the deeper fix is re-anchor noise, not the threshold. */
+export const DISC_FLOOR_M = 300;
+export const DISC_CAP_M = 900;
+/** 1.25 → 1.1 in the same deviation: discThresholdM floors its pace at
+ *  DEFAULT_PACE, so the minimum scaled threshold was 45·5.5·1.25 ≈ 309 m and
+ *  the floor alone barely moved anything — the margin is the knob that
+ *  rescales the whole gap-aware band (min becomes 272 → the 300 floor binds). */
+export const DISC_MARGIN = 1.1;
 export const DISC_GAP_MIN_S = 45;
 export const DISC_GAP_MAX_S = 240;
 /** A stop is "reached" within this of its distM, m (port: tramSim STOP_REACH_M). */
@@ -847,7 +860,11 @@ function runDrive(args: {
         }
         return vP <= envP + 1e-9;
       };
-      const aFloor = a - TRAJ_J_MAX * DT_S;
+      // The fallback floor is the jerk window's lower edge BOUNDED BY −A_BRK:
+      // an unbounded a − J·dt printed one −1.467 m/s² wire accel in 578 k
+      // segments (2026-08-17) — the brake cap is a frozen contract limit and
+      // outranks the feasibility heuristic.
+      const aFloor = Math.max(a - TRAJ_J_MAX * DT_S, -TRAJ_A_BRK);
       if (aDes > aFloor && !post(aDes)) {
         let lo = aFloor;
         let hi = aDes;
@@ -1070,6 +1087,82 @@ function emitCompressed(
     if (bounds.length > TRAJ_MAX_POINTS && bestCost > FREE_M) budgetForced = true;
     bounds.splice(best, 1);
     if (forbidden.size > 0) forbidden.clear();
+  }
+
+  // Post-compression repair (G4 literal zero): upstream merges shift
+  // downstream EMITTED positions AFTER those segments passed their own guard
+  // check — the last live offender class (10 per 578 k segments, all at
+  // t+84…116 s where prefix drift is largest, 2026-08-17). Re-verify every
+  // segment against its FINAL emitted midpoint; split any violator at the
+  // fine step sitting deepest in the envelope dip (protected), then re-merge
+  // the cheapest guard-passing knot if over budget. Rounds are bounded: each
+  // inserts one knot and the violating population is ~1–2 per affected track.
+  for (let round = 0; round < 6; round++) {
+    const sEm = new Array<number>(bounds.length);
+    sEm[0] = sFine[0];
+    for (let k = 1; k < bounds.length; k++) {
+      sEm[k] =
+        sEm[k - 1] + ((vFine[bounds[k - 1]] + vFine[bounds[k]]) / 2) * (bounds[k] - bounds[k - 1]) * DT_S;
+    }
+    let worstK = -1;
+    let worstExcess = 0;
+    for (let k = 1; k < bounds.length; k++) {
+      const chord = (vFine[bounds[k - 1]] + vFine[bounds[k]]) / 2;
+      const cap = curveEnvAt(profile, geom, (sEm[k - 1] + sEm[k]) / 2);
+      const excess = chord - (cap * 1.05 + 0.25);
+      if (excess > worstExcess) {
+        worstExcess = excess;
+        worstK = k;
+      }
+    }
+    if (worstK < 0) break;
+    const l = bounds[worstK - 1];
+    const r = bounds[worstK];
+    if (r - l < 2) break; // single fine step — pointwise, not a chord artefact
+    let ins = -1;
+    let insEnv = Infinity;
+    let acc = sEm[worstK - 1];
+    for (let k2 = l + 1; k2 < r; k2++) {
+      acc += ((vFine[k2 - 1] + vFine[k2]) / 2) * DT_S;
+      const e = curveEnvAt(profile, geom, acc);
+      if (e < insEnv) {
+        insEnv = e;
+        ins = k2;
+      }
+    }
+    if (ins < 0) break;
+    bounds.splice(worstK, 0, ins);
+    prot.add(ins);
+    while (bounds.length > TRAJ_MAX_POINTS) {
+      let best = -1;
+      let bestCost = Infinity;
+      for (let j = 1; j < bounds.length - 1; j++) {
+        if (prot.has(bounds[j])) continue;
+        if (!capGuardOk(j)) continue;
+        const c = cost(j);
+        if (c < bestCost) {
+          bestCost = c;
+          best = j;
+        }
+      }
+      if (best === -1) {
+        let fj = -1;
+        for (let j = bounds.length - 2; j >= 1; j--) {
+          if (bounds[j] !== ins && prot.has(bounds[j])) {
+            fj = j;
+            break;
+          }
+        }
+        if (fj < 0) break;
+        prot.delete(bounds[fj]);
+        bounds.splice(fj, 1);
+        pressureDrops++;
+        budgetForced = true;
+        continue;
+      }
+      if (bestCost > FREE_M) budgetForced = true;
+      bounds.splice(best, 1);
+    }
   }
 
   const points: TrackPoint[] = [];
