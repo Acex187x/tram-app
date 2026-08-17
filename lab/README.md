@@ -329,6 +329,65 @@ TSX_TSCONFIG_PATH=$PWD/tsconfig.runtime.json ./node_modules/.bin/tsx src/main.ts
   holdout only 66.8 → 54.8 m — the residual at Prague's fix cadence is mostly
   irreducible without a denser upstream feed.
 
+- **2026-08-17 (day 9, curvegen-v3 shadow tuning): the smooth track's deficit
+  was the CEILING, not the demand — and G4's "structural zero" had four real
+  holes.** After 12 h of shadow (157 k emissions, matched n=115 087) the drive
+  OPINION already beat the published pair (ml-drive 81.7 m mean vs ml-mode
+  94.2) but ml-drive-smooth ran 109.1 m / bias −67.0 vs ml-smooth 94.4 /
+  −30.7, with G5 catch-up p50 22.5 s / p90 45.5 vs the 12/28 design gates —
+  and the demand constants were already at their band edges (T_CLOSE 8, DV 7),
+  so the demand was never the binder. A per-step limiter drill-down
+  (`/api/summary → perceptual.g5catchup.limiter`, kept) proved it in minutes:
+  **62 % of catch-up steps were bound by the observed-pace ceiling** (mean
+  3.3 m/s of closing speed clipped), 5 % of bound steps commanded the smooth
+  SLOWER than the opinion it chases, 42 % of hold-follow approaches were
+  ceiling-bound below the brake parabola, and 21 % of yield steps OUTRAN the
+  reference (the lead grew while "repaying"). Root cause: `paceAt` at the
+  smooth's own position is the stop-zone bucket at exactly the moments
+  catch-up starts, and stop-zone cells are dwell-contaminated (moving→moving
+  spans crossing a stop fold dwell into pace; R13 only guards at_stop
+  endpoints). Fix (design §6 tuning deviation): the ceiling's pace anchor
+  spans BOTH ends of the gap corridor, floored at `vO + CATCH_DV_MIN 2.5`
+  (catch-up) / `DEFAULT_PACE` (hold-follow approach); yield never exceeds the
+  reference's own speed. G4's 513 violations decomposed into (a) hot SEAM
+  imports — the previous emission's chord/knot-lerp speed at t_E exceeds the
+  local envelope when the chord spans a dip; fixed by a margin-aware
+  `seamSpeedCap` on BOTH tracks (+ inherited accel clamped ≤ 0 when it
+  bites); (b) CORNERLESS DESCENTS — braking into a hold across a curve zone
+  is monotone in v, so §11's local-minimum knot protection provably cannot
+  see it; fixed by an envelope guard on every compression merge, evaluated at
+  the chord's EMITTED accumulated position (fine-grid approximations drifted
+  metres in budget-forced horizons); (c) a full-throttle ramp arriving at a
+  demand plateau overshoots by A²/2J ≈ 1.06 m/s; fixed by the S-curve
+  APPROACH ceiling `a ≤ +√(2·J·Δv)` — the exact accel-side mirror of the
+  landing floor; (d) the a-dependent onset margin lets a hard ramp COLLAPSE
+  its own envelope demand after jerk can no longer comply (the margin
+  cliff); fixed by a one-step-ahead feasibility clamp — never enter a state
+  you cannot brake out of. **Post-fix fresh window** (40 min, 09:15–09:56Z,
+  14 213 emissions, matched n=10 336): ml-drive 76.3 m mean / −24.8 signed
+  (vs ml-mode 87.3 / −33.8), ml-drive-smooth 97.6 / −60.8 (vs ml-smooth
+  87.5 / −35.2) — the smooth deficit narrowed +14.7 → +10.1 m mean and
+  −67.0 → −60.8 signed but still misses the flip bar (≤ +2 / ≥ −45). The
+  residual is no longer the ceiling (ceil-below-ref 0, yield-outrun 0,
+  behind-unconverged 535 → 10 of 7 171 episodes): it is honest gap-carry —
+  v3 DRIVES OFF re-anchor gaps the published smoother teleports over (G8
+  fix-driven discontinuity 0.65 % vs ~16 % published; T_disc 350–1200 m vs
+  the flat 150). G5 near p50 22.5 s / p90 43.5 (lifetime counter incl.
+  restart transient; steady-state bytes 09:26–09:52: moving starts 16.0 /
+  41.0, standing starts 30.0 / 48.0 at 15 % share — the jerk spin-up the §6
+  latency math never priced) vs targets 14/30 — missed; ahead-unconverged
+  12.8 % (was 17.4, target <10) — missed; G4 10 per 578 k segments (was 513
+  per 6.43 M — 4.7× down, all deep-horizon t+84–116 s: upstream merges
+  shift downstream emitted midpoints AFTER their guard check — repair pass
+  queued); G2 jerk p99 0.795 / 0 over 1.0; G3 1.26 flips/min; G9 3
+  (2.2–4.4 m, geometry-refresh re-anchor class, pre-existing at the same
+  rate); published feeds untouched (0 kinematic violations over 615 k
+  segments, v1 13-point shape, determinism byte-identical); one shadow
+  accel −1.467 m/s² from the feasibility clamp's unbounded fallback floor
+  (fix queued: bound it by −A_BRK). Next lever within the design's own
+  tunables: tighten T_disc so the largest gap-carriers teleport honestly
+  instead of dragging −200 m errors for 60–90 s — G8 has 7× headroom.
+
 ## Teardown
 
 ```sh
@@ -338,5 +397,7 @@ rm /etc/dokploy/traefik/dynamic/tram-lab.yml
 # until explicitly removed with `docker volume rm`.
 ```
 
-NOTE: the compose currently mounts THIS worktree as /repo. If this branch's
-worktree is ever removed, redeploy from the main checkout after merging.
+NOTE: since 2026-08-16 the compose mounts the MAIN checkout
+(/root/code/pets/tram-app) as /repo — verified via the container's compose
+labels. Code changes apply with `docker restart tram-lab`; the runtime loads
+sources at boot (tsx, no watch).
