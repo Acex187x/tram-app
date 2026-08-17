@@ -57,6 +57,19 @@ export interface TrackPoint {
   s: number;
 }
 
+/** Which physics engine `GET /api/trajectories/v2?gen=…` serves:
+ *
+ *   current — the published generator; what every phone gets when `gen` is
+ *             absent, and the ONLY bundle whose bytes are frozen by contract.
+ *   v3      — the drive-v3 bundle (the /api/shadow-trajectories content) in the
+ *             plain v2 wire shape.
+ *   mix     — v3's opinion driven onto the current generator's smooth track.
+ *
+ * The engine choice is the phone's, so the bundle says which one answered:
+ * `v3`/`mix` carry a `generator` field, `current` cannot (its bytes are
+ * frozen), and absence therefore means "the published generator". */
+export type TrajectoryGen = 'current' | 'v3' | 'mix';
+
 export interface V2Vehicle {
   key: string;
   tripId: string;

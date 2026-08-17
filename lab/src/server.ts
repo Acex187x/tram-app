@@ -4,14 +4,31 @@ import fs from 'fs';
 import http from 'http';
 import path from 'path';
 import { HTTP_PORT } from './config';
+import type { TrajectoryGen } from './trajectory';
+
+/** `?gen=` → engine. Anything unrecognised (including a misspelled one) serves
+ *  the PUBLISHED bundle: a phone that asks for an engine this build does not
+ *  know must still get a working map, never an error page. The reply's
+ *  `generator` field is what tells the client which engine actually answered. */
+function parseGen(raw: string | null): TrajectoryGen {
+  switch ((raw ?? '').toLowerCase()) {
+    case 'v3':
+      return 'v3';
+    case 'mix':
+      return 'mix';
+    default:
+      return 'current';
+  }
+}
 
 export interface ServerDeps {
   getLive: () => unknown;
   getSummary: () => unknown;
   /** Already-serialized JSON (cached upstream) — sent verbatim. */
   getTrajectories: () => string;
-  /** physics-v3 bundle (docs/research/physics-v3-protocol.md), also cached. */
-  getTrajectoriesV2: () => string;
+  /** physics-v3 bundle (docs/research/physics-v3-protocol.md), also cached.
+   *  `gen` selects the engine; each gen is cached/frozen separately. */
+  getTrajectoriesV2: (gen: TrajectoryGen) => string;
   /** curvegen-v3 SHADOW bundle (same shape + shadow:true), also cached 2 s. */
   getShadowTrajectories: () => string;
   /** Published or shadow curves + recent real fixes for one vehicle. */
@@ -68,7 +85,7 @@ export function startServer(deps: ServerDeps): void {
       } else if (url === '/api/trajectories') {
         jsonRaw(200, deps.getTrajectories()); // v1 — build-12 phones; frozen
       } else if (url === '/api/trajectories/v2') {
-        jsonRaw(200, deps.getTrajectoriesV2());
+        jsonRaw(200, deps.getTrajectoriesV2(parseGen(new URLSearchParams(query).get('gen'))));
       } else if (url === '/api/shadow-trajectories') {
         jsonRaw(200, deps.getShadowTrajectories()); // curvegen-v3 shadow; not for phones
       } else if (url === '/api/mlreport') {

@@ -62,6 +62,7 @@ import {
   modalReleaseMs,
   type KinTrack,
   type ModalHold,
+  type TrajectoryGen,
   type V2Vehicle,
 } from './trajectory';
 
@@ -645,7 +646,9 @@ export function start(): void {
    * as v1 INCLUDING serverNowMs, so two fetches inside the window are
    * byte-identical (determinism gate); clients pay ≤ TRAJ_JSON_TTL_MS of clock
    * offset for that, which the staleness field makes visible. */
-  function getTrajectoriesV2(): string {
+  function getTrajectoriesV2(gen: TrajectoryGen = 'current'): string {
+    if (gen === 'v3') return getGenV3();
+    if (gen === 'mix') return getGenMix();
     const nowMs = Date.now();
     if (trajV2Json !== null && nowMs - trajV2JsonAtMs < TRAJ_JSON_TTL_MS) return trajV2Json;
     trajV2Json = JSON.stringify({
@@ -677,6 +680,81 @@ export function start(): void {
     });
     shadowJsonAtMs = nowMs;
     return shadowJson;
+  }
+
+  // ── GET /api/trajectories/v2?gen=v3|mix — engine selection from the phone ──
+  // Same wire shape, same 2 s freeze, one cache PER GEN so byte-determinism
+  // inside a window holds for each of them independently. `gen=current` never
+  // reaches this code: its bytes are frozen for build 14 in the field.
+  let genV3Json: string | null = null;
+  let genV3JsonAtMs = 0;
+  let genMixJson: string | null = null;
+  let genMixJsonAtMs = 0;
+
+  /** `?gen=v3` — the drive-v3 curves (the /api/shadow-trajectories content) in
+   *  the plain v2 envelope: a phone that picked this engine is not running a
+   *  shadow, so the `shadow: true` marker stays on the shadow endpoint. */
+  function getGenV3(): string {
+    const nowMs = Date.now();
+    if (genV3Json !== null && nowMs - genV3JsonAtMs < TRAJ_JSON_TTL_MS) return genV3Json;
+    genV3Json = JSON.stringify({
+      protocolVersion: 2,
+      generator: 'drive-v3',
+      serverNowMs: nowMs,
+      atMs: trajBuiltAtMs,
+      horizonS: ((TRAJ_POINTS - 1) * TRAJ_STEP_MS) / 1000,
+      vehicles: [...shadowTrajectories.values()].map((e) => e.v2),
+    });
+    genV3JsonAtMs = nowMs;
+    return genV3Json;
+  }
+
+  /** `?gen=mix` — per vehicle: v3's `opinion` (and the anchor it re-anchored
+   *  to) driven onto the CURRENT generator's `smooth` track, to see whether the
+   *  new opinion is the improvement without also swapping the continuity track.
+   *  `discontinuity` is the OR and `emittedAtMs` the max of the two sources, so
+   *  the composite can never under-report a teleport nor blend from an anchor
+   *  older than the curves it carries. A vehicle only one source knows is
+   *  passed through whole — and so is one whose sources disagree on the trip,
+   *  because `s` is distance along THAT trip's shape and a track composed
+   *  across a trip change would be drawn on geometry it was never fitted to.
+   *  Built only when this gen is actually requested, then frozen like the
+   *  others; the pass-through cases reuse the source objects rather than
+   *  copying them. */
+  function getGenMix(): string {
+    const nowMs = Date.now();
+    if (genMixJson !== null && nowMs - genMixJsonAtMs < TRAJ_JSON_TTL_MS) return genMixJson;
+    const vehicles: V2Vehicle[] = [];
+    for (const [key, cur] of trajectories) {
+      const v3 = shadowTrajectories.get(key);
+      if (!v3 || v3.v2.tripId !== cur.v2.tripId) {
+        vehicles.push(v3 ? v3.v2 : cur.v2);
+        continue;
+      }
+      vehicles.push({
+        key: v3.v2.key,
+        tripId: v3.v2.tripId,
+        line: v3.v2.line,
+        anchorMs: v3.v2.anchorMs,
+        emittedAtMs: Math.max(v3.v2.emittedAtMs, cur.v2.emittedAtMs),
+        discontinuity: v3.v2.discontinuity || cur.v2.discontinuity,
+        opinion: v3.v2.opinion,
+        smooth: cur.v2.smooth,
+      });
+    }
+    for (const [key, v3] of shadowTrajectories) {
+      if (!trajectories.has(key)) vehicles.push(v3.v2);
+    }
+    genMixJson = JSON.stringify({
+      protocolVersion: 2,
+      generator: 'mix',
+      serverNowMs: nowMs,
+      atMs: trajBuiltAtMs,
+      horizonS: ((TRAJ_POINTS - 1) * TRAJ_STEP_MS) / 1000,
+      vehicles,
+    });
+    genMixJsonAtMs = nowMs;
+    return genMixJson;
   }
 
   // ── GET /api/geometry-pack — cold start for clients ────────────────────────

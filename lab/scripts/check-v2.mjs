@@ -3,6 +3,14 @@
 //
 //   node lab/scripts/check-v2.mjs                 # 75 s against tram-lab.acex.sh
 //   LAB_URL=http://localhost:8090 DURATION_S=90 node lab/scripts/check-v2.mjs
+//   node lab/scripts/check-v2.mjs v3              # same run against ?gen=v3
+//   GEN=mix node lab/scripts/check-v2.mjs         # …or ?gen=mix
+//
+// The engine selector (`?gen=current|v3|mix`) only changes WHICH bundle the v2
+// endpoint serves — every gate below is the same contract, so each gen must
+// pass it. An unknown gen is a hard error here (unlike the server, which falls
+// back to the published bundle): a checker that silently graded a different
+// engine than you asked for would be worse than no checker.
 //
 // What it proves:
 //  1. every emitted track satisfies the wire contract (both tracks, t↑, s↛↓,
@@ -27,6 +35,13 @@
 //     Percentile gates need n ≥ a floor to bind; below it they print advisory.
 
 const BASE = process.env.LAB_URL ?? 'https://tram-lab.acex.sh';
+const GEN = process.argv[2] ?? process.env.GEN ?? '';
+if (GEN !== '' && GEN !== 'current' && GEN !== 'v3' && GEN !== 'mix') {
+  console.error(`check-v2: unknown gen "${GEN}" — expected current | v3 | mix`);
+  process.exit(2);
+}
+/** Only the v2 endpoint takes `gen`; v1 and the shadow endpoint are unaffected. */
+const V2_PATH = `/api/trajectories/v2${GEN === '' ? '' : `?gen=${GEN}`}`;
 const DURATION_S = Number(process.env.DURATION_S ?? 75);
 const POLL_MS = Number(process.env.POLL_MS ?? 2000);
 const CONTINUITY_TOL_M = 2;
@@ -423,7 +438,7 @@ function maxSpeedWithin(track, tFrom, tTo) {
 const t0 = Date.now();
 while (Date.now() - t0 < DURATION_S * 1000) {
   const [b, v1, sb] = await Promise.all([
-    get('/api/trajectories/v2'),
+    get(V2_PATH),
     get('/api/trajectories'),
     get('/api/shadow-trajectories').catch(() => null),
   ]);
@@ -515,7 +530,7 @@ while (Date.now() - t0 < DURATION_S * 1000) {
 }
 
 // ── the literal two-snapshot test (first bundle vs one ~DURATION_S later) ────
-const late = await get('/api/trajectories/v2');
+const late = await get(V2_PATH);
 const twoFetchSingleGen = [];
 const twoFetchMultiGen = [];
 for (const v of late.vehicles) {
@@ -526,7 +541,7 @@ for (const v of late.vehicles) {
   else twoFetchMultiGen.push(d);
 }
 
-console.log(`\n── /api/trajectories/v2 contract, ${BASE} ─────────────────────────`);
+console.log(`\n── ${V2_PATH} contract, ${BASE} ─────────────────────────`);
 console.log(`bundles polled        ${bundles} over ${((Date.now() - t0) / 1000).toFixed(0)}s (every ${POLL_MS} ms)`);
 console.log(`vehicle-samples       ${vehiclesSeen}, last bundle ${late.vehicles.length} vehicles`);
 console.log(`max points/track      ${maxPoints} (cap 24)   min horizon ${minHorizonS}s (floor 120)`);
