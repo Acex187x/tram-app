@@ -528,6 +528,10 @@ function checkShadowCollisions(sb, liveByKey) {
     if (arr.length < 2) continue;
     arr.sort((a, b) => a.fixS - b.fixS);
     for (let i = 0; i + 1 < arr.length; i++) {
+      // Alias pair (same consist double-reported): fixes closer than a tram
+      // length cannot be two ordered trams on one rail — skip, mirroring the
+      // generator's own §14.4 exclusion.
+      if (arr[i + 1].fixS - arr[i].fixS < 15) continue;
       const f = arr[i].v;
       const l = arr[i + 1].v;
       const id = `g12:${f.key}@${f.emittedAtMs}|${l.key}@${l.emittedAtMs}`;

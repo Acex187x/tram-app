@@ -573,9 +573,16 @@ export function start(): void {
       const arr = byShape.get(shapeId);
       if (!arr) return null;
       if (leaderMemory.size > 20_000) leaderMemory.clear(); // bounded memory
+      const self = arr.find((c) => c.key === key);
       const cands: { c: { key: string; fixS: number; snap: TramSnapshot }; cOrd: number }[] = [];
       for (const c of arr) {
         if (c.key === key) continue;
+        // Alias pair: two "vehicles" with fixes closer than a tram length are
+        // physically one consist double-reported (or siding odometry
+        // aliasing) — no ordering can hold and mutual clipping interleaves
+        // the curves (measured live 2026-08-17: two L9V3 pairs flip-flopping
+        // at < 15 m separation). Not a queue; skip.
+        if (self && Math.abs(c.fixS - self.fixS) < 15) continue;
         // Ordering basis per §14.4: FIXES are the evidence ("overtaking is
         // rare" — a fresh fix outranks any model belief; the first live
         // window measured an ML curve "overtaking" a real leader by 289 m).
