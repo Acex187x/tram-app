@@ -43,6 +43,7 @@ import {
   TRAJ_ML_MAX_ROWS,
   TRAJ_POINTS,
   TRAJ_STEP_MS,
+  TRAJ_STAND_ASSERT_MS,
   TRAJ_V3_PUBLISH,
   TRAJ_V_MAX_MS,
   horizonBucket,
@@ -862,7 +863,8 @@ export function start(): void {
               anchorMs: v.snap.observedAtMs,
               fixGapS: v.fixGapS,
               standingStart:
-                (modal !== null && modal.releaseAtMs > tCompute) || shadowBuilt.meta.jamHolding,
+                (modal !== null && modal.releaseAtMs > tCompute + TRAJ_STAND_ASSERT_MS) ||
+                shadowBuilt.meta.jamHolding,
               discontinuity: shadowBuilt.vehicle.discontinuity,
             });
           }
@@ -952,7 +954,7 @@ export function start(): void {
             prevFixS: prevEntry.anchorFixS,
             anchorMs: v.snap.observedAtMs,
             fixGapS: v.fixGapS,
-            standingStart: modal !== null && modal.releaseAtMs > tCompute,
+            standingStart: modal !== null && modal.releaseAtMs > tCompute + TRAJ_STAND_ASSERT_MS,
             discontinuity: v2.discontinuity,
           });
         }

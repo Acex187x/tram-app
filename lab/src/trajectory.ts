@@ -49,6 +49,7 @@ import {
   TRAJ_MODAL_P,
   TRAJ_REANCHOR_TOL_M,
   TRAJ_SIM_STEP_MS,
+  TRAJ_STAND_ASSERT_MS,
   TRAJ_V_MAX_MS,
 } from './config';
 import { normalCdf } from './learned';
@@ -308,7 +309,12 @@ export function buildV2Vehicle(args: BuildV2Args): BuiltV2 | null {
   // exceed a still-armed modal hold's stopS only when the release estimate
   // moved later across the refresh; the marker then stands where it was
   // already rendered instead of teleporting back to the platform.
-  const holdingNow = modal !== null && modal.releaseAtMs > t0;
+  // §14.7 standing assertion: the hold outranks the continuity floor only
+  // when it actually renders standing (release beyond the sliver) — a hold
+  // releasing within TRAJ_STAND_ASSERT_MS asserts no standing evidence, and
+  // exempting it yanked the seam back to the platform for a blink (the
+  // measured 00:34Z G13 leak class).
+  const holdingNow = modal !== null && modal.releaseAtMs > t0 + TRAJ_STAND_ASSERT_MS;
   // §14.7 seam floor (fix-driven re-emissions): when the previous opinion's
   // projection at t0 is within `seamJustifiedM` of the NEW fix — i.e. the
   // newest evidence cannot prove the rendered position wrong — the target is

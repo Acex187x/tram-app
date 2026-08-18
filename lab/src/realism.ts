@@ -259,9 +259,13 @@ function round3(x: number): number {
 export const SEAM_REANCHOR_TOL_M = TRAJ_REANCHOR_TOL_M;
 /** Wire slack for G13 at the seam instant (cm rounding + eval interpolation). */
 export const SEAM_SLACK_M = 2;
-/** Extra slack at t_E + 2 s: a new curve legitimately braking for a
- *  constraint the old one ignored may fall ≤ a·t²/2 ≈ 3 m behind it. */
-export const SEAM_SLACK_LATE_M = 5;
+/** Extra slack at t_E + 2 s: from a continuity-correct seam the new curve may
+ *  legitimately BRAKE (envelope / curve cap / hold ahead) while the old one
+ *  was still accelerating — the physical worst-case divergence over 2 s is
+ *  ½·(A_ACC + A_BRK)·2² = 5.4 m (measured live 2026-08-18 00:40Z as a ≤ 10 m
+ *  +2 s-only residual). 6.5 = that bound + wire rounding; anything above it
+ *  is a genuine backward step, not physics. */
+export const SEAM_SLACK_LATE_M = 6.5;
 /** Client swap-lag instants the seam is evaluated at, s after emission. */
 export const SEAM_EVAL_DT_S = [0, 2, 5, 9] as const;
 

@@ -104,6 +104,16 @@ export const TRAJ_CONV_TOL_M = 15;
  * fix-gap of speed-estimate error, chosen from the measured 2026-08-18
  * pre-fix window (see lab/README.md Findings). */
 export const TRAJ_REANCHOR_TOL_M = 20;
+/** §14.7 standing-assertion floor, ms: a modal hold outranks the continuity
+ * floor only when it actually RENDERS standing — release later than this
+ * beyond the emission instant. A hold releasing within the sliver asserts no
+ * standing evidence (the release model itself believes the tram is leaving),
+ * yet it still yanked the seam back to the platform for a blink and printed
+ * exactly the G13 class the rule exists to kill (measured live 2026-08-18
+ * 00:34Z: 50–126 m backward swaps on both chains, byte-checker caught, the
+ * too-broad generator exemption did not). 5 s = the byte checker's own
+ * standing-observability window. */
+export const TRAJ_STAND_ASSERT_MS = 5_000;
 
 /** ── curvegen-v3 flip flag (design §12 phase B) ──
  * OFF: /api/trajectories/v2 serves the CURRENT generator unchanged and the v3

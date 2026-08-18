@@ -30,6 +30,7 @@ import {
   TRAJ_J_MAX,
   TRAJ_MAX_POINTS,
   TRAJ_SIM_STEP_MS,
+  TRAJ_STAND_ASSERT_MS,
   TRAJ_V_MAX_MS,
 } from './config';
 import { round2 } from './db';
@@ -1651,7 +1652,13 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
   // previously rendered opinion position (ageFloorS) — the drive integrates
   // forward-only, so flooring s0 floors the whole curve.
   const ageFloor = clamp(args.ageFloorS ?? 0, 0, geom.totalM);
-  const holdingNow = modal !== null && modal.releaseAtMs > t0;
+  // §14.7 standing assertion: a modal hold outranks the continuity floor (and
+  // stands at all) only when it renders standing beyond the observability
+  // sliver — a release within TRAJ_STAND_ASSERT_MS of the emission means the
+  // release model itself believes the tram is leaving, and exempting that
+  // sliver from the seam floor produced the measured 00:34Z G13 leak (the
+  // curve yanked back to the platform for a blink, then departed).
+  const holdingNow = modal !== null && modal.releaseAtMs > t0 + TRAJ_STAND_ASSERT_MS;
   // §14.3 jam hold: evidence-backed stuck position wins over the ML nowcast
   // (the dispatcher yields to reality) — hold there until movement evidence
   // (which arrives as a fix-driven re-emission) or the staleness release.
