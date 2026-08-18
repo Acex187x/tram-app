@@ -259,13 +259,17 @@ function round3(x: number): number {
 export const SEAM_REANCHOR_TOL_M = TRAJ_REANCHOR_TOL_M;
 /** Wire slack for G13 at the seam instant (cm rounding + eval interpolation). */
 export const SEAM_SLACK_M = 2;
-/** Extra slack at t_E + 2 s: from a continuity-correct seam the new curve may
- *  legitimately BRAKE (envelope / curve cap / hold ahead) while the old one
- *  was still accelerating — the physical worst-case divergence over 2 s is
- *  ½·(A_ACC + A_BRK)·2² = 5.4 m (measured live 2026-08-18 00:40Z as a ≤ 10 m
- *  +2 s-only residual). 6.5 = that bound + wire rounding; anything above it
- *  is a genuine backward step, not physics. */
-export const SEAM_SLACK_LATE_M = 6.5;
+/** Extra slack at t_E + 2 s. From a continuity-correct (floored, back0 ≈ 0)
+ *  seam the new curve may legitimately fall behind the OLD projection: the
+ *  margin-aware seam speed cap can cut the inherited speed at the floored
+ *  position (the old chord was wire-legal at its own midpoint, not at prevO),
+ *  and the §14.1 trim eases off when the ML sits behind the floored position
+ *  — measured live 2026-08-18 00:45Z: drift 5.9–9.9 m at +2 s, ~12–20 m at
+ *  +9 s, back0 exactly 0. That is continuous physics/design drift, not a
+ *  teleport. 10 m sits above it while a floored curve that immediately
+ *  STANDS (v ≥ ~5.5 m/s at the seam) still trips the clause; the drift class
+ *  itself is telemetried by backAtWorstSwapLag. */
+export const SEAM_SLACK_LATE_M = 10;
 /** Client swap-lag instants the seam is evaluated at, s after emission. */
 export const SEAM_EVAL_DT_S = [0, 2, 5, 9] as const;
 

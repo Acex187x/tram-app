@@ -794,9 +794,14 @@ Two refinements from the first live G13 window (2026-08-18 00:30–00:45Z):
   broad exemption let it yank the seam 50–126 m back to the platform for a
   blink before departing — the byte checker caught what the generator
   exempted. Such holds now fall to the continuity floor (and do not stand).
-- **Late-swap slack**: G13's t_E + 2 s recheck allows ½·(A_ACC+A_BRK)·2² ≈
-  5.4 m of divergence — a continuity-correct seam whose new curve brakes for
-  its own envelope while the old accelerated is physics, not a teleport.
+- **Late-swap slack**: G13's t_E + 2 s recheck allows 10 m of drift. A
+  floored (back0 ≈ 0) seam legally falls behind the OLD projection: the
+  margin-aware seam speed cap can cut the inherited speed at prevO (the old
+  chord was wire-legal at its own midpoint, not there), and the §14.1 trim
+  eases off while the ML sits behind the floored position — measured drift
+  5.9–9.9 m at +2 s, ~12–20 m at +9 s. Continuous physics from an exact
+  seam, not a teleport; a floored curve that immediately STANDS still trips
+  the clause, and the drift class is telemetried (backAtWorstSwapLag p90).
 
 The anti-collision clamp (§14.4) still outranks the continuity floor. Both
 generators apply the rule (`drive.ts` s0 floor; `trajectory.ts` target

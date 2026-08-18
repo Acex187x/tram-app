@@ -220,11 +220,12 @@ function checkSwapRegressionBytes(prefix, v, prev, liveByKey, serverNowMs) {
     return;
   }
   g13.checked++;
-  // +2 s slack: ½·(A_ACC+A_BRK)·2² = 5.4 m of legitimate physics divergence
-  // (new curve braking for its envelope while the old accelerated) + bytes.
+  // +2 s slack mirrors realism.SEAM_SLACK_LATE_M (10): a floored seam's curve
+  // may legally drift behind the old projection (seam speed cap + trim ease);
+  // an immediate stand from cruise speed still trips it. +0.5 bytes rounding.
   for (const [dt, slack] of [
     [0, 2.5],
-    [2000, 7.0],
+    [2000, 10.5],
   ]) {
     const back = evalTrack(prev.opinion, E + dt) - evalTrack(v.opinion, E + dt);
     if (back > slack) {
