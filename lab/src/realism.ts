@@ -15,10 +15,11 @@ import {
   TRAJ_CONV_TOL_M,
   TRAJ_FLIP_DEADBAND,
   TRAJ_J_GATE,
+  TRAJ_REANCHOR_TOL_M,
   TRAJ_V_MAX_GATE_MS,
 } from './config';
 import type { CurveViolationDetail, DipDetail, RegimeStats } from './drive';
-import { evalTrack, type TrackPoint } from './trajectory';
+import { evalTrack, seamJustifiedM, type TrackPoint } from './trajectory';
 
 export interface RealismReading {
   /** Per-segment mean speeds, m/s — what the client actually moves the marker at. */
@@ -229,6 +230,313 @@ export class RealismCounters {
 
 function round3(x: number): number {
   return Math.round(x * 1000) / 1000;
+}
+
+// ── re-anchor seam telemetry (owner field report 2026-08-18) ─────────────────
+// Symptom on build 15: a fresh fix arrives, the tram follows it, then ~5–10 s
+// later the «fixed» marker FLIES BACKWARD past the fix and stands. The G10
+// anchor floor (per-track, intra-emission) cannot see this class: it is a
+// CROSS-EMISSION regression — the NEW opinion curve, at the instant the phone
+// swaps bundles (up to ~9 s after emission: 5 s client poll + 2 s server
+// cache + fetch), renders BEHIND where the PREVIOUS opinion curve was already
+// rendering. Candidate mechanisms, each measured here before any fix ships:
+//   M1 swap regression — fix-driven re-anchor lands at nowcast ≈ fix + ds
+//     (latency), which is behind the old curve's projection;
+//   M2 behind-the-newest-fix — by swap time the phone holds a NEWER raw fix
+//     (RemoteFeed, ~2 s) than the bundle's anchor, so the rendered marker sits
+//     behind the dot the user sees (measured at fix arrival, server-side);
+//   M3 modal mis-fire — the new emission STANDS (modal/jam hold) while the
+//     fix evidence says the tram is rolling, so late swaps read as "jumped
+//     back and тупо стоит".
+// G13 «swapRegression» (armed with the §14.7 seam rule): a fix re-emission
+// stepping BACKWARD at the server-controllable swap instants (t_E, t_E + 2 s)
+// while the newest fix cannot exclude the previous projection
+// (prevOpinion(t_E) ≤ seamJustifiedM = fix + fixAge·vObs + TOL). Standing
+// evidence (modal/jam start) is exempt — its floor is the anchor itself
+// (G10). Target 0.
+
+/** The §14.7 evidence slack, m (config: TRAJ_REANCHOR_TOL_M). */
+export const SEAM_REANCHOR_TOL_M = TRAJ_REANCHOR_TOL_M;
+/** Wire slack for G13 at the seam instant (cm rounding + eval interpolation). */
+export const SEAM_SLACK_M = 2;
+/** Extra slack at t_E + 2 s: a new curve legitimately braking for a
+ *  constraint the old one ignored may fall ≤ a·t²/2 ≈ 3 m behind it. */
+export const SEAM_SLACK_LATE_M = 5;
+/** Client swap-lag instants the seam is evaluated at, s after emission. */
+export const SEAM_EVAL_DT_S = [0, 2, 5, 9] as const;
+
+export interface SeamEvent {
+  key: string;
+  emittedAtMs: number;
+  /** The NEW emission's anchor fix, m along shape. */
+  latestFixS: number;
+  /** The previous emission's anchor fix (null: unknown — pre-restart entry). */
+  prevFixS: number | null;
+  /** latestFixS − prevFixS: how far the fix itself advanced. */
+  movedM: number | null;
+  /** prevOpinion(t_E) − latestFixS: how far ahead of the newest fix the old
+   *  curve was projecting at the seam. */
+  prevAheadM: number;
+  /** §14.7 justified overhang (seamJustifiedM − latestFixS): prevAheadM at or
+   *  under this ⇒ continuity was owed (M1 class); above ⇒ honest overshoot
+   *  correction. */
+  justifiedAheadM: number;
+  /** prevOpinion(t) − newOpinion(t) at t_E + SEAM_EVAL_DT_S (backward step a
+   *  client swapping at that lag renders; > 0 = the marker jumps back). */
+  backM: number[];
+  /** The new emission begins STANDING (modal hold / jam hold). */
+  standingStart: boolean;
+  discontinuity: boolean;
+}
+
+/** Per-chain (published / shadow) counters over fix-driven re-emissions. */
+export class SeamCounters {
+  /** Fix-driven, non-discontinuity re-emissions with a same-trip prev curve. */
+  n = 0;
+  /** Seam regressions by size, at swap lag 0 (the seam itself). */
+  back0Over2 = 0;
+  back0Over10 = 0;
+  back0Over25 = 0;
+  back0Over50 = 0;
+  back0Over100 = 0;
+  /** …and at the worst client swap lag in the window (max over dt). */
+  backMaxOver10 = 0;
+  backMaxOver25 = 0;
+  backMaxOver50 = 0;
+  backMaxOver100 = 0;
+  /** M3 signature: the regressing emission starts standing. */
+  standingBackOver10 = 0;
+  /** …while the fix itself had MOVED (> 8 m — rolling evidence). */
+  movingFixStandingBackOver10 = 0;
+  /** G13 swapRegression (provisional until the seam rule ships): backward step
+   *  beyond what the newest fix justifies, at t_E or t_E + 2 s. Target 0. */
+  g13Violations = 0;
+  /** Honest-correction population: regression at the seam, but the old curve
+   *  had overshot beyond the §14.7 justified bound (fix + fixAge·vObs + TOL)
+   *  — correcting down IS the evidence speaking. */
+  overshootCorrections = 0;
+  private back0Hist = new Histogram(-50, 300, 1);
+  private backMaxHist = new Histogram(-50, 300, 1);
+  private prevAheadHist = new Histogram(-100, 500, 2);
+  /** What the §14.7 rule would do at other TOLs (choose REANCHOR_TOL_M from
+   *  data, not taste): per TOL — regressions > 2 m the floor would kill
+   *  (prevAhead ≤ TOL) vs keep as honest corrections (prevAhead > TOL). */
+  tolTable = [15, 25, 40, 60, 80, 120].map((tol) => ({ tol, killed: 0, kept: 0 }));
+  worst: SeamEvent[] = [];
+  recent: SeamEvent[] = [];
+
+  record(e: {
+    key: string;
+    emittedAtMs: number;
+    prevOpinion: TrackPoint[];
+    newOpinion: TrackPoint[];
+    latestFixS: number;
+    prevFixS: number | null;
+    /** observedAtMs of the NEW anchor fix (for the fix-age term of §14.7). */
+    anchorMs: number;
+    /** Observed gap between the last two fixes, s (vObs denominator). */
+    fixGapS: number;
+    standingStart: boolean;
+    discontinuity: boolean;
+  }): void {
+    if (e.prevOpinion.length === 0 || e.newOpinion.length === 0) return;
+    const t0 = e.emittedAtMs;
+    const backM = SEAM_EVAL_DT_S.map((dt) =>
+      round3(evalTrack(e.prevOpinion, t0 + dt * 1000) - evalTrack(e.newOpinion, t0 + dt * 1000)),
+    );
+    const prevAheadM = round3(evalTrack(e.prevOpinion, t0) - e.latestFixS);
+    const justified = seamJustifiedM({
+      anchorFixS: e.latestFixS,
+      anchorMs: e.anchorMs,
+      emittedAtMs: t0,
+      prevFixS: e.prevFixS ?? e.latestFixS,
+      fixGapS: e.fixGapS,
+    });
+    const ev: SeamEvent = {
+      key: e.key,
+      emittedAtMs: t0,
+      latestFixS: round3(e.latestFixS),
+      prevFixS: e.prevFixS === null ? null : round3(e.prevFixS),
+      movedM: e.prevFixS === null ? null : round3(e.latestFixS - e.prevFixS),
+      prevAheadM,
+      justifiedAheadM: round3(justified - e.latestFixS),
+      backM,
+      standingStart: e.standingStart,
+      discontinuity: e.discontinuity,
+    };
+    if (e.discontinuity) return this.push(ev); // honest teleport: ring only
+    this.n++;
+    const back0 = backM[0];
+    const backMax = Math.max(...backM);
+    this.back0Hist.add(back0);
+    this.backMaxHist.add(backMax);
+    this.prevAheadHist.add(prevAheadM);
+    if (back0 > 2) this.back0Over2++;
+    if (back0 > 10) this.back0Over10++;
+    if (back0 > 25) this.back0Over25++;
+    if (back0 > 50) this.back0Over50++;
+    if (back0 > 100) this.back0Over100++;
+    if (backMax > 10) this.backMaxOver10++;
+    if (backMax > 25) this.backMaxOver25++;
+    if (backMax > 50) this.backMaxOver50++;
+    if (backMax > 100) this.backMaxOver100++;
+    if (backMax > 10 && e.standingStart) {
+      this.standingBackOver10++;
+      if (ev.movedM !== null && ev.movedM > 8) this.movingFixStandingBackOver10++;
+    }
+    if (back0 > 2) {
+      for (const row of this.tolTable) {
+        if (prevAheadM <= row.tol) row.killed++;
+        else row.kept++;
+      }
+      if (evalTrack(e.prevOpinion, t0) > justified) this.overshootCorrections++;
+    }
+    // G13 «swapRegression» (§14.7 exact): a backward step at the server-
+    // controllable swap instants (t_E, t_E + 2 s of bundle cache) while the
+    // newest fix cannot exclude the previous projection (prevO ≤ justified).
+    // Standing evidence (modal/jam start) is exempt: its floor is the anchor
+    // itself, which G10 already gates.
+    if (!e.standingStart) {
+      if (evalTrack(e.prevOpinion, t0) <= justified) {
+        for (const dt of [0, 2]) {
+          const t = t0 + dt * 1000;
+          const slack = dt === 0 ? SEAM_SLACK_M : SEAM_SLACK_LATE_M;
+          if (evalTrack(e.newOpinion, t) < evalTrack(e.prevOpinion, t) - slack) {
+            this.g13Violations++;
+            break;
+          }
+        }
+      }
+    }
+    if (backMax > 10) this.push(ev);
+  }
+
+  private push(ev: SeamEvent): void {
+    this.recent.unshift(ev);
+    if (this.recent.length > 24) this.recent.length = 24;
+    if (ev.discontinuity) return;
+    this.worst.push(ev);
+    this.worst.sort((a, b) => Math.max(...b.backM) - Math.max(...a.backM));
+    if (this.worst.length > 12) this.worst.length = 12;
+  }
+
+  gauges(): unknown {
+    return {
+      tolM: SEAM_REANCHOR_TOL_M,
+      n: this.n,
+      g13swapRegression: { violations: this.g13Violations, target: 0 },
+      backAtSeam: {
+        over2: this.back0Over2,
+        over10: this.back0Over10,
+        over25: this.back0Over25,
+        over50: this.back0Over50,
+        over100: this.back0Over100,
+        p50: this.back0Hist.pct(50),
+        p90: this.back0Hist.pct(90),
+        p99: this.back0Hist.pct(99),
+      },
+      backAtWorstSwapLag: {
+        over10: this.backMaxOver10,
+        over25: this.backMaxOver25,
+        over50: this.backMaxOver50,
+        over100: this.backMaxOver100,
+        p50: this.backMaxHist.pct(50),
+        p90: this.backMaxHist.pct(90),
+        p99: this.backMaxHist.pct(99),
+      },
+      prevAheadOfFix: {
+        p50: this.prevAheadHist.pct(50),
+        p90: this.prevAheadHist.pct(90),
+        p99: this.prevAheadHist.pct(99),
+      },
+      m3standing: {
+        backOver10: this.standingBackOver10,
+        movingFix: this.movingFixStandingBackOver10,
+      },
+      overshootCorrections: this.overshootCorrections,
+      tolTable: this.tolTable,
+      worst: this.worst,
+      recent: this.recent,
+    };
+  }
+}
+
+// ── M2: rendered-behind-the-newest-fix, measured at fix arrival ──────────────
+// The instant a genuinely-new fix lands in the lab (≈ the instant the phone's
+// RemoteFeed dot moves), evaluate the CURRENTLY SERVED opinion curve at that
+// wall instant: `fixS − rendered` > 0 means every client already sees the dot
+// AHEAD of the marker — and the phone keeps rendering that stale curve for up
+// to another ~7–9 s of poll + cache lag on top of what is measured here.
+
+export interface FreshnessEvent {
+  key: string;
+  atMs: number;
+  behindM: number;
+  fixS: number;
+  /** The served curve was STANDING (< 0.3 m/s over the last 3 s) while the
+   *  newest fix contradicts it from ahead — the M3 end-to-end signature. */
+  standing: boolean;
+}
+
+export class FreshnessCounters {
+  arrivals = 0;
+  behindOver2 = 0;
+  behindOver10 = 0;
+  behindOver25 = 0;
+  behindOver50 = 0;
+  behindOver100 = 0;
+  /** Standing curve contradicted from ahead by > 25 m (M3 end-to-end). */
+  standingContradicted = 0;
+  maxBehindM = 0;
+  private behindHist = new Histogram(0, 400, 1);
+  recent: FreshnessEvent[] = [];
+
+  note(key: string, opinion: TrackPoint[], fixS: number, atMs: number): void {
+    if (opinion.length === 0) return;
+    this.arrivals++;
+    const rendered = evalTrack(opinion, atMs);
+    const behindM = fixS - rendered;
+    this.behindHist.add(Math.max(0, behindM));
+    if (behindM <= 2) return;
+    const standing =
+      Math.abs(rendered - evalTrack(opinion, atMs - 3000)) < 0.9; // < 0.3 m/s
+    this.behindOver2++;
+    if (behindM > 10) this.behindOver10++;
+    if (behindM > 25) this.behindOver25++;
+    if (behindM > 50) this.behindOver50++;
+    if (behindM > 100) this.behindOver100++;
+    if (standing && behindM > 25) this.standingContradicted++;
+    if (behindM > this.maxBehindM) this.maxBehindM = behindM;
+    if (behindM > 10) {
+      this.recent.unshift({
+        key,
+        atMs,
+        behindM: round3(behindM),
+        fixS: round3(fixS),
+        standing,
+      });
+      if (this.recent.length > 16) this.recent.length = 16;
+    }
+  }
+
+  gauges(): unknown {
+    return {
+      arrivals: this.arrivals,
+      behind: {
+        over2: this.behindOver2,
+        over10: this.behindOver10,
+        over25: this.behindOver25,
+        over50: this.behindOver50,
+        over100: this.behindOver100,
+        p50: this.behindHist.pct(50),
+        p90: this.behindHist.pct(90),
+        p99: this.behindHist.pct(99),
+        maxM: round3(this.maxBehindM),
+      },
+      standingContradicted: this.standingContradicted,
+      recent: this.recent,
+    };
+  }
 }
 
 // ── curvegen-v3 perceptual gate, generator side (design §8) ──────────────────

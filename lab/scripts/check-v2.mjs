@@ -164,6 +164,78 @@ function checkAnchorFloorBytes(v, liveByKey, serverNowMs, prefix = '') {
   }
 }
 
+// ── G13 swapRegression (§14.7, bytes side): a FIX-DRIVEN re-emission may step
+// the opinion backward at the client swap instants ONLY when the newest fix
+// justifies it — i.e. the previous curve's projection exceeded
+// fix + fixAge·vObs + TOL (vObs from the fixes themselves). Inside that bound
+// the server floors the new curve at the previous projection (continuity), so
+// any backward step observed from bytes is a violation. Standing-evidence
+// starts (modal/jam — the new curve stands at its anchor) are exempt: their
+// floor is the fix itself, which G10 already gates. Two-fetch analysis: the
+// dense poll gives prev/new emission pairs per key; /api/live provides the
+// fix positions the wire does not carry.
+const G13_REANCHOR_TOL_M = 20;
+const G13_V_PLAUS_MS = 16.7;
+const g13 = { checked: 0, violations: 0, skippedNoFix: 0, standingExempt: 0, overshoot: 0 };
+/** chainPrefix → (key → {anchorMs, fixS}): the anchor fix of the last seen emission. */
+const g13AnchorFix = new Map();
+function noteAnchorFixBytes(prefix, v, liveByKey, serverNowMs) {
+  const lv = liveByKey.get(v.key);
+  if (!lv || !Array.isArray(v.opinion) || v.opinion.length === 0) return;
+  if (Math.abs(lv.fixAgeS - (serverNowMs - v.anchorMs) / 1000) > 4) return; // other fix
+  let m = g13AnchorFix.get(prefix);
+  if (!m) g13AnchorFix.set(prefix, (m = new Map()));
+  m.set(v.key, { anchorMs: v.anchorMs, fixS: lv.fixDistM });
+}
+function checkSwapRegressionBytes(prefix, v, prev, liveByKey, serverNowMs) {
+  if (v.discontinuity || prev.anchorMs === v.anchorMs || prev.tripId !== v.tripId) return;
+  if (!Array.isArray(v.opinion) || v.opinion.length === 0) return;
+  const lv = liveByKey.get(v.key);
+  const rec = g13AnchorFix.get(prefix)?.get(v.key);
+  if (
+    !lv ||
+    Math.abs(lv.fixAgeS - (serverNowMs - v.anchorMs) / 1000) > 4 ||
+    !rec ||
+    rec.anchorMs !== prev.anchorMs
+  ) {
+    g13.skippedNoFix++; // cannot ground this pair in fix positions — skip
+    return;
+  }
+  const E = v.emittedAtMs;
+  // Standing-evidence exemption, bytes proxy: the new curve stands at its
+  // anchor (< 0.5 m/s over the first 5 s).
+  if (evalTrack(v.opinion, E + 5000) - v.opinion[0].s < 2.5) {
+    g13.standingExempt++;
+    return;
+  }
+  const fixGapS = (v.anchorMs - rec.anchorMs) / 1000;
+  const vObs =
+    fixGapS > 0
+      ? Math.min(Math.max((lv.fixDistM - rec.fixS) / fixGapS, 0), G13_V_PLAUS_MS)
+      : 0;
+  const justified =
+    lv.fixDistM + Math.max(0, (E - v.anchorMs) / 1000) * vObs + G13_REANCHOR_TOL_M;
+  if (evalTrack(prev.opinion, E) > justified + 0.5) {
+    g13.overshoot++; // provable overshoot — the backward correction is honest
+    return;
+  }
+  g13.checked++;
+  for (const [dt, slack] of [
+    [0, 2.5],
+    [2000, 5.5],
+  ]) {
+    const back = evalTrack(prev.opinion, E + dt) - evalTrack(v.opinion, E + dt);
+    if (back > slack) {
+      g13.violations++;
+      fail(
+        `${prefix}${v.key}@${E}: G13 swap regression ${back.toFixed(1)} m at +${dt / 1000}s ` +
+          `(prev within justified ${justified.toFixed(1)} m — continuity was owed)`,
+      );
+      break;
+    }
+  }
+}
+
 function checkRealism(v, name) {
   const id = `${v.key}@${v.emittedAtMs}:${name}`;
   if (realismSeen.has(id)) return; // each emission is polled many times
@@ -612,6 +684,15 @@ while (Date.now() - t0 < DURATION_S * 1000) {
     if (Array.isArray(sb.vehicles)) {
       const present = new Set(sb.vehicles.map((v) => v.key));
       for (const v of sb.vehicles) {
+        // G13 must read sh.last BEFORE checkShadowVehicle overwrites it.
+        const shPrev = sh.last.get(v.key);
+        if (
+          shPrev &&
+          shPrev.emittedAtMs !== v.emittedAtMs &&
+          (shadowPrevPresent === null || shadowPrevPresent.has(v.key))
+        ) {
+          checkSwapRegressionBytes('sh:', v, shPrev, liveByKey, sb.serverNowMs);
+        }
         checkShadowVehicle(
           v,
           sb.atMs,
@@ -620,6 +701,7 @@ while (Date.now() - t0 < DURATION_S * 1000) {
           sb.vehicles,
         );
         checkAnchorFloorBytes(v, liveByKey, sb.serverNowMs, 'sh:');
+        noteAnchorFixBytes('sh:', v, liveByKey, sb.serverNowMs);
       }
       if (geo) checkShadowCollisions(sb, liveByKey);
       shadowPrevPresent = present;
@@ -665,6 +747,7 @@ while (Date.now() - t0 < DURATION_S * 1000) {
     // previous bundle was dropped and re-added server-side; clients dropped
     // the marker, so its "seam" is not a continuity observation.
     if (prev && prev.emittedAtMs !== v.emittedAtMs && (pubPrevPresent === null || pubPrevPresent.has(v.key))) {
+      checkSwapRegressionBytes('', v, prev, liveByKey, b.serverNowMs);
       transitions++;
       gens.set(v.key, (gens.get(v.key) ?? 0) + 1);
       const E = v.emittedAtMs;
@@ -692,6 +775,7 @@ while (Date.now() - t0 < DURATION_S * 1000) {
       }
     }
     last.set(v.key, v);
+    noteAnchorFixBytes('', v, liveByKey, b.serverNowMs);
   }
   pubPrevPresent = new Set(b.vehicles.map((v) => v.key));
   if (first === null) {
@@ -741,6 +825,16 @@ console.log(`between-segment accel ${dist(realism.allAccels, 'm/s²')}`);
 console.log(`\n── G10 anchor floor (opinion never behind its fix; every gen) ─────`);
 console.log(`checked ${g10.checked} emissions (bundle + shadow, live-fix matched), ` +
   `VIOLATIONS ${g10.violations}  [target literal 0]`);
+
+console.log(`\n── G13 swap regression (§14.7 — no backward step the fix does not justify) ──`);
+console.log(
+  `checked ${g13.checked} fix re-emissions (both chains, live-fix grounded), ` +
+    `VIOLATIONS ${g13.violations}  [target literal 0]`,
+);
+console.log(
+  `   exempt: ${g13.standingExempt} standing-evidence starts, ${g13.overshoot} honest ` +
+    `overshoot corrections; ${g13.skippedNoFix} pairs not fix-groundable`,
+);
 
 console.log(`\n── catch-up: how fast does smooth actually drive to converge? ─────`);
 console.log(`episodes (gap ≥ ${CATCHUP_MIN_M} m)  ${catchupGap.length}`);

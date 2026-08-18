@@ -748,8 +748,54 @@ within one server poll cycle (~2 s):
 | G10 | behind-fix | emitted opinion `s(t) ≥ s_anchorFix` (monotone ⇒ first knot bounds all t); age re-emissions additionally ≥ previously rendered opinion | **0 violations**, every gen | realism counters (exact, 5 cm slack) + check-v2 via /api/live (0.5 m bytes slack) |
 | G11 | mid-segment stops | stand episodes (v < 0.5 m/s sustained > 3 s) outside stop zones (50 m of a platform / modal hold / shape end) and NOT evidence-backed (jam/queue stands count separately as `jamHolds`/`queueHolds`) | **0** (model-invented stands only) | generator (full context) + check-v2 (zones from geometry-pack, fix from /api/live) |
 | G12 | collision violations | follower curve crossing `leader(t) − gap` at any sampled t | **0** | generator (has the leader curve) + check-v2 same-shape non-crossing from bytes |
+| G13 | swap regression | fix-driven re-emission stepping the opinion BACKWARD at the swap instants (`t_E`, `t_E + 2 s`) while `prevOpinion(t_E) ≤ seamJustifiedM` (§14.7); standing-evidence starts exempt (their floor is the fix — G10) | **0**, every gen | SeamCounters (exact, per chain) + check-v2 two-fetch pairs grounded in /api/live fixes |
 
 Curve/kinematic/perceptual gates G1–G9 unchanged.
+
+### 14.7 Re-anchor seam rule (owner field report, 2026-08-18)
+
+Build-15 symptom, repeatedly observed: a fresh fix arrives; the tram follows
+it; ~5–10 s later the «fixed» marker FLIES BACKWARD past the fix and stands.
+This is a CROSS-EMISSION class the per-track G10 floor cannot see. Measured
+mechanics (pre-fix window, published chain): the phone swaps bundles up to
+~9 s after emission (5 s poll + 2 s server cache + re-emit), and a fix-driven
+re-anchor lands at nowcast ≈ fix + ds(latency) — routinely BEHIND where the
+previous curve was already rendering (~31 % of fix re-emissions with > 2 m of
+seam regression; p90 backward step at worst swap lag ≈ 75 m, max 141 m).
+
+The rule separates the two honest cases by EVIDENCE, not by a flat tolerance:
+
+```
+vObs        = clamp((anchorFixS − prevFixS) / fixGapS, 0, V_MAX)   # fixes only
+justifiedM  = anchorFixS + (t_E − anchorMs)/1000 · vObs + REANCHOR_TOL_M (20)
+prevO       = prevOpinion(t_E)
+
+prevO ≤ justifiedM  ⇒ CONTINUITY: the newest fix cannot exclude the rendered
+                      position — the new opinion STARTS AT prevO (s0 floor;
+                      the drive integrates forward, so flooring s0 floors the
+                      curve). The backward hop to the nowcast was model
+                      disagreement, not evidence (measured archetype: fix
+                      moved 338 m, prevO 89 m past it ≈ latency × speed).
+prevO > justifiedM  ⇒ OVERSHOOT: the old curve provably ran away (archetype:
+                      fixes flat while the curve projected 150 m ahead). The
+                      honest backward correction to the nowcast — never below
+                      the fix (G10) — is emitted unchanged.
+standing evidence   ⇒ a modal hold at the anchor (at_stop) or a §14.3 jam
+                      hold outranks continuity: the tram provably stands
+                      THERE; the curve corrects back and stands with it.
+```
+
+The anti-collision clamp (§14.4) still outranks the continuity floor. Both
+generators apply the rule (`drive.ts` s0 floor; `trajectory.ts` target
+floor); the client adds a last-mile guard for the residual poll-lag race
+(M2): in FIXED mode the rendered position is floored at the newest same-trip
+RemoteFeed fix — the marker can never be drawn behind the dot the user sees
+(«если мы знаем что трамвай уже впереди, эта позиция вообще не должна
+показываться»). Smooth is never floored client-side: its catch-up is the
+server-driven §6 machinery. The movement-evidence override for standing
+renders is the same doctrine as §14.3 jam holds, inverted: fresher motion
+evidence (the newest fix ahead) beats the release model at the pixel level
+until the next re-anchor lands.
 
 ## 15. Source index
 

@@ -928,5 +928,83 @@ const mkDrive = (over: Partial<Parameters<typeof buildDriveVehicle>[0]> &
     adv > 50 && adv < 130, `advanced ${adv.toFixed(0)} m in 60 s (creep 1.5 m/s ⇒ ~90)`);
 }
 
+// ── D19. §14.7 re-anchor seam rule: no backward swap the fix does not justify ─
+// Owner field report 2026-08-18: a fresh fix arrives, the tram follows it,
+// then ~5–10 s later the fixed marker FLIES BACKWARD and stands — the new
+// emission re-anchored at nowcast ≈ fix + ds(latency), BEHIND where the
+// previous curve was already rendering. Rule: when the newest fix cannot
+// exclude the previous projection (prevO ≤ fix + fixAge·vObs + TOL), the new
+// opinion STARTS AT it; a provable overshoot corrects honestly (≥ fix, G10);
+// standing evidence (modal/jam) outranks continuity.
+{
+  // (a) drive, moving tram (vObs ≈ 6.9 m/s): continuity floor engages.
+  const geom = synthGeometry({ totalM: 6000 });
+  const prev = mkDrive({
+    raw: raw(1000, 8, T0 - 30_000), geom, surfaces: surf(8),
+    emittedAtMs: T0 - 30_000, anchorMs: T0 - 35_000,
+  });
+  const prevO = evalTrack(prev.vehicle.opinion, T0); // ≈ 1240
+  const prevTk = { tripId: 'tSynth', smooth: prev.smooth, opinion: prev.opinion };
+  const b = mkDrive({
+    raw: raw(1190, 8), geom, surfaces: surf(8), emittedAtMs: T0, anchorMs: T0 - 9_000,
+    anchorFixS: 1180, prevFixS: 1000, fixGapS: 26, prev: prevTk,
+  });
+  driveContract('drive/seam-rule', b);
+  check('drive/seam-rule: consistent prev projection ⇒ continuity, no backward step',
+    b.vehicle.opinion[0].s >= prevO - 0.05 && b.meta.seamFloorApplied,
+    `opinion[0].s = ${b.vehicle.opinion[0].s.toFixed(1)}, prevO ${prevO.toFixed(1)}, ` +
+    `nowcast would be 1190 (${(prevO - 1190).toFixed(0)} m backward)`);
+
+  // (b) drive, flat fixes (vObs = 0): the old curve provably overshot — the
+  // honest backward correction to the nowcast is emitted unchanged.
+  const c = mkDrive({
+    raw: raw(1000, 2), geom, surfaces: surf(2), emittedAtMs: T0, anchorMs: T0 - 9_000,
+    anchorFixS: 1000, prevFixS: 1000, fixGapS: 26, prev: prevTk,
+  });
+  check('drive/seam-rule: provable overshoot corrects back to the nowcast (≥ fix)',
+    !c.meta.seamFloorApplied &&
+    c.vehicle.opinion[0].s >= 1000 - 0.05 && c.vehicle.opinion[0].s < prevO - 100,
+    `opinion[0].s = ${c.vehicle.opinion[0].s.toFixed(1)} (prevO ${prevO.toFixed(1)} was unjustified)`);
+
+  // (c) drive, standing evidence at the anchor: modal hold outranks
+  // continuity — the curve stands AT the platform, not at the old projection.
+  const d = mkDrive({
+    raw: raw(1220, 2), geom, surfaces: surf(2), emittedAtMs: T0, anchorMs: T0 - 9_000,
+    anchorFixS: 1220, prevFixS: 800, fixGapS: 26,
+    modal: { stopS: 1220, releaseAtMs: T0 + 40_000 }, prev: prevTk,
+  });
+  check('drive/seam-rule: standing evidence outranks continuity (holds at platform)',
+    !d.meta.seamFloorApplied &&
+    Math.abs(evalTrack(d.vehicle.opinion, T0 + 10_000) - 1220) < 0.1,
+    `s at +10 s = ${evalTrack(d.vehicle.opinion, T0 + 10_000).toFixed(1)} (stopS 1220, prevO ${prevO.toFixed(1)})`);
+
+  // (d) the published generator honours the same rule.
+  const pv = buildV2Vehicle({
+    key: 'S', tripId: 't1', line: '22', anchorMs: T0 - 35_000, emittedAtMs: T0 - 30_000,
+    raw: raw(1000, 8, T0 - 30_000), modal: null, prev: null,
+  })!;
+  const pPrevO = evalTrack(pv.vehicle.opinion, T0);
+  const pb = buildV2Vehicle({
+    key: 'S', tripId: 't1', line: '22', anchorMs: T0 - 9_000, emittedAtMs: T0,
+    raw: raw(1190, 8), modal: null,
+    prev: { tripId: 't1', smooth: pv.smooth, opinion: pv.opinion },
+    anchorFixS: 1180, prevFixS: 1000, fixGapS: 26,
+  })!;
+  contract('seam-rule/published/opinion', pb.vehicle.opinion, T0);
+  check('seam-rule: published gen — continuity floor engages, telemetry set',
+    pb.vehicle.opinion[0].s >= pPrevO - 0.05 && pb.seamFloorApplied && !pb.ageFloorApplied,
+    `opinion[0].s = ${pb.vehicle.opinion[0].s.toFixed(1)}, prevO ${pPrevO.toFixed(1)}`);
+  const pc = buildV2Vehicle({
+    key: 'S', tripId: 't1', line: '22', anchorMs: T0 - 9_000, emittedAtMs: T0,
+    raw: raw(1000, 2), modal: null,
+    prev: { tripId: 't1', smooth: pv.smooth, opinion: pv.opinion },
+    anchorFixS: 1000, prevFixS: 1000, fixGapS: 26,
+  })!;
+  check('seam-rule: published gen — overshoot corrects honestly (no floor)',
+    !pc.seamFloorApplied && pc.vehicle.opinion[0].s >= 1000 - 0.05 &&
+    pc.vehicle.opinion[0].s < pPrevO - 100,
+    `opinion[0].s = ${pc.vehicle.opinion[0].s.toFixed(1)}`);
+}
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

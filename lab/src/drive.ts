@@ -36,6 +36,7 @@ import { round2 } from './db';
 import {
   accelAt,
   evalTrack,
+  seamJustifiedM,
   speedAt,
   type KinTrack,
   type PrevTrack,
@@ -468,6 +469,14 @@ export interface DriveArgs {
   /** The anchor fix's shapeDistM (the G10 floor), m — the §14.4 seam clamp
    *  may reduce the nowcast toward the leader curve but never below this. */
   anchorFixS?: number;
+  /** §14.7 seam rule inputs, set on FIX-DRIVEN re-emissions only: the
+   *  PREVIOUS emission's anchor fix position (with fixGapS above, the observed
+   *  fix-over-fix speed). When the previous opinion's projection at t0 is
+   *  within `seamJustifiedM` of the new fix, s0 is floored AT that projection
+   *  — continuity instead of the backward swap hop (G13). Standing evidence
+   *  (modal hold / jam hold) outranks continuity: the honest correction back
+   *  to the platform / stuck point is emitted. */
+  prevFixS?: number;
   /** §14.3 jam hold: evidence-backed stuck position (two-plus genuinely-new
    *  fixes flat within STUCK_FIX_EPS_M, away from platforms — run.ts detects,
    *  descending from tramSim.updateStuckHold), m along shape. null = moving. */
@@ -597,6 +606,8 @@ export interface DriveBuilt {
     seamGapM: number | null;
     /** Anchor-floor hotfix telemetry: the age-refresh floor lifted s0. */
     ageFloorApplied: boolean;
+    /** §14.7 telemetry: the fix-driven seam floor (continuity) lifted s0. */
+    seamFloorApplied: boolean;
     /** §14.2: request stops excluded from this emission's plan (telemetry). */
     requestSkips: { stopId: string; distM: number }[];
     /** §14.3: the emission holds at an evidence-backed jam position. */
@@ -1664,6 +1675,39 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
   if (!holdingNow && !jamHolding && ageFloor > 0 && s0 > ageFloor && s0 - ageFloor <= AGE_INNOV_GATE_M) {
     s0 = ageFloor;
   }
+  // §14.7 seam rule (fix-driven re-anchors): the nowcast lands at
+  // fix + ds(latency), which is routinely BEHIND where the previous curve was
+  // already rendering — the phone swaps bundles up to ~9 s after emission and
+  // draws the difference as a backward teleport (measured 2026-08-18: p90
+  // ≈ 75 m of backward step on the published chain). When the newest fix
+  // cannot exclude the previous projection (prevO ≤ seamJustifiedM: fix +
+  // fixAge·vObs + TOL, vObs from the fixes themselves), CONTINUITY wins: the
+  // new opinion starts AT the previous projection. Beyond the bound the old
+  // curve provably overshot (e.g. it rolled while the fixes stood) and the
+  // honest backward correction — never below the fix (G10) — is emitted
+  // unchanged. Standing evidence (modal/jam hold) skips this floor entirely.
+  let seamFloorApplied = false;
+  if (
+    !holdingNow &&
+    !jamHolding &&
+    prev !== null &&
+    prev.tripId === args.tripId &&
+    args.prevFixS !== undefined &&
+    args.anchorFixS !== undefined
+  ) {
+    const prevO = evalTrack(prev.opinion.points, t0);
+    const justified = seamJustifiedM({
+      anchorFixS: args.anchorFixS,
+      anchorMs: args.anchorMs,
+      emittedAtMs: t0,
+      prevFixS: args.prevFixS,
+      fixGapS: args.fixGapS,
+    });
+    if (prevO <= justified && s0 < prevO) {
+      s0 = clamp(prevO, 0, geom.totalM);
+      seamFloorApplied = true;
+    }
+  }
   // §14.4 seam clamp: the opinion may never re-anchor THROUGH its leader's
   // curve. When the ML nowcast claims an overtake the fix ordering denies
   // (measured live 2026-08-17: a curve "overtaking" a real leader by 289 m),
@@ -1867,6 +1911,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
       tDiscM,
       seamGapM,
       ageFloorApplied,
+      seamFloorApplied,
       requestSkips,
       jamHolding,
       leaderKey: args.leader?.key ?? null,

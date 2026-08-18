@@ -47,6 +47,7 @@ import {
   TRAJ_HOLD_V_MS,
   TRAJ_MAX_POINTS,
   TRAJ_MODAL_P,
+  TRAJ_REANCHOR_TOL_M,
   TRAJ_SIM_STEP_MS,
   TRAJ_V_MAX_MS,
 } from './config';
@@ -210,6 +211,35 @@ export interface PrevTrack {
   opinion: KinTrack;
 }
 
+/**
+ * §14.7 seam rule: the farthest-ahead position the NEWEST fix cannot exclude,
+ * m. The fix proves the tram was at `anchorFixS` at `anchorMs`; since then it
+ * can plausibly have travelled `fixAge × vObs`, where vObs is the OBSERVED
+ * fix-over-fix speed (evidence, never the model), plus TOL of fix/projection
+ * noise. A previous opinion projecting AT OR UNDER this bound is consistent
+ * with everything the feed knows — re-anchoring behind it is model
+ * disagreement, not evidence, and the phone renders it as a backward teleport
+ * at bundle swap (the G13 class). Beyond the bound the old curve provably
+ * overshot and an honest backward correction (never below the fix, G10) is
+ * exactly what must be shown.
+ */
+export function seamJustifiedM(args: {
+  anchorFixS: number;
+  anchorMs: number;
+  emittedAtMs: number;
+  /** Previous emission's anchor fix position, m (how far the fix moved). */
+  prevFixS: number;
+  /** Observed gap between the two fixes, s (0/unknown ⇒ vObs 0). */
+  fixGapS: number;
+}): number {
+  const vObs =
+    args.fixGapS > 0
+      ? Math.min(Math.max((args.anchorFixS - args.prevFixS) / args.fixGapS, 0), TRAJ_V_MAX_MS)
+      : 0;
+  const fixAgeS = Math.max(0, (args.emittedAtMs - args.anchorMs) / 1000);
+  return args.anchorFixS + fixAgeS * vObs + TRAJ_REANCHOR_TOL_M;
+}
+
 export interface BuildV2Args {
   key: string;
   tripId: string;
@@ -234,6 +264,19 @@ export interface BuildV2Args {
    *  (fix-driven or first emission — a fix-driven re-anchor may honestly move
    *  back TO the fresh fix, never behind it, which the floored `raw` covers). */
   ageFloorS?: number;
+  /** §14.7 seam rule inputs — set on FIX-DRIVEN re-emissions only (undefined
+   *  otherwise): the new anchor fix position, the PREVIOUS emission's anchor
+   *  fix position, and the observed gap between those fixes. When the previous
+   *  opinion's projection at `emittedAtMs` is within `seamJustifiedM` of the
+   *  new fix, the target curve is floored AT that projection: the phone is
+   *  already rendering there and the newest fix cannot prove it wrong, so the
+   *  re-anchor continues the curve instead of stepping backward to the nowcast
+   *  (the G13 swap-regression class). A modal hold at the anchor (holdingNow)
+   *  is CURRENT standing evidence and wins: the honest correction back to the
+   *  platform is shown. */
+  anchorFixS?: number;
+  prevFixS?: number;
+  fixGapS?: number;
 }
 
 export interface BuiltV2 {
@@ -245,6 +288,9 @@ export interface BuiltV2 {
    *  least one target sample (i.e. this emission's bytes differ from the
    *  pre-hotfix builder). False whenever ageFloorS is 0/absent. */
   ageFloorApplied: boolean;
+  /** §14.7 telemetry: the fix-driven seam floor (continuity at the previous
+   *  opinion's projection) actually lifted at least one target sample. */
+  seamFloorApplied: boolean;
 }
 
 /** Build both tracks for one vehicle. Returns null if any sample is
@@ -262,8 +308,37 @@ export function buildV2Vehicle(args: BuildV2Args): BuiltV2 | null {
   // exceed a still-armed modal hold's stopS only when the release estimate
   // moved later across the refresh; the marker then stands where it was
   // already rendered instead of teleporting back to the platform.
-  const floorS = args.ageFloorS ?? 0;
-  let ageFloorApplied = false;
+  const holdingNow = modal !== null && modal.releaseAtMs > t0;
+  // §14.7 seam floor (fix-driven re-emissions): when the previous opinion's
+  // projection at t0 is within `seamJustifiedM` of the NEW fix — i.e. the
+  // newest evidence cannot prove the rendered position wrong — the target is
+  // floored AT that projection: continuity instead of the backward hop to
+  // nowcast ≈ fix + ds(latency) (the measured M1/G13 class: p90 ≈ 75 m of
+  // backward step at client swap, 2026-08-18 pre-fix window). Beyond the
+  // bound the old curve provably overshot and the honest correction (down to
+  // the floored `raw`, never below the fix) is emitted unchanged. A modal
+  // hold at the anchor is CURRENT standing evidence and outranks continuity.
+  let seamFloorS = 0;
+  if (
+    !holdingNow &&
+    prev !== null &&
+    prev.tripId === args.tripId &&
+    args.anchorFixS !== undefined &&
+    args.prevFixS !== undefined
+  ) {
+    const prevO = evalTrack(prev.opinion.points, t0);
+    const justified = seamJustifiedM({
+      anchorFixS: args.anchorFixS,
+      anchorMs: args.anchorMs,
+      emittedAtMs: t0,
+      prevFixS: args.prevFixS,
+      fixGapS: args.fixGapS ?? 0,
+    });
+    if (prevO <= justified) seamFloorS = prevO;
+  }
+  const floorS = Math.max(args.ageFloorS ?? 0, seamFloorS);
+  const seamFloorWins = seamFloorS > (args.ageFloorS ?? 0);
+  let floorApplied = false;
   const targetAt = (t: number): number => {
     const base =
       modal === null
@@ -272,7 +347,7 @@ export function buildV2Vehicle(args: BuildV2Args): BuiltV2 | null {
           ? modal.stopS
           : Math.max(modal.stopS, modal.walk(t));
     if (base < floorS) {
-      ageFloorApplied = true;
+      floorApplied = true;
       return floorS;
     }
     return base;
@@ -289,7 +364,6 @@ export function buildV2Vehicle(args: BuildV2Args): BuiltV2 | null {
   // jump either. A vehicle the modal rule says is STANDING starts at 0 —
   // otherwise a fresh at-stop fix would emit a curve that rolls through the
   // platform at the speed the tram had before it stopped.
-  const holdingNow = modal !== null && modal.releaseAtMs > t0;
   const v0Opinion = holdingNow
     ? 0
     : prev !== null && prev.tripId === args.tripId
@@ -340,7 +414,8 @@ export function buildV2Vehicle(args: BuildV2Args): BuiltV2 | null {
     },
     opinion,
     smooth,
-    ageFloorApplied,
+    ageFloorApplied: floorApplied && !seamFloorWins,
+    seamFloorApplied: floorApplied && seamFloorWins,
   };
 }
 

@@ -60,7 +60,7 @@ import {
 import { GeometryStore } from './geometry';
 import { LearnedModel } from './learned';
 import { buildMlFeatures, MlClient } from './ml';
-import { PerceptualCounters, RealismCounters } from './realism';
+import { FreshnessCounters, PerceptualCounters, RealismCounters, SeamCounters } from './realism';
 import { schedulePosition } from './schedule';
 import { startServer } from './server';
 import {
@@ -132,6 +132,8 @@ export interface TrajectoryVehicle {
 
 interface TrajectoryEntry {
   fixObsAtMs: number;
+  /** shapeDistM of the anchor fix (seam telemetry: how far the NEXT fix moves). */
+  anchorFixS: number;
   /** v1 payload — the shape build-12 phones consume; NEVER change it. */
   vehicle: TrajectoryVehicle;
   /** v2 payload — physics-v3 opinion + smooth tracks over the same ML samples. */
@@ -148,6 +150,8 @@ interface TrajectoryEntry {
  *  state, never published while TRAJ_V3_PUBLISH is off. */
 interface ShadowEntry {
   fixObsAtMs: number;
+  /** shapeDistM of the anchor fix (seam telemetry). */
+  anchorFixS: number;
   v2: V2Vehicle;
   opinionK: KinTrack;
   smoothK: KinTrack;
@@ -233,6 +237,8 @@ export function start(): void {
   let anchorDsClampedEmissions = 0; // emissions with ≥ 1 floored sample
   let ageFloorPubApplied = 0; // published-chain age-refresh floors engaged
   let ageFloorShadowApplied = 0; // shadow/v3-chain age-refresh floors engaged
+  let seamFloorPubApplied = 0; // §14.7 fix-driven continuity floors, published
+  let seamFloorShadowApplied = 0; // …and on the shadow/v3 chain
   /** Why an at-fix probe could/couldn't score the PUBLISHED v2 tracks. */
   let probeOk = 0;
   let probeMissing = 0;
@@ -242,6 +248,14 @@ export function start(): void {
    *  counters over every shadow emission, and the shadow probe split. */
   const realismShadow = new RealismCounters();
   const perceptual = new PerceptualCounters();
+  /** Re-anchor seam telemetry (owner field report 2026-08-18: the fixed marker
+   *  flies backward past the fix on bundle swap, then stands). Measured on
+   *  BOTH chains — the owner's build-15 default is the published gen. */
+  const seamPub = new SeamCounters();
+  const seamShadow = new SeamCounters();
+  /** M2: rendered-behind-the-newest-fix at fix arrival, per chain. */
+  const freshPub = new FreshnessCounters();
+  const freshShadow = new FreshnessCounters();
   let shadowEmissions = 0;
   let shadowDiscontinuities = 0;
   let shadowBuildFailures = 0;
@@ -301,6 +315,19 @@ export function start(): void {
     cFixes++;
     latencySum += latencyS;
     latencyN++;
+
+    // M2 freshness probe: the instant a genuinely-new fix lands (≈ when the
+    // phone's RemoteFeed dot moves), how far BEHIND it is each chain's
+    // currently served opinion curve? Clients add up to ~7–9 s of poll+cache
+    // lag on top of this before the re-anchored curve reaches their screen.
+    const pubEntry = trajectories.get(snap.key);
+    if (pubEntry && pubEntry.v2.tripId === snap.tripId && pubEntry.fixObsAtMs < snap.observedAtMs) {
+      freshPub.note(snap.key, pubEntry.v2.opinion, snap.shapeDistM, nowMs);
+    }
+    const shEntry = shadowTrajectories.get(snap.key);
+    if (shEntry && shEntry.v2.tripId === snap.tripId && shEntry.fixObsAtMs < snap.observedAtMs) {
+      freshShadow.note(snap.key, shEntry.v2.opinion, snap.shapeDistM, nowMs);
+    }
 
     const geom = geometry.resolve(snap.tripId);
     const sameTrip = prev !== undefined && prev.snap.tripId === snap.tripId;
@@ -736,6 +763,29 @@ export function start(): void {
             : 0;
         const ageFloorShadowS = ageFloorOf(prevShadow?.v2, prevShadow?.fixObsAtMs);
         const ageFloorPubS = ageFloorOf(prevEntry?.v2, prevEntry?.fixObsAtMs);
+        // §14.7 seam-rule input: the PREVIOUS emission's anchor fix, present
+        // exactly when this is a FIX-DRIVEN re-emission of the same trip.
+        const seamPrevFixOf = (
+          pv: V2Vehicle | undefined,
+          pFixObsAtMs: number | undefined,
+          pAnchorFixS: number | undefined,
+        ): number | undefined =>
+          pv !== undefined &&
+          pv.tripId === v.snap.tripId &&
+          pFixObsAtMs !== undefined &&
+          pFixObsAtMs !== v.snap.observedAtMs
+            ? pAnchorFixS
+            : undefined;
+        const seamPrevFixShadowS = seamPrevFixOf(
+          prevShadow?.v2,
+          prevShadow?.fixObsAtMs,
+          prevShadow?.anchorFixS,
+        );
+        const seamPrevFixPubS = seamPrevFixOf(
+          prevEntry?.v2,
+          prevEntry?.fixObsAtMs,
+          prevEntry?.anchorFixS,
+        );
 
         // ── curvegen-v3 SHADOW build (design §12 phase A): its own seam
         // chain, its own realism gate + perceptual counters, never published
@@ -748,6 +798,7 @@ export function start(): void {
           fixGapS: v.fixGapS,
           ageFloorS: ageFloorShadowS,
           anchorFixS: v.snap.shapeDistM,
+          prevFixS: seamPrevFixShadowS,
           stuckAtM: v.stuckAtM,
           leader: leaderFor(
             shadowTrajectories,
@@ -772,6 +823,7 @@ export function start(): void {
           shadowEmissions++;
           if (shadowBuilt.vehicle.discontinuity) shadowDiscontinuities++;
           if (shadowBuilt.meta.ageFloorApplied) ageFloorShadowApplied++;
+          if (shadowBuilt.meta.seamFloorApplied) seamFloorShadowApplied++;
           realismShadow.check(v.key, 'opinion', shadowBuilt.vehicle.opinion, tCompute);
           realismShadow.check(v.key, 'smooth', shadowBuilt.vehicle.smooth, tCompute);
           realismShadow.checkAnchorFloor(v.key, shadowBuilt.vehicle.opinion, anchorS, tCompute);
@@ -793,8 +845,30 @@ export function start(): void {
             leaderKey: shadowBuilt.meta.leaderKey,
             perTrack: { opinion: shadowBuilt.meta.opinion, smooth: shadowBuilt.meta.smooth },
           });
+          // Re-anchor seam telemetry (fix-driven re-emissions only): what a
+          // client swapping from the previous shadow curve to this one renders.
+          if (
+            prevShadow &&
+            prevShadow.v2.tripId === v.snap.tripId &&
+            prevShadow.fixObsAtMs !== v.snap.observedAtMs
+          ) {
+            seamShadow.record({
+              key: v.key,
+              emittedAtMs: tCompute,
+              prevOpinion: prevShadow.v2.opinion,
+              newOpinion: shadowBuilt.vehicle.opinion,
+              latestFixS: v.snap.shapeDistM,
+              prevFixS: prevShadow.anchorFixS,
+              anchorMs: v.snap.observedAtMs,
+              fixGapS: v.fixGapS,
+              standingStart:
+                (modal !== null && modal.releaseAtMs > tCompute) || shadowBuilt.meta.jamHolding,
+              discontinuity: shadowBuilt.vehicle.discontinuity,
+            });
+          }
           shadowTrajectories.set(v.key, {
             fixObsAtMs: v.snap.observedAtMs,
+            anchorFixS: v.snap.shapeDistM,
             v2: shadowBuilt.vehicle,
             opinionK: shadowBuilt.opinion,
             smoothK: shadowBuilt.smooth,
@@ -822,6 +896,7 @@ export function start(): void {
               fixGapS: v.fixGapS,
               ageFloorS: ageFloorPubS,
               anchorFixS: v.snap.shapeDistM,
+              prevFixS: seamPrevFixPubS,
               stuckAtM: v.stuckAtM,
               leader: leaderFor(
                 trajectories,
@@ -832,7 +907,15 @@ export function start(): void {
               chainBroken: publishedChainBroken.has(v.key),
               prev: prevPub,
             })
-          : buildV2Vehicle({ ...baseArgs, modal, prev: prevPub, ageFloorS: ageFloorPubS });
+          : buildV2Vehicle({
+              ...baseArgs,
+              modal,
+              prev: prevPub,
+              ageFloorS: ageFloorPubS,
+              anchorFixS: v.snap.shapeDistM,
+              prevFixS: seamPrevFixPubS,
+              fixGapS: v.fixGapS,
+            });
         if (built === null) {
           trajectories.delete(v.key);
           publishedChainBroken.add(v.key);
@@ -840,6 +923,9 @@ export function start(): void {
         }
         if ('meta' in built ? built.meta.ageFloorApplied : built.ageFloorApplied) {
           ageFloorPubApplied++;
+        }
+        if ('meta' in built ? built.meta.seamFloorApplied : built.seamFloorApplied) {
+          seamFloorPubApplied++;
         }
         const v2 = built.vehicle;
         trajEmissions++;
@@ -851,8 +937,29 @@ export function start(): void {
         realism.check(v.key, 'smooth', v2.smooth, tCompute);
         realism.checkAnchorFloor(v.key, v2.opinion, anchorS, tCompute);
 
+        // Re-anchor seam telemetry, published chain (fix-driven only).
+        if (
+          prevEntry &&
+          prevEntry.v2.tripId === v.snap.tripId &&
+          prevEntry.fixObsAtMs !== v.snap.observedAtMs
+        ) {
+          seamPub.record({
+            key: v.key,
+            emittedAtMs: tCompute,
+            prevOpinion: prevEntry.v2.opinion,
+            newOpinion: v2.opinion,
+            latestFixS: v.snap.shapeDistM,
+            prevFixS: prevEntry.anchorFixS,
+            anchorMs: v.snap.observedAtMs,
+            fixGapS: v.fixGapS,
+            standingStart: modal !== null && modal.releaseAtMs > tCompute,
+            discontinuity: v2.discontinuity,
+          });
+        }
+
         trajectories.set(v.key, {
           fixObsAtMs: v.snap.observedAtMs,
+          anchorFixS: v.snap.shapeDistM,
           vehicle: {
             key: v.key,
             tripId: v.snap.tripId,
@@ -1213,6 +1320,8 @@ export function start(): void {
           dsClampedEmissions: anchorDsClampedEmissions,
           ageFloorPublished: ageFloorPubApplied,
           ageFloorShadow: ageFloorShadowApplied,
+          seamFloorPublished: seamFloorPubApplied,
+          seamFloorShadow: seamFloorShadowApplied,
         },
       },
       realism: realism.gauges(),
@@ -1232,6 +1341,13 @@ export function start(): void {
         realism: realismShadow.gauges(),
       },
       perceptual: perceptual.gauges(),
+      /** Re-anchor seam telemetry + G13 (owner field report 2026-08-18): the
+       *  cross-emission backward-swap class the G10 floor cannot see, and the
+       *  M2 freshness race, per chain. */
+      seam: {
+        published: { swap: seamPub.gauges(), freshness: freshPub.gauges() },
+        shadow: { swap: seamShadow.gauges(), freshness: freshShadow.gauges() },
+      },
       horizonBuckets: HORIZON_BUCKETS,
     };
   }

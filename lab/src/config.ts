@@ -92,6 +92,19 @@ export const TRAJ_FLIP_DEADBAND = 0.2;
  * m (≈ one tram length, design §10 CONV_TOL_M). */
 export const TRAJ_CONV_TOL_M = 15;
 
+/** ── §14.7 re-anchor seam rule (owner field report 2026-08-18) ──
+ * A fix-driven re-anchor may step the rendered opinion BACKWARD only when the
+ * newest fix actually justifies it: the previous curve's projection is beyond
+ * `latestFixS + fixAge · vObs + TOL` (vObs = fix-over-fix observed speed —
+ * evidence, not model). Inside that bound the old projection is consistent
+ * with everything the feed knows, so the new opinion STARTS AT it
+ * (continuity); a backward hop there is the swap-regression class the phone
+ * renders as «маркер улетел назад за фикс» (G13). This constant is the
+ * evidence slack of that bound, m — fix/shape-projection noise plus one
+ * fix-gap of speed-estimate error, chosen from the measured 2026-08-18
+ * pre-fix window (see lab/README.md Findings). */
+export const TRAJ_REANCHOR_TOL_M = 20;
+
 /** ── curvegen-v3 flip flag (design §12 phase B) ──
  * OFF: /api/trajectories/v2 serves the CURRENT generator unchanged and the v3
  * drive runs shadow-only (/api/shadow-trajectories, variants ml-drive /

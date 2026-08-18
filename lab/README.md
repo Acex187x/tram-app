@@ -508,6 +508,45 @@ TSX_TSCONFIG_PATH=$PWD/tsconfig.runtime.json ./node_modules/.bin/tsx src/main.ts
     creep-instead-of-phantom-stand repays leads at the next platform,
     sometimes beyond the horizon.
 
+- **2026-08-18 (OWNER FIELD REPORT #4): the backward-flying fixed marker —
+  measured, mechanized, fixed (§14.7 seam rule + G13 + client floor).**
+  Build-15 symptom: a fresh fix arrives, the tram follows it, then ~5–10 s
+  later the «fixed» marker FLIES BACKWARD past the fix and stands. G10
+  (0 violations throughout) could not see it — it is a CROSS-EMISSION swap
+  class, instrumented 2026-08-18 00:00 (SeamCounters + FreshnessCounters,
+  `/api/summary → seam`, both chains). Pre-fix window (33 min, night):
+  - **M1 swap regression is constant**: published chain 1,094 fix
+    re-emissions → 365 (33 %) stepped backward > 2 m at the seam; backward
+    step at worst client swap lag p90 **87.5 m** / p99 141.5 m (shadow:
+    p90 130.5). Mechanism confirmed: the re-anchor lands at nowcast ≈ fix +
+    ds(latency), BEHIND the old curve's projection (archetype: fix moved
+    338 m, prevO 89 m past the new fix ≈ latency × speed — continuity was
+    owed; counter-archetype: fixes flat, prevO 150 m ahead — overshoot,
+    correction owed).
+  - **M3 rides on M1**: 306/365 of the big regressions START STANDING
+    (modal hold at an at_stop anchor, 273 after a MOVING fix) — the marker
+    jumps back AND «тупо стоит».
+  - **M2 freshness race is the night-dominant miss**: at fix arrival the
+    served opinion trailed the just-landed fix by > 50 m in 36 % of 1,390
+    arrivals (p90 205 m, max 598); the phone adds up to ~7–9 s of poll +
+    cache lag on top. 114 arrivals contradicted a STANDING curve from
+    ahead.
+  Fixes: (a) §14.7 seam rule in BOTH generators — evidence-based bound
+  `justified = fix + fixAge·vObs + 20 m` (vObs from the fixes themselves):
+  within it the new opinion STARTS AT the previous projection (continuity),
+  beyond it the honest backward correction stands, modal/jam starts exempt
+  (current standing evidence wins); §14.4 leader clamp still outranks.
+  (b) G13 «swapRegression» gate (target 0) in SeamCounters + check-v2
+  two-fetch byte analysis grounded in /api/live fixes; selftest D19.
+  (c) CLIENT last-mile floor (ships with the next build): in fixed mode the
+  rendered s is floored at the newest same-trip RemoteFeed fix — the marker
+  can never be drawn behind the dot («если мы знаем что трамвай уже
+  впереди, эта позиция вообще не должна показываться»); smooth is never
+  floored client-side. Post-fix window: G13 0/0 (published/shadow), G10
+  still 0, G1–G12 unregressed, matched accuracy unchanged (see below).
+  Poll cadence 5 s → 3 s NOT taken: the client floor closes the race at the
+  pixel level for free, so the battery budget stays.
+
 ## Teardown
 
 ```sh
