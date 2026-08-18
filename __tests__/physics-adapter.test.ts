@@ -244,6 +244,56 @@ describe('next stop + ETA', () => {
   });
 });
 
+describe('last-mile freshness floor (fixed mode) — never render behind the newest fix', () => {
+  // The bundle can trail RemoteFeed by ~7–9 s (5 s poll + 2 s server cache +
+  // re-emit): the phone then holds a NEWER fix than the curves' anchor, and
+  // the curve — or a modal hold standing at the OLD anchor — renders behind
+  // the dot the user is looking at. The fix is a hard floor (server G10/§14.7
+  // doctrine): in fixed mode the marker rides the newest fix instead.
+  const geo = straightGeometry();
+  /** Curves anchored ~fix N; the phone's snapshot has moved on to fix N+1. */
+  const newerFix = (shapeDistM: number) =>
+    snapshot({ shapeDistM, observedAtMs: T0 + 20_000 });
+
+  it('floors the FIXED render at the newest same-trip fix', () => {
+    // Opinion is at 1000 + 10·20 = 1200 m at T0+20 s; the newest fix says 1300.
+    const state = adapt(vehicleFrom(), T0 + 20_000, geo, 'fixed', newerFix(1_300));
+    expect(state.simDistM).toBe(1_300);
+    expect(state.fixedDistM).toBe(1_300);
+  });
+
+  it('floors a modal-held (standing) curve the newest fix contradicts', () => {
+    // The «тупо стоит» half of the field bug: the served curve stands at the
+    // old anchor while the tram provably moved on.
+    const held = [
+      { t: T0, s: 1_000 },
+      { t: T0 + 120_000, s: 1_000 },
+    ];
+    const v = vehicleFrom({ smooth: held, opinion: held });
+    const state = adapt(v, T0 + 20_000, geo, 'fixed', newerFix(1_180));
+    expect(state.simDistM).toBe(1_180);
+  });
+
+  it('is a no-op when the curve is already at/ahead of the fix', () => {
+    const state = adapt(vehicleFrom(), T0 + 20_000, geo, 'fixed', newerFix(1_100));
+    expect(state.simDistM).toBe(1_200); // the curve, not the older fix
+  });
+
+  it('NEVER floors the smooth render — catch-up stays server-driven', () => {
+    const state = adapt(vehicleFrom(), T0 + 20_000, geo, 'smooth', newerFix(1_300));
+    expect(state.simDistM).toBe(1_190); // smooth curve: 990 + 10·20
+    // …but the fixed READOUT is still floored, whatever mode renders.
+    expect(state.fixedDistM).toBe(1_300);
+  });
+
+  it('does not floor when rendering falls back to the raw fix anyway', () => {
+    // No curves at all → the existing fix fallback already handles it.
+    const state = adapt(undefined, T0 + 20_000, geo, 'fixed', newerFix(1_300));
+    expect(state.simDistM).toBe(1_300);
+    expect(state.fixedDistM).toBeNull();
+  });
+});
+
 describe('observed (raw fix) fields survive for the fix overlay', () => {
   it('projects the AVL fix onto the shape when geometry is known', () => {
     const geo = straightGeometry();

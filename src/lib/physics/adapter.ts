@@ -121,6 +121,22 @@ export function adaptTram(input: AdaptInput): TramPublicState {
     simSpeedKmh = pastHorizon ? 0 : evalSpeedMs(trackFor(vehicle, mode), serverNowMs) * 3.6;
     const opinion = vehicle.opinion.length > 0 ? vehicle.opinion : null;
     fixedDistM = opinion ? clampToShape(evalTrajectory(opinion, serverNowMs), geometry) : null;
+    // Last-mile freshness floor, FIXED mode only. The snapshot is the newest
+    // same-trip AVL fix the phone holds (RemoteFeed lands ~2 s after a batch),
+    // while the trajectory bundle can trail it by up to ~9 s (5 s poll + 2 s
+    // server cache + re-emit). The fix is a hard floor — the tram provably
+    // was at shapeDistM and does not reverse (the server's G10/§14.7
+    // doctrine) — so in the mode whose whole point is "the truest position",
+    // a marker behind the newest dot must not be shown: it renders AT the
+    // fix until the re-anchored curve lands. With an equal-or-older snapshot
+    // the max() is a no-op (the server already floors each curve at its own
+    // anchor fix), so no timestamp comparison is needed. SMOOTH is left
+    // untouched: its catch-up is server-driven by design, and a client-side
+    // floor would teleport exactly what that track exists to smooth.
+    if (opinion !== null) {
+      if (fixedDistM !== null && fixedDistM < observedDist) fixedDistM = observedDist;
+      if (mode === 'fixed' && simDistM < observedDist) simDistM = observedDist;
+    }
     const delta = smoothFixedDeltaM(vehicle, serverNowMs);
     deviationM = Number.isFinite(delta) ? delta : null;
   } else {
