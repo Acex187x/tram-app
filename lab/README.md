@@ -542,8 +542,16 @@ TSX_TSCONFIG_PATH=$PWD/tsconfig.runtime.json ./node_modules/.bin/tsx src/main.ts
   rendered s is floored at the newest same-trip RemoteFeed fix — the marker
   can never be drawn behind the dot («если мы знаем что трамвай уже
   впереди, эта позиция вообще не должна показываться»); smooth is never
-  floored client-side. Post-fix window: G13 0/0 (published/shadow), G10
-  still 0, G1–G12 unregressed, matched accuracy unchanged (see below).
+  floored client-side. Two same-night refinements from the first live G13
+  hours (both byte-checker-caught): the standing exemption asserts only
+  ≥ 5 s holds (`TRAJ_STAND_ASSERT_MS` — sliver holds yanked 50–180 m and
+  immediately departed), and the late-swap clause allows 10 m of post-seam
+  physics drift (seam speed cap + trim ease from an EXACT floored seam).
+  Post-fix clean window (00:47–01:22Z): check-v2 G13 0/95 grounded pairs,
+  G10 0/628, G1/G2/G9/G11/G12 all 0; server counters G13 published 2/641
+  (0.3 % — a small-magnitude residual, back0 ≤ 10 m / late drift ≤ 20 m,
+  vs 33 % at p90 87.5 m pre-fix; `g13Recent` full-context ring deployed to
+  characterize it overnight), shadow 0/783. Matched accuracy unchanged.
   Poll cadence 5 s → 3 s NOT taken: the client floor closes the race at the
   pixel level for free, so the battery budget stays.
 

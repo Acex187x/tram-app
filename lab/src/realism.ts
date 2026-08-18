@@ -332,6 +332,10 @@ export class SeamCounters {
   tolTable = [15, 25, 40, 60, 80, 120].map((tol) => ({ tol, killed: 0, kept: 0 }));
   worst: SeamEvent[] = [];
   recent: SeamEvent[] = [];
+  /** EVERY G13-firing event, full context (the >10 m rings miss small-back0
+   *  violations — the 2026-08-18 01:09Z residual class, 1/591, was
+   *  uncharacterizable because it rotated out / never qualified). */
+  g13Recent: SeamEvent[] = [];
 
   record(e: {
     key: string;
@@ -411,6 +415,8 @@ export class SeamCounters {
           const slack = dt === 0 ? SEAM_SLACK_M : SEAM_SLACK_LATE_M;
           if (evalTrack(e.newOpinion, t) < evalTrack(e.prevOpinion, t) - slack) {
             this.g13Violations++;
+            this.g13Recent.unshift(ev);
+            if (this.g13Recent.length > 12) this.g13Recent.length = 12;
             break;
           }
         }
@@ -432,7 +438,7 @@ export class SeamCounters {
     return {
       tolM: SEAM_REANCHOR_TOL_M,
       n: this.n,
-      g13swapRegression: { violations: this.g13Violations, target: 0 },
+      g13swapRegression: { violations: this.g13Violations, target: 0, recent: this.g13Recent },
       backAtSeam: {
         over2: this.back0Over2,
         over10: this.back0Over10,
