@@ -260,6 +260,36 @@ export function start(): void {
   let shadowEmissions = 0;
   let shadowDiscontinuities = 0;
   let shadowBuildFailures = 0;
+  /** §14.4 leader-selection outcomes. The G12 counter can only see emissions
+   *  that GOT a leader; every `return null` below is a silent hole where the
+   *  anti-collision constraint simply does not apply, and the 2026-08-19
+   *  bytes probe found the real through-passing population living in exactly
+   *  those holes (100–336 m crossings on line 9, 28/30 with a stale fix on at
+   *  least one side). Counted per leaderFor call, shadow chain. */
+  const leaderPick = {
+    calls: 0,
+    /** A leader was returned and clipped against. */
+    bound: 0,
+    /** Nobody ahead on this shape (or the shape has one vehicle). */
+    noCandidate: 0,
+    /** Every candidate ahead was excluded as an alias pair (< 15 m). */
+    aliasOnly: 0,
+    /** Leadership memory says this vehicle leads the near-tied pair. */
+    memoryHeld: 0,
+    /** The nearest leader sits > 1500 m ahead — the constraint never binds. */
+    tooFar: 0,
+    /** The candidate's curve is NOT anchored to its newest fix — it is mid-
+     *  rebuild this cycle. Suspected to be the main hole; measured 2026-08-19
+     *  at literally 0 over 5.8 k calls, because a vehicle whose fixes stop
+     *  arriving keeps `fixObsAtMs === observedAtMs` and stays leadable. */
+    staleCurve: 0,
+    /** The candidate has no chain entry at all (dropped / first cycle). */
+    noEntry: 0,
+    /** The candidate's curve is on another rail (geometry moved under it). */
+    otherRail: 0,
+  };
+  /** Same shape, for the crossing probe's lookups (not reported). */
+  const leaderPickScratch = { ...leaderPick };
   let shadowProbeOk = 0;
   let shadowProbeMissing = 0;
   let shadowProbeStaleAnchor = 0;
@@ -561,14 +591,7 @@ export function start(): void {
         if (!lf) continue;
         const g = geometry.resolve(lf.snap.tripId);
         if (!g) continue;
-        const lead = leaderFor(
-          shadowTrajectories,
-          key,
-          g.shapeId,
-          (tCompute - lf.snap.observedAtMs) / 1000 <= 30
-            ? lf.snap.shapeDistM
-            : Math.max(evalTrack(entry.v2.opinion, tCompute), lf.snap.shapeDistM),
-        );
+        const lead = leaderFor(shadowTrajectories, key, g.shapeId, lf.snap.shapeDistM, false);
         if (!lead) continue;
         for (const dt of [0, 30_000, 60_000]) {
           const t = tCompute + dt;
@@ -597,11 +620,21 @@ export function start(): void {
       key: string,
       shapeId: string,
       ordS: number,
+      /** false for the crossing probe's lookups — they ask the same question
+       *  but on a different population, and mixing them makes the outcome
+       *  rates uninterpretable. */
+      tally = true,
     ): { key: string; opinion: TrajectoryPoint[]; smooth: TrajectoryPoint[]; gapM: number } | null => {
+      const pick = tally ? leaderPick : leaderPickScratch;
+      pick.calls++;
       const arr = byShape.get(shapeId);
-      if (!arr) return null;
+      if (!arr) {
+        pick.noCandidate++;
+        return null;
+      }
       if (leaderMemory.size > 20_000) leaderMemory.clear(); // bounded memory
       const self = arr.find((c) => c.key === key);
+      let aliasExcluded = 0;
       const cands: { c: { key: string; fixS: number; snap: TramSnapshot }; cOrd: number }[] = [];
       for (const c of arr) {
         if (c.key === key) continue;
@@ -610,27 +643,47 @@ export function start(): void {
         // aliasing) — no ordering can hold and mutual clipping interleaves
         // the curves (measured live 2026-08-17: two L9V3 pairs flip-flopping
         // at < 15 m separation). Not a queue; skip.
-        if (self && Math.abs(c.fixS - self.fixS) < 15) continue;
+        if (self && Math.abs(c.fixS - self.fixS) < 15) {
+          aliasExcluded++;
+          continue;
+        }
         // Ordering basis per §14.4: FIXES are the evidence ("overtaking is
         // rare" — a fresh fix outranks any model belief; the first live
         // window measured an ML curve "overtaking" a real leader by 289 m).
-        // Only a STALE fix (> 30 s) falls back to the chain nowcast — raw
-        // stale fixes inverted pairs the other way (the 200 m phantom cap).
-        const ce = chain.get(c.key);
-        const cAgeS = (tCompute - c.snap.observedAtMs) / 1000;
-        const cOrd =
-          cAgeS <= 30 || !ce ? c.fixS : Math.max(evalTrack(ce.v2.opinion, tCompute), c.fixS);
+        //
+        // 2026-08-19: the ordering no longer falls back to the chain nowcast
+        // past a 30 s fix age. ORDER and POSITION age at completely different
+        // rates — which of two trams on one rail is in front is a topological
+        // fact that survives minutes of silence (that IS "overtaking is
+        // rare"), while the projected position diverges fast: measured
+        // fleet-wide this window, a curve sits a median 343 m past its own fix
+        // at 60–120 s of fix age (max 1231 m). Promoting the nowcast let a
+        // diverging curve declare ITSELF the leader, which legitimised the
+        // crossing instead of preventing it — the 2026-08-19 bytes probe
+        // found 30 crossings up to 336 m, 28 of them with a stale fix on at
+        // least one side and only 2 fresh/fresh, on pairs whose FIXES were a
+        // queue-distance 20–32 m apart. The phantom-cap failure this fallback
+        // was built for (a stale vehicle chained to a leader it has really
+        // passed) is now handled where it belongs — `effLeader`'s inversion
+        // band, which clips-and-heals rather than dropping the constraint.
+        // Ordering is now fix-based throughout, matching the alias exclusion
+        // and the leadership memory, which were already reading raw fixes.
+        const cOrd = c.fixS;
         if (cOrd <= ordS + 0.5) continue;
         cands.push({ c, cOrd });
       }
       cands.sort((x, y) => x.cOrd - y.cOrd);
       let best: { key: string; fixS: number; snap: TramSnapshot } | null = null;
       let bestOrd = Infinity;
+      let memoryHeld = false;
       for (const { c, cOrd } of cands) {
         const pairKey = key < c.key ? `${key}|${c.key}` : `${c.key}|${key}`;
         if (cOrd - ordS < 30) {
           const mem = leaderMemory.get(pairKey);
-          if (mem === key) continue; // near-tied and memory says I lead
+          if (mem === key) {
+            memoryHeld = true;
+            continue; // near-tied and memory says I lead
+          }
           if (mem === undefined) leaderMemory.set(pairKey, c.key);
         } else {
           leaderMemory.set(pairKey, c.key); // genuine separation — update
@@ -639,15 +692,34 @@ export function start(): void {
         bestOrd = cOrd;
         break;
       }
-      if (best === null || bestOrd - ordS > 1500) return null; // never binds
+      if (best === null) {
+        if (memoryHeld) pick.memoryHeld++;
+        else if (aliasExcluded > 0 && cands.length === 0) pick.aliasOnly++;
+        else pick.noCandidate++;
+        return null;
+      }
+      if (bestOrd - ordS > 1500) {
+        pick.tooFar++;
+        return null; // never binds
+      }
       const entry = chain.get(best.key);
-      if (!entry) return null;
+      if (!entry) {
+        pick.noEntry++;
+        return null;
+      }
       // Freshness: the leader's curve must reflect its NEWEST fix — a stale
       // curve can sit behind the follower's fresh position and would cap the
       // follower onto a phantom (the leader rebuilds within one poll cycle).
-      if (entry.fixObsAtMs !== best.snap.observedAtMs) return null;
+      if (entry.fixObsAtMs !== best.snap.observedAtMs) {
+        pick.staleCurve++;
+        return null;
+      }
       const lg = geometry.resolve(entry.v2.tripId);
-      if (!lg || lg.shapeId !== shapeId) return null; // stale curve, other rail
+      if (!lg || lg.shapeId !== shapeId) {
+        pick.otherRail++;
+        return null; // stale curve, other rail
+      }
+      pick.bound++;
       const modelId = regNumberToModelId(best.snap.registrationNumber);
       const lenM =
         (getModelSpec(modelId)?.totalLengthM ?? 14.1) +
@@ -801,12 +873,7 @@ export function start(): void {
           anchorFixS: v.snap.shapeDistM,
           prevFixS: seamPrevFixShadowS,
           stuckAtM: v.stuckAtM,
-          leader: leaderFor(
-            shadowTrajectories,
-            v.key,
-            v.geom.shapeId,
-            (tCompute - v.snap.observedAtMs) / 1000 <= 30 ? v.snap.shapeDistM : points[0].s,
-          ),
+          leader: leaderFor(shadowTrajectories, v.key, v.geom.shapeId, v.snap.shapeDistM),
           chainBroken: shadowChainBroken.has(v.key),
           prev: prevShadow
             ? {
@@ -844,6 +911,8 @@ export function start(): void {
             requestSkips: shadowBuilt.meta.requestSkips,
             jamHolding: shadowBuilt.meta.jamHolding,
             leaderKey: shadowBuilt.meta.leaderKey,
+            standingStart: shadowBuilt.meta.standingStart,
+            leaderDroppedInverted: shadowBuilt.meta.leaderDroppedInverted,
             perTrack: { opinion: shadowBuilt.meta.opinion, smooth: shadowBuilt.meta.smooth },
           });
           // Re-anchor seam telemetry (fix-driven re-emissions only): what a
@@ -900,12 +969,7 @@ export function start(): void {
               anchorFixS: v.snap.shapeDistM,
               prevFixS: seamPrevFixPubS,
               stuckAtM: v.stuckAtM,
-              leader: leaderFor(
-                trajectories,
-                v.key,
-                v.geom.shapeId,
-                (tCompute - v.snap.observedAtMs) / 1000 <= 30 ? v.snap.shapeDistM : points[0].s,
-              ),
+              leader: leaderFor(trajectories, v.key, v.geom.shapeId, v.snap.shapeDistM),
               chainBroken: publishedChainBroken.has(v.key),
               prev: prevPub,
             })
@@ -1334,6 +1398,7 @@ export function start(): void {
         emissions: shadowEmissions,
         discontinuities: shadowDiscontinuities,
         buildFailures: shadowBuildFailures,
+        leaderPick,
         probe: {
           ok: shadowProbeOk,
           missing: shadowProbeMissing,

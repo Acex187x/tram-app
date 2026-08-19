@@ -126,6 +126,36 @@ export const G12_TOL_M = 1.0;
  *  boundary then reads as penetration from bytes. The cushion is invisible
  *  product-wise and keeps the emitted curve clear of the measured gap. */
 export const QUEUE_SIM_CUSHION_M = 3.0;
+/** §14.4 clearance RECOVERY, m/s. The seam routinely hands the drive a pair
+ *  that is already tighter than the registry gap — or outright inverted by a
+ *  metre or two, because the follower's own fresh fix (G10 floor), its modal
+ *  hold or its smooth continuity seam all outrank the leader's older curve.
+ *  Clipping the enforced gap to that inherited value and holding it there
+ *  (the 2026-08-17 effLeader clamp) fixed the false-violation storm but froze
+ *  the geometry: capped at exactly `vLead`, a follower can never repay the
+ *  overlap, so one bad seam persisted for the whole 120 s horizon and was
+ *  re-inherited by the next emission through the smooth seam — measured
+ *  2026-08-19 as the same pair re-printing six emissions running. The gap now
+ *  RELAXES back to nominal at this rate, so an inversion heals in ~10 s and a
+ *  tight queue re-opens to the registry clearance in ~35 s. Costs the
+ *  follower ≤ 0.5 m/s of pace — inside the ±20 % band the doctrine already
+ *  spends on dwell/pace absorption, and never a reversal (it is a speed cap,
+ *  floored at 0: behind a STANDING leader the follower simply stands, which
+ *  §14.4 already classifies as an evidence-backed queue stand). */
+export const QUEUE_GAP_RECOVER_MS = 0.5;
+/** Inversion beyond which the pair is not a queue at all but an ordering
+ *  artifact, and the leader is dropped outright rather than clipped, m.
+ *
+ *  Was 5 m: anything deeper lost its constraint entirely, which is precisely
+ *  where the 2026-08-19 probe found the real through-passing (crossings to
+ *  336 m). 5 m was the right bound only because the old response to an
+ *  inversion was to FREEZE it — freezing a 60 m overlap for the horizon would
+ *  have been worse than dropping it. With the recovery schedule the response
+ *  is instead to repay it, so the band can cover the queue-scale inversions
+ *  that actually occur. Sized so a full-band inversion is repaid inside ONE
+ *  horizon (60 m ÷ QUEUE_GAP_RECOVER_MS = 120 s); beyond it the pair is not a
+ *  queue in any physical sense and the ordering itself is not to be trusted. */
+export const QUEUE_INVERT_MAX_M = 60;
 /** ML positional trim gain, m (port: smoother PACE_GAIN_M). */
 export const G_ML = 120;
 /** Trim authority: the smoother's track clamp tightened to ±15 % (new). */
@@ -532,6 +562,15 @@ export interface TrackBuildMeta {
   collisionViolations: number;
   /** G12 drill-down: deepest penetration of the measured gap, m (≤ 0 clear). */
   collisionMaxPenM: number;
+  /** G12 drill-down: penetration at the emission instant (inherited state). */
+  collisionPenAt0M: number;
+  /** G12 drill-down: the effective clearance enforced this emission, m. */
+  collisionGapM: number;
+  /** G12 drill-down: a leader existed (the three fields above are real). */
+  collisionMeasured: boolean;
+  /** G12 drill-down: the penetration was already there at the emission
+   *  instant — a seam inheritance the drive froze, not a curve it drove. */
+  collisionInherited: boolean;
   /** 'regimes' runs only: why the smooth track drove the speed it drove —
    *  the G5 latency drill-down (which limiter actually bound). */
   regime: RegimeStats | null;
@@ -613,8 +652,18 @@ export interface DriveBuilt {
     requestSkips: { stopId: string; distM: number }[];
     /** §14.3: the emission holds at an evidence-backed jam position. */
     jamHolding: boolean;
+    /** Standing evidence at the seam (asserted modal hold OR jam hold) — the
+     *  state that exempts the emission from the §14.7 continuity floor AND
+     *  (today) from the §14.4 leader clamp. Exposed because both the seam and
+     *  the collision drill-downs classify by it. */
+    standingStart: boolean;
     /** §14.4: the leader this emission was clipped against, if any. */
     leaderKey: string | null;
+    /** §14.4: a leader was SELECTED but dropped because the follower's own
+     *  seam already sat more than QUEUE_INVERT_MAX_M past it (the inverted-
+     *  pair escape) — the emission then carries no anti-collision constraint
+     *  at all, so this gauge IS the size of the remaining blind spot. */
+    leaderDroppedInverted: boolean;
     opinion: TrackBuildMeta;
     smooth: TrackBuildMeta;
   };
@@ -687,6 +736,29 @@ interface FineRun {
   regime: RegimeStats;
 }
 
+/** §14.4 leader constraint as the drive sees it: the leader's emitted curve on
+ *  the same s-axis plus a clearance SCHEDULE. The schedule (rather than a
+ *  scalar gap) is what lets an inherited overlap be represented honestly at
+ *  the seam — `gap0M` may be negative — and still converge back to the
+ *  registry clearance, so the sim cap and the G12 measurement are the same
+ *  statement about the same moving boundary. */
+export interface DriveLeader {
+  track: TrackPoint[];
+  /** Clearance enforced at t0Ms, m. MAY BE NEGATIVE (inherited inversion). */
+  gap0M: number;
+  /** Registry clearance the pair relaxes back to, m (QUEUE_GAP_M + length). */
+  nominalM: number;
+  /** Emission instant the schedule is anchored to. */
+  t0Ms: number;
+}
+
+/** The clearance §14.4 requires at t: the inherited gap easing back to the
+ *  nominal one at QUEUE_GAP_RECOVER_MS. Monotone non-decreasing in t. */
+export function queueGapAt(leader: DriveLeader, tMs: number): number {
+  const eased = leader.gap0M + (QUEUE_GAP_RECOVER_MS * (tMs - leader.t0Ms)) / 1000;
+  return eased < leader.nominalM ? eased : leader.nominalM;
+}
+
 interface OpinionRef {
   fine: FineRun;
   /** Gate per plan stop for the smooth run: the smooth may pass stop i freely
@@ -736,7 +808,7 @@ function runDrive(args: {
    *  dispatcher noise. */
   skipTauMs?: number[];
   /** §14.4: the same-track leader curve this run must stay behind. */
-  leader?: { track: TrackPoint[]; gapM: number } | null;
+  leader?: DriveLeader | null;
   s0: number;
   v0: number;
   a0: number;
@@ -1082,14 +1154,33 @@ function runDrive(args: {
     // braking envelope onto the clearance boundary (with the §5 jerk-onset
     // margin via slack()), i.e. classic car-following re-hosted onto the
     // leader's EMITTED curve. At/past the boundary (inherited seam overlap)
-    // the follower may at most match the leader's speed — the overlap decays,
-    // never grows.
+    // the follower is held BELOW the leader's speed by the recovery rate, so
+    // the overlap is actively repaid rather than merely prevented from
+    // growing — see QUEUE_GAP_RECOVER_MS for why matching it was not enough.
     let envQueue = Infinity;
-    if (leader) {
-      const lim = evalTrack(leader.track, tMs) - leader.gapM - QUEUE_SIM_CUSHION_M;
+    // Past the leader's last knot we have no prediction for it — NOT a
+    // prediction that it stands. Braking for a phantom parked at the leader's
+    // final position would invent a stop the evidence never asserted (§14.4 /
+    // G11 doctrine), so the constraint simply lapses there and the next
+    // emission — which will have a fresh leader curve — reimposes it.
+    if (leader && tMs <= leader.track[leader.track.length - 1].t) {
+      const lim = evalTrack(leader.track, tMs) - queueGapAt(leader, tMs) - QUEUE_SIM_CUSHION_M;
       const vLead = leaderSpeedAt(tMs);
-      envQueue = lim - sI <= 0 ? vLead : vLead + Math.sqrt(2 * TRAJ_A_BRK * slack(lim));
-      if (envQueue < 0.5 && vLead < 0.5) standKind[i + 1] = 2; // queue stand
+      const inside = lim - sI <= 0;
+      // Inside the boundary the follower may not merely MATCH the leader —
+      // it repays the inherited overlap at the recovery rate. Floored at 0:
+      // a speed cap never reverses anything, so behind a standing leader this
+      // is a stand, not a backward slide.
+      envQueue = inside
+        ? Math.max(0, vLead - QUEUE_GAP_RECOVER_MS)
+        : vLead + Math.sqrt(2 * TRAJ_A_BRK * slack(lim));
+      // Queue stand (evidence-backed, §14.4/G11): the clearance term alone is
+      // what holds this step under the stand threshold. Superset of the old
+      // `vLead < 0.5` proxy — with the recovery subtraction the follower can
+      // be pressed to a stand by a leader that is itself still creeping.
+      if (envQueue < G11_STAND_V_MS && (inside || vLead < G11_STAND_V_MS)) {
+        standKind[i + 1] = 2;
+      }
     }
     const env = Math.min(envCurve, envHold, envQueue);
     if (env < vCmd) {
@@ -1312,12 +1403,36 @@ function scanStands(
   return { midSegmentStops, jamHolds, queueHolds, midSegmentDetail };
 }
 
-/** Spread helper: measureCollision result → the two TrackBuildMeta fields. */
-function collisionMeta(m: { violations: number; maxPenM: number }): {
+/** Spread helper: measureCollision result → the TrackBuildMeta fields. */
+function collisionMeta(m: CollisionMeasure): {
   collisionViolations: number;
   collisionMaxPenM: number;
+  collisionPenAt0M: number;
+  collisionGapM: number;
+  collisionMeasured: boolean;
+  collisionInherited: boolean;
 } {
-  return { collisionViolations: m.violations, collisionMaxPenM: m.maxPenM };
+  return {
+    collisionViolations: m.violations,
+    collisionMaxPenM: m.maxPenM,
+    collisionPenAt0M: m.penAt0M,
+    collisionGapM: m.gapM,
+    collisionMeasured: m.measured,
+    collisionInherited: m.penAt0M > G12_TOL_M,
+  };
+}
+
+interface CollisionMeasure {
+  violations: number;
+  maxPenM: number;
+  /** Penetration at the emission instant itself — the INHERITED state the
+   *  drive could not have caused (> G12_TOL_M ⇒ the whole episode is a seam
+   *  inheritance, not a curve the follower drove into its leader). */
+  penAt0M: number;
+  /** The effective clearance actually enforced/measured, m (§14.4 effLeader). */
+  gapM: number;
+  /** A leader existed, so the numbers above are meaningful. */
+  measured: boolean;
 }
 
 /** G12: sampled 1 s instants where an emitted track penetrates the leader's
@@ -1325,18 +1440,39 @@ function collisionMeta(m: { violations: number; maxPenM: number }): {
  *  zero; the count is the measurement, not the guarantee. */
 function measureCollision(
   track: TrackPoint[],
-  leader: { track: TrackPoint[]; gapM: number } | null | undefined,
-): { violations: number; maxPenM: number } {
-  if (!leader || track.length === 0) return { violations: 0, maxPenM: 0 };
+  leader: DriveLeader | null | undefined,
+): CollisionMeasure {
+  if (!leader || track.length === 0) {
+    return { violations: 0, maxPenM: 0, penAt0M: 0, gapM: 0, measured: false };
+  }
   let violations = 0;
-  let maxPenM = 0;
-  const tEnd = track[track.length - 1].t;
+  let maxPenM = -Infinity;
+  // Only where BOTH curves are defined. `evalTrack` freezes past the last
+  // knot, so sampling the follower's full horizon against a leader whose
+  // prediction has run out measures the follower closing on a PARKED phantom
+  // — and emissions are staggered by a median 15.6 s across the bundle (max
+  // 56 s measured 2026-08-19), so that tail is 100 m+ of pure artifact. It
+  // was the whole "grown" class: penAt0 −0.5 m by construction, then tens of
+  // metres of "penetration" accumulated entirely after the leader's horizon.
+  const tEnd = Math.min(track[track.length - 1].t, leader.track[leader.track.length - 1].t);
+  // Measured against the SAME schedule the sim enforced, so a violation means
+  // exactly one thing: the emitted curve closed on its leader faster than the
+  // recovery allows. An inherited overlap reads as −0.5 m at t_E by
+  // construction and can never, by itself, print a violation.
+  const penAt = (t: number): number =>
+    evalTrack(track, t) - (evalTrack(leader.track, t) - queueGapAt(leader, t));
   for (let t = track[0].t; t <= tEnd; t += 1000) {
-    const pen = evalTrack(track, t) - (evalTrack(leader.track, t) - leader.gapM);
+    const pen = penAt(t);
     if (pen > G12_TOL_M) violations++;
     if (pen > maxPenM) maxPenM = pen;
   }
-  return { violations, maxPenM: round2(maxPenM) };
+  return {
+    violations,
+    maxPenM: round2(maxPenM),
+    penAt0M: round2(penAt(track[0].t)),
+    gapM: round2(queueGapAt(leader, track[0].t)),
+    measured: true,
+  };
 }
 
 // ── constraint-aware compression (§11) ───────────────────────────────────────
@@ -1777,10 +1913,16 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
   // collision (measured live 2026-08-17: 254 "violations" in 4 min, all
   // pre-existing-overlap class). The constraint prevents CROSSING and never
   // lets an inherited overlap grow; it does not teleport followers backward.
-  const effLeader = (
-    track: TrackPoint[],
-    sStart: number,
-  ): { track: TrackPoint[]; gapM: number } | null => {
+  //
+  // 2026-08-19: the seam gap is no longer clipped at 0 and no longer held for
+  // the horizon. Clipping at 0 turned every inherited INVERSION (clear0 < 0 —
+  // the follower's own fix/hold/smooth-seam legitimately outranking an older
+  // leader curve) into ~120 s of counted penetration it could not repay, and
+  // holding it meant the pair never healed. Carrying the inversion honestly as
+  // a negative gap makes the measurement read −0.5 m at t_E, and the recovery
+  // schedule repays it at QUEUE_GAP_RECOVER_MS.
+  let leaderDroppedInverted = false;
+  const effLeader = (track: TrackPoint[], sStart: number): DriveLeader | null => {
     if (!args.leader) return null;
     const clear0 = evalTrack(track, t0) - sStart;
     // Inverted pair: the "follower" already sits well past this leader curve —
@@ -1788,8 +1930,16 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     // here would chain the vehicle to a phantom behind it (measured live
     // 2026-08-17: one inverted pair printed 202 m of "penetration" per
     // emission and stood the follower mid-street).
-    if (clear0 < -5) return null;
-    return { track, gapM: Math.min(args.leader.gapM, Math.max(0, clear0 - 0.5)) };
+    if (clear0 < -QUEUE_INVERT_MAX_M) {
+      leaderDroppedInverted = true;
+      return null;
+    }
+    return {
+      track,
+      gap0M: Math.min(args.leader.gapM, clear0 - 0.5),
+      nominalM: args.leader.gapM,
+      t0Ms: t0,
+    };
   };
   const leaderO = args.leader ? effLeader(args.leader.opinion, s0) : null;
 
@@ -1921,7 +2071,9 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
       seamFloorApplied,
       requestSkips,
       jamHolding,
+      standingStart,
       leaderKey: args.leader?.key ?? null,
+      leaderDroppedInverted,
       opinion: opinionMeta,
       smooth: smoothMeta,
     },

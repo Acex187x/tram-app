@@ -726,6 +726,60 @@ stands as a queue stand (`queueHolds` telemetry — a traffic column, jam-class,
 legal), and against a MOVING leader the cap keeps it rolling. `collisionViolations`
 (G12) measures the emitted curves against the leader constraint — target 0.
 
+**Amendment 2026-08-19 — the clearance SCHEDULE, and ordering that outlives
+the fix.** Two things the original spec left implicit turned out to carry the
+whole residual.
+
+*The gap is a schedule, not a scalar.* The seam routinely hands the drive a
+pair already tighter than the registry clearance, or outright INVERTED by a
+few metres: the follower's own fresh fix (the G10 floor), its modal hold, and
+its smooth continuity seam all legitimately outrank an older leader curve, and
+the §14.4 s0 clamp is floored at the anchor fix precisely so a fix always
+beats a model curve. The enforced clearance is therefore taken from the seam —
+`gap0 = min(nominal, clear0 − 0.5)` — and then RELAXES back to nominal at
+`QUEUE_GAP_RECOVER_MS` (0.5 m/s):
+
+```
+gap(t)  = min(nominal, gap0 + QUEUE_GAP_RECOVER_MS · (t − t_E))
+cap     = vLead(t) − QUEUE_GAP_RECOVER_MS   inside the boundary (floored at 0)
+```
+
+`gap0` MAY BE NEGATIVE: an inherited inversion is represented honestly rather
+than clipped to zero. Clipping it to zero (the 2026-08-17 form) made the
+measurement read the inherited overlap as fresh penetration at every sampled
+second, and capping the follower at exactly `vLead` froze the geometry so the
+pair could never heal — one bad seam persisted for the whole 120 s horizon and
+was re-inherited through the smooth seam by the next emission. With the
+schedule, the sim cap and the G12 measurement are the same statement about the
+same moving boundary, `pen(t_E) = −0.5 m` by construction for every inherited
+state, and a violation means exactly one thing: **the emitted follower closed
+on its leader faster than the recovery allows.** The repayment is a speed cap
+floored at 0, so it never reverses anything — behind a standing leader it is a
+queue stand, which §14.4 already classifies as evidence-backed.
+
+*Ordering is fix-based at every fix age.* ORDER and POSITION age at completely
+different rates. Which of two trams on one rail is in front is a topological
+fact that survives minutes of silence — that IS "overtaking is rare" — while
+the projected position diverges fast (measured fleet-wide 2026-08-19: a curve
+sits a median **343 m** past its own fix at 60–120 s of fix age, max 1231 m).
+The former fallback — past 30 s of fix age, order by `max(nowcast, fix)` —
+therefore let a diverging curve declare ITSELF the leader, legitimising a
+crossing instead of preventing it. Ordering now reads raw fix positions at
+every age, matching the alias exclusion and the leadership memory, which were
+already fix-based. The phantom-cap failure the fallback was built for (a
+stale vehicle chained to a leader it has really passed) is handled where it
+belongs: `QUEUE_INVERT_MAX_M` (60 m), the band inside which an inversion is
+clipped-and-healed rather than dropped — sized so a full-band inversion is
+repaid within one horizon. Beyond it the pair is not a queue in any physical
+sense and the ordering itself is not to be trusted, so the leader is dropped.
+
+*G12's unit.* `collisionViolations` counts violating SAMPLED SECONDS, and one
+bad emission contributes its entire ~120 s horizon. Rating it against
+`emissions` (as the 2026-08-17 report did at "117 / 0.6 %") overstates the
+incidence ~100×. The per-emission population is `g12collision.tracks` over
+`measuredTracks` (track-emissions that had a leader at all); the gate is that
+rate plus `penM.over5`, the through-passing counter.
+
 ### 14.5 Nowcast anchor filter (asymmetric by design)
 
 The filter rejects ONLY backward jumps and no-evidence jitter — legitimate

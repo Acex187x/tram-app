@@ -905,6 +905,98 @@ const mkDrive = (over: Partial<Parameters<typeof buildDriveVehicle>[0]> &
     `unconstrained min clearance ${minClearU.toFixed(1)} m`);
 }
 
+// ── D17b. §14.4 inherited inversion: the seam hands the drive a follower ────
+// already sitting PAST its leader's curve (its own fresh fix / modal hold /
+// smooth continuity outranking an older leader curve). The old effLeader
+// clipped the enforced gap to 0, which froze the overlap for the whole
+// horizon AND counted it as ~120 s of G12 penetration. The schedule must
+// instead read the seam as legal, repay the overlap, and never reverse.
+{
+  const geom = synthGeometry({ totalM: 6000 });
+  const lead = mkDrive({ key: 'L', raw: raw(1200, 6), geom, surfaces: surf(6) });
+  const gapM = 3 + 14.1;
+  const leader = { key: 'L', opinion: lead.vehicle.opinion, smooth: lead.vehicle.smooth, gapM };
+  // Follower's own fresh fix sits 3 m past the leader's curve at t_E. This is
+  // the real inversion path: the §14.4 s0 clamp is FLOORED at the anchor fix
+  // (G10 — a fix is evidence and outranks a model curve), so the clamp cannot
+  // pull the seam back behind the leader and the drive starts inverted.
+  const lead0 = evalTrack(lead.vehicle.opinion, T0);
+  const b = mkDrive({
+    raw: raw(lead0 + 3, 6),
+    geom,
+    surfaces: surf(6),
+    leader,
+    anchorFixS: lead0 + 3,
+  });
+  driveContract('drive/queue-inverted', b); // includes G12 = 0
+  check('drive/queue-inverted: an inherited inversion is not counted as a collision',
+    b.meta.opinion.collisionViolations === 0 && b.meta.smooth.collisionViolations === 0,
+    `G12 ${b.meta.opinion.collisionViolations}/${b.meta.smooth.collisionViolations}, ` +
+    `penAt0 ${b.meta.opinion.collisionPenAt0M} m, gap0 ${b.meta.opinion.collisionGapM} m`);
+  const clearAt = (dt: number): number =>
+    evalTrack(lead.vehicle.opinion, T0 + dt) - evalTrack(b.vehicle.opinion, T0 + dt);
+  check('drive/queue-inverted: the overlap is repaid, not frozen',
+    clearAt(60_000) > clearAt(0) + 10,
+    `clearance ${clearAt(0).toFixed(1)} m at t_E → ${clearAt(60_000).toFixed(1)} m at +60 s`);
+  // Never reverse: the repayment is a speed cap, so s stays monotone.
+  const mono = b.vehicle.opinion.every((p, i) => i === 0 || p.s >= b.vehicle.opinion[i - 1].s - 1e-9);
+  check('drive/queue-inverted: repayment never drives the follower backward', mono);
+}
+
+// ── D17c. …and a WIDE inversion (inside QUEUE_INVERT_MAX_M) is still clipped ─
+// rather than dropped: at 5 m the constraint used to vanish, which is exactly
+// where the 2026-08-19 probe found the real through-passing.
+{
+  const geom = synthGeometry({ totalM: 6000 });
+  const lead = mkDrive({ key: 'L', raw: raw(1200, 6), geom, surfaces: surf(6) });
+  const gapM = 3 + 14.1;
+  const leader = { key: 'L', opinion: lead.vehicle.opinion, smooth: lead.vehicle.smooth, gapM };
+  const lead0 = evalTrack(lead.vehicle.opinion, T0);
+  const b = mkDrive({
+    raw: raw(lead0 + 40, 6), geom, surfaces: surf(6), leader, anchorFixS: lead0 + 40,
+  });
+  driveContract('drive/queue-wide-inversion', b);
+  check('drive/queue-wide-inversion: 40 m inverted still binds (leader not dropped)',
+    b.meta.leaderKey === 'L' && !b.meta.leaderDroppedInverted && b.meta.opinion.collisionMeasured,
+    `leaderKey ${b.meta.leaderKey}, dropped ${b.meta.leaderDroppedInverted}, gap0 ${b.meta.opinion.collisionGapM} m`);
+  const clearAt = (dt: number): number =>
+    evalTrack(lead.vehicle.opinion, T0 + dt) - evalTrack(b.vehicle.opinion, T0 + dt);
+  check('drive/queue-wide-inversion: the band is repaid within one horizon',
+    clearAt(120_000) > clearAt(0) + 40,
+    `clearance ${clearAt(0).toFixed(1)} m at t_E → ${clearAt(120_000).toFixed(1)} m at +120 s`);
+  check('drive/queue-wide-inversion: repayment never drives the follower backward',
+    b.vehicle.opinion.every((p, i) => i === 0 || p.s >= b.vehicle.opinion[i - 1].s - 1e-9));
+}
+
+// ── D17d. §14.4 lapse: a leader whose prediction has RUN OUT is not a wall ──
+// Emissions are staggered (median 15.6 s across the bundle, max 56 s measured
+// 2026-08-19), so a follower's horizon routinely outlives its leader's.
+// evalTrack freezes past the last knot, so the old code both braked for and
+// counted penetration against a phantom parked at the leader's final position.
+{
+  const geom = synthGeometry({ totalM: 8000 });
+  // Leader emitted 60 s ago ⇒ its curve ends at T0 + 60 s, the follower's at
+  // T0 + 120 s. The last 60 s of the follower's horizon has no leader at all.
+  const lead = mkDrive({
+    key: 'L', raw: raw(2000, 6, T0 - 60_000), geom, surfaces: surf(6),
+    emittedAtMs: T0 - 60_000, anchorMs: T0 - 65_000,
+  });
+  const gapM = 3 + 14.1;
+  const leader = { key: 'L', opinion: lead.vehicle.opinion, smooth: lead.vehicle.smooth, gapM };
+  const b = mkDrive({ raw: raw(1400, 6), geom, surfaces: surf(6), leader });
+  driveContract('drive/queue-lapse', b);
+  const leadEnd = lead.vehicle.opinion[lead.vehicle.opinion.length - 1].t;
+  check('drive/queue-lapse: nothing is counted past the leader\'s last knot',
+    b.meta.opinion.collisionViolations === 0 && b.meta.smooth.collisionViolations === 0,
+    `G12 ${b.meta.opinion.collisionViolations}/${b.meta.smooth.collisionViolations}, ` +
+    `leader ends +${((leadEnd - T0) / 1000).toFixed(0)}s, follower +120s`);
+  // …and the drive keeps rolling after the lapse instead of braking for the
+  // phantom: no invented stand in the unconstrained tail.
+  const vTail = (evalTrack(b.vehicle.opinion, T0 + 110_000) - evalTrack(b.vehicle.opinion, T0 + 90_000)) / 20;
+  check('drive/queue-lapse: the follower does not brake for the phantom',
+    vTail > 3, `mean v over +90…110 s = ${vTail.toFixed(2)} m/s`);
+}
+
 // ── D18. §6/§14.1 creep: ahead of a standing reality — no phantom stand ─────
 {
   const geom = synthGeometry({ totalM: 6000, stops: [{ atM: 1000, id: 'S1' }, { atM: 2000, id: 'S2' }] });

@@ -555,6 +555,142 @@ TSX_TSCONFIG_PATH=$PWD/tsconfig.runtime.json ./node_modules/.bin/tsx src/main.ts
   Poll cadence 5 s → 3 s NOT taken: the client floor closes the race at the
   pixel level for free, so the battery budget stays.
 
+- **2026-08-19 (G12 anti-collision): three mechanisms killed, and the real
+  through-passing traced OUT of §14.4.** Trigger: `collisionViolations` had
+  reached 14,372 over 35 h and read like a 100× regression on the v3.1
+  window's 117. It was not one.
+  - **The headline number was a UNIT error.** `collisionViolations` sums
+    violating SAMPLED SECONDS, and one bad emission contributes its entire
+    ~120 s horizon; dividing by `emissions` overstates incidence ~100×. The
+    2026-08-17 "117 / 0.6 % of emissions" had the same bug, so the two were
+    never comparable. `g12collision.tracks / measuredTracks` is now the
+    per-emission population, with `penM.over5` as the through-passing gate.
+  - **The counter and the product defect are different populations.** A
+    bytes-side probe (`lab/scripts/g12-probe.ts`, 25 min, 9,612 emissions,
+    24,118 pair-tracks) found **30 genuine curve crossings, p50 118.8 m, max
+    336.6 m, all on line 9** — while the generator's own G12 moved +8
+    violating seconds in a comparable window. The counter could not see them:
+    every `leaderFor` / `effLeader` `return null` is a hole where the
+    constraint does not apply and therefore cannot be violated. Two framings
+    from the v3.1 report were wrong — the cluster is NOT at a terminus (all 30
+    are 3.7–8.7 km from either shape end) and NOT standing-related (0 of 1,734
+    violating seconds had a standing follower).
+  - **M1 — the inherited overlap was FROZEN, not repaid.** `effLeader` clipped
+    the enforced gap to `max(0, clear0 − 0.5)`, so an inversion the seam
+    handed the drive (its own fresh fix / modal hold / smooth continuity all
+    legitimately outrank an older leader curve) was charged as fresh
+    penetration every second, and the `vLead` cap meant the pair could never
+    heal — it persisted a full horizon and was re-inherited by the next
+    emission. Fixed: the gap is a SCHEDULE, `gap0` may be negative, and it
+    relaxes to nominal at `QUEUE_GAP_RECOVER_MS` 0.5 m/s with the follower
+    held at `vLead − 0.5` inside the boundary (floored at 0 — a speed cap
+    never reverses). Sim cap and G12 measurement now read one schedule, so
+    `pen(t_E) = −0.5 m` by construction and a violation means only "closed
+    faster than the recovery allows". Live proof of the repayment, one pair
+    across consecutive emissions: gap0 **−38.6 → −21.1 → −12.5 → −7.2 → −5.3
+    → −4.3 m**.
+  - **M2 — a diverging curve could declare ITSELF the leader.** Ordering fell
+    back to `max(nowcast, fix)` past 30 s of fix age. But ORDER and POSITION
+    age at different rates: order is topological and survives silence ("
+    overtaking is rare"), while position diverges fast — measured fleet-wide,
+    a curve sits a median **343 m** past its own fix at 60–120 s of fix age
+    (max 1231 m). 28 of the 30 crossings had a stale fix on at least one side
+    (only 2 fresh/fresh) on pairs whose FIXES were a queue-distance 20–32 m
+    apart. Ordering is now fix-based at every age, matching the alias
+    exclusion and leadership memory which were already fix-based; the
+    phantom-cap failure the fallback guarded is handled by
+    `QUEUE_INVERT_MAX_M` (5 → 60 m), the band inside which an inversion is
+    clipped-and-healed rather than dropped, sized so a full-band inversion is
+    repaid within one horizon.
+  - **M3 — an ended leader was treated as a leader PARKED.** `evalTrack`
+    freezes past the last knot, and emissions are staggered by a median
+    **15.6 s (max 56 s)** across the bundle, so a follower's horizon routinely
+    outlives its leader's. Both the sim and the measurement braked for / counted
+    against a phantom at the leader's final position — at 8 m/s a 15 s stagger
+    is 120 m of pure artifact. This was the entire "grown" class (every
+    violating track showed `penAt0 = −0.5` then tens of metres accumulated
+    late). Fixed: the constraint lapses past the leader's last knot (no
+    prediction ≠ a prediction of standing, §14.4/G11), and `measureCollision`
+    samples only where both curves are defined.
+  - **Hypotheses measured and DISCARDED rather than assumed.** The
+    leader-freshness guard (`staleCurve`) — **0** over 5.8 k calls; a vehicle
+    whose fixes stop arriving keeps `fixObsAtMs === observedAtMs` and stays
+    leadable. The leadership-memory lock (`memoryHeld`) — **0**, so the memory
+    was NOT pinning wrong orders and was left in place. The `[−5,−1)`
+    frozen-overlap class predicted from the drill-down ring — **0
+    occurrences**. New `shadow.leaderPick` gauge makes all of these visible:
+    the real leader-drop mass is `tooFar` (>1500 m, ~68 %) and `noCandidate`.
+  - **The residual through-passing is NOT an anti-collision defect** —
+    forensics (`lab/scripts/g12-forensics.ts`) caught it with full context.
+    The leader's SMOOTH curve renders **behind its own fresh fix** while the
+    §6 catch-up converges: leader 8529, fix 14769.0 @ 6 s, smooth at 14652.5 —
+    **−116.5 m behind its own fix** — recovering −116.5 → −102.1 → −84.7 →
+    −46.9 → −9.8 → +5.2 → +53.6 m over ~25 s. Any same-shape vehicle behind it
+    renders as passing through it. G10 floors only the OPINION, and the §14.7
+    client last-mile floor deliberately does not apply to smooth. §14.4 cannot
+    repair this without teleporting a curve backward, which §14.7/G13 forbid.
+    Recommended next step (NOT taken here — it is a §6/G5 change with accuracy
+    implications): floor the collision boundary, and the rendered smooth, at
+    the leader's own anchor fix, the same "a fix is evidence" rule G10 already
+    applies to the opinion.
+  - **Post-fix window (45 min, 15:29–16:14 local, 19,095 shadow emissions).**
+    Generator-side G12 **11 violating track-emissions / 2,250 leader-clipped
+    tracks**, i.e. **0.029 % of all track-emissions — the < 0.1 %-per-emission
+    target is MET** — but `penM.over5` = 8 (p50 20.4 m, p90 31.9 m), so the
+    **"no through-passing above 5 m" bar is NOT met**. Class split is the
+    proof M1/M3 landed: **0 inherited, 11 grown**, every one with
+    `penAt0 = −0.5 m`. The constraint now actually engages on inversions
+    instead of dropping them — 15 inverted seams clipped-and-healed inside the
+    band vs 8 dropped beyond it. Bytes side (check-v2, 40 min, 34,750 tracks,
+    696 k segments): G12 **58 / 26,880 pair-tracks = 0.216 %**, down from
+    0.484 % pre-fix (2.2×), but magnitudes still p50 35.3 m / max 626.1 m.
+    Unregressed elsewhere: G1 0, G2 p99 0.800 with **0 over 1.0**, G3
+    1.03/min, G8 1.0 %/0.5 %, G11 56 / 20,560, G4 25 (all smooth, **seg12 0**
+    — the seam class stays dead). G5 near/moving p90 40 s, far p90 68 s and G6
+    p95 2.0 fail at the same rate the README already records as pre-existing.
+    Determinism intact. **Matched accuracy stable (n=7,233):** ml-drive 79.8 m
+    mean / −8.3 signed / p90 181.9 vs published ml-mode 85.6 / −24.9 / 217.3;
+    ml-drive-smooth 91.1 / −25.4 — both at or better than the v3.1 window
+    (81.8 / −13.8 and 95.7 / −37.0), so the recovery cap costs nothing
+    measurable.
+  - **What the residual actually is, measured (50 forensics events + 62 probe
+    crossings).** `diffTrip` **50/50**; `follower-projects-far-more` **46/50**;
+    stale-follower/fresh-leader **41/50**; and the probe's decisive column,
+    **follower's emission OLDER than the leader's in 53 of 62**. The archetype:
+    a follower's AGING emission is rendered against a leader that has since
+    re-anchored on a fresh fix and often stands (`curve == fix == engine`
+    exactly). The constraint was satisfied when the follower was built — the
+    bundle then ages and the pair becomes inconsistent in the rendered frame.
+    `probeCrossing` exists precisely to re-emit such followers and is
+    demonstrably not converting them; that, not the clearance math, is the
+    next lever. Second contributor, same data: a leader's SMOOTH curve renders
+    behind its own fresh fix while §6 catch-up converges (8529 measured at
+    **−116.5 m behind its own fix**, recovering to +53.6 m over ~25 s), and
+    G10 floors only the opinion. Both are outside §14.4 — no clearance rule
+    can fix a stale bundle or a lagging catch-up without teleporting a curve
+    backward, which §14.7/G13 forbid.
+  - **G13 verdict: bounded, and the constant is now chosen from data.**
+    Published **21 / 10,747 (0.20 %)**, shadow **0 / 13,054**. New
+    `lateDriftM` histogram over 3,545 continuous-seam re-emissions: p90
+    **0.25 m**, p99 **8.25 m**. The new `lateTolTable` shows every violation
+    sits in a narrow band just above the current slack — tol 6 → 76 fires,
+    tol 10 → 21, **tol 15 → 0**, tol 20 → 0, tol 30 → 0. The pre-restart
+    `g13Recent` ring agrees: 16 of 17 events at `back0 ≈ 0.00` (the continuity
+    floor landing exactly) with +2 s drift 10.05–15.33 m, 0 standing starts.
+    So the residual is NOT a backward teleport — the seam is exact and the
+    class is post-floor deceleration drift, bounded at ~15 m. Left at 10 m
+    deliberately: raising the constant to 15 would zero the counter without
+    changing a pixel, and this project counts rather than excuses. (The
+    "missing g13Recent observer" in the task framing was a false alarm — it
+    lives at `seam.published.swap.g13swapRegression.recent`, not under
+    `perceptual`.)
+  - **Byte impact:** none on the published default gen. `TRAJ_V3_PUBLISH` is
+    unset, so `current` is built by `trajectory.ts`; every change is confined
+    to the v3/shadow chain (`drive.ts` + the shadow leader wiring).
+    Determinism intact (5 fetches byte-identical, eval digest reproduced).
+    New selftests `drive/queue-inverted`, `drive/queue-wide-inversion`,
+    `drive/queue-lapse` cover M1–M3.
+
 ## Teardown
 
 ```sh

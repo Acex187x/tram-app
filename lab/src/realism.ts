@@ -330,6 +330,15 @@ export class SeamCounters {
    *  data, not taste): per TOL — regressions > 2 m the floor would kill
    *  (prevAhead ≤ TOL) vs keep as honest corrections (prevAhead > TOL). */
   tolTable = [15, 25, 40, 60, 80, 120].map((tol) => ({ tol, killed: 0, kept: 0 }));
+  /** §14.7 late-swap drift: on a seam that landed EXACTLY on the continuity
+   *  floor (back0 within SEAM_SLACK_M — no backward step to speak of), how
+   *  far does the new curve fall behind the old projection by t_E + 2 s? The
+   *  §14.7 text set SEAM_SLACK_LATE_M = 10 from a first window measured at
+   *  5.9–9.9 m; this histogram is the standing population so the constant is
+   *  re-chosen from data rather than from that one window. */
+  private lateDriftHist = new Histogram(-20, 120, 0.5);
+  /** …and what each candidate slack would do to the G13 count. */
+  lateTolTable = [6, 10, 15, 20, 30].map((tol) => ({ tol, fires: 0 }));
   worst: SeamEvent[] = [];
   recent: SeamEvent[] = [];
   /** EVERY G13-firing event, full context (the >10 m rings miss small-back0
@@ -410,6 +419,13 @@ export class SeamCounters {
     // itself, which G10 already gates.
     if (!e.standingStart) {
       if (evalTrack(e.prevOpinion, t0) <= justified) {
+        // Late-swap drift population: the seam itself is continuous (back0
+        // inside the seam slack), so whatever shows up at +2 s is the
+        // post-floor deceleration, not a teleport.
+        if (back0 <= SEAM_SLACK_M) {
+          this.lateDriftHist.add(backM[1]);
+          for (const row of this.lateTolTable) if (backM[1] > row.tol) row.fires++;
+        }
         for (const dt of [0, 2]) {
           const t = t0 + dt * 1000;
           const slack = dt === 0 ? SEAM_SLACK_M : SEAM_SLACK_LATE_M;
@@ -438,7 +454,19 @@ export class SeamCounters {
     return {
       tolM: SEAM_REANCHOR_TOL_M,
       n: this.n,
-      g13swapRegression: { violations: this.g13Violations, target: 0, recent: this.g13Recent },
+      g13swapRegression: {
+        violations: this.g13Violations,
+        target: 0,
+        lateSlackM: SEAM_SLACK_LATE_M,
+        lateDriftM: {
+          n: this.lateDriftHist.n,
+          p50: this.lateDriftHist.pct(50),
+          p90: this.lateDriftHist.pct(90),
+          p99: this.lateDriftHist.pct(99),
+        },
+        lateTolTable: this.lateTolTable,
+        recent: this.g13Recent,
+      },
       backAtSeam: {
         over2: this.back0Over2,
         over10: this.back0Over10,
@@ -629,6 +657,10 @@ export interface PerceptualEmission {
   jamHolding: boolean;
   /** §14.4: the same-shape leader this emission was clipped against. */
   leaderKey: string | null;
+  /** Standing evidence at the seam (asserted modal hold or §14.3 jam hold). */
+  standingStart: boolean;
+  /** §14.4: a leader was selected but dropped as an inverted pair. */
+  leaderDroppedInverted: boolean;
   perTrack: {
     opinion: PerceptualTrackMeta;
     smooth: PerceptualTrackMeta;
@@ -652,6 +684,10 @@ export interface PerceptualTrackMeta {
   /** G12 leader-clearance penetrations of the emitted track. */
   collisionViolations: number;
   collisionMaxPenM: number;
+  collisionPenAt0M: number;
+  collisionGapM: number;
+  collisionMeasured: boolean;
+  collisionInherited: boolean;
   regime: RegimeStats | null;
 }
 
@@ -679,13 +715,62 @@ export class PerceptualCounters {
   midSegmentStops = 0;
   jamHolds = 0;
   queueHolds = 0;
-  /** G12 (target 0). */
+  /** G12 (target 0). Note the UNIT: this is a sum of violating SAMPLED
+   *  SECONDS, and one bad emission contributes its whole horizon (~120) —
+   *  dividing it by `emissions` (as the 2026-08-17 report did) overstates the
+   *  incidence ~100×. `collisionTracks` below is the per-emission population. */
   collisionViolations = 0;
+  /** G12 per-emission incidence: track-emissions with ≥ 1 violating second. */
+  collisionTracks = 0;
+  /** …split by mechanism. INHERITED = already penetrating at the emission
+   *  instant, i.e. the seam handed the drive an overlap it may only freeze,
+   *  never cause (§14.4 effLeader). GROWN = clear at t_E and the emitted
+   *  curve closed into the leader afterwards — the only class the constraint
+   *  is actually responsible for. */
+  collisionInherited = 0;
+  collisionGrown = 0;
+  /** …and by whether the follower's seam carried standing evidence (which
+   *  today skips the §14.4 s0 clamp entirely). */
+  collisionStandingTracks = 0;
+  /** Track-emissions that had a leader at all (the G12 denominator). */
+  collisionMeasuredTracks = 0;
+  /** PRECURSOR telemetry — the state the seam hands §14.4, measured on every
+   *  clipped track rather than only on the ones that end up violating (the
+   *  violations themselves are far too rare to steer a fix inside one live
+   *  window). `clear0` = leader curve − follower seam at t_E: the clearance
+   *  that actually existed before the drive ran. */
+  private g12Clear0Hist = new Histogram(-100, 900, 5);
+  /** clear0 ≤ 0.5 ⇒ effLeader's gap saturates at 0 and the nominal 17–32 m
+   *  clearance is not enforced at all this emission. */
+  collisionGapFlooredTracks = 0;
+  /** clear0 < 0 ⇒ the curves are ORDERED INVERTED at the seam: the follower
+   *  is drawn past the leader the fixes say is ahead of it. */
+  collisionInvertedSeamTracks = 0;
+  /** Emissions where the inversion exceeded 5 m and the leader was dropped
+   *  outright — no anti-collision constraint applied. */
+  collisionLeaderDropped = 0;
+  private g12PenHist = new Histogram(0, 60, 0.25);
+  private g12GrownPenHist = new Histogram(0, 60, 0.25);
+  /** The product-visible bar: penetration deep enough to READ as one tram
+   *  driving through another (the task's 5 m through-passing threshold). */
+  private g12PenOver5 = 0;
+  private g12GrownPenOver5 = 0;
   /** G7 drill-down: the most recent counted dips, with context. */
   g7Recent: (DipDetail & { key: string; track: 'opinion' | 'smooth'; emittedAtMs: number })[] = [];
   /** G11/G12 drill-downs: recent violations with context. */
   g11Recent: { key: string; track: 'opinion' | 'smooth'; emittedAtMs: number; sM: number; durS: number }[] = [];
-  g12Recent: { key: string; leaderKey: string | null; track: 'opinion' | 'smooth'; emittedAtMs: number; maxPenM: number }[] = [];
+  g12Recent: {
+    key: string;
+    leaderKey: string | null;
+    track: 'opinion' | 'smooth';
+    emittedAtMs: number;
+    maxPenM: number;
+    penAt0M: number;
+    gapM: number;
+    seconds: number;
+    cls: 'inherited' | 'grown';
+    standingStart: boolean;
+  }[] = [];
   /** §14.2 request-stop skips (telemetry, not violations). */
   requestSkipsTotal = 0;
   /** Emissions holding at an observed jam / clipped behind a leader. */
@@ -767,6 +852,7 @@ export class PerceptualCounters {
       this.recentJamHolds.unshift({ key: e.key, emittedAtMs: e.emittedAtMs });
       if (this.recentJamHolds.length > 8) this.recentJamHolds.length = 8;
     }
+    if (e.leaderDroppedInverted) this.collisionLeaderDropped++;
     if (e.leaderKey !== null) {
       this.leaderClippedEmissions++;
       this.recentLeaderClips.unshift({ key: e.key, leaderKey: e.leaderKey, emittedAtMs: e.emittedAtMs });
@@ -793,15 +879,40 @@ export class PerceptualCounters {
         this.g11Recent.unshift({ key: e.key, track: name, emittedAtMs: e.emittedAtMs, ...md });
       }
       if (this.g11Recent.length > 8) this.g11Recent.length = 8;
+      if (meta.collisionMeasured) {
+        this.collisionMeasuredTracks++;
+        // clear0 is recoverable from what the measurement already carries:
+        // penAt0 = gap − clear0 by definition, so clear0 = gap − penAt0.
+        const clear0 = meta.collisionGapM - meta.collisionPenAt0M;
+        this.g12Clear0Hist.add(clear0);
+        if (meta.collisionGapM <= 0) this.collisionGapFlooredTracks++;
+        if (clear0 < 0) this.collisionInvertedSeamTracks++;
+      }
       if (meta.collisionViolations > 0) {
+        const cls = meta.collisionInherited ? 'inherited' : 'grown';
+        this.collisionTracks++;
+        if (cls === 'inherited') this.collisionInherited++;
+        else this.collisionGrown++;
+        if (e.standingStart) this.collisionStandingTracks++;
+        this.g12PenHist.add(meta.collisionMaxPenM);
+        if (meta.collisionMaxPenM > 5) this.g12PenOver5++;
+        if (cls === 'grown') {
+          this.g12GrownPenHist.add(meta.collisionMaxPenM);
+          if (meta.collisionMaxPenM > 5) this.g12GrownPenOver5++;
+        }
         this.g12Recent.unshift({
           key: e.key,
           leaderKey: e.leaderKey,
           track: name,
           emittedAtMs: e.emittedAtMs,
           maxPenM: meta.collisionMaxPenM,
+          penAt0M: meta.collisionPenAt0M,
+          gapM: meta.collisionGapM,
+          seconds: meta.collisionViolations,
+          cls,
+          standingStart: e.standingStart,
         });
-        if (this.g12Recent.length > 8) this.g12Recent.length = 8;
+        if (this.g12Recent.length > 16) this.g12Recent.length = 16;
       }
       for (const d of meta.curveDetail) {
         if (d.seg <= 2) this.g4Seg12++;
@@ -966,7 +1077,39 @@ export class PerceptualCounters {
         recent: this.g11Recent,
       },
       g12collision: {
+        /** Violating SAMPLED SECONDS (one bad emission ≈ its whole horizon). */
         violations: this.collisionViolations,
+        /** The per-emission incidence — the number to rate against. */
+        tracks: this.collisionTracks,
+        measuredTracks: this.collisionMeasuredTracks,
+        ratePct:
+          this.collisionMeasuredTracks > 0
+            ? round3((100 * this.collisionTracks) / this.collisionMeasuredTracks)
+            : null,
+        byClass: { inherited: this.collisionInherited, grown: this.collisionGrown },
+        standingTracks: this.collisionStandingTracks,
+        penM: {
+          p50: this.g12PenHist.pct(50),
+          p90: this.g12PenHist.pct(90),
+          p99: this.g12PenHist.pct(99),
+          over5: this.g12PenOver5,
+        },
+        grownPenM: {
+          n: this.g12GrownPenHist.n,
+          p90: this.g12GrownPenHist.pct(90),
+          over5: this.g12GrownPenOver5,
+        },
+        seam: {
+          clear0M: {
+            p1: this.g12Clear0Hist.pct(1),
+            p10: this.g12Clear0Hist.pct(10),
+            p50: this.g12Clear0Hist.pct(50),
+            n: this.g12Clear0Hist.n,
+          },
+          gapFlooredTracks: this.collisionGapFlooredTracks,
+          invertedSeamTracks: this.collisionInvertedSeamTracks,
+          leaderDroppedInverted: this.collisionLeaderDropped,
+        },
         leaderClippedEmissions: this.leaderClippedEmissions,
         recent: this.g12Recent,
       },
