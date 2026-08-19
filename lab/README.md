@@ -189,6 +189,22 @@ Host smoke run (no docker): `cd lab && npm install &&
 CONVEX_URL=https://tram-api.acex.sh SITE_URL=https://tram-site.acex.sh
 TSX_TSCONFIG_PATH=$PWD/tsconfig.runtime.json ./node_modules/.bin/tsx src/main.ts`
 
+### Measuring what the PHONE draws (not what we serve)
+
+```sh
+node lab/scripts/client-path-replay.mjs 240000
+```
+
+Every gate below scores the SERVED curve. None of them evaluate the client's
+fix-forward shim (`src/lib/physics/fixForward.ts`), which is what the owner is
+actually looking at — and that gap is how three sessions of green gates
+coexisted with «трамваи стоят посреди перегона». This script polls the two
+feeds a phone polls, at a phone's cadences, renders the fleet at 4 Hz and
+reports backward steps (attributed to fix update vs bundle swap), stall time
+while the curve says the tram is moving, and time rendered behind the newest
+fix. **Re-run it after any change to either side of the shim** — it is the only
+number that describes the screen. See the 2026-08-19 Findings entry.
+
 ## Caveats (v0)
 
 - Per-variant sample sets are not strictly matched during warm-up (engine
@@ -205,6 +221,29 @@ TSX_TSCONFIG_PATH=$PWD/tsconfig.runtime.json ./node_modules/.bin/tsx src/main.ts
   implemented yet — this lab exists to establish the baseline it must beat.
 
 ## Findings log
+
+- **2026-08-19: the gates were measuring the wrong thing, and the fix for
+  that measured the build-16 stall.** Every gate here scores the served curve;
+  the phone draws the served curve wound forward onto a fix the server had not
+  seen when it built it, at a bundle age of up to ~7 s. `client-path-replay.mjs`
+  (new, see Run/operate) replays that path against the live feeds. Results,
+  4 min, gen=v3, ~280 vehicles:
+  - build 16's `max(curve, fix)` clamp renders a tram **standing still for
+    2.5–3.0 % of all the time the served curve says it is moving** — the
+    «останавливаются посреди перегона» report, previously invisible to every
+    gate because the served curve is fine; the CLAMP is the stall.
+  - the served curve is behind the phone's newest fix for ~10 % of the fleet at
+    any instant, median 73 m, p90 228 m (agreeing with M2's 48 %-at-arrival).
+  - **Backward steps are a swap phenomenon, not a fix phenomenon.** Attributing
+    every one of them: 0–1 caused by a new fix, **796 of 809 by the bundle
+    swap** — the fresh curve landing behind the phone's marker because the
+    §14.7 seam floor referenced `evalTrack(prev, t0)`, i.e. where the previous
+    curve sat rather than where the client draws it. Fixed by
+    `clientProjectionM` (trajectory.ts), which both generators' seam floors now
+    use; the `seamJustifiedM` bound still caps it.
+  - A space-shifted client shim (`curve + gap`) was tried and rejected on
+    measurement: same backward-step count as the time shift (844 vs 854) and it
+    carries platform holds off the platform. The time shift ships.
 
 - **2026-08-09 (day 1): release-estimator cadence bias — found and fixed.**
   The v0 `stopRelease` estimator folded the RAW at_stop→moving fix gap and
