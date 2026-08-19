@@ -37,6 +37,7 @@ import { readJerk, readRealism } from '../src/realism';
 import {
   accelAt,
   buildV2Vehicle,
+  clientProjectionM,
   evalTrack,
   modalReleaseMs,
   speedAt,
@@ -1046,6 +1047,18 @@ const mkDrive = (over: Partial<Parameters<typeof buildDriveVehicle>[0]> &
     b.vehicle.opinion[0].s >= prevO - 0.05 && b.meta.seamFloorApplied,
     `opinion[0].s = ${b.vehicle.opinion[0].s.toFixed(1)}, prevO ${prevO.toFixed(1)}, ` +
     `nowcast would be 1190 (${(prevO - 1190).toFixed(0)} m backward)`);
+
+  // (a2) …and the floor is where the PHONE is drawing, not where the previous
+  // curve as served sits. Build 17 clients wind a stale curve forward in time
+  // onto the newest fix (src/lib/physics/fixForward.ts), so a floor set at the
+  // unshifted projection sits below the marker and the swap still steps back —
+  // measured 2026-08-19 as 796 of 809 backward steps. clientProjectionM is the
+  // server's copy of that rule and must be what the floor uses.
+  const prevOClient = clientProjectionM(prev.vehicle.opinion, 1180, T0 - 9_000, T0);
+  check('drive/seam-rule: the floor is the CLIENT projection, not the served curve',
+    prevOClient > prevO + 1 && Math.abs(b.vehicle.opinion[0].s - prevOClient) < 0.05,
+    `opinion[0].s = ${b.vehicle.opinion[0].s.toFixed(1)}, client draws ${prevOClient.toFixed(1)}, ` +
+    `served curve is at ${prevO.toFixed(1)}`);
 
   // (b) drive, flat fixes (vObs = 0): the old curve provably overshot — the
   // honest backward correction to the nowcast is emitted unchanged.

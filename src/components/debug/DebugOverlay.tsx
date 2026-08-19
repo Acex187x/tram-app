@@ -577,6 +577,13 @@ function DebugLive({ tramKey }: { tramKey: string }) {
               value={signed(dbg.deltaM, 1)}
               warn={dbg.deltaM != null && Math.abs(dbg.deltaM) > 80}
             />
+            {/* How far the SERVED curve is behind the newest fix right now —
+                the shim is adding exactly this many meters to the marker. */}
+            <Row
+              label="fix-forward"
+              value={dbg.fixForwardM != null ? `+${num(dbg.fixForwardM, 1)}` : '—'}
+              warn={dbg.fixForwardM != null && dbg.fixForwardM > 50}
+            />
             <Row label="speed" value={`${num(dbg.simSpeedKmh, 1)} km/h`} />
           </View>
 

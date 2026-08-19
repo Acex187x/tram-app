@@ -148,8 +148,10 @@ export function DebugMapTraces() {
       lastSampleMs = nowMs;
       // Read the SMOOTH state explicitly (not whichever mode is selected), so
       // both curves are always sampled and the comparison never depends on the
-      // user's current setting: simDistM is then the smooth curve and
-      // fixedDistM its opinion partner, evaluated at the same instant.
+      // user's current setting: simDistM is then the smooth curve AS DRAWN
+      // (fix-forward included) and fixedDistM its raw opinion partner at the
+      // same instant. The gap between the smooth trace and the fix trace is
+      // therefore the shim doing its job, not an error.
       const state = runtime.fleet.getState(key, nowMs, 'smooth');
       if (!state) return;
       const history = historyRef.current;

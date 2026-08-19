@@ -137,6 +137,11 @@ export interface TramPublicState {
   /**
    * The opinion («fixed» mode) curve's distance along shape, m — the partner
    * of `simDistM` for the smooth↔fixed comparison. Null without a trajectory.
+   *
+   * RAW: the served curve, with no client-side fix-forward correction applied
+   * (unlike `simDistM`, which is what gets drawn). It is written as `projDist`
+   * into every calibration/ride record and scored against the next fix as the
+   * MODEL's error, so it has to stay the model's own answer.
    */
   fixedDistM: number | null;
   /**
@@ -177,6 +182,14 @@ export interface PhysicsDebugInfo {
   fixedDistM: number | null;
   /** smooth − fixed, SIGNED m (positive = smooth ahead). Null w/o both curves. */
   deltaM: number | null;
+  /**
+   * Meters the fix-forward shim is currently adding to the active curve
+   * (src/lib/physics/fixForward.ts) — i.e. how far the SERVED curve is behind
+   * the newest AVL fix the phone holds, after mode-dependent rate limiting.
+   * 0 in the steady state; a persistently large value is the bundle trailing
+   * the fix stream, which is the thing to report. Null without a trajectory.
+   */
+  fixForwardM: number | null;
   /** Rendered speed in the active mode, km/h. */
   simSpeedKmh: number;
   /** Smooth-curve speed, km/h — comparison partner (null w/o a smooth curve). */

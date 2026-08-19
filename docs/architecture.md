@@ -21,6 +21,7 @@ src/
     fleet/registry.ts      # regNumberToModel(), MODEL_SPECS (sections, lengths, livery), coupled-pair heuristic
     geo/polyline.ts        # Polyline: cumulative dists, pointAt(s), bearingAt(s), curvature profile
     physics/evaluator.ts   # evalTrajectory(track, tMs): binary search + lerp — the whole client physics
+    physics/fixForward.ts  # the newest AVL fix translates the curve; the client's only correction
     physics/bundle.ts      # /api/trajectories/v2 → typed arrays, once per fetch; clock.ts = server-time offset
     physics/fleet.ts       # curves → TramPublicState behind the seam TramEngine used to occupy
     render/featureBuilder.ts # fleet states → GeoJSON FCs (points FC + 3D sections FC), viewport culling
@@ -110,6 +111,21 @@ GET /api/trajectories/v2   two curves per tram, built server-side
 - **`render.ts`** — picks the track: `smooth` (default) or `fixed`
   («Более точное положение»). Switching is FREE — it changes which curve the
   next evaluation reads, and nothing else.
+- **`fixForward.ts`** — the client's ONE correction, and the only place it adds
+  anything to the server's physics. Curves cost an ML round trip before they
+  can be emitted, so they reach the phone ~7–11 s after the tram was there,
+  while Convex pushes the raw fix in ~2 s: at 48 % of fix arrivals the served
+  curve is already behind the dot (lab M2, p90 142 m). The curve is therefore
+  wound forward **in time** until it is where the newest fix proves the tram
+  is — the curve is not wrong about how the tram drives, it is late — and read
+  from there. Forward only, gated on the curve's own `anchorMs`, rate-limited
+  to 2 m/s in `smooth`, whole and immediate in `fixed`. Past the horizon a tram
+  coasts to a halt over 20 s instead of stopping dead, and stays dimmed the
+  entire time. The lab mirrors the rule in `clientProjectionM` so the §14.7
+  seam floor is set where the phone actually draws; without that the bundle
+  swap steps backward (796 of 809 measured backward steps). Protocol
+  §Fix-forward has the rationale and the invariants;
+  `__tests__/physics-fix-forward.test.ts` pins them.
 - **`connection.ts`** — live / degraded / offline derived from BUNDLE AGE
   (< 15 s, 15–45 s, > 45 s), not from fetch outcomes; drives the explicit
   offline banner and the dimmed `stale` render prop.

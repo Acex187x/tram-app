@@ -36,6 +36,7 @@ import {
 import { round2 } from './db';
 import {
   accelAt,
+  clientProjectionM,
   evalTrack,
   seamJustifiedM,
   speedAt,
@@ -1838,7 +1839,16 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     args.prevFixS !== undefined &&
     args.anchorFixS !== undefined
   ) {
-    const prevO = evalTrack(prev.opinion.points, t0);
+    // Where the PHONE is drawing the previous curve — it holds this fix
+    // already and winds the curve forward to it (clientProjectionM), so the
+    // unshifted evalTrack here was continuity against a marker that has not
+    // been on screen since build 17.
+    const prevO = clientProjectionM(
+      prev.opinion.points,
+      args.anchorFixS,
+      args.anchorMs,
+      t0,
+    );
     const justified = seamJustifiedM({
       anchorFixS: args.anchorFixS,
       anchorMs: args.anchorMs,

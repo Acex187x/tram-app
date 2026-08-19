@@ -9,9 +9,10 @@
 // Every derived quantity is a PURE function of (snapshot, curves, geometry,
 // instant) — there is no controller, no per-tram memory, nothing to resync:
 //
-//   simSpeedKmh   central finite difference of s over ±0.5 s on the rendered
-//                 curve (evaluator.evalSpeedMs) — the speed the tram is
-//                 actually rendered moving at, not a modelled speed.
+//   simSpeedKmh   central finite difference of s over ±0.5 s on the RENDERED
+//                 motion (render.renderSpeedMs — curve + fix-forward offset +
+//                 past-horizon coast) — the speed the tram is actually
+//                 rendered moving at, not a modelled speed.
 //   phase         'dwell' while standing within 30 m of a stop ('terminal' at
 //                 the last one), 'cruise' otherwise, 'unknown' without curves.
 //   nextStop*     first stop ahead of s; its ETA is the SMOOTH track's
@@ -25,8 +26,15 @@
 import { bearingAt, pointAt } from '@/lib/geo/polyline';
 import type { RouteGeometry, RouteStop, TramModelSpec, TramPublicState, TramSnapshot } from '@/lib/types';
 import type { ParsedVehicle } from './bundle';
-import { crossingTimeMs, evalSpeedMs, evalTrajectory } from './evaluator';
-import { renderTram, smoothFixedDeltaM, trackFor, type RenderMode } from './render';
+import { crossingTimeMs, evalTrajectory } from './evaluator';
+import { SMOOTH_CATCHUP_V_MS } from './fixForward';
+import {
+  renderedDistM,
+  renderSpeedMs,
+  renderTram,
+  smoothFixedDeltaM,
+  type RenderMode,
+} from './render';
 
 /** At or below this rendered speed the tram counts as standing, km/h. */
 export const DWELL_SPEED_KMH = 1;
@@ -87,8 +95,10 @@ export interface AdaptInput {
  * Without curves (vehicle absent, or its trip changed under us) the tram falls
  * back to its RAW AVL fix and is marked `pastHorizon`: the fix is real
  * observed data, so showing it is honest — but it is frozen, so it renders
- * dimmed exactly like a tram that ran off the end of its curve. We never
- * invent motion the server did not predict.
+ * dimmed exactly like a tram that ran off the end of its curve. With no curve
+ * there is no velocity profile to translate and nothing but the fix to stand
+ * on, so this stays a freeze; the fix-forward shim only ever moves a tram
+ * along motion the server did predict.
  */
 export function adaptTram(input: AdaptInput): TramPublicState {
   const { snapshot, model, geometry, serverNowMs, mode } = input;
@@ -100,7 +110,12 @@ export function adaptTram(input: AdaptInput): TramPublicState {
       : undefined;
 
   const hasGeometry = geometry !== undefined;
-  const observedDist = clampToShape(snapshot.shapeDistM, geometry);
+  // The newest AVL fix the phone holds for this tram — raw, on the SHAPE axis
+  // the curves also live on. Feeds the fix-forward shim below; unclamped,
+  // because every consumer clamps its own result to the geometry.
+  const fixS = snapshot.shapeDistM;
+  const fixAtMs = snapshot.observedAtMs;
+  const observedDist = clampToShape(fixS, geometry);
   const observedPosition: [number, number] = geometry
     ? pointAt(geometry.coordinates, geometry.cumDistM, observedDist)
     : [snapshot.coordinates[0], snapshot.coordinates[1]];
@@ -115,28 +130,37 @@ export function adaptTram(input: AdaptInput): TramPublicState {
   let deviationM: number | null = null;
 
   if (vehicle) {
-    const rendered = renderTram(vehicle, serverNowMs, mode);
+    // The last-mile fix-forward shim (fixForward.ts). The snapshot is the
+    // newest same-trip AVL fix the phone holds — RemoteFeed lands it ~2 s
+    // after the tram was there, while the trajectory bundle trails by ~7–11 s
+    // because every curve costs an ML round trip before it can be emitted. So
+    // for most of each inter-fix window the client knows something the served
+    // curve does not, and the lab measures the cost on its own chain: at 48 %
+    // of fix arrivals the served opinion is already behind the fix that just
+    // landed (p90 142 m). Build 16 floored the render at the fix, which fixed
+    // the backward marker and produced a tram standing still mid-segment for
+    // ~17 s at that p90. Here the whole curve is translated through the fix
+    // instead, so the tram keeps moving on the server's own velocity profile.
+    // It fires only on a fix the curve's own anchor postdates — see
+    // fixForwardOffsetM, which owns that gate.
+    const rendered = renderTram(vehicle, serverNowMs, mode, fixS, fixAtMs);
     simDistM = clampToShape(rendered.s, geometry);
     pastHorizon = rendered.pastHorizon;
-    simSpeedKmh = pastHorizon ? 0 : evalSpeedMs(trackFor(vehicle, mode), serverNowMs) * 3.6;
-    const opinion = vehicle.opinion.length > 0 ? vehicle.opinion : null;
-    fixedDistM = opinion ? clampToShape(evalTrajectory(opinion, serverNowMs), geometry) : null;
-    // Last-mile freshness floor, FIXED mode only. The snapshot is the newest
-    // same-trip AVL fix the phone holds (RemoteFeed lands ~2 s after a batch),
-    // while the trajectory bundle can trail it by up to ~9 s (5 s poll + 2 s
-    // server cache + re-emit). The fix is a hard floor — the tram provably
-    // was at shapeDistM and does not reverse (the server's G10/§14.7
-    // doctrine) — so in the mode whose whole point is "the truest position",
-    // a marker behind the newest dot must not be shown: it renders AT the
-    // fix until the re-anchored curve lands. With an equal-or-older snapshot
-    // the max() is a no-op (the server already floors each curve at its own
-    // anchor fix), so no timestamp comparison is needed. SMOOTH is left
-    // untouched: its catch-up is server-driven by design, and a client-side
-    // floor would teleport exactly what that track exists to smooth.
-    if (opinion !== null) {
-      if (fixedDistM !== null && fixedDistM < observedDist) fixedDistM = observedDist;
-      if (mode === 'fixed' && simDistM < observedDist) simDistM = observedDist;
-    }
+    // Read off the RENDERED motion, not the raw curve: past the horizon that
+    // is the coast decaying to zero, and inside it the fix-forward offset is
+    // part of how fast the marker is really travelling. `phase` reads this.
+    simSpeedKmh = renderSpeedMs(vehicle, serverNowMs, mode, fixS, fixAtMs) * 3.6;
+    // The opinion curve RAW — no shim, no floor. This is not a UI readout:
+    // it is written to every calibration and ride record as `projDist`, and
+    // docs/calibration/analyze.py scores `prev.projDist − cur.obsDist` as the
+    // MODEL's error at the next fix. Folding a client-side correction into it
+    // (build 16 floored it at the fix) makes the physics-tuning loop grade the
+    // server on the client's homework. What the client added is reported
+    // separately as PhysicsDebugInfo.fixForwardM.
+    fixedDistM =
+      vehicle.opinion.length > 0
+        ? clampToShape(evalTrajectory(vehicle.opinion, serverNowMs), geometry)
+        : null;
     const delta = smoothFixedDeltaM(vehicle, serverNowMs);
     deviationM = Number.isFinite(delta) ? delta : null;
   } else {
@@ -171,8 +195,37 @@ export function adaptTram(input: AdaptInput): TramPublicState {
       nextStopName = stop.name;
       // ETA always reads the SMOOTH curve: it is the server's best answer to
       // "when", independent of which curve the user chose to watch.
+      //
+      // …read at the lead the marker actually has, because a curve that is
+      // late about where the tram is is late about when it arrives by exactly
+      // as much. Asking the unwound curve when it reaches a stop the tram is
+      // provably already closer to is the same staleness, reported in seconds.
+      //
+      // The lead is measured, not assumed: `tauEffMs` is how long the smooth
+      // curve still needs to reach the point the smooth marker is ALREADY
+      // drawn at. Using the raw τ instead would over-credit the rate-limited
+      // smooth marker and report «arriving now» for a stop the tram is still
+      // 20 m short of. Because the marker's own position is the datum, and the
+      // next stop is by definition ahead of it, the subtraction can never
+      // produce a crossing in the past.
+      //
+      // Basis stays the SMOOTH track whichever mode renders — "when" is a
+      // property of the prediction, not of the curve the user chose to watch.
+      // The fixed marker runs ahead of this basis, so its ETA errs late, which
+      // is the safe direction and the same "fixed is beaten by smooth"
+      // relationship the two tracks already have.
       const smoothTrack = vehicle.smooth.length > 0 ? vehicle.smooth : vehicle.opinion;
-      const crossMs = crossingTimeMs(smoothTrack, stop.distM);
+      const smoothRenderedS = renderedDistM(
+        smoothTrack,
+        serverNowMs,
+        SMOOTH_CATCHUP_V_MS,
+        fixS,
+        fixAtMs,
+        vehicle.anchorMs,
+      );
+      const leadMs = crossingTimeMs(smoothTrack, smoothRenderedS) - serverNowMs;
+      const tauEffMs = Number.isFinite(leadMs) && leadMs > 0 ? leadMs : 0;
+      const crossMs = crossingTimeMs(smoothTrack, stop.distM) - tauEffMs;
       if (Number.isFinite(crossMs)) {
         const etaS = (crossMs - serverNowMs) / 1000;
         nextStopEtaS = etaS > 0 ? etaS : 0;

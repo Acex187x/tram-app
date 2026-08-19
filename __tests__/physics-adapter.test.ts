@@ -6,6 +6,7 @@
 
 import { adaptTram, nearestStopIndex, nextStopIndex, DWELL_NEAR_STOP_M } from '@/lib/physics/adapter';
 import { parseBundle, type ParsedVehicle } from '@/lib/physics/bundle';
+import { SMOOTH_CATCHUP_V_MS } from '@/lib/physics/fixForward';
 import { pointAt } from '@/lib/geo/polyline';
 import { getModelSpec } from '@/lib/fleet/registry';
 import type { RouteGeometry } from '@/lib/types';
@@ -131,13 +132,25 @@ describe('pastHorizon — never animate beyond the data', () => {
     expect(adapt(vehicleFrom(), T0 + 60_000).pastHorizon).toBe(false);
   });
 
-  it('freezes at the last keyframe past the horizon, with zero speed', () => {
+  it('coasts to a halt past the horizon, then freezes with zero speed', () => {
+    // The curve ends at T0+120 s doing 10 m/s. Stopping dead at the last
+    // keyframe is the one thing a tram cannot do, so the marker decelerates
+    // over COAST_DECAY_MS (20 s) — 100 m, half the constant-speed distance —
+    // and holds there forever after. `pastHorizon` stays true throughout, so
+    // it renders dimmed the whole time: coasting is not a prediction.
     const v = vehicleFrom();
-    const beyond = adapt(v, T0 + 10 * 60_000);
     const atEnd = adapt(v, T0 + 120_000);
+    const midCoast = adapt(v, T0 + 130_000);
+    const beyond = adapt(v, T0 + 10 * 60_000);
+    expect(atEnd.pastHorizon).toBe(false);
+    expect(midCoast.pastHorizon).toBe(true);
     expect(beyond.pastHorizon).toBe(true);
-    expect(beyond.simDistM).toBe(atEnd.simDistM);
+    expect(midCoast.simDistM).toBeGreaterThan(atEnd.simDistM);
+    expect(midCoast.simSpeedKmh).toBeCloseTo(18, 6); // 5 m/s, half of 10
+    expect(beyond.simDistM).toBeCloseTo(atEnd.simDistM + 100, 6);
     expect(beyond.simSpeedKmh).toBe(0);
+    // …and it never runs on: 10 min and 1 h past the horizon are the same spot.
+    expect(adapt(v, T0 + 60 * 60_000).simDistM).toBe(beyond.simDistM);
   });
 
   it('a vehicle with NO curves stands on its raw fix, marked frozen', () => {
@@ -244,34 +257,85 @@ describe('next stop + ETA', () => {
   });
 });
 
-describe('last-mile freshness floor (fixed mode) — never render behind the newest fix', () => {
-  // The bundle can trail RemoteFeed by ~7–9 s (5 s poll + 2 s server cache +
-  // re-emit): the phone then holds a NEWER fix than the curves' anchor, and
-  // the curve — or a modal hold standing at the OLD anchor — renders behind
-  // the dot the user is looking at. The fix is a hard floor (server G10/§14.7
-  // doctrine): in fixed mode the marker rides the newest fix instead.
+describe('fix-forward — the newest fix moves the curve, it does not pin it', () => {
+  // The bundle trails RemoteFeed by ~7–11 s (5 s poll + 2 s server cache + the
+  // ML round trip the emission waits on): the phone holds a NEWER fix than the
+  // curves' anchor, and the curve — or a modal hold standing at the OLD anchor
+  // — renders behind the dot the user is looking at. Build 16 clamped the
+  // render at the fix, which stopped the tram dead mid-segment. The curve is
+  // now TRANSLATED through the fix, so it keeps moving on the server's own
+  // velocity profile.
   const geo = straightGeometry();
   /** Curves anchored ~fix N; the phone's snapshot has moved on to fix N+1. */
-  const newerFix = (shapeDistM: number) =>
-    snapshot({ shapeDistM, observedAtMs: T0 + 20_000 });
+  const newerFix = (shapeDistM: number, atMs = T0 + 20_000) =>
+    snapshot({ shapeDistM, observedAtMs: atMs });
 
-  it('floors the FIXED render at the newest same-trip fix', () => {
+  it('puts the FIXED render on the newest same-trip fix', () => {
     // Opinion is at 1000 + 10·20 = 1200 m at T0+20 s; the newest fix says 1300.
     const state = adapt(vehicleFrom(), T0 + 20_000, geo, 'fixed', newerFix(1_300));
     expect(state.simDistM).toBe(1_300);
-    expect(state.fixedDistM).toBe(1_300);
   });
 
-  it('floors a modal-held (standing) curve the newest fix contradicts', () => {
-    // The «тупо стоит» half of the field bug: the served curve stands at the
-    // old anchor while the tram provably moved on.
+  it('leaves fixedDistM RAW — the calibration loop scores the model, not us', () => {
+    // fixedDistM is written as `projDist` into every calibration/ride record
+    // and scored against the next fix as the MODEL's error. If the client's
+    // own correction leaked into it, the physics-tuning loop would grade the
+    // server on the client's homework (build 16 floored it, and did).
+    const state = adapt(vehicleFrom(), T0 + 20_000, geo, 'fixed', newerFix(1_300));
+    expect(state.fixedDistM).toBe(1_200); // the served opinion, untouched
+    expect(state.simDistM).toBe(1_300); // …while the marker rides the fix
+  });
+
+  it('KEEPS MOVING afterwards instead of standing at the fix (the build-16 bug)', () => {
+    // The whole point. Under the old max() clamp the marker sat at 1300 m for
+    // the 10 s it took the curve to climb past it — a tram standing still on
+    // open track. Translated, it does the curve's own 10 m/s from the fix.
+    const v = vehicleFrom();
+    const fix = newerFix(1_300);
+    const at20 = adapt(v, T0 + 20_000, geo, 'fixed', fix);
+    const at25 = adapt(v, T0 + 25_000, geo, 'fixed', fix);
+    const at30 = adapt(v, T0 + 30_000, geo, 'fixed', fix);
+    expect(at25.simDistM).toBeCloseTo(1_350, 6);
+    expect(at30.simDistM).toBeCloseTo(1_400, 6);
+    expect(at20.simSpeedKmh).toBeCloseTo(36, 6); // never reports a stall
+    expect(at25.simSpeedKmh).toBeCloseTo(36, 6);
+  });
+
+  it('a stop the tram has provably left is not rendered as a dwell', () => {
+    // The curve holds at the 1000 m platform until T0+60 s; the fix proves the
+    // tram was 180 m past it at T0+20 s. Winding the curve forward in TIME
+    // skips the stale hold. (Translating it in SPACE instead would carry the
+    // hold to 1180 m and park the tram in mid-block — the artefact being
+    // fixed, relocated — which is why the shim is a time shift.)
     const held = [
       { t: T0, s: 1_000 },
-      { t: T0 + 120_000, s: 1_000 },
+      { t: T0 + 60_000, s: 1_000 },
+      { t: T0 + 120_000, s: 1_600 },
+    ];
+    const stops = [{ distM: 1_000, name: 'B' }, { distM: 1_600, name: 'C' }];
+    const v = vehicleFrom({ smooth: held, opinion: held });
+    const fix = newerFix(1_180);
+    const at20 = adapt(v, T0 + 20_000, straightGeometry(stops), 'fixed', fix);
+    const at30 = adapt(v, T0 + 30_000, straightGeometry(stops), 'fixed', fix);
+    expect(at20.simDistM).toBeCloseTo(1_180, 6); // on the fix
+    expect(at30.simDistM).toBeGreaterThan(1_270); // and rolling, not held
+    expect(at20.simSpeedKmh).toBeGreaterThan(30);
+    expect(at20.phase).toBe('cruise');
+    expect(at20.nextStopName).toBe('C');
+  });
+
+  it('but a hold the fix CONFIRMS is still a hold', () => {
+    const held = [
+      { t: T0, s: 1_000 },
+      { t: T0 + 60_000, s: 1_000 },
+      { t: T0 + 120_000, s: 1_600 },
     ];
     const v = vehicleFrom({ smooth: held, opinion: held });
-    const state = adapt(v, T0 + 20_000, geo, 'fixed', newerFix(1_180));
-    expect(state.simDistM).toBe(1_180);
+    const stops = [{ distM: 1_000, name: 'B' }];
+    const st = adapt(v, T0 + 20_000, straightGeometry(stops), 'fixed', newerFix(1_000));
+    expect(st.simDistM).toBe(1_000);
+    expect(st.simSpeedKmh).toBe(0);
+    expect(st.phase).toBe('dwell');
   });
 
   it('is a no-op when the curve is already at/ahead of the fix', () => {
@@ -279,15 +343,68 @@ describe('last-mile freshness floor (fixed mode) — never render behind the new
     expect(state.simDistM).toBe(1_200); // the curve, not the older fix
   });
 
-  it('NEVER floors the smooth render — catch-up stays server-driven', () => {
-    const state = adapt(vehicleFrom(), T0 + 20_000, geo, 'smooth', newerFix(1_300));
-    expect(state.simDistM).toBe(1_190); // smooth curve: 990 + 10·20
-    // …but the fixed READOUT is still floored, whatever mode renders.
-    expect(state.fixedDistM).toBe(1_300);
+  it('never fires on a fix the curve was already built from', () => {
+    // The default snapshot IS the curves' anchor fix (1000 m), and the smooth
+    // track legitimately starts 10 m behind it — that is continuity, not
+    // staleness. Dragging it forward would re-teleport what smooth removes.
+    expect(adapt(vehicleFrom(), T0, geo, 'smooth').simDistM).toBe(990);
+    expect(adapt(vehicleFrom(), T0, geo, 'fixed').simDistM).toBe(1_000);
   });
 
-  it('does not floor when rendering falls back to the raw fix anyway', () => {
-    // No curves at all → the existing fix fallback already handles it.
+  it('closes the gap gradually in SMOOTH mode, never in one step', () => {
+    // Fix observed at T0+20 s, 110 m ahead of the smooth curve (1190 m). The
+    // smooth track may not teleport, so it walks to the wound-forward curve at
+    // SMOOTH_CATCHUP_V_MS on top of its own motion. The allowance accrues from
+    // the CURVE's start, so by T0+20 s it is already 40 m.
+    const v = vehicleFrom();
+    const fix = newerFix(1_300);
+    const at20 = adapt(v, T0 + 20_000, geo, 'smooth', fix);
+    const at25 = adapt(v, T0 + 25_000, geo, 'smooth', fix);
+    expect(at20.simDistM).toBeCloseTo(1_230, 6); // 1190 + 2 m/s × 20 s
+    expect(at25.simDistM).toBeCloseTo(1_290, 6); // 1240 + 2 m/s × 25 s
+    expect(at25.simSpeedKmh).toBeCloseTo(43.2, 6); // 12 m/s: 10 curve + 2 catch-up
+    // …it never overshoots the wound-forward curve, and stops catching up once
+    // it gets there: the shifted curve is 1300 at T0+20 s, +10 m/s after.
+    const at60 = adapt(v, T0 + 60_000, geo, 'smooth', fix);
+    expect(at60.simDistM).toBeCloseTo(1_700, 6); // = smooth(60+11 s), fully caught up
+    expect(at60.simSpeedKmh).toBeCloseTo(36, 6);
+  });
+
+  it('the ETA never says «arriving now» for a stop the marker is short of', () => {
+    // The ETA basis is the smooth track at the smooth catch-up rate — the same
+    // motion the smooth marker rides. Without that pairing (ETA taking the
+    // whole gap while the marker takes the rate-limited part) a stop 60 m
+    // ahead of the marker reads 0 s in the sheet, the timeline, the status
+    // line and the fleet filter.
+    const stopped = straightGeometry([{ distM: 1_250, name: 'B' }]);
+    const fix = newerFix(1_300);
+    const state = adapt(vehicleFrom(), T0 + 20_000, stopped, 'smooth', fix);
+    expect(state.simDistM).toBeCloseTo(1_230, 6); // 20 m short of the stop
+    expect(state.nextStopName).toBe('B');
+    expect(state.nextStopEtaS).toBeGreaterThan(1);
+    // Walk forward: by the instant the ETA named, the marker HAS reached the
+    // stop. It gets there a metre or two early — the offset keeps closing
+    // while the tram travels, and the ETA is computed from the offset now —
+    // which is the safe direction for a countdown.
+    const etaS = state.nextStopEtaS!;
+    const arrival = adapt(vehicleFrom(), T0 + 20_000 + etaS * 1_000, stopped, 'smooth', fix);
+    expect(arrival.simDistM).toBeGreaterThanOrEqual(1_250);
+    expect(arrival.simDistM).toBeLessThan(1_250 + SMOOTH_CATCHUP_V_MS * etaS + 1);
+  });
+
+  it('the FIXED marker errs late against the ETA, never early', () => {
+    // The fixed track runs ahead of the smooth ETA basis by design ("fixed
+    // exists to be visibly beaten by smooth"), so its ETA is conservative.
+    const stopped = straightGeometry([{ distM: 2_000, name: 'C' }]);
+    const fix = newerFix(1_300);
+    const st = adapt(vehicleFrom(), T0 + 20_000, stopped, 'fixed', fix);
+    const remainingS = (2_000 - st.simDistM) / 10; // the marker's own 10 m/s
+    expect(st.nextStopEtaS).toBeGreaterThanOrEqual(remainingS);
+  });
+
+  it('does nothing when rendering falls back to the raw fix anyway', () => {
+    // No curves at all → no velocity profile to translate; the fix fallback
+    // already stands the tram on the last real observation.
     const state = adapt(undefined, T0 + 20_000, geo, 'fixed', newerFix(1_300));
     expect(state.simDistM).toBe(1_300);
     expect(state.fixedDistM).toBeNull();

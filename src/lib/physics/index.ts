@@ -7,15 +7,19 @@
 //   bundle.ts           one-time decode of a /api/trajectories/v2 body
 //   clock.ts            server-clock sync — what makes clients agree
 //   connection.ts       the live/degraded/offline verdict — honesty
+//   fixForward.ts       the last-mile shim: the newest fix moves the curve
 //   render.ts           which curve, evaluated when (smooth vs fixed)
 //   adapter.ts          curves → TramPublicState for the existing UI
 //   trajectoryStore.ts  the 5 s fetch loop (the only network call)
 //   fleet.ts            the seam the old TramEngine occupied
 //
 // What is NOT here, deliberately: any notion of a tick, a controller, an
-// integrator, per-tram memory, or a fallback that invents motion when the
-// server is unreachable. Without the server there is no physics — the trams
-// freeze on their last known curve, dimmed, behind an explicit banner.
+// integrator, or per-tram memory. Without the server there is still no
+// physics: the ONE thing the client adds is fixForward.ts, and even that
+// invents no motion — it translates the server's own curve so it passes
+// through the newest AVL fix, because the fix stream reaches the phone ~7–11 s
+// ahead of the curve that accounts for it. Past the horizon a tram coasts to a
+// halt over 20 s and then freezes, dimmed, behind an explicit banner.
 
 export {
   evalTrajectory,
@@ -57,9 +61,21 @@ export {
 } from './connection';
 
 export {
+  fixForwardTauMs,
+  trackEndSpeedMs,
+  coastDistM,
+  SMOOTH_CATCHUP_V_MS,
+  COAST_DECAY_MS,
+} from './fixForward';
+
+export {
   renderTram,
   renderDistM,
+  renderedDistM,
+  renderSpeedMs,
+  fixForwardAppliedM,
   smoothFixedDeltaM,
+  catchupVMsFor,
   trackFor,
   type RenderMode,
   type RenderedTram,

@@ -22,7 +22,7 @@ import type {
 import { segmentIndexAt } from '@/lib/geo/polyline';
 import { adaptTram } from './adapter';
 import { evalSpeedMs, evalTrajectory, trackEndMs } from './evaluator';
-import { renderDistM, trackFor, type RenderMode } from './render';
+import { catchupVMsFor, fixForwardAppliedM, renderDistM, trackFor, type RenderMode } from './render';
 import type { TrajectoryStore } from './trajectoryStore';
 
 export interface TramFleetOptions {
@@ -170,8 +170,11 @@ export class TramFleet {
         const geometry = this.geometries.get(key);
         if (geometry) {
           const vehicle = this.vehicleFor(snapshot);
+          // Same fix-forward composition the adapter renders with — culling on
+          // the raw curve would test a position up to hundreds of meters away
+          // from the marker (fixForward.ts) and pop trams at the bbox edge.
           const d = vehicle
-            ? renderDistM(vehicle, serverNow, mode)
+            ? renderDistM(vehicle, serverNow, mode, snapshot.shapeDistM, snapshot.observedAtMs)
             : snapshot.shapeDistM;
           if (!distInBbox(geometry, d, bbox)) continue;
         } else {
@@ -227,10 +230,24 @@ export class TramFleet {
     let smoothDistM: number | null = null;
     let fixedDistM: number | null = null;
     let horizonLeftS: number | null = null;
+    let fixForwardM: number | null = null;
     if (vehicle) {
+      // The two curves RAW — deviationM and the smooth-vs-fixed comparison are
+      // about what the server published, so the shim stays out of them.
       if (vehicle.smooth.length > 0) smoothDistM = evalTrajectory(vehicle.smooth, serverNowMs);
       if (vehicle.opinion.length > 0) fixedDistM = evalTrajectory(vehicle.opinion, serverNowMs);
       horizonLeftS = (trackEndMs(trackFor(vehicle, mode)) - serverNowMs) / 1000;
+      // …and the meters the shim is currently adding on top, which is the one
+      // number that says "the served curve is this far behind the newest fix".
+      // Reading it in the field is how a complaint becomes a measurement.
+      fixForwardM = fixForwardAppliedM(
+        trackFor(vehicle, mode),
+        serverNowMs,
+        catchupVMsFor(mode),
+        snapshot.shapeDistM,
+        snapshot.observedAtMs,
+        vehicle.anchorMs,
+      );
     }
 
     return {
@@ -241,6 +258,7 @@ export class TramFleet {
       smoothDistM,
       fixedDistM,
       deltaM: smoothDistM !== null && fixedDistM !== null ? smoothDistM - fixedDistM : null,
+      fixForwardM,
       simSpeedKmh: state.simSpeedKmh,
       smoothSpeedKmh:
         vehicle && vehicle.smooth.length > 0

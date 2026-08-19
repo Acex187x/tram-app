@@ -124,6 +124,61 @@ export function evalTrack(track: TrackPoint[], tMs: number): number {
   return a.s + ((b.s - a.s) * (tMs - a.t)) / dt;
 }
 
+/** Inverse of `evalTrack`: when does the track reach `sTarget`? The track's
+ *  own start time when the target is already behind it, NaN past its horizon.
+ *  Mirrors the client's `crossingTimeMs` (src/lib/physics/evaluator.ts). */
+export function crossTrack(track: TrackPoint[], sTarget: number): number {
+  const n = track.length;
+  if (n === 0) return NaN;
+  if (sTarget <= track[0].s) return track[0].t;
+  if (sTarget > track[n - 1].s) return NaN;
+  let lo = 1;
+  let hi = n - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (track[mid].s >= sTarget) hi = mid;
+    else lo = mid + 1;
+  }
+  const a = track[hi - 1];
+  const b = track[hi];
+  const ds = b.s - a.s;
+  if (ds <= 0) return b.t;
+  return a.t + ((b.t - a.t) * (sTarget - a.s)) / ds;
+}
+
+/**
+ * Where a PHONE is drawing this curve at `atMs`, given the newest fix.
+ *
+ * The server's twin of the client's fix-forward shim
+ * (src/lib/physics/fixForward.ts). The phone receives fixes over Convex in
+ * ~2 s but the curve that accounts for one only ~7–11 s later, because every
+ * emission waits on an ML round trip; in that window it winds the served curve
+ * forward in TIME until the curve is where the fix proves the tram is, and
+ * renders from there.
+ *
+ * The server has to model that, because §14.7 continuity is defined against
+ * "where the client is already rendering". Measured against the live streams
+ * (2026-08-19, 4 min, gen=v3), reading the UNSHIFTED previous curve instead
+ * put the seam floor below the phone's marker on essentially every emission —
+ * 796 of the shim's 809 backward steps happened at the bundle swap, and 0–1
+ * anywhere else. This is that hole, closed on the side that can see both
+ * curves.
+ */
+export function clientProjectionM(
+  track: TrackPoint[],
+  fixS: number,
+  fixAtMs: number,
+  atMs: number,
+): number {
+  const base = evalTrack(track, atMs);
+  if (track.length === 0 || !(fixS > evalTrack(track, fixAtMs))) return base;
+  const reach = crossTrack(track, fixS);
+  // Past the whole curve: the phone holds at the fix (it has no more profile).
+  if (!Number.isFinite(reach)) return Math.max(base, fixS);
+  const tau = reach - fixAtMs;
+  return tau > 0 ? evalTrack(track, atMs + tau) : base;
+}
+
 /** Instantaneous speed of a kinematic track at t, m/s — exact, because v is
  *  linear inside every emitted segment. Past the last knot the client freezes
  *  the marker, so the RENDERED speed there is 0, not the profile's. */
@@ -332,7 +387,10 @@ export function buildV2Vehicle(args: BuildV2Args): BuiltV2 | null {
     args.anchorFixS !== undefined &&
     args.prevFixS !== undefined
   ) {
-    const prevO = evalTrack(prev.opinion.points, t0);
+    // Where the PHONE is drawing the previous curve, not where the curve as
+    // served sits: the client holds this fix already and winds the curve
+    // forward to it (clientProjectionM / src/lib/physics/fixForward.ts).
+    const prevO = clientProjectionM(prev.opinion.points, args.anchorFixS, args.anchorMs, t0);
     const justified = seamJustifiedM({
       anchorFixS: args.anchorFixS,
       anchorMs: args.anchorMs,
