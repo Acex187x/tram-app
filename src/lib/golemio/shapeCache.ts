@@ -473,7 +473,14 @@ export function requestPrefetch(
  */
 export function seedProvisional(tripId: string, geometry: RouteGeometry): boolean {
   if (!isUsableGeometry(geometry)) return false;
-  if (memCache.has(tripId) || inFlight.has(tripId)) return false;
+  // Only a RESOLVED entry outranks a seed. A merely in-flight per-trip fetch
+  // holds no data yet — on a cold start it is a scheduler waiter that will not
+  // land for up to ~140 s — and blocking on it made the pack seed ZERO trips
+  // whenever the fullFleet seed beat the pack to the wire (it always does: 18 KB
+  // over an already-opening socket vs 0.45 MiB of gzip). When that fetch does
+  // land it overwrites this entry and clears the provisional mark, which is
+  // exactly the convergence contract above.
+  if (memCache.has(tripId)) return false;
   memCache.set(tripId, geometry);
   provisional.add(tripId);
   return true;
