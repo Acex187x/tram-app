@@ -67,6 +67,10 @@ function makeState(opts: {
   airConditioned?: boolean | null;
   registrationNumber?: number | null;
   isCanceled?: boolean;
+  /** Operator stop cursor (Golemio last_stop/next_stop), as on a real fix. */
+  statePosition?: string;
+  lastStopSequence?: number | null;
+  nextStopSequence?: number | null;
 }): TramPublicState {
   const snapshot: TramSnapshot = makeSnapshot({
     key: opts.key,
@@ -74,6 +78,9 @@ function makeState(opts: {
     line: opts.line,
     headsign: opts.headsign ?? 'Somewhere',
     delaySeconds: opts.delaySeconds ?? 0,
+    statePosition: opts.statePosition ?? 'on_track',
+    lastStopSequence: opts.lastStopSequence ?? null,
+    nextStopSequence: opts.nextStopSequence ?? null,
     airConditioned: opts.airConditioned === undefined ? true : opts.airConditioned,
     registrationNumber:
       opts.registrationNumber === undefined ? Number(opts.key) || null : opts.registrationNumber,
@@ -169,6 +176,49 @@ describe('computeArrivals', () => {
     const arrivals = computeArrivals('beta', states, [geoA()], BASE + 300 * S);
     expect(arrivals).toHaveLength(1);
     expect(arrivals[0].etaS).toBe(0);
+  });
+
+  // REGRESSION (owner report: "trams that really are at a stop are missing
+  // from that stop's schedule"). `simDistM` is a PREDICTION: the lab measures
+  // the published engine at meanAbs ≈ 123 m, p90 ≈ 197 m, running AHEAD of the
+  // tram in ~55 % of samples. The board used to gate on it with a 2 m slack, so
+  // a tram standing at the platform with an overshooting prediction was deleted
+  // from that platform's board — measured live at 24.5 % of at-stop trams.
+  // The operator's own stop cursor (last_stop/next_stop sequence) is exact and
+  // must win over the prediction.
+  it('keeps a tram the feed reports AT the stop even when the prediction overshot', () => {
+    // Beta is stop sequence 2 at 500 m; the prediction has run 250 m past it.
+    const states = [
+      makeState({
+        key: '9201',
+        tripId: 'trip-a',
+        line: '22',
+        simDistM: 750,
+        statePosition: 'at_stop',
+        lastStopSequence: 2,
+        nextStopSequence: 3,
+      }),
+    ];
+    const arrivals = computeArrivals('beta', states, [geoA()], BASE + 300 * S);
+    expect(arrivals.map((a) => a.tramKey)).toEqual(['9201']);
+    expect(arrivals[0].etaS).toBe(0);
+  });
+
+  it('still drops a station the operator says the tram has served', () => {
+    // Same overshoot, but the feed says it is already heading for Gamma (3).
+    const states = [
+      makeState({
+        key: '9201',
+        tripId: 'trip-a',
+        line: '22',
+        simDistM: 480, // prediction LAGS: still short of Beta at 500 m
+        statePosition: 'on_track',
+        lastStopSequence: 2,
+        nextStopSequence: 3,
+      }),
+    ];
+    expect(computeArrivals('beta', states, [geoA()], BASE)).toHaveLength(0);
+    expect(computeArrivals('gamma', states, [geoA()], BASE)).toHaveLength(1);
   });
 
   it('skips trams without loaded geometry and canceled trips', () => {

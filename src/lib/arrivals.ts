@@ -13,15 +13,55 @@ import type {
   RouteGeometry,
   TramModelSpec,
   TramPublicState,
+  TramSnapshot,
 } from '@/lib/types';
 
 /** Max arrivals returned for a station board. */
 export const MAX_ARRIVALS = 12;
 
-/** A tram is considered still "approaching" a stop within this slack (m) —
- *  matches the engine's 2 m dwell tolerance so a tram dwelling AT the stop
- *  still shows on the board as "now". */
-const STOP_SLACK_M = 2;
+/**
+ * FALLBACK slack (m) for deciding a stop is still ahead of a tram, used ONLY
+ * when the feed gives no stop-sequence cursor (see stopCursorSequence).
+ *
+ * This was 2 m, on the stated grounds that it "matches the engine's 2 m dwell
+ * tolerance" — a tolerance that does not exist (the engine's is
+ * DWELL_NEAR_STOP_M = 30, physics/adapter.ts). The number it gates,
+ * `simDistM`, is a PREDICTION whose published error the lab measures at
+ * meanAbs ≈ 123 m / p90 ≈ 197 m, and which runs AHEAD of the tram's true
+ * position in ~55 % of samples. A 2 m tolerance on a ±200 m quantity silently
+ * deleted trams standing at the platform. 30 m at least matches the engine.
+ */
+const STOP_SLACK_M = 30;
+
+/**
+ * The lowest stop `sequence` a tram may still be counted as arriving at, taken
+ * from the OPERATOR's own cursor rather than from our physics.
+ *
+ * Golemio reports `last_stop.sequence` / `next_stop.sequence` on every fix, and
+ * they index the exact same numbering as `RouteGeometry.stops[].sequence`
+ * (verified against the live fleet: 35/35 stopId agreement on both fields).
+ * That cursor is ground truth for "which stops has this vehicle not served
+ * yet", so it — not a noisy predicted distance — is what decides whether a
+ * station is still ahead.
+ *
+ * `at_stop` means the vehicle is standing AT `last_stop`, which must still
+ * count as an arrival (it is the "now" row on the board), hence the −1 there.
+ * Returns null when the feed omits both fields; callers then fall back to the
+ * distance gate.
+ */
+export function stopCursorSequence(
+  snapshot: Pick<
+    TramSnapshot,
+    'statePosition' | 'lastStopSequence' | 'nextStopSequence'
+  >,
+): number | null {
+  const last = snapshot.lastStopSequence;
+  const next = snapshot.nextStopSequence;
+  if (snapshot.statePosition === 'at_stop' && typeof last === 'number') return last;
+  if (typeof next === 'number') return next;
+  if (typeof last === 'number') return last + 1;
+  return null;
+}
 
 // ── Station lookup ────────────────────────────────────────────────────────────
 
@@ -225,7 +265,12 @@ export function computeArrivals(
     const geo = byTrip.get(state.snapshot.tripId);
     if (!geo) continue;
 
-    const stop = nextStationStop(geo, key, state.simDistM);
+    const stop = nextStationStop(
+      geo,
+      key,
+      state.simDistM,
+      stopCursorSequence(state.snapshot),
+    );
     if (!stop) continue;
 
     const arrivalMs = stop.arrivalMs + state.snapshot.delaySeconds * 1000;
@@ -253,13 +298,25 @@ function geometriesByTrip(geometries: RouteGeometry[]): Map<string, RouteGeometr
 }
 
 /**
- * First stop of station `key` still ahead of a tram at `simDistM`. Exported
- * for the spotter (src/lib/spotter.ts), which anchors its departed-detector
- * on the matched platform's shape distance.
+ * First stop of station `key` still ahead of a tram. Exported for the spotter
+ * (src/lib/spotter.ts), which anchors its departed-detector on the matched
+ * platform's shape distance.
+ *
+ * `minSequence` is the operator's stop cursor (stopCursorSequence). When it is
+ * available it is the ONLY gate: it is exact, monotonic, and — unlike the
+ * predicted `simDistM` — cannot hide a tram that is standing at the platform.
+ * Without it we fall back to the distance gate.
  */
-export function nextStationStop(geo: RouteGeometry, key: string, simDistM: number) {
+export function nextStationStop(
+  geo: RouteGeometry,
+  key: string,
+  simDistM: number,
+  minSequence: number | null = null,
+) {
   for (const stop of geo.stops) {
-    if (stop.distM < simDistM - STOP_SLACK_M) continue;
+    if (minSequence !== null) {
+      if (stop.sequence < minSequence) continue;
+    } else if (stop.distM < simDistM - STOP_SLACK_M) continue;
     if (normalizeName(stop.name) === key) return stop;
   }
   return null;
@@ -379,7 +436,13 @@ export function computeItineraryTiming(
         const geo = byTrip.get(state.snapshot.tripId);
         if (!geo) continue;
 
-        const ride = rideWindow(geo, fromKey, toKey, state.simDistM);
+        const ride = rideWindow(
+          geo,
+          fromKey,
+          toKey,
+          state.simDistM,
+          stopCursorSequence(state.snapshot),
+        );
         if (!ride) continue;
 
         const delayMs = state.snapshot.delaySeconds * 1000;
@@ -427,12 +490,17 @@ function rideWindow(
   fromKey: string,
   toKey: string,
   simDistM: number,
+  minSequence: number | null = null,
 ): { departureMs: number; travelMs: number } | null {
   let fromIdx = -1;
   for (let i = 0; i < geo.stops.length; i++) {
     const stop = geo.stops[i];
     if (fromIdx < 0) {
-      if (stop.distM < simDistM - STOP_SLACK_M) continue;
+      if (
+        minSequence !== null
+          ? stop.sequence < minSequence
+          : stop.distM < simDistM - STOP_SLACK_M
+      ) continue;
       if (normalizeName(stop.name) === fromKey) fromIdx = i;
     } else if (normalizeName(stop.name) === toKey) {
       const from = geo.stops[fromIdx];

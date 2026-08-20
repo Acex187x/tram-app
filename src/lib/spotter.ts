@@ -18,7 +18,12 @@
 // distance, rolled onto a new trip, or got canceled) or DISAPPEARS from the
 // states list for longer than MISSING_TIMEOUT_MS.
 
-import { computeArrivals, nextStationStop, positionEtaS } from '@/lib/arrivals';
+import {
+  computeArrivals,
+  nextStationStop,
+  positionEtaS,
+  stopCursorSequence,
+} from '@/lib/arrivals';
 import type { RouteGeometry, TramPublicState } from '@/lib/types';
 
 /** A target that passed the platform by more than this has departed (m). */
@@ -48,6 +53,8 @@ export interface SpotterTracking {
   tripId: string;
   /** Shape distance of the spotted platform on that trip (m). */
   stopDistM: number;
+  /** GTFS stop_sequence of that platform — the operator-side departure test. */
+  stopSequence: number;
   /** Scheduled arrival at that platform (ms epoch) — the ETA base. */
   stopArrivalMs: number;
   /** Wall-clock ms this target was acquired — anchors the preemption holdoff. */
@@ -118,7 +125,7 @@ export function stepSpotter(
     } else if (
       !st.snapshot.isCanceled &&
       st.snapshot.tripId === prev.tripId &&
-      st.simDistM <= prev.stopDistM + DEPARTED_PAST_M
+      !hasDeparted(st, prev)
     ) {
       // Still inbound / dwelling / just past within the window — keep it,
       // but periodically re-rank the arrivals and hand off to a genuinely
@@ -204,18 +211,42 @@ function acquireTarget(
   if (!st) return null;
   const geo = geometryForTrip(geometries, st.snapshot.tripId);
   if (!geo) return null;
-  const stop = nextStationStop(geo, stationKey, st.simDistM);
+  const stop = nextStationStop(
+    geo,
+    stationKey,
+    st.simDistM,
+    stopCursorSequence(st.snapshot),
+  );
   if (!stop) return null;
   return {
     targetKey: a.tramKey,
     line: a.line,
     tripId: st.snapshot.tripId,
     stopDistM: stop.distM,
+    stopSequence: stop.sequence,
     stopArrivalMs: stop.arrivalMs,
     acquiredMs: nowMs,
     lastSeenMs: nowMs,
     lastReevalMs: nowMs,
   };
+}
+
+/**
+ * Has the held target left the spotted platform?
+ *
+ * The predicted distance alone is not enough: it overshoots the true position
+ * by more than DEPARTED_PAST_M often enough (lab: p90 ≈ 197 m daytime) that a
+ * tram still standing at the platform would read as departed — and, now that
+ * acquisition trusts the operator's stop cursor, it would be re-acquired the
+ * next step and dropped again, flip-flopping the camera. So departure needs
+ * BOTH witnesses: the prediction is clear of the platform AND the operator's
+ * own cursor has moved past it. When the feed gives no cursor, the distance
+ * test stands alone exactly as before.
+ */
+function hasDeparted(st: TramPublicState, prev: SpotterTracking): boolean {
+  if (st.simDistM <= prev.stopDistM + DEPARTED_PAST_M) return false;
+  const cursor = stopCursorSequence(st.snapshot);
+  return cursor === null || cursor > prev.stopSequence;
 }
 
 function findState(states: TramPublicState[], key: string): TramPublicState | undefined {
