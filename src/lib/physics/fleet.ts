@@ -69,6 +69,13 @@ export class TramFleet {
   private snapshots = new Map<string, TramSnapshot>();
   private geometries = new Map<string, RouteGeometry>();
   private models = new Map<string, TramModelSpec>();
+  /**
+   * Observed pace per vehicle, from consecutive AVL fixes — the input of the
+   * client's NAIVE fallback (adapter.ts): when a tram has no curves at all,
+   * it dead-reckons from its last fix at this speed instead of freezing.
+   * Bookkeeping only (fix pairs, like the old calibration fold) — not physics.
+   */
+  private paces = new Map<string, { tripId: string; s: number; atMs: number; vMs: number }>();
   /** Render mode mirrored from the settings store by the runtime. */
   private mode: RenderMode = 'smooth';
 
@@ -103,16 +110,32 @@ export class TramFleet {
     const nextSnapshots = new Map<string, TramSnapshot>();
     const nextGeometries = new Map<string, RouteGeometry>();
     const nextModels = new Map<string, TramModelSpec>();
+    const nextPaces = new Map<string, { tripId: string; s: number; atMs: number; vMs: number }>();
     for (const s of snapshots) {
       nextSnapshots.set(s.key, s);
       const geometry = getGeometry(s.tripId);
       if (geometry) nextGeometries.set(s.key, geometry);
       const known = this.models.get(s.key);
       nextModels.set(s.key, known ?? this.resolveModel(s));
+      // Fold the fix pair into the observed pace. A trip change moves the
+      // s-axis under the pair, so it resets rather than producing a garbage Δ.
+      const prevPace = this.paces.get(s.key);
+      if (!prevPace || prevPace.tripId !== s.tripId) {
+        nextPaces.set(s.key, { tripId: s.tripId, s: s.shapeDistM, atMs: s.observedAtMs, vMs: 0 });
+      } else if (s.observedAtMs > prevPace.atMs) {
+        const dtS = (s.observedAtMs - prevPace.atMs) / 1000;
+        const dsM = s.shapeDistM - prevPace.s;
+        const vMs =
+          dtS >= 4 && dtS <= 300 && dsM >= 0 ? Math.min(16.7, dsM / dtS) : prevPace.vMs;
+        nextPaces.set(s.key, { tripId: s.tripId, s: s.shapeDistM, atMs: s.observedAtMs, vMs });
+      } else {
+        nextPaces.set(s.key, prevPace);
+      }
     }
     this.snapshots = nextSnapshots;
     this.geometries = nextGeometries;
     this.models = nextModels;
+    this.paces = nextPaces;
   }
 
   /** Trip geometry currently driving a tram's rendering. */
@@ -205,6 +228,7 @@ export class TramFleet {
       vehicle: this.trajectories.getVehicle(snapshot.key),
       serverNowMs,
       mode,
+      observedPaceMs: this.paces.get(snapshot.key)?.vMs ?? 0,
     });
   }
 

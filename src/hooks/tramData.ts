@@ -148,7 +148,10 @@ export type FrameListener = (nowMs: number) => void;
 
 export class TramRuntime {
   /** MOTION: the server's published curves, refetched every 5 s. */
-  readonly trajectories = new TrajectoryStore();
+  // `convex: true`: the production ('current') generation rides the Convex
+  // push stream — curves land the moment the predictor publishes them. The
+  // research generations still poll the predictor's HTTP endpoint.
+  readonly trajectories = new TrajectoryStore(undefined, { convex: true });
 
   /** The joined view the whole app renders and reads from. */
   readonly fleet = new TramFleet({

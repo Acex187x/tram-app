@@ -87,7 +87,20 @@ export interface AdaptInput {
   /** SERVER-corrected wall clock — every evaluation uses this, never Date.now(). */
   serverNowMs: number;
   mode: RenderMode;
+  /**
+   * Observed fix-over-fix pace, m/s (fleet.ts bookkeeping). Powers the NAIVE
+   * fallback when this tram has no curves at all; 0 ⇒ stand on the fix.
+   */
+  observedPaceMs?: number;
 }
+
+/**
+ * How long the naive fallback dead-reckons past the fix before freezing, s.
+ * Long enough to bridge the predictor's first emission for a new vehicle
+ * (~2–4 s) and a short server blip; short enough that a genuinely dead feed
+ * cannot silently animate a tram across half the city on one stale pace.
+ */
+export const NAIVE_HORIZON_S = 60;
 
 /**
  * Build the public state one tram renders and reads from.
@@ -164,8 +177,23 @@ export function adaptTram(input: AdaptInput): TramPublicState {
     const delta = smoothFixedDeltaM(vehicle, serverNowMs);
     deviationM = Number.isFinite(delta) ? delta : null;
   } else {
-    // No server physics: stand on the last real observation, visibly frozen.
-    simDistM = observedDist;
+    // No server physics for this tram (new vehicle before its first curve,
+    // trip just changed, or the trajectory feed is down): the NAIVE fallback.
+    // Dead-reckon along the shape from the last real observation at the last
+    // observed fix-over-fix pace — the tram keeps driving instead of freezing
+    // — for up to NAIVE_HORIZON_S, then stop (never silently animate beyond
+    // what one stale pace can honestly claim). Marked `pastHorizon`
+    // throughout: this is a guess, and the dimmed marker says so.
+    const paceMs = input.observedPaceMs ?? 0;
+    const aheadS = (serverNowMs - fixAtMs) / 1000;
+    const advanceM =
+      paceMs > 0 && aheadS > 0 && hasGeometry
+        ? paceMs * (aheadS < NAIVE_HORIZON_S ? aheadS : NAIVE_HORIZON_S)
+        : 0;
+    simDistM = clampToShape(fixS + advanceM, geometry);
+    if (advanceM > 0 && aheadS < NAIVE_HORIZON_S && simDistM < (geometry?.totalM ?? Infinity)) {
+      simSpeedKmh = paceMs * 3.6;
+    }
     pastHorizon = true;
   }
 

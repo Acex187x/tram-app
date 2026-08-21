@@ -149,23 +149,23 @@ const PHYSICS_ENGINES: {
 }[] = [
   {
     value: 'current',
-    label: 'Текущий',
-    description: 'Как сейчас.',
+    label: 'Основной',
+    description: 'ML-движок из Convex: кривые приходят сразу, как только посчитаны.',
     icon: 'tram.fill',
     tint: Tram.pidRed,
   },
   {
     value: 'v3',
-    label: 'Новый (v3)',
+    label: 'Исследовательский (v3)',
     description:
-      'Плавное вождение: разгоны, торможения, повороты. Не прыгает, но догоняет свежие данные чуть дольше.',
+      'Тот же ML-движок напрямую с исследовательского сервера (HTTP, медленнее доставка). Для сравнения.',
     icon: 'sparkles',
     tint: Tram.gold,
   },
   {
     value: 'mix',
     label: 'Смешанный',
-    description: 'Точный режим — новый, плавный — текущий.',
+    description: 'Точный режим — v3, плавный — прежний генератор. Для сравнения.',
     icon: 'arrow.triangle.merge',
     tint: Tram.night,
   },
