@@ -88,6 +88,8 @@ export interface TrajectoryHealth {
   gen: PhysicsGen;
   /** Active transport: Convex push (production) or HTTP poll (research gens). */
   transport: 'convex' | 'http';
+  /** Highest trajectory diff-stream seq seen (Convex transport; 0 = none). */
+  lastSeq: number;
   /**
    * The newest bundle's own `generator` field: what the server says it served,
    * or null when there is no bundle or the field is absent (= published). Read
@@ -118,6 +120,7 @@ export class TrajectoryStore implements TrajectorySink {
   private gen: PhysicsGen = 'current';
 
   private current: ParsedBundle | null = null;
+  private lastSeqSeen = 0;
   private failures = 0;
   private lastError: string | null = null;
   private lastBundleAtMs = 0;
@@ -304,6 +307,7 @@ export class TrajectoryStore implements TrajectorySink {
       vehicleCount: this.current?.vehicles.size ?? 0,
       gen: this.gen,
       transport: this.transport,
+      lastSeq: this.lastSeqSeen,
       serverGen: this.current?.generator ?? null,
       discontinuities: this.discontinuities,
       lastBundleAtMs: this.lastBundleAtMs,
@@ -370,6 +374,7 @@ export class TrajectoryStore implements TrajectorySink {
       receivedAtMs,
     };
     this.clock.sample(serverNowMs, receivedAtMs);
+    this.lastSeqSeen = meta?.lastSeq ?? this.lastSeqSeen;
     this.failures = 0;
     this.lastError = null;
     this.lastBundleAtMs = receivedAtMs;
@@ -394,6 +399,7 @@ export class TrajectoryStore implements TrajectorySink {
     }
     if (batch.atMs > cur.atMs) cur.atMs = batch.atMs;
     if (serverNowMs > cur.serverNowMs) cur.serverNowMs = serverNowMs;
+    if (batch.seq > this.lastSeqSeen) this.lastSeqSeen = batch.seq;
     this.clock.sample(serverNowMs, receivedAtMs);
     this.failures = 0;
     this.lastError = null;
@@ -409,6 +415,7 @@ export class TrajectoryStore implements TrajectorySink {
    */
   noteConvexMeta(meta: TrajectoryMetaWire, receivedAtMs: number): void {
     this.clock.sample(meta.serverNowMs, receivedAtMs);
+    if (meta.lastSeq > this.lastSeqSeen) this.lastSeqSeen = meta.lastSeq;
     const cur = this.current;
     if (cur) {
       if (meta.atMs > cur.atMs) cur.atMs = meta.atMs;

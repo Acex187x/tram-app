@@ -32,6 +32,14 @@ export interface ParsedVehicle {
   opinion: Float64Array;
   /** Continuity-blended curve, interleaved [t,s,…] — the «smooth» render mode. */
   smooth: Float64Array;
+  /**
+   * What produced the curve's target keyframes: ml-gbdt ('ml') or the
+   * predictor's learned-walker substitute ('naive', ML outage + overrun).
+   * Null when the transport did not say (HTTP research bundles).
+   */
+  source: 'ml' | 'naive' | null;
+  /** shapeDistM of the anchor fix the curve was predicted from (NaN = absent). */
+  anchorS: number;
 }
 
 /** A decoded bundle: the complete fleet physics for the next ~120 seconds. */
@@ -109,10 +117,12 @@ export function parseVehicle(raw: unknown): ParsedVehicle | null {
     tripId?: unknown;
     line?: unknown;
     anchorMs?: unknown;
+    anchorS?: unknown;
     emittedAtMs?: unknown;
     discontinuity?: unknown;
     opinion?: unknown;
     smooth?: unknown;
+    source?: unknown;
   } | null;
   if (v == null || typeof v.key !== 'string' || v.key.length === 0) return null;
   if (typeof v.tripId !== 'string') return null;
@@ -128,6 +138,8 @@ export function parseVehicle(raw: unknown): ParsedVehicle | null {
     discontinuity: v.discontinuity === true,
     opinion,
     smooth,
+    source: v.source === 'ml' || v.source === 'naive' ? v.source : null,
+    anchorS: num(v.anchorS),
   };
 }
 
