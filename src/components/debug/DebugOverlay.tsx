@@ -139,7 +139,11 @@ function buildSnapshot(key: string | null, locator: OnlineLocator): DebugSnapsho
  */
 function phaseLabel(d: PhysicsDebugInfo): string {
   if (!d.hasGeometry) return 'NO GEOMETRY (raw dot — shape pending)';
+  if (d.renderSource === 'client-naive') return 'NO CURVES — client dead-reckon (naive)';
   if (!d.hasTrajectory) return 'NO CURVES — frozen on the last raw fix';
+  // τ=∞: the fix outran the whole curve. NOT a freeze — smooth is walking to
+  // the fix, fixed is pinned on it — but it IS the bug-class state to notice.
+  if (d.shimBranch === 'walk') return 'FIX PAST CURVE — walking to it (τ=∞)';
   if (d.pastHorizon) return 'PAST HORIZON — frozen (no data beyond here)';
   switch (d.phase) {
     case 'terminal':
@@ -157,8 +161,18 @@ function phaseLabel(d: PhysicsDebugInfo): string {
 function activeNotes(d: PhysicsDebugInfo): string[] {
   const out: string[] = [];
   if (d.connection !== 'live') out.push(d.connection.toUpperCase());
+  if (d.renderSource === 'curve-naive') out.push('NAIVE curve (ML outage)');
+  if (d.renderSource === 'client-naive') out.push('client dead-reckon');
   if (!d.hasTrajectory) out.push('no published curves');
-  else if (d.pastHorizon) out.push('frozen past horizon');
+  else if (d.shimBranch === 'walk') {
+    out.push(`fix past curve — ${num(d.walkRemainingM, 0)}m left to walk`);
+  } else if (d.pastHorizon) out.push('frozen past horizon');
+  if (d.anchorLagS != null && d.anchorLagS > 6) {
+    out.push(`curve hasn't seen ${num(d.anchorLagS, 0)}s of fixes`);
+  }
+  if (d.fixVsCurveM != null && d.fixVsCurveM > 50) {
+    out.push(`curve ${num(d.fixVsCurveM, 0)}m behind the fix`);
+  }
   if (d.discontinuity) out.push('discontinuity flagged');
   if (d.deltaM != null && Math.abs(d.deltaM) >= 1) {
     out.push(`smooth ${d.deltaM >= 0 ? 'ahead of' : 'behind'} fixed by ${num(Math.abs(d.deltaM), 1)}m`);
@@ -167,6 +181,68 @@ function activeNotes(d: PhysicsDebugInfo): string[] {
     out.push(`horizon ${num(d.horizonLeftS, 1)}s left`);
   }
   return out;
+}
+
+// ── server-side truth (the engine's own view of this tram) ───────────────────
+//
+// Debug mode only: the expanded panel polls the predictor's per-vehicle debug
+// endpoint every few seconds and shows what the ENGINE holds for this tram —
+// which fix the served curve was predicted from, whether it is ml-gbdt or the
+// naive substitute, whether that exact emission has reached Convex, whether
+// the ML service is answering, and the raw recent fixes from the archive.
+// This is the other half of every «какого хуя» investigation: the client card
+// says what the phone is doing, this card says what the server believes.
+
+const SERVER_DEBUG_BASE = 'https://tram-lab.acex.sh/api/vehicle';
+const SERVER_DEBUG_POLL_MS = 3_000;
+
+interface ServerVehicleDebug {
+  found: boolean;
+  atMs?: number;
+  tripId?: string;
+  emittedAtMs?: number;
+  curveSource?: 'ml' | 'naive' | null;
+  anchorFix?: { obsAtMs: number; s: number } | null;
+  latestFix?: {
+    obsAtMs: number;
+    s: number;
+    statePosition: string;
+    fixGapS: number;
+    stuckAtM: number | null;
+  } | null;
+  ml?: { ready: boolean; lastOkMs: number; lastError: string | null };
+  publish?: { enabled: boolean; emittedAtMs: number | null; synced: boolean };
+  fixes?: { observedAtMs?: number; obsAtMs?: number; shapeDistM?: number; distM?: number; statePosition?: string }[];
+}
+
+function useServerDebug(key: string): { data: ServerVehicleDebug | null; error: string | null } {
+  const [data, setData] = useState<ServerVehicleDebug | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setData(null);
+    setError(null);
+    const read = async () => {
+      try {
+        const res = await fetch(`${SERVER_DEBUG_BASE}/${encodeURIComponent(key)}/debug`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = (await res.json()) as ServerVehicleDebug;
+        if (alive) {
+          setData(body);
+          setError(null);
+        }
+      } catch (e) {
+        if (alive) setError(e instanceof Error ? e.message : String(e));
+      }
+    };
+    void read();
+    const id = setInterval(() => void read(), SERVER_DEBUG_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [key]);
+  return { data, error };
 }
 
 // ── guide mode ───────────────────────────────────────────────────────────────
@@ -188,6 +264,59 @@ interface GuideSection {
 
 const GUIDE_SECTIONS: GuideSection[] = [
   {
+    title: 'SOURCE',
+    rows: [
+      [
+        'moving on',
+        'The data actually driving this marker right now. ML curve = the server’s ml-gbdt prediction (normal). NAIVE curve = the server substituted its simple physics walker because ML was down AND the old prediction was provably overrun. Client dead-reckon = NO curve at all; the phone extrapolates the last fix at the observed pace for up to 60 s. Frozen raw fix = no curve and no usable pace.',
+      ],
+      [
+        'transport',
+        'How curves reach the phone: convex push (production — the server pushes every prediction the moment it is computed; seq is the diff-stream cursor) or http poll (research engines v3/mix, 5 s poll).',
+      ],
+      [
+        'engine gen',
+        'Which predictor generation built the bundle, read from the bundle itself — never from the setting that asked for it. Production publishes drive-v3.',
+      ],
+      [
+        'ML anchor fix',
+        'THE fix the served prediction was computed from: metres along the route and its age. Everything the curve believes starts from this observation.',
+      ],
+      [
+        'anchor lag',
+        'How many seconds of NEWER fixes the served curve has not seen (newest fix time − anchor time). The freshness race in one number: should collapse to ~0 within one publish cycle (~2–4 s). Persistently large = the predictor is falling behind the fix stream.',
+      ],
+      [
+        'emission age',
+        'How long ago the server published this trajectory. It is also the blend anchor: continuity is measured from this instant.',
+      ],
+    ],
+  },
+  {
+    title: 'FIX-FORWARD SHIM',
+    rows: [
+      [
+        'branch',
+        'Which branch of the last-mile shim is active. off = no fix newer than the curve’s anchor (curve rendered as served). curve ≥ fix = a newer fix exists but the curve is already at/past it. winding = the curve is wound forward τ seconds so it passes through the fix. WALK = the fix is past EVERYTHING the curve predicts (τ=∞): smooth walks toward the fix at ≤2 m/s extra, fixed pins on it. WALK is the branch of the «телепортируется за фикс и стоит» bug class — screenshot this card when you see it.',
+      ],
+      ['τ wind', 'How many seconds the curve is being wound forward (the winding branch). ∞ = the walk branch.'],
+      [
+        'fix−curve',
+        'Raw gap: the newest fix minus the curve’s position at the fix instant, metres. Positive = the tram is provably ahead of what the server drew — the gap the shim exists to close.',
+      ],
+      [
+        'shim applied',
+        'Metres the shim is adding to the marker right now, after the mode’s rate limit. fixed takes the whole gap at once; smooth is limited to ≤2 m/s of extra speed.',
+      ],
+      ['walk left', 'WALK branch only: metres still to walk before the marker reaches the overrun fix.'],
+      ['AVL fix', 'The newest raw feed position the phone holds: metres along the route and its age.'],
+      [
+        'obs pace',
+        'Observed fix-over-fix speed of this tram. This is also the speed the client dead-reckon fallback would use.',
+      ],
+    ],
+  },
+  {
     title: 'CURVES',
     rows: [
       [
@@ -204,34 +333,46 @@ const GUIDE_SECTIONS: GuideSection[] = [
       ],
       [
         'smooth−fixed',
-        'The gap between the two curves right now. THIS is the number the whole comparison exists to produce: positive = the smooth curve is running ahead of the model’s opinion, negative = behind. Large values mean continuity is costing accuracy.',
+        'The gap between the two curves right now: positive = smooth is running ahead of the model’s opinion (it will ease off / wait to repay the lead), negative = behind (it is catching up). A tram standing mid-road with a large POSITIVE value = smooth got ahead and is waiting — report that combination.',
       ],
       [
         'speed',
-        'How fast the drawn tram is moving — measured from the curve itself (its slope over ±0.5 s), not modelled. Nothing on the client decides this.',
+        'How fast the drawn tram is moving — measured from the rendered motion (curve + shim), not modelled.',
+      ],
+      [
+        'horizon left',
+        'Seconds of curve remaining. At zero the tram coasts to a stop over 20 s and freezes dimmed — the client never invents motion beyond the data.',
+      ],
+      [
+        'discontinuity',
+        'Whether the server flagged THIS emission as a sanctioned break in continuity (trip change or a model break beyond the desync threshold), plus how many have been seen this session.',
       ],
     ],
   },
   {
-    title: 'HORIZON',
+    title: 'SERVER (engine truth)',
     rows: [
       [
-        'horizon left',
-        'Seconds of curve remaining. At zero the tram FREEZES where the data ended and dims — the client never animates beyond what the server predicted.',
+        'curve src',
+        'What the ENGINE says it served for this tram: ml (gbdt keyframes) or naive (the learned-walker substitute during an ML outage).',
       ],
       [
-        'emission age',
-        'How long ago the server published this trajectory. It is also the blend anchor: continuity is measured from this instant.',
+        '→ convex',
+        'Whether THIS exact emission has been pushed to Convex (what the phone reads). PENDING for more than a cycle = the publisher is failing.',
+      ],
+      ['ML service', 'Whether the LightGBM service is answering the engine at all.'],
+      ['anchor fix', 'The fix the engine anchored the served curve to (its own records).'],
+      ['latest fix', 'The newest fix the ENGINE holds, with its feed state.'],
+      [
+        'anchor behind',
+        'Latest engine fix minus the anchor fix, metres — how far reality has driven past the served prediction, as the server itself can see.',
       ],
       [
-        'anchor age',
-        'How old the AVL fix underneath these curves is. The curves are the server’s answer to "where is it now", given a fix this old.',
+        'phone−engine fix',
+        'Phone’s newest fix time minus the engine’s, seconds. Should be ≈0 (both read the same Convex stream); a big value means the two disagree about reality itself.',
       ],
-      ['AVL age', 'Age of the last raw reported position from the feed, independently of the curves.'],
-      [
-        'discontinuity',
-        'Whether the server flagged THIS emission as a sanctioned break in continuity (trip change, or the model moved more than 150 m), plus how many have been seen this session. Smooth mode may jump once on a flagged emission; otherwise it must not.',
-      ],
+      ['fix gap', 'Observed interval between this tram’s last two fixes.'],
+      ['recent fixes', 'The engine’s last archived fixes: age · metres · feed state.'],
     ],
   },
   {
@@ -243,14 +384,14 @@ const GUIDE_SECTIONS: GuideSection[] = [
       ],
       [
         'bundle age',
-        'Age of the newest trajectory bundle in server time. This — not "did the last fetch throw" — is what decides the state above, so a server answering 200 OK with stale data still reads as offline.',
+        'Age of the newest trajectory publication in server time (heartbeats count — a quiet fleet stays fresh). This decides the state above.',
       ],
       [
         'clock offset',
-        'serverNow − this device’s clock, smoothed over the last few fetches. Every curve is evaluated at the CORRECTED time, which is what makes two phones draw identical trams.',
+        'serverNow − this device’s clock, smoothed. Every curve is evaluated at the CORRECTED time, which is what makes two phones draw identical trams.',
       ],
-      ['vehicles', 'How many vehicles the newest bundle carried.'],
-      ['fetch', 'Whether a fetch is in flight, or how many consecutive attempts have failed.'],
+      ['vehicles', 'How many vehicles the current bundle carries.'],
+      ['fetch', 'Whether a fetch/subscription attempt is failing right now.'],
     ],
   },
   {
@@ -301,7 +442,7 @@ const PRIMER: [string, string][] = [
   ],
   [
     'WHO PREDICTS',
-    'The SERVER does, for the whole fleet, every 5 s. It publishes each tram’s next ~120 seconds as a short list of (time, metres-along-route) keyframes. The app downloads one bundle for all trams.',
+    'The SERVER does, for the whole fleet, every ~2 s: the ml-gbdt model predicts each tram’s next ~120 seconds, a physics generator (drive-v3) turns that into realistic keyframe curves, and every re-computation is PUSHED to the phone over Convex the moment it exists. If ML is down, the server holds the old curve while it still describes the tram, then substitutes a simple learned-physics walk («naive»).',
   ],
   [
     'WHAT THE APP DOES',
@@ -329,6 +470,106 @@ const PRIMER: [string, string][] = [
 const GuideContext = createContext(false);
 
 // ── rows ─────────────────────────────────────────────────────────────────────
+
+/** Human labels for PhysicsDebugInfo.renderSource (SOURCE card). */
+const RENDER_SOURCE_LABEL: Record<PhysicsDebugInfo['renderSource'], string> = {
+  'curve-ml': 'ML curve',
+  'curve-naive': 'NAIVE curve',
+  'client-naive': 'client dead-reckon',
+  'raw-fix': 'frozen raw fix',
+};
+
+/** Human labels for the shim branch (FIX-FORWARD SHIM card). */
+const SHIM_BRANCH_LABEL: Record<PhysicsDebugInfo['shimBranch'], string> = {
+  off: 'off (curve fresh)',
+  ahead: 'curve ≥ fix',
+  wind: 'winding (finite τ)',
+  walk: 'WALK — fix past curve',
+};
+
+/**
+ * The engine's own view of this tram, fetched live (see useServerDebug).
+ * `clientAnchorMs` is the newest fix the PHONE holds — comparing it with the
+ * engine's latest fix instantly shows whether the two even agree on reality.
+ */
+function ServerCard({ tramKey, clientAnchorMs }: { tramKey: string; clientAnchorMs: number }) {
+  const { data, error } = useServerDebug(tramKey);
+  const guide = useContext(GuideContext);
+  if (guide) return null;
+  const now = data?.atMs ?? Date.now();
+  const anchorAge = data?.anchorFix ? (now - data.anchorFix.obsAtMs) / 1000 : null;
+  const latestAge = data?.latestFix ? (now - data.latestFix.obsAtMs) / 1000 : null;
+  const anchorBehindM =
+    data?.anchorFix && data?.latestFix ? data.latestFix.s - data.anchorFix.s : null;
+  const phoneVsEngineFixS =
+    data?.latestFix ? (clientAnchorMs - data.latestFix.obsAtMs) / 1000 : null;
+  const fixes = (data?.fixes ?? []).slice(0, 3).map((f) => {
+    const at = f.observedAtMs ?? f.obsAtMs;
+    const s = f.shapeDistM ?? f.distM;
+    const age = at != null ? `${Math.round((now - at) / 1000)}s` : '?';
+    return `${age}·${s != null ? Math.round(s) : '?'}m·${f.statePosition ?? '?'}`;
+  });
+  return (
+    <View style={styles.debugCard}>
+      <SectionTitle>SERVER (engine truth)</SectionTitle>
+      {error && <Row label="fetch" value={error} warn />}
+      {!error && !data && <Row label="fetch" value="loading…" />}
+      {data && !data.found && <Row label="entry" value="NOT IN ENGINE" warn />}
+      {data?.found && (
+        <>
+          <Row
+            label="curve src"
+            value={data.curveSource ?? '—'}
+            warn={data.curveSource === 'naive'}
+          />
+          <Row
+            label="→ convex"
+            value={
+              !data.publish?.enabled
+                ? 'publish OFF'
+                : data.publish.synced
+                  ? 'synced'
+                  : 'PENDING'
+            }
+            warn={!data.publish?.enabled || data.publish?.synced === false}
+          />
+          <Row
+            label="ML service"
+            value={data.ml ? (data.ml.ready ? 'ready' : (data.ml.lastError ?? 'not ready')) : '—'}
+            warn={data.ml ? !data.ml.ready : false}
+          />
+          <Row
+            label="anchor fix"
+            value={data.anchorFix ? `${num(data.anchorFix.s)}m · ${num(anchorAge, 0)}s` : '—'}
+          />
+          <Row
+            label="latest fix"
+            value={
+              data.latestFix
+                ? `${num(data.latestFix.s)}m · ${num(latestAge, 0)}s · ${data.latestFix.statePosition}`
+                : '—'
+            }
+          />
+          <Row
+            label="anchor behind"
+            value={anchorBehindM != null ? `${signed(anchorBehindM, 0)}m` : '—'}
+            warn={anchorBehindM != null && anchorBehindM > 50}
+          />
+          <Row
+            label="phone−engine fix"
+            value={phoneVsEngineFixS != null ? `${signed(phoneVsEngineFixS, 0)}s` : '—'}
+            warn={phoneVsEngineFixS != null && Math.abs(phoneVsEngineFixS) > 15}
+          />
+          {data.latestFix?.stuckAtM != null && (
+            <Row label="jam hold" value={`${num(data.latestFix.stuckAtM)}m`} warn />
+          )}
+          <Row label="fix gap" value={data.latestFix ? `${num(data.latestFix.fixGapS, 0)}s` : '—'} />
+          <Row label="recent fixes" value={fixes.join('  ') || '—'} />
+        </>
+      )}
+    </View>
+  );
+}
 
 function Row({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
   const guide = useContext(GuideContext);
@@ -566,8 +807,79 @@ function DebugLive({ tramKey }: { tramKey: string }) {
       {!dbg && <Text style={styles.note}>No state yet (waiting for a fix).</Text>}
       {dbg && health && (
         <>
+          {/* WHAT IS MOVING THIS TRAM — the promotion-pipeline card. Answers,
+              in order: which data drives the marker, over which transport,
+              from which fix the ML predicted, and how far behind the newest
+              fix that prediction is. */}
           <View style={styles.debugCard}>
             <Text style={styles.phase}>{phaseLabel(dbg)}</Text>
+            <SectionTitle>SOURCE</SectionTitle>
+            <Row
+              label="moving on"
+              value={RENDER_SOURCE_LABEL[dbg.renderSource]}
+              warn={dbg.renderSource !== 'curve-ml'}
+            />
+            <Row
+              label="transport"
+              value={dbg.transport === 'convex' ? `convex push · seq ${num(dbg.feedSeq)}` : 'http poll'}
+            />
+            <Row label="engine gen" {...genReadout(health)} />
+            <Row
+              label="ML anchor fix"
+              value={
+                dbg.anchorFixS != null
+                  ? `${num(dbg.anchorFixS)}m · ${num(dbg.anchorAgeS, 1)}s old`
+                  : dbg.anchorAgeS != null
+                    ? `? · ${num(dbg.anchorAgeS, 1)}s old`
+                    : '—'
+              }
+            />
+            <Row
+              label="anchor lag"
+              value={dbg.anchorLagS != null ? `${num(dbg.anchorLagS, 1)}s of fixes` : '—'}
+              warn={dbg.anchorLagS != null && dbg.anchorLagS > 6}
+            />
+            <Row label="emission age" value={dbg.emissionAgeS != null ? `${num(dbg.emissionAgeS, 1)}s` : '—'} />
+          </View>
+
+          {/* THE SHIM — the τ machinery closing the fix-vs-curve race. This is
+              the card to screenshot when a tram teleports or stands mid-road:
+              branch `walk` + a large `walk left` IS the τ=∞ bug class. */}
+          <View style={styles.debugCard}>
+            <SectionTitle>FIX-FORWARD SHIM</SectionTitle>
+            <Row
+              label="branch"
+              value={SHIM_BRANCH_LABEL[dbg.shimBranch]}
+              warn={dbg.shimBranch === 'walk'}
+            />
+            <Row
+              label="τ wind"
+              value={
+                dbg.shimBranch === 'walk' ? '∞' : dbg.tauS != null ? `${num(dbg.tauS, 1)}s` : '—'
+              }
+            />
+            <Row
+              label="fix−curve"
+              value={dbg.fixVsCurveM != null ? `${signed(dbg.fixVsCurveM, 1)}m` : '—'}
+              warn={dbg.fixVsCurveM != null && dbg.fixVsCurveM > 100}
+            />
+            <Row
+              label="shim applied"
+              value={dbg.fixForwardM != null ? `${signed(dbg.fixForwardM, 1)}m` : '—'}
+            />
+            <Row
+              label="walk left"
+              value={dbg.walkRemainingM != null ? `${num(dbg.walkRemainingM, 1)}m` : '—'}
+              warn={dbg.walkRemainingM != null && dbg.walkRemainingM > 30}
+            />
+            <Row label="AVL fix" value={`${num(dbg.obsDistM)}m · ${num(dbg.fixAgeS, 1)}s`} />
+            <Row label="obs pace" value={`${num(dbg.observedPaceMs * 3.6, 1)} km/h`} />
+          </View>
+
+          <View style={styles.debugCard}>
+            <Text style={styles.phase} numberOfLines={2}>
+              {activeNotes(dbg).join(' · ') || 'nominal'}
+            </Text>
             <SectionTitle>CURVES</SectionTitle>
             <Row label="drawing" value={dbg.mode} />
             <Row label="smooth" value={num(dbg.smoothDistM)} />
@@ -577,29 +889,16 @@ function DebugLive({ tramKey }: { tramKey: string }) {
               value={signed(dbg.deltaM, 1)}
               warn={dbg.deltaM != null && Math.abs(dbg.deltaM) > 80}
             />
-            {/* How far the SERVED curve is behind the newest fix right now —
-                the shim is adding exactly this many meters to the marker. */}
-            <Row
-              label="fix-forward"
-              value={dbg.fixForwardM != null ? `+${num(dbg.fixForwardM, 1)}` : '—'}
-              warn={dbg.fixForwardM != null && dbg.fixForwardM > 50}
-            />
             <Row label="speed" value={`${num(dbg.simSpeedKmh, 1)} km/h`} />
-          </View>
-
-          <View style={styles.debugCard}>
-            <SectionTitle>HORIZON</SectionTitle>
-            <Text style={styles.notes}>{activeNotes(dbg).join(' · ') || 'nominal'}</Text>
             <Row
               label="horizon left"
               value={dbg.horizonLeftS != null ? `${num(dbg.horizonLeftS, 1)}s` : '—'}
               warn={dbg.pastHorizon}
             />
-            <Row label="emission age" value={dbg.emissionAgeS != null ? `${num(dbg.emissionAgeS, 1)}s` : '—'} />
-            <Row label="anchor age" value={dbg.anchorAgeS != null ? `${num(dbg.anchorAgeS, 1)}s` : '—'} />
-            <Row label="AVL age" value={`${num(dbg.fixAgeS, 1)}s`} />
             <Row label="discontinuity" value={`${dbg.discontinuity ? 'THIS' : 'no'} · ${dbg.discontinuitiesTotal} total`} />
           </View>
+
+          <ServerCard tramKey={tramKey} clientAnchorMs={dbg.obsAtMs} />
 
           <View style={styles.debugCard}>
             <SectionTitle>CONNECTION</SectionTitle>
@@ -613,11 +912,6 @@ function DebugLive({ tramKey }: { tramKey: string }) {
               value={dbg.bundleAgeS != null ? `${num(dbg.bundleAgeS, 1)}s` : 'none'}
               warn={dbg.bundleAgeS == null || dbg.bundleAgeS >= 15}
             />
-            {/* Which generation built the bundle above — right next to its
-                age, because after a swap the two are read together ("no
-                bundle yet" is the swap, not a fault). Read from the payload,
-                never from the setting: see genReadout. */}
-            <Row label="engine gen" {...genReadout(health)} />
             <Row label="clock offset" value={`${signed(dbg.clockOffsetMs)}ms`} warn={health.clockImplausible} />
             <Row label="vehicles" value={num(health.vehicleCount)} />
             <Row

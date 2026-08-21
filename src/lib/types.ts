@@ -174,6 +174,50 @@ export interface PhysicsDebugInfo {
   hasGeometry: boolean;
   /** Curve being rendered right now. */
   mode: 'smooth' | 'fixed';
+
+  // — the promotion pipeline (2026-08-21): WHAT is driving this marker —
+  /**
+   * The data actually moving the marker at this instant:
+   *   'curve-ml'     server curve rendering ml-gbdt keyframes
+   *   'curve-naive'  server curve rendering the learned-walker substitute
+   *                  (ML outage + the old curve was provably overrun)
+   *   'client-naive' NO curve — dead-reckoning from the last fix at the
+   *                  observed pace (≤ NAIVE_HORIZON_S, dimmed)
+   *   'raw-fix'      NO curve and no usable pace — frozen on the fix
+   */
+  renderSource: 'curve-ml' | 'curve-naive' | 'client-naive' | 'raw-fix';
+  /** Transport the curves arrive over: Convex push or HTTP poll (research). */
+  transport: 'convex' | 'http';
+  /** shapeDistM of the fix the served curve was predicted FROM (null = unsent). */
+  anchorFixS: number | null;
+  /**
+   * fixAtMs − anchorMs, s: how many seconds of newer fixes the served curve
+   * has NOT seen. THE freshness-race number — the fix-forward shim exists to
+   * cover exactly this window, and it should collapse to ~0 within one
+   * publish cycle (~2–4 s). Null without both stamps.
+   */
+  anchorLagS: number | null;
+  /** Observed fix-over-fix pace, m/s (the client-naive fallback's speed). */
+  observedPaceMs: number;
+
+  // — the fix-forward shim state (the τ machinery) —
+  /**
+   * Which branch of the shim is active on the RENDERED track:
+   *   'off'   no fix newer than the curve's anchor — curve rendered as served
+   *   'ahead' newer fix exists but the curve is at/past it — left alone
+   *   'wind'  finite τ: curve wound forward τ seconds onto the fix
+   *   'walk'  τ = ∞: fix is past the whole curve; smooth walks toward it at
+   *           the bounded rate (fixed jumps). THE branch of the
+   *           «телепортируется за новый фикс и стоит» bug class.
+   */
+  shimBranch: 'off' | 'ahead' | 'wind' | 'walk';
+  /** τ in seconds ('wind' branch); null when off/ahead; Infinity when 'walk'. */
+  tauS: number | null;
+  /** fixS − curve(fixAt), m, signed: how far the newest fix is ahead of the
+   *  served curve at the fix instant (the raw gap the shim is closing). */
+  fixVsCurveM: number | null;
+  /** 'walk' branch only: meters still left to walk to reach the fix. */
+  walkRemainingM: number | null;
   /** Rendered distance in the active mode, m. */
   simDistM: number;
   /** Continuity-curve distance, m (null without a trajectory). */
@@ -222,6 +266,10 @@ export interface PhysicsDebugInfo {
   //   reads one object) —
   /** Age of the newest trajectory bundle, s (null when none decoded). */
   bundleAgeS: number | null;
+  /** Highest trajectory diff-stream seq folded (Convex transport; 0 = none). */
+  feedSeq: number;
+  /** What produced the newest bundle per its own field ('drive-v3', …). */
+  serverGen: string | null;
   /** Smoothed server−device clock offset, ms. */
   clockOffsetMs: number;
   /** Connection verdict from bundle age + fetch health. */

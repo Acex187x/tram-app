@@ -20,8 +20,9 @@ import type {
   PhysicsDebugInfo,
 } from '@/lib/types';
 import { segmentIndexAt } from '@/lib/geo/polyline';
-import { adaptTram } from './adapter';
+import { adaptTram, NAIVE_HORIZON_S } from './adapter';
 import { evalSpeedMs, evalTrajectory, trackEndMs } from './evaluator';
+import { fixForwardTauMs } from './fixForward';
 import { catchupVMsFor, fixForwardAppliedM, renderDistM, trackFor, type RenderMode } from './render';
 import type { TrajectoryStore } from './trajectoryStore';
 
@@ -255,29 +256,78 @@ export class TramFleet {
     let fixedDistM: number | null = null;
     let horizonLeftS: number | null = null;
     let fixForwardM: number | null = null;
+    // — the shim's own state, read off the RENDERED track (devtools truth) —
+    let shimBranch: PhysicsDebugInfo['shimBranch'] = 'off';
+    let tauS: number | null = null;
+    let fixVsCurveM: number | null = null;
+    let walkRemainingM: number | null = null;
     if (vehicle) {
       // The two curves RAW — deviationM and the smooth-vs-fixed comparison are
       // about what the server published, so the shim stays out of them.
       if (vehicle.smooth.length > 0) smoothDistM = evalTrajectory(vehicle.smooth, serverNowMs);
       if (vehicle.opinion.length > 0) fixedDistM = evalTrajectory(vehicle.opinion, serverNowMs);
-      horizonLeftS = (trackEndMs(trackFor(vehicle, mode)) - serverNowMs) / 1000;
+      const track = trackFor(vehicle, mode);
+      horizonLeftS = (trackEndMs(track) - serverNowMs) / 1000;
       // …and the meters the shim is currently adding on top, which is the one
       // number that says "the served curve is this far behind the newest fix".
       // Reading it in the field is how a complaint becomes a measurement.
       fixForwardM = fixForwardAppliedM(
-        trackFor(vehicle, mode),
+        track,
         serverNowMs,
         catchupVMsFor(mode),
         snapshot.shapeDistM,
         snapshot.observedAtMs,
         vehicle.anchorMs,
       );
+      // Which branch of fixForward.ts is deciding this marker right now, and
+      // the raw gap it is closing — the numbers that separate «кривая отстала»
+      // from «фикс обогнал всю кривую» from «шим спит» at a glance.
+      const fixS = snapshot.shapeDistM;
+      const fixAtMs = snapshot.observedAtMs;
+      const newerFix = !Number.isFinite(vehicle.anchorMs) || fixAtMs > vehicle.anchorMs;
+      if (track.length > 0 && newerFix) {
+        fixVsCurveM = fixS - evalTrajectory(track, fixAtMs);
+        const tau = fixForwardTauMs(track, fixS, fixAtMs, vehicle.anchorMs);
+        if (tau === 0) {
+          shimBranch = fixVsCurveM <= 0 ? 'ahead' : 'off';
+        } else if (tau === Number.POSITIVE_INFINITY) {
+          shimBranch = 'walk';
+          tauS = Number.POSITIVE_INFINITY;
+          walkRemainingM = Math.max(0, fixS - state.simDistM);
+        } else {
+          shimBranch = 'wind';
+          tauS = tau / 1000;
+        }
+      }
     }
+
+    // What is actually driving the marker (see PhysicsDebugInfo.renderSource).
+    const observedPaceMs = this.paces.get(key)?.vMs ?? 0;
+    const fixAheadS = (serverNowMs - snapshot.observedAtMs) / 1000;
+    const renderSource: PhysicsDebugInfo['renderSource'] = vehicle
+      ? vehicle.source === 'naive'
+        ? 'curve-naive'
+        : 'curve-ml'
+      : observedPaceMs > 0 && state.hasGeometry && fixAheadS < NAIVE_HORIZON_S
+        ? 'client-naive'
+        : 'raw-fix';
 
     return {
       hasTrajectory: vehicle !== undefined,
       hasGeometry: state.hasGeometry,
       mode,
+      renderSource,
+      transport: health.transport,
+      anchorFixS: vehicle && Number.isFinite(vehicle.anchorS) ? vehicle.anchorS : null,
+      anchorLagS:
+        vehicle && Number.isFinite(vehicle.anchorMs)
+          ? (snapshot.observedAtMs - vehicle.anchorMs) / 1000
+          : null,
+      observedPaceMs,
+      shimBranch,
+      tauS,
+      fixVsCurveM,
+      walkRemainingM,
       simDistM: state.simDistM,
       smoothDistM,
       fixedDistM,
@@ -306,6 +356,8 @@ export class TramFleet {
       delaySeconds: snapshot.delaySeconds,
       statePosition: snapshot.statePosition,
       bundleAgeS: health.bundleAgeS,
+      feedSeq: health.lastSeq,
+      serverGen: health.serverGen,
       clockOffsetMs: health.clockOffsetMs,
       connection: health.connection,
       discontinuitiesTotal: health.discontinuities,
