@@ -26,6 +26,8 @@ const PUSH_CHUNK = 100;
 export interface PublishableEntry {
   v2: V2Vehicle;
   source: 'ml' | 'naive';
+  /** shapeDistM of the anchor fix — published as `anchorS` (devtools). */
+  anchorFixS: number;
 }
 
 export interface PublishGauges {
@@ -64,10 +66,10 @@ export class ConvexPublisher {
     if (!this.enabled || this.inFlight) return;
     this.inFlight = true;
     try {
-      const changed: Array<V2Vehicle & { source: 'ml' | 'naive' }> = [];
+      const changed: Array<V2Vehicle & { source: 'ml' | 'naive'; anchorS: number }> = [];
       for (const [key, e] of entries) {
         if (this.lastPublished.get(key) !== e.v2.emittedAtMs) {
-          changed.push({ ...e.v2, source: e.source });
+          changed.push({ ...e.v2, source: e.source, anchorS: e.anchorFixS });
         }
       }
       const removed: string[] = [];
@@ -103,6 +105,11 @@ export class ConvexPublisher {
     } finally {
       this.inFlight = false;
     }
+  }
+
+  /** emittedAtMs of the last successfully pushed emission for `key` (devtools). */
+  publishedEmittedAtMs(key: string): number | null {
+    return this.lastPublished.get(key) ?? null;
   }
 
   gauges(): PublishGauges {

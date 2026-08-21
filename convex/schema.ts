@@ -123,6 +123,8 @@ export const trajectoryVehicleValidator = v.object({
   tripId: v.string(),
   line: v.string(),
   anchorMs: v.number(),
+  /** shapeDistM of the anchor fix — "which fix the ML predicted from" (devtools). */
+  anchorS: v.optional(v.number()),
   emittedAtMs: v.number(),
   discontinuity: v.boolean(),
   opinion: v.array(v.object({ t: v.number(), s: v.number() })),
