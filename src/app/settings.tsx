@@ -35,7 +35,7 @@ import { appleScheme, Tram, Type } from '@/constants/theme';
 import { ICON_PACKS, ICON_PACK_IDS } from '@/lib/fleet/iconPacks';
 import { useMotionLog, type MotionFileInfo } from '@/lib/motionlog';
 import type { TramModelId } from '@/lib/types';
-import { useSettingsStore, type LightPreset, type PhysicsEngine } from '@/stores/settings';
+import { useSettingsStore, type LightPreset } from '@/stores/settings';
 
 const LIGHT_PRESETS: { value: LightPreset; label: string; icon: SFSymbol; tint: string }[] = [
   { value: 'auto', label: 'Automatic', icon: 'wand.and.stars', tint: Tram.night },
@@ -129,77 +129,6 @@ function PositionModeSection() {
         По умолчанию трамваи движутся по сглаженной траектории — без рывков между обновлениями.
         Включите, чтобы показывать положение, которое сервер считает наиболее точным: оно ближе к
         реальности сразу после обновления, но заметно прыгает.
-      </Footnote>
-    </View>
-  );
-}
-
-/**
- * Which server physics GENERATION publishes the curves. A different axis from
- * the switch above: that one picks a track inside the bundle, this one picks
- * which predictor built the bundle. Copy is deliberately plain Russian — the
- * options are named for what the trams DO, not for the release that ships them.
- */
-const PHYSICS_ENGINES: {
-  value: PhysicsEngine;
-  label: string;
-  description: string;
-  icon: SFSymbol;
-  tint: string;
-}[] = [
-  {
-    value: 'current',
-    label: 'Основной',
-    description: 'ML-движок из Convex: кривые приходят сразу, как только посчитаны.',
-    icon: 'tram.fill',
-    tint: Tram.pidRed,
-  },
-  {
-    value: 'v3',
-    label: 'Исследовательский (v3)',
-    description:
-      'Тот же ML-движок напрямую с исследовательского сервера (HTTP, медленнее доставка). Для сравнения.',
-    icon: 'sparkles',
-    tint: Tram.gold,
-  },
-  {
-    value: 'mix',
-    label: 'Смешанный',
-    description: 'Точный режим — v3, плавный — прежний генератор. Для сравнения.',
-    icon: 'arrow.triangle.merge',
-    tint: Tram.night,
-  },
-];
-
-function PhysicsEngineSection() {
-  const physicsEngine = useSettingsStore((s) => s.physicsEngine);
-  const setPhysicsEngine = useSettingsStore((s) => s.setPhysicsEngine);
-  return (
-    <View style={styles.section}>
-      <SectionLabel>Движок физики</SectionLabel>
-      <InsetGroup>
-        {PHYSICS_ENGINES.map((engine, i) => (
-          <Fragment key={engine.value}>
-            {i > 0 && <RowSeparator inset={16 + 29 + 12} />}
-            <InsetRow
-              icon={engine.icon}
-              iconTint={engine.tint}
-              title={engine.label}
-              subtitle={engine.description}
-              subtitleLines={3}
-              checked={physicsEngine === engine.value}
-              onPress={() => {
-                if (physicsEngine === engine.value) return;
-                void Haptics.selectionAsync();
-                setPhysicsEngine(engine.value);
-              }}
-            />
-          </Fragment>
-        ))}
-      </InsetGroup>
-      <Footnote>
-        Переключение сразу запрашивает данные заново, поэтому трамваи на секунду замирают на
-        последнем известном месте, а потом едут по новым траекториям.
       </Footnote>
     </View>
   );
@@ -603,7 +532,6 @@ export default function SettingsScreen() {
   return (
     <SheetSurface header={<SheetHeader title="Settings" />}>
       <PositionModeSection />
-      <PhysicsEngineSection />
       <LightPresetSection />
       <MapSection />
       <IconPackSection />

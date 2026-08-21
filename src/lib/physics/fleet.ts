@@ -77,6 +77,17 @@ export class TramFleet {
    * Bookkeeping only (fix pairs, like the old calibration fold) — not physics.
    */
   private paces = new Map<string, { tripId: string; s: number; atMs: number; vMs: number }>();
+  /**
+   * Teleport watch: last rendered position per vehicle (in the active render
+   * mode) + the last jump that no plausible motion explains. Updated in-place
+   * on every build() — allocation-free after the first sighting (perf #8).
+   * Mode switches and trip changes legitimately move the marker, so both
+   * reset the tracking instead of recording a phantom teleport.
+   */
+  private jumps = new Map<
+    string,
+    { tripId: string; s: number; atMs: number; jumpM: number; jumpAtMs: number }
+  >();
   /** Render mode mirrored from the settings store by the runtime. */
   private mode: RenderMode = 'smooth';
 
@@ -87,6 +98,7 @@ export class TramFleet {
 
   /** Selected render mode (settings). Affects every getter that omits one. */
   setMode(mode: RenderMode): void {
+    if (this.mode !== mode) this.jumps.clear(); // a mode switch is not a teleport
     this.mode = mode;
   }
 
@@ -137,6 +149,9 @@ export class TramFleet {
     this.geometries = nextGeometries;
     this.models = nextModels;
     this.paces = nextPaces;
+    for (const key of this.jumps.keys()) {
+      if (!nextSnapshots.has(key)) this.jumps.delete(key); // departed vehicles
+    }
   }
 
   /** Trip geometry currently driving a tram's rendering. */
@@ -222,7 +237,7 @@ export class TramFleet {
     serverNowMs: number,
     mode: RenderMode,
   ): TramPublicState {
-    return adaptTram({
+    const state = adaptTram({
       snapshot,
       model: this.models.get(snapshot.key) ?? this.resolveModel(snapshot),
       geometry: this.geometries.get(snapshot.key),
@@ -231,6 +246,43 @@ export class TramFleet {
       mode,
       observedPaceMs: this.paces.get(snapshot.key)?.vMs ?? 0,
     });
+    // Teleport watch — active render mode only, so a diagnostics read in the
+    // other mode cannot record a phantom jump.
+    if (mode === this.mode) this.watchJump(snapshot, state.simDistM, serverNowMs);
+    return state;
+  }
+
+  /**
+   * Record a frame-over-frame displacement no plausible motion explains.
+   * Forward allowance: 20 m/s (above V_MAX pace) plus 25 m of slack for the
+   * licensed fixed-mode re-anchor jitter; backward allowance 10 m (rendering
+   * is monotone by construction — anything bigger IS the backward-teleport
+   * bug class). Gaps over 5 s (background, culled stretch) reset instead of
+   * judging — across a long gap any displacement is legitimate motion.
+   */
+  private watchJump(snapshot: TramSnapshot, s: number, atMs: number): void {
+    const j = this.jumps.get(snapshot.key);
+    if (!j || j.tripId !== snapshot.tripId) {
+      this.jumps.set(snapshot.key, {
+        tripId: snapshot.tripId,
+        s,
+        atMs,
+        jumpM: 0,
+        jumpAtMs: 0,
+      });
+      return;
+    }
+    const dtMs = atMs - j.atMs;
+    if (dtMs <= 0) return; // same or out-of-order instant — nothing to judge
+    if (dtMs <= 5_000) {
+      const ds = s - j.s;
+      if (ds > 25 + 0.02 * dtMs || ds < -10) {
+        j.jumpM = ds;
+        j.jumpAtMs = atMs;
+      }
+    }
+    j.s = s;
+    j.atMs = atMs;
   }
 
   /**
@@ -312,12 +364,16 @@ export class TramFleet {
         ? 'client-naive'
         : 'raw-fix';
 
+    const jump = this.jumps.get(key);
+    const hasJump = jump !== undefined && jump.jumpAtMs > 0;
+
     return {
       hasTrajectory: vehicle !== undefined,
       hasGeometry: state.hasGeometry,
       mode,
       renderSource,
-      transport: health.transport,
+      lastJumpM: hasJump ? jump.jumpM : null,
+      lastJumpAgoS: hasJump ? (serverNowMs - jump.jumpAtMs) / 1000 : null,
       anchorFixS: vehicle && Number.isFinite(vehicle.anchorS) ? vehicle.anchorS : null,
       anchorLagS:
         vehicle && Number.isFinite(vehicle.anchorMs)

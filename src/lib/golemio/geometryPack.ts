@@ -27,8 +27,15 @@ import type { RouteGeometry } from '@/lib/types';
 import { servedToRouteGeometry, type ServedGeometry } from './gtfs';
 import * as shapeCache from './shapeCache';
 
-/** Predictor-service endpoint (same origin as /api/trajectories/v2). */
-export const GEOMETRY_PACK_URL = 'https://tram-lab.acex.sh/api/geometry-pack';
+/**
+ * Served by the app's own backend since 2026-08-21 (Convex http action,
+ * convex/geometryPack.ts — the predictor uploads the pack there). Same origin
+ * as per-trip geometry, so the app knows exactly one backend.
+ */
+const SITE_ENV = process.env.EXPO_PUBLIC_CONVEX_SITE_URL;
+export const GEOMETRY_PACK_URL = `${
+  typeof SITE_ENV === 'string' && SITE_ENV.length > 0 ? SITE_ENV : 'https://tram-site.acex.sh'
+}/geometry-pack`;
 
 /**
  * Hard timeout for the one pack request. Generous (it is a large gzip body)
