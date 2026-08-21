@@ -113,6 +113,25 @@ export const routeStopValidator = v.object({
   isTerminal: v.boolean(),
 });
 
+/**
+ * One published trajectory — the physics-v3 `V2Vehicle` wire object plus the
+ * predictor's `source` marker. Knot arrays are `{t, s}` pairs exactly as on
+ * the HTTP wire, so the client parses both transports with one code path.
+ */
+export const trajectoryVehicleValidator = v.object({
+  key: v.string(),
+  tripId: v.string(),
+  line: v.string(),
+  anchorMs: v.number(),
+  emittedAtMs: v.number(),
+  discontinuity: v.boolean(),
+  opinion: v.array(v.object({ t: v.number(), s: v.number() })),
+  smooth: v.array(v.object({ t: v.number(), s: v.number() })),
+  source: v.union(v.literal('ml'), v.literal('naive')),
+});
+
+export type StoredTrajectoryVehicle = Infer<typeof trajectoryVehicleValidator>;
+
 export default defineSchema({
   /** The live fleet: one row per tram key, replaced only when the fix moved. */
   vehicles: defineTable({
@@ -258,5 +277,44 @@ export default defineSchema({
         n: v.number(),
       }),
     ),
+  }).index('by_singleton', ['singleton']),
+
+  /**
+   * The published trajectory feed — physics-v3 curves, pushed by the predictor
+   * service (lab/src/publish.ts) and streamed to clients over the same Convex
+   * subscription transport the fix stream uses. One row per vehicle, replaced
+   * on every re-emission; rows for vehicles that left the feed are deleted.
+   * Wire shape mirrors `V2Vehicle` (docs/research/physics-v3-protocol.md §Wire)
+   * plus `source`: 'ml' when the curve renders ml-gbdt keyframes, 'naive' when
+   * the predictor substituted the learned-walker fallback (ML unavailable and
+   * the newest fix proved the old curve overrun).
+   */
+  trajectoryVehicles: defineTable({
+    key: v.string(),
+    vehicle: trajectoryVehicleValidator,
+    /** `trajectoryBatches.seq` that last wrote this row. */
+    updatedSeq: v.number(),
+  }).index('by_key', ['key']),
+
+  /** Trajectory diff stream (same pattern as `batches`; swept by crons.ts). */
+  trajectoryBatches: defineTable({
+    seq: v.number(),
+    /** Predictor build instant of this publication (bundle `atMs`). */
+    atMs: v.number(),
+    changed: v.array(trajectoryVehicleValidator),
+    removed: v.optional(v.array(v.string())),
+  }).index('by_seq', ['seq']),
+
+  /** Singleton (`singleton: 'meta'`): bundle-level fields of the feed. */
+  trajectoryMeta: defineTable({
+    singleton: v.literal('meta'),
+    /** Predictor build instant of the newest publication. */
+    atMs: v.number(),
+    horizonS: v.number(),
+    /** Generator of the published chain ('current' | 'drive-v3' | …). */
+    generator: v.string(),
+    lastSeq: v.number(),
+    /** Convex transaction clock at the last publish (staleness watch). */
+    publishedAtMs: v.number(),
   }).index('by_singleton', ['singleton']),
 });

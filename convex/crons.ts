@@ -18,6 +18,17 @@ crons.interval('poller watchdog', { minutes: 1 }, internal.poller.watchdog, {});
 // deleted, which is what keeps `batches` (and the storage bill) tiny.
 crons.interval('batches retention', { minutes: 1 }, internal.ingest.sweepBatches, {});
 
+// Trajectory feed hygiene: the diff stream is a resume buffer like `batches`,
+// and abandoned vehicle rows (predictor died without a removal notice) must
+// not serve ghost curves forever.
+crons.interval('trajectory batches retention', { minutes: 1 }, internal.trajectories.sweepBatches, {});
+crons.interval(
+  'trajectory stale vehicles',
+  { minutes: 5 },
+  internal.trajectories.sweepStaleVehicles,
+  {},
+);
+
 // Compact the live calibration stats into the client-facing bundle. Hourly is a
 // deliberate ceiling on churn — the underlying EWMAs have a 14-day half-life,
 // so nothing meaningful moves faster than that.
