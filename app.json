@@ -8,7 +8,7 @@
     "scheme": "fablespotsthetram",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "buildNumber": "19",
+      "buildNumber": "20",
       "icon": "./assets/tram.icon",
       "bundleIdentifier": "cz.zabolotny.tramspotter",
       "supportsTablet": true,
