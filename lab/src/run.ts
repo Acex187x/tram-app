@@ -1452,6 +1452,7 @@ export function start(): void {
         mlHeld: trajMlHeld,
         naiveEmissions: trajNaiveEmissions,
         publish: publisher.gauges(),
+        geometryPack: publisher.packGauges(),
         probe: { ok: probeOk, missing: probeMissing, staleAnchor: probeStaleAnchor, tripMismatch: probeTripMismatch },
         /** Anchor-floor hotfix telemetry: exactly where bytes may differ from
          *  the pre-hotfix builders (everywhere else: pure fn, same inputs). */
@@ -1591,6 +1592,15 @@ export function start(): void {
 
   setInterval(() => engine.tick(Date.now()), TICK_MS);
   setInterval(rollup, ROLLUP_MS);
+  // Cold-start geometry pack → Convex file storage (the app reads it from
+  // tram-site since 2026-08-21). First upload once the fleet has geometry,
+  // then refresh every 5 min; uploadGeometryPack itself skips unchanged packs.
+  const uploadPack = (): void => {
+    if (!publisher.enabled || fleet.size === 0) return;
+    void publisher.uploadGeometryPack(getGeometryPack());
+  };
+  setTimeout(uploadPack, 90_000);
+  setInterval(uploadPack, 5 * 60_000);
   setInterval(() => {
     learned.flush();
     fetchHealth()
