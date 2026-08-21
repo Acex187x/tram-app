@@ -91,11 +91,26 @@ export function renderedDistM(
   const tau = fixForwardTauMs(track, fixS, fixAtMs, anchorMs);
   if (tau === 0) return curveWithCoast(track, tMs, endMs);
   // The tram is past everything this curve predicts: there is no phase left to
-  // wind to, so hold at the fix rather than invent a continuation. The next
-  // bundle re-anchors there anyway.
+  // wind to. `fixed` takes the correction at once (the protocol licenses it to
+  // jump) and then holds at the fix — the predictor replaces an overrun curve
+  // within a couple of seconds, so the hold is a blink. `smooth` must not
+  // teleport, so it WALKS to the fix at the bounded catch-up rate. Before this
+  // branch ignored `catchupVMs` entirely and snapped both modes onto the fix,
+  // which was the «телепортируется за новый фикс и стоит» field report.
+  //
+  // The walk's allowance is measured from the CURVE's start — the same datum
+  // the finite-τ branch below uses, and for the same reason: a fix-anchored
+  // allowance resets to zero on every AVL update, and a fix that flips a
+  // finite τ to ∞ would hand back everything already caught up as a backward
+  // step (caught by the fix-sweeping monotonicity tests). One datum, one
+  // allowance, continuous across the branch boundary — and deterministic,
+  // because both are server timestamps.
   if (tau === Number.POSITIVE_INFINITY) {
     const raw = curveWithCoast(track, tMs, endMs);
-    return raw > fixS ? raw : fixS;
+    if (raw >= fixS) return raw;
+    if (catchupVMs === Number.POSITIVE_INFINITY) return fixS;
+    const walked = raw + catchupVMs * Math.max(0, (tMs - trackStartMs(track)) / 1000);
+    return walked < fixS ? walked : fixS;
   }
   const shifted = curveWithCoast(track, tMs + tau, endMs);
   if (catchupVMs === Number.POSITIVE_INFINITY) return shifted;

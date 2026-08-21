@@ -404,3 +404,44 @@ describe('past-horizon coast — a tram cannot stop dead at the last keyframe', 
     expect(r.pastHorizon).toBe(true);
   });
 });
+
+describe('τ = ∞ in SMOOTH mode — the overrun fix is walked to, never snapped to', () => {
+  // The «телепортируется за новый фикс и стоит» field report (build 18): a fix
+  // beyond everything the curve predicts used to snap BOTH modes onto the fix
+  // and freeze them there. `fixed` is licensed to jump; `smooth` is not.
+  const t = track(1_000, 10); // ends at 2200 m, T0+120 s
+
+  it('never jumps at the instant the overrun fix lands', () => {
+    // Just before the fix arrives the smooth marker is on the raw curve.
+    const fixAt = T0 + 30_000;
+    const before = renderedDistM(t, fixAt, SMOOTH_CATCHUP_V_MS, Number.NaN, Number.NaN, ANCHOR);
+    const after = renderedDistM(t, fixAt, SMOOTH_CATCHUP_V_MS, 5_000, fixAt, ANCHOR);
+    // The whole 3700 m gap must NOT appear on screen: the step at the fix
+    // instant is bounded by the allowance already accrued from the curve's
+    // start, never by the size of the overrun.
+    expect(after - before).toBeLessThanOrEqual((SMOOTH_CATCHUP_V_MS * 30_000) / 1000 + 1e-9);
+    // `fixed` takes it at once — that is the mode's contract.
+    expect(renderedDistM(t, fixAt, IMMEDIATE, 5_000, fixAt, ANCHOR)).toBe(5_000);
+  });
+
+  it('walks toward the fix at bounded extra speed and stops AT it, monotone', () => {
+    const fixAt = T0 + 30_000;
+    const fixS = 2_500; // 300 m past the curve's own horizon end
+    let prev = -Infinity;
+    for (let dt = 0; dt <= 300_000; dt += 500) {
+      const now = fixAt + dt;
+      const s = renderedDistM(t, now, SMOOTH_CATCHUP_V_MS, fixS, fixAt, ANCHOR);
+      expect(s).toBeGreaterThanOrEqual(prev - 1e-9); // never backwards
+      expect(s).toBeLessThanOrEqual(fixS + 1e-9); // never invents past the fix
+      // Extra speed over the raw curve stays inside the catch-up budget
+      // (allowance measured from the curve's start, same datum as finite τ).
+      const raw = renderedDistM(t, now, SMOOTH_CATCHUP_V_MS, Number.NaN, Number.NaN, ANCHOR);
+      expect(s - raw).toBeLessThanOrEqual(
+        (SMOOTH_CATCHUP_V_MS * (now - T0)) / 1000 + 1e-9,
+      );
+      prev = s;
+    }
+    // It does eventually get there — the walk converges, it does not stall.
+    expect(prev).toBeCloseTo(fixS, 6);
+  });
+});

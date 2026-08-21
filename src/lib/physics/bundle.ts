@@ -98,6 +98,40 @@ export function packTrack(points: unknown): Float64Array {
 }
 
 /**
+ * Decode ONE vehicle object — the same shape on both transports (the HTTP v2
+ * bundle's `vehicles[i]` and a Convex `trajectoryVehicles` row's `vehicle`).
+ * Returns null for anything unusable; a vehicle with neither curve carries no
+ * physics, so it is dropped and the renderer falls back to its raw fix.
+ */
+export function parseVehicle(raw: unknown): ParsedVehicle | null {
+  const v = raw as {
+    key?: unknown;
+    tripId?: unknown;
+    line?: unknown;
+    anchorMs?: unknown;
+    emittedAtMs?: unknown;
+    discontinuity?: unknown;
+    opinion?: unknown;
+    smooth?: unknown;
+  } | null;
+  if (v == null || typeof v.key !== 'string' || v.key.length === 0) return null;
+  if (typeof v.tripId !== 'string') return null;
+  const opinion = packTrack(v.opinion);
+  const smooth = packTrack(v.smooth);
+  if (opinion.length === 0 && smooth.length === 0) return null;
+  return {
+    key: v.key,
+    tripId: v.tripId,
+    line: typeof v.line === 'string' ? v.line : '',
+    anchorMs: num(v.anchorMs),
+    emittedAtMs: num(v.emittedAtMs),
+    discontinuity: v.discontinuity === true,
+    opinion,
+    smooth,
+  };
+}
+
+/**
  * Decode one `GET /api/trajectories/v2` body. Returns null when the payload is
  * not a usable bundle (wrong shape, no server clock) — callers keep the
  * previous bundle and let the connection state tell the truth about its age.
@@ -119,33 +153,8 @@ export function parseBundle(payload: unknown, receivedAtMs: number): ParsedBundl
   const atMsRaw = num(body.atMs);
   const vehicles = new Map<string, ParsedVehicle>();
   for (const raw of body.vehicles) {
-    const v = raw as {
-      key?: unknown;
-      tripId?: unknown;
-      line?: unknown;
-      anchorMs?: unknown;
-      emittedAtMs?: unknown;
-      discontinuity?: unknown;
-      opinion?: unknown;
-      smooth?: unknown;
-    } | null;
-    if (v == null || typeof v.key !== 'string' || v.key.length === 0) continue;
-    if (typeof v.tripId !== 'string') continue;
-    const opinion = packTrack(v.opinion);
-    const smooth = packTrack(v.smooth);
-    // A vehicle with neither curve carries no physics — drop it and let the
-    // renderer fall back to its raw fix (visibly frozen), which is the truth.
-    if (opinion.length === 0 && smooth.length === 0) continue;
-    vehicles.set(v.key, {
-      key: v.key,
-      tripId: v.tripId,
-      line: typeof v.line === 'string' ? v.line : '',
-      anchorMs: num(v.anchorMs),
-      emittedAtMs: num(v.emittedAtMs),
-      discontinuity: v.discontinuity === true,
-      opinion,
-      smooth,
-    });
+    const parsed = parseVehicle(raw);
+    if (parsed) vehicles.set(parsed.key, parsed);
   }
 
   return {
