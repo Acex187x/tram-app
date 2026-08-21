@@ -29,7 +29,28 @@ first, in its own commit.
      re-anchors on every fix, may jump. Exists to be visibly beaten by
      smooth and eventually removed.
 
-## Wire: `GET /api/trajectories/v2` (predictor service, today tram-lab.acex.sh)
+## Transport (amended 2026-08-21 — the promotion)
+
+The production feed no longer travels over HTTP polling. The predictor pushes
+every re-emission into Convex (`convex/trajectories.ts`: `trajectoryVehicles`
+per-vehicle rows + `trajectoryBatches` diff stream + `trajectoryMeta`
+heartbeat singleton, mutation `trajectories:publish` gated by
+`ENGINE_PUSH_TOKEN`), and the client folds the same diff-stream shape the fix
+feed already uses (`src/lib/physics/convexSource.ts` →
+`TrajectoryStore.seedConvex/foldConvex/noteConvexMeta`). Fix→curve-on-glass
+drops from ~7–11 s (poll against a JSON freeze) to ~2–4 s (the ML round trip
+itself). `GET /api/trajectories/v2` STAYS, byte-compatible, for the research
+generations (`?gen=v3|mix`), the lab pages and the gates.
+
+Each published vehicle carries one field the HTTP wire does not:
+`source: 'ml' | 'naive'`. `naive` marks the ML-outage substitute — the owner's
+replacement doctrine: when ML is unavailable, a vehicle's old curve is KEPT
+while it still describes the tram, and replaced by the learned-walker naive
+prediction (through the same generator, same kinematic limits) only when the
+newest fix proves the tram drove past everything the curve predicts, the curve
+ran out of horizon, or the trip changed.
+
+## Wire: `GET /api/trajectories/v2` (research transport; same shape as the Convex rows)
 
 ```jsonc
 {
@@ -219,8 +240,22 @@ Constraints on it:
   server timestamps only, never of when this phone happened to receive
   anything, so two clients holding the same bundle and the same fix render the
   same pixel.
-- **Still no invented motion.** With no curve there is no profile to wind and
-  the tram stands on its raw fix, dimmed, exactly as before.
+- **Overrun fixes are walked to, never snapped to (amended 2026-08-21).** When
+  the fix is past everything the curve predicts (`τ = ∞`), the first draft
+  floored BOTH modes at the fix — an instantaneous snap followed by a standing
+  marker, the «телепортируется за новый фикс и стоит» field report (build 18).
+  Now only `fixed` jumps (its license); `smooth` walks toward the fix at the
+  same bounded catch-up rate, with the allowance measured from the CURVE's
+  start — the same datum the finite-τ branch uses, so the two branches are
+  continuous at the boundary and a fix that flips τ from finite to ∞ cannot
+  reset the allowance (`__tests__/physics-fix-forward.test.ts`, the τ=∞ suite).
+  The server replaces an overrun curve within ~one publish cycle (naive
+  substitute if ML is down), so the walk is short-lived by construction.
+- **Naive client fallback (amended 2026-08-21).** With no curve AT ALL the tram
+  no longer freezes: it dead-reckons from its last fix at the observed
+  fix-over-fix pace (fleet.ts bookkeeping) for ≤ 60 s (`NAIVE_HORIZON_S`),
+  dimmed (`pastHorizon`) the whole time, then stops. Bridges a new vehicle's
+  first emission and short feed blips without inventing unbounded motion.
 
 ### The server has to model the shim (§14.7 amendment)
 
@@ -233,6 +268,10 @@ not a theory: attributing every backward step in a four-minute live replay puts
 
 So `clientProjectionM` in `lab/src/trajectory.ts` is the server's copy of the
 rule, and both generators' seam floors read it instead of `evalTrack(prev, t0)`.
+Since 2026-08-21 the SMOOTH seam resumes from `clientSmoothProjectionM` — the
+rate-limited twin that models the smooth marker's bounded walk (finite τ AND
+τ = ∞) — because resuming from the unshifted curve handed the accrued
+catch-up back as a backward step on every swap.
 The server has the same two inputs the phone does — the previous curve and the
 newest fix — so the two agree by construction rather than by luck. The
 `seamJustifiedM` bound still caps it: a projection the newest fix can prove
