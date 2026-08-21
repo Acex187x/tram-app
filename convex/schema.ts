@@ -307,6 +307,23 @@ export default defineSchema({
     removed: v.optional(v.array(v.string())),
   }).index('by_seq', ['seq']),
 
+  /**
+   * Singleton (`singleton: 'pack'`): the cold-start geometry pack — the whole
+   * active fleet's shapes in one gzip, built and uploaded by the predictor
+   * (lab getGeometryPack → publish.ts uploader), served by GET /geometry-pack
+   * (http.ts). Replaced wholesale on every upload; the previous storage file
+   * is deleted in the same transaction's mutation.
+   */
+  geometryPack: defineTable({
+    singleton: v.literal('pack'),
+    storageId: v.id('_storage'),
+    /** Predictor build instant of the pack. */
+    atMs: v.number(),
+    shapes: v.number(),
+    trips: v.number(),
+    gzipBytes: v.number(),
+  }).index('by_singleton', ['singleton']),
+
   /** Singleton (`singleton: 'meta'`): bundle-level fields of the feed. */
   trajectoryMeta: defineTable({
     singleton: v.literal('meta'),
