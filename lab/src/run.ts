@@ -1512,6 +1512,12 @@ export function start(): void {
       source === 'shadow'
         ? (entry as ShadowEntry).target
         : (entry as TrajectoryEntry).vehicle.points;
+    const lf = lastFix.get(key);
+    // Promotion-era truth for the devtools: which fix the served curve was
+    // predicted FROM, whether it renders ml-gbdt or the naive substitute,
+    // whether this exact emission has reached Convex, and whether the ML
+    // service is even answering — everything "какого хуя" needs in one fetch.
+    const pubEmitted = publisher.publishedEmittedAtMs(key);
     return {
       key,
       atMs: Date.now(),
@@ -1523,6 +1529,34 @@ export function start(): void {
       emittedAtMs: entry.v2.emittedAtMs,
       discontinuity: entry.v2.discontinuity,
       statePosition: snap?.statePosition ?? null,
+      /** ml-gbdt keyframes or the learned-walker substitute (published chain). */
+      curveSource: source === 'published' ? (entry as TrajectoryEntry).source : null,
+      /** The fix the served curve was anchored to (obsAt + shapeDist). */
+      anchorFix:
+        source === 'published'
+          ? {
+              obsAtMs: (entry as TrajectoryEntry).fixObsAtMs,
+              s: (entry as TrajectoryEntry).anchorFixS,
+            }
+          : null,
+      /** The newest fix the ENGINE holds (compare against anchorFix for lag). */
+      latestFix: lf
+        ? {
+            obsAtMs: lf.snap.observedAtMs,
+            s: lf.snap.shapeDistM,
+            statePosition: lf.snap.statePosition,
+            fixGapS: lf.fixGapS,
+            stuckAtM: lf.stuckAtM,
+          }
+        : null,
+      /** ML service health as this engine sees it. */
+      ml: { ready: ml.modelsReady, lastOkMs: ml.lastOkMs, lastError: ml.lastError },
+      /** Convex publication state of THIS vehicle's current emission. */
+      publish: {
+        enabled: publisher.enabled,
+        emittedAtMs: pubEmitted,
+        synced: pubEmitted !== null && pubEmitted === entry.v2.emittedAtMs,
+      },
       opinion: { points: entry.v2.opinion, v: entry.opinionK.v },
       smooth: { points: entry.v2.smooth, v: entry.smoothK.v },
       /** The raw ml-gbdt TARGET positions both generators consume. */
