@@ -90,14 +90,6 @@ export {
   type AdaptInput,
 } from './adapter';
 
-export {
-  TrajectoryStore,
-  TRAJECTORIES_URL,
-  TRAJECTORY_POLL_MS,
-  trajectoriesUrl,
-  genFromGenerator,
-  type PhysicsGen,
-  type TrajectoryHealth,
-} from './trajectoryStore';
+export { TrajectoryStore, type TrajectoryHealth } from './trajectoryStore';
 
 export { TramFleet, type TramFleetOptions } from './fleet';

@@ -186,8 +186,6 @@ export interface PhysicsDebugInfo {
    *   'raw-fix'      NO curve and no usable pace — frozen on the fix
    */
   renderSource: 'curve-ml' | 'curve-naive' | 'client-naive' | 'raw-fix';
-  /** Transport the curves arrive over: Convex push or HTTP poll (research). */
-  transport: 'convex' | 'http';
   /** shapeDistM of the fix the served curve was predicted FROM (null = unsent). */
   anchorFixS: number | null;
   /**
@@ -218,6 +216,14 @@ export interface PhysicsDebugInfo {
   fixVsCurveM: number | null;
   /** 'walk' branch only: meters still left to walk to reach the fix. */
   walkRemainingM: number | null;
+  /**
+   * The last TELEPORT of this tram's rendered marker (fleet.ts jump watch):
+   * a frame-over-frame displacement no plausible motion explains. Signed
+   * meters (negative = the marker flew BACKWARD) and how long ago. Null until
+   * one happens. THE metric of the «телепортируется и стоит» bug class.
+   */
+  lastJumpM: number | null;
+  lastJumpAgoS: number | null;
   /** Rendered distance in the active mode, m. */
   simDistM: number;
   /** Continuity-curve distance, m (null without a trajectory). */

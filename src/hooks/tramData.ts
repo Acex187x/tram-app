@@ -151,7 +151,7 @@ export class TramRuntime {
   // `convex: true`: the production ('current') generation rides the Convex
   // push stream — curves land the moment the predictor publishes them. The
   // research generations still poll the predictor's HTTP endpoint.
-  readonly trajectories = new TrajectoryStore(undefined, { convex: true });
+  readonly trajectories = new TrajectoryStore({ convex: true });
 
   /** The joined view the whole app renders and reads from. */
   readonly fleet = new TramFleet({
@@ -277,12 +277,11 @@ export class TramRuntime {
       this.trajectoryUnsub = this.trajectories.subscribe(this.onBundle);
       const settings = useSettingsStore.getState();
       this.applyRenderMode(settings.positionMode);
-      this.trajectories.setGen(settings.physicsEngine);
       this.settingsUnsub = useSettingsStore.subscribe((s) => {
+        // No-op when unchanged, so an unrelated settings write costs one
+        // comparison. (The physics-generation switcher is gone: the engine is
+        // chosen, one transport, one published chain.)
         this.applyRenderMode(s.positionMode);
-        // Both are no-ops when unchanged, so an unrelated settings write costs
-        // two comparisons. A real change refetches immediately (setGen).
-        this.trajectories.setGen(s.physicsEngine);
       });
       const state = AppState.currentState;
       if (state !== 'background' && state !== 'inactive') this.resume();
@@ -377,7 +376,9 @@ export class TramRuntime {
     if (this.runMode === 'active') this.halt();
     this.runMode = 'rideBackground';
     this.feed.start(RIDE_BG_POLL_MS);
-    this.trajectories.start(RIDE_BG_POLL_MS);
+    // The trajectory stream is push-driven; a ride-background session simply
+    // keeps the subscription (the feed above throttles its own deliveries).
+    this.trajectories.start();
   }
 
   private startFrameTimer(): void {

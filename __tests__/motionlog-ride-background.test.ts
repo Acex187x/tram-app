@@ -181,7 +181,9 @@ describe('data sources follow the run mode', () => {
     p.onAppState('background');
     expect(p.runMode).toBe('rideBackground');
     expect(trajStop).toHaveBeenCalled();
-    expect(trajStart).toHaveBeenLastCalledWith(RIDE_BG_POLL_MS);
+    // The trajectory stream is push-driven since the promotion: rideBackground
+    // keeps the subscription (no poll cadence to slow), only the FEED throttles.
+    expect(trajStart).toHaveBeenLastCalledWith();
     expect(feed.startCalls).toEqual([undefined, RIDE_BG_POLL_MS]);
   });
 

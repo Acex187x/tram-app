@@ -15,6 +15,13 @@ import {
   OFFLINE_BANNER_TEXT,
 } from '@/lib/physics/connection';
 import { TrajectoryStore } from '@/lib/physics/trajectoryStore';
+import {
+  ConvexTrajectorySource,
+  TRAJ_BATCHES_QUERY,
+  type ConvexTrajectoryClient,
+  type TrajectoryBatchesResult,
+  type TrajectorySeedResult,
+} from '@/lib/physics/convexSource';
 import { T0, wireBundle, wireVehicle } from './physicsFixtures';
 
 describe('connectionState', () => {
@@ -157,96 +164,128 @@ describe('TrajectoryStore staleness + health', () => {
   });
 });
 
-describe('TrajectoryStore fetch lifecycle (perf invariant #3)', () => {
-  const url = 'https://example.invalid/api/trajectories/v2';
-  let fetchMock: jest.Mock;
+describe('ConvexTrajectorySource lifecycle (perf invariant #3)', () => {
+  const seedResult = (seq: number): TrajectorySeedResult => ({
+    vehicles: [wireVehicle({ key: '9201' })],
+    meta: {
+      atMs: T0,
+      horizonS: 120,
+      generator: 'drive-v3',
+      lastSeq: seq,
+      publishedAtMs: T0,
+      serverNowMs: T0 + 300,
+    },
+    seq,
+  });
 
-  beforeEach(() => {
-    jest.useFakeTimers();
-    fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => wireBundle({ serverNowMs: Date.now() }),
+  /** A fake ConvexClient: one pending seed query + capture of subscriptions. */
+  function makeFake(seed: TrajectorySeedResult) {
+    const state = {
+      queries: 0,
+      closes: 0,
+      unsubs: 0,
+      batchCb: null as ((r: TrajectoryBatchesResult) => unknown) | null,
+      resolveSeed: null as ((v: TrajectorySeedResult) => void) | null,
+    };
+    const client: ConvexTrajectoryClient = {
+      query: (() => {
+        state.queries += 1;
+        return new Promise<TrajectorySeedResult>((resolve) => {
+          state.resolveSeed = resolve;
+        });
+      }) as ConvexTrajectoryClient['query'],
+      onUpdate: (q, _args, cb) => {
+        if (q === TRAJ_BATCHES_QUERY) state.batchCb = cb as typeof state.batchCb;
+        return () => {
+          state.unsubs += 1;
+        };
+      },
+      close: async () => {
+        state.closes += 1;
+      },
+    };
+    void seed;
+    return { client, state };
+  }
+
+  it('seeds the store, then folds pushed batches at the advanced cursor', async () => {
+    const store = new TrajectoryStore();
+    const { client, state } = makeFake(seedResult(41));
+    const src = new ConvexTrajectorySource(store, {
+      url: 'https://example.invalid',
+      createClient: () => client,
     });
-    (globalThis as { fetch: unknown }).fetch = fetchMock;
+    src.start();
+    expect(state.queries).toBe(1);
+    state.resolveSeed!(seedResult(41));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(store.bundle?.vehicles.size).toBe(1);
+    expect(store.health(T0).lastSeq).toBe(41);
+    expect(state.batchCb).not.toBeNull();
+
+    state.batchCb!({
+      batches: [
+        { seq: 42, atMs: T0 + 2_000, changed: [wireVehicle({ key: '9202' })], removed: undefined },
+      ],
+      oldestSeq: 40,
+      latestSeq: 42,
+      serverNowMs: T0 + 2_300,
+    });
+    expect(store.bundle?.vehicles.size).toBe(2);
+    expect(store.health(T0).lastSeq).toBe(42);
+    src.stop();
   });
 
-  afterEach(() => {
+  it('a seq gap beyond retention reseeds from scratch', async () => {
+    const store = new TrajectoryStore();
+    const { client, state } = makeFake(seedResult(10));
+    const src = new ConvexTrajectorySource(store, {
+      url: 'https://example.invalid',
+      createClient: () => client,
+    });
+    src.start();
+    state.resolveSeed!(seedResult(10));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(state.queries).toBe(1);
+    // Batches jumped to 50 while the oldest surviving row is 40: rows 11–39
+    // are swept — the cursor cannot be resumed.
+    state.batchCb!({
+      batches: [{ seq: 50, atMs: T0 + 9_000, changed: [], removed: undefined }],
+      oldestSeq: 40,
+      latestSeq: 50,
+      serverNowMs: T0 + 9_000,
+    });
+    expect(state.queries).toBe(2); // the reseed
+    src.stop();
+  });
+
+  it('stop() closes the client and a late seed cannot mutate the store', async () => {
+    const store = new TrajectoryStore();
+    const { client, state } = makeFake(seedResult(7));
+    const src = new ConvexTrajectorySource(store, {
+      url: 'https://example.invalid',
+      createClient: () => client,
+    });
+    src.start();
+    src.stop();
+    expect(state.closes).toBe(1);
+    state.resolveSeed!(seedResult(7));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(store.bundle).toBeNull(); // generation guard held
+    expect(store.clock.synced).toBe(false);
+  });
+
+  it('a store without the convex opt-in starts inert — nothing ticks, ever', () => {
+    jest.useFakeTimers();
+    const store = new TrajectoryStore();
+    store.start();
+    jest.advanceTimersByTime(60_000);
+    expect(store.bundle).toBeNull();
+    expect(store.health(Date.now()).consecutiveFailures).toBe(0);
+    store.stop();
     jest.useRealTimers();
-  });
-
-  it('fetches immediately on start and then on the poll interval', async () => {
-    const s = new TrajectoryStore(url);
-    s.start(5_000);
-    await jest.advanceTimersByTimeAsync(0);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    await jest.advanceTimersByTimeAsync(5_000);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    await jest.advanceTimersByTimeAsync(5_000);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    s.stop();
-  });
-
-  it('start() is idempotent', async () => {
-    const s = new TrajectoryStore(url);
-    s.start(5_000);
-    s.start(5_000);
-    await jest.advanceTimersByTimeAsync(0);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    s.stop();
-  });
-
-  it('stop() halts polling completely — nothing ticks in background', async () => {
-    const s = new TrajectoryStore(url);
-    s.start(5_000);
-    await jest.advanceTimersByTimeAsync(0);
-    s.stop();
-    await jest.advanceTimersByTimeAsync(60_000);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(s.health(Date.now()).pollIntervalMs).toBe(0);
-  });
-
-  it('a response landing after stop() cannot mutate the store (generation guard)', async () => {
-    let release!: (v: unknown) => void;
-    fetchMock.mockReturnValueOnce(
-      new Promise((resolve) => {
-        release = resolve;
-      }),
-    );
-    const s = new TrajectoryStore(url);
-    s.start(5_000);
-    await jest.advanceTimersByTimeAsync(0);
-    s.stop();
-    // The in-flight fetch now resolves, far too late to be trusted.
-    release({ ok: true, json: async () => wireBundle({ serverNowMs: T0 }) });
-    await jest.advanceTimersByTimeAsync(0);
-    expect(s.bundle).toBeNull();
-    expect(s.clock.synced).toBe(false);
-  });
-
-  it('a failing fetch is recorded, never thrown, and keeps the last bundle', async () => {
-    const s = new TrajectoryStore(url);
-    s.start(5_000);
-    await jest.advanceTimersByTimeAsync(0);
-    expect(s.bundle).not.toBeNull();
-
-    fetchMock.mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
-    await jest.advanceTimersByTimeAsync(5_000);
-    await jest.advanceTimersByTimeAsync(5_000);
-    expect(s.health(Date.now()).consecutiveFailures).toBe(2);
-    expect(s.health(Date.now()).lastError).toContain('503');
-    expect(s.bundle).not.toBeNull(); // stale data still renders, visibly stale
-    s.stop();
-  });
-
-  it('keeps the decoded bundle across stop/start — a stateless client needs no resync', async () => {
-    const s = new TrajectoryStore(url);
-    s.start(5_000);
-    await jest.advanceTimersByTimeAsync(0);
-    const before = s.bundle;
-    s.stop();
-    expect(s.bundle).toBe(before);
-    s.start(5_000);
-    await jest.advanceTimersByTimeAsync(0);
-    s.stop();
   });
 });

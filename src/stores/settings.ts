@@ -40,9 +40,10 @@ export function normalizePositionMode(value: unknown): PositionMode {
  *   'v3'      — the new drive-v3 physics (both tracks regenerated).
  *   'mix'     — fixed(opinion) from v3, smooth from current.
  *
- * Structurally identical to `PhysicsGen` in src/lib/physics/trajectoryStore.ts,
- * which is where the wire meaning lives; the physics lib does not import app
- * stores (same split as RenderMode / PositionMode above).
+ * INERT since 2026-08-21 (the promotion): the engine is chosen, the app rides
+ * the one published Convex stream, and nothing reads this setting anymore —
+ * the field and its setter survive only so persisted settings JSON from older
+ * installs keeps round-tripping without a migration (same story as FeedSource).
  */
 export type PhysicsEngine = 'current' | 'v3' | 'mix';
 

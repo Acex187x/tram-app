@@ -1,34 +1,36 @@
-// DEBUG OVERLAY — a live, utilitarian technical readout of the physics for
-// the followed tram, drawn over the map when Settings ▸ Developer ▸ Debug mode
-// is on. Deliberately NOT styled to the app's guidelines: dense monospace rows,
-// lots of raw numbers — built to evaluate the physics from inside a real tram.
+// ДЕБАГ-ОВЕРЛЕЙ — живая техническая панель физики для трамвая, за которым ты
+// следуешь (Settings ▸ Developer ▸ Debug mode). Нарочно не стилизована под
+// приложение: плотные моноширинные строки, много сырых чисел — инструмент для
+// оценки физики изнутри настоящего трамвая.
 //
-// UPDATE CADENCE — 10 Hz, but ONLY in the live readout. Debug mode is EXEMPT
-// from the app's ≤1 Hz perf invariant exactly where the claim holds:
-// `DebugLive` (rendered solely for the followed tram, expanded, not in guide
-// mode) re-reads the fleet on a private 100 ms timer. Numeric text cannot make
-// useful use of display-rate React commits; the former display loop rebuilt four
-// cards and dozens of Text nodes ~60 times/s and could pin Hermes when the
-// persisted debug setting reopened. The GPS on-line position is read at 10 Hz
-// and forward-extrapolated between the ~1 Hz foreground fixes
-// (projectOnlineDistAt) so the "real" distance still advances smoothly instead of
-// stepping once a second. The collapsed one-liner and the guide render nothing
-// that changes at 60 Hz, so they run at 1 Hz and hold NO GPS watch: unmounting
-// DebugLive releases the locator and clears the timer.
+// СЛОВАРЬ (согласован с владельцем 2026-08-21) — все подписи ниже строго из него:
+//   фикс             сырое наблюдение из городского фида («трамвай был в X в T»)
+//   ML-прогноз       ответ ml-gbdt: 13 точек «где будет трамвай через 0…120 с»
+//   опорный фикс     фикс, ОТ которого посчитан текущий ML-прогноз
+//   профиль движения прогноз, превращённый в реалистичную кривую (fixed / smooth)
+//   пересчёт прогноза один выпуск профиля сервером (по новому фиксу или старости)
+//   слепая зона      сколько секунд НОВЫХ фиксов профиль ещё не видел
+//   поправка по фиксу клиентская доводка: профиль промотан вперёд до свежего фикса
+//   последний телепорт скачок маркера, который не объясняется ездой
+//   наивный прогноз  замена ML простой физикой (сервер) / протяжка (клиент)
+//   данные с БД      что движок сам знает про этот трамвай (его карточка)
+//   последний апдейт от Convex — свежесть всей ленты профилей
 //
-// Data sources:
-//   • fleet.getDiagnostics(key) — the physics v3 readout: which curve is being
-//     drawn, BOTH curves' positions and the signed gap between them, how much
-//     horizon is left, how old the anchor/emission/bundle are, the clock offset
-//     and the connection verdict;
-//   • fleet.getState(key)       — next stop + ETA, delay, raw fix;
-//   • runtime.physicsHealth     — fleet-wide fetch health (vehicles in the
-//     bundle, consecutive failures, discontinuity count);
-//   • OnlineLocator             — the rider's filtered GPS projected onto the
-//     followed tram's shape = the REAL on-line position (ground truth: the
-//     rider is physically in this tram).
+// КАДЕНС — 10 Гц, но ТОЛЬКО в живой панели (`DebugLive`), санкционированное
+// исключение из перф-инварианта ≤1 Гц: числовому тексту дисплейная частота не
+// нужна, а панель размонтируется при сворачивании и освобождает GPS и таймер.
 //
-// Diffs are signed: POSITIVE lag = the RENDERED tram is AHEAD of the real one.
+// Источники данных:
+//   • fleet.getDiagnostics(key) — вся клиентская физика: источник движения,
+//     состояние поправки по фиксу, оба профиля, свежесть всего;
+//   • fleet.getState(key)       — следующая остановка, опоздание, сырой фикс;
+//   • runtime.physicsHealth     — здоровье ленты Convex (машины, ошибки);
+//   • /api/vehicle/:key/debug   — ДАННЫЕ С БД: что движок сам знает про этот
+//     трамвай (его фиксы, чем посчитан профиль, дошёл ли он до Convex);
+//   • OnlineLocator             — твой GPS, спроецированный на маршрут =
+//     истинное положение (ты физически едешь в этом трамвае).
+//
+// Разности со знаком: ПЛЮС = нарисованный трамвай ВПЕРЕДИ настоящего.
 import { createContext, useContext, useEffect, useState } from 'react';
 import Constants from 'expo-constants';
 import {
@@ -42,7 +44,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getRuntime, useTramState } from '@/hooks/tramData';
-import { genFromGenerator, type TrajectoryHealth } from '@/lib/physics/trajectoryStore';
+import type { TrajectoryHealth } from '@/lib/physics/trajectoryStore';
 import { Fonts } from '@/constants/theme';
 import {
   projectOnlineDistAt,
@@ -54,46 +56,46 @@ import {
 } from '@/lib/motionlog';
 import type { PhysicsDebugInfo, TramPublicState } from '@/lib/types';
 import { useSelectionStore } from '@/stores/selection';
-import { useSettingsStore, type PhysicsEngine } from '@/stores/settings';
+import { useSettingsStore } from '@/stores/settings';
 
 const MONO = Fonts?.mono ?? 'monospace';
-/** Fast enough for numeric diagnostics, ~6x fewer React commits than display rate. */
+/** Достаточно для числовой диагностики, ~в 6 раз меньше React-коммитов, чем 60 Гц. */
 export const DEBUG_LIVE_INTERVAL_MS = 100;
 
-// ── formatting ───────────────────────────────────────────────────────────────
+// ── форматирование ───────────────────────────────────────────────────────────
 
 function num(n: number | null | undefined, digits = 0): string {
   if (n == null || !Number.isFinite(n)) return '—';
   return n.toFixed(digits);
 }
 
-/** Signed value (leading + on non-negative) — for diffs where sign is meaning. */
+/** Со знаком (ведущий + у неотрицательных) — для разностей, где знак и есть смысл. */
 function signed(n: number | null | undefined, digits = 0): string {
   if (n == null || !Number.isFinite(n)) return '—';
   return (n >= 0 ? '+' : '') + n.toFixed(digits);
 }
 
-// ── live snapshot (rebuilt at 10 Hz) ─────────────────────────────────────────
+// ── живой снимок (пересобирается на 10 Гц) ───────────────────────────────────
 
 interface DebugSnapshot {
   nowMs: number;
   dbg: PhysicsDebugInfo | undefined;
   state: TramPublicState | undefined;
-  /** Fleet-wide trajectory/fetch health (same for every tram). */
+  /** Здоровье ленты профилей (одно на весь флот). */
   health: TrajectoryHealth;
   fix: OnlineFix | null;
   proj: OnlineProjection | null;
-  /** Filtered on-line distance, forward-extrapolated to the current sample. */
+  /** Фильтрованное GPS-положение, дотянутое вперёд до текущего момента. */
   realDistM: number | null;
-  /** Raw GPS projected on the shape (non-extrapolated). */
+  /** Сырой GPS на маршруте (без дотяжки). */
   realRawDistM: number | null;
-  /** Along-shape distance to the next stop ahead of the sim, m. */
+  /** Метры до следующей остановки впереди нарисованной точки. */
   nextStopDistM: number | null;
   watchActive: boolean;
   watchError: string | null;
 }
 
-/** Read everything fresh for `key` at the current instant. Pure (no writes). */
+/** Прочитать всё свежее для `key` на текущий момент. Чистая функция (без записей). */
 function buildSnapshot(key: string | null, locator: OnlineLocator): DebugSnapshot {
   const nowMs = Date.now();
   const runtime = getRuntime();
@@ -131,67 +133,92 @@ function buildSnapshot(key: string | null, locator: OnlineLocator): DebugSnapsho
   };
 }
 
-// ── phase / regime words ─────────────────────────────────────────────────────
+// ── словесные состояния ──────────────────────────────────────────────────────
 
-/**
- * Human-readable headline. The frozen states come FIRST: a tram standing still
- * because the curve ran out must never be mistaken for one standing at a stop.
- */
+/** Человеческий заголовок. Замороженные состояния ПЕРВЫМИ: стоящий из-за
+ *  кончившихся данных трамвай нельзя перепутать со стоящим на остановке. */
 function phaseLabel(d: PhysicsDebugInfo): string {
-  if (!d.hasGeometry) return 'NO GEOMETRY (raw dot — shape pending)';
-  if (d.renderSource === 'client-naive') return 'NO CURVES — client dead-reckon (naive)';
-  if (!d.hasTrajectory) return 'NO CURVES — frozen on the last raw fix';
-  // τ=∞: the fix outran the whole curve. NOT a freeze — smooth is walking to
-  // the fix, fixed is pinned on it — but it IS the bug-class state to notice.
-  if (d.shimBranch === 'walk') return 'FIX PAST CURVE — walking to it (τ=∞)';
-  if (d.pastHorizon) return 'PAST HORIZON — frozen (no data beyond here)';
+  if (!d.hasGeometry) return 'НЕТ ГЕОМЕТРИИ (точка без маршрута)';
+  if (d.renderSource === 'client-naive') return 'НЕТ ПРОФИЛЯ — клиентская протяжка';
+  if (!d.hasTrajectory) return 'НЕТ ПРОФИЛЯ — замер на последнем фиксе';
+  // Фикс за горизонтом профиля: НЕ заморозка — smooth идёт к фиксу пешком,
+  // fixed прибит к нему — но именно это состояние твоего бага.
+  if (d.shimBranch === 'walk') return 'ФИКС ЗА ГОРИЗОНТОМ — идём к нему (τ=∞)';
+  if (d.pastHorizon) return 'ЗА ГОРИЗОНТОМ — замер (данных дальше нет)';
   switch (d.phase) {
     case 'terminal':
-      return 'AT TERMINAL (end of trip)';
+      return 'НА КОНЕЧНОЙ (рейс закончен)';
     case 'dwell':
-      return 'STANDING AT A STOP';
+      return 'СТОИТ НА ОСТАНОВКЕ';
     case 'cruise':
-      return d.mode === 'smooth' ? 'RUNNING (smooth curve)' : 'RUNNING (fixed curve)';
+      return d.mode === 'smooth' ? 'ЕДЕТ (профиль smooth)' : 'ЕДЕТ (профиль fixed)';
     default:
-      return 'NO PHASE (no geometry)';
+      return 'НЕТ ФАЗЫ (нет геометрии)';
   }
 }
 
-/** Whatever is currently notable about this tram, most-urgent first. */
+/** Всё примечательное про этот трамвай прямо сейчас, самое срочное первым. */
 function activeNotes(d: PhysicsDebugInfo): string[] {
   const out: string[] = [];
-  if (d.connection !== 'live') out.push(d.connection.toUpperCase());
-  if (d.renderSource === 'curve-naive') out.push('NAIVE curve (ML outage)');
-  if (d.renderSource === 'client-naive') out.push('client dead-reckon');
-  if (!d.hasTrajectory) out.push('no published curves');
-  else if (d.shimBranch === 'walk') {
-    out.push(`fix past curve — ${num(d.walkRemainingM, 0)}m left to walk`);
-  } else if (d.pastHorizon) out.push('frozen past horizon');
+  if (d.connection !== 'live') out.push(d.connection === 'offline' ? 'ОФЛАЙН' : 'ЗАДЕРЖКА ЛЕНТЫ');
+  if (d.renderSource === 'curve-naive') out.push('НАИВНЫЙ прогноз (ML лежал)');
+  if (d.renderSource === 'client-naive') out.push('клиентская протяжка');
+  if (!d.hasTrajectory) out.push('профиля нет');
+  else if (d.shimBranch === 'walk') out.push(`фикс за горизонтом — дойти ${num(d.walkRemainingM, 0)} м`);
+  else if (d.pastHorizon) out.push('замер за горизонтом');
+  if (d.lastJumpM != null && d.lastJumpAgoS != null && d.lastJumpAgoS < 60) {
+    out.push(`ТЕЛЕПОРТ ${signed(d.lastJumpM, 0)} м ${num(d.lastJumpAgoS, 0)} с назад`);
+  }
   if (d.anchorLagS != null && d.anchorLagS > 6) {
-    out.push(`curve hasn't seen ${num(d.anchorLagS, 0)}s of fixes`);
+    out.push(`слепая зона ${num(d.anchorLagS, 0)} с`);
   }
   if (d.fixVsCurveM != null && d.fixVsCurveM > 50) {
-    out.push(`curve ${num(d.fixVsCurveM, 0)}m behind the fix`);
+    out.push(`профиль отстал от фикса на ${num(d.fixVsCurveM, 0)} м`);
   }
-  if (d.discontinuity) out.push('discontinuity flagged');
+  if (d.discontinuity) out.push('скачок разрешён сервером');
   if (d.deltaM != null && Math.abs(d.deltaM) >= 1) {
-    out.push(`smooth ${d.deltaM >= 0 ? 'ahead of' : 'behind'} fixed by ${num(Math.abs(d.deltaM), 1)}m`);
+    out.push(
+      d.deltaM >= 0
+        ? `smooth ВПЕРЕДИ fixed на ${num(d.deltaM, 1)} м${d.simSpeedKmh <= 1 ? ' И СТОИТ' : ''}`
+        : `smooth догоняет fixed: ${num(-d.deltaM, 1)} м`,
+    );
   }
   if (d.horizonLeftS != null && d.horizonLeftS < 15) {
-    out.push(`horizon ${num(d.horizonLeftS, 1)}s left`);
+    out.push(`горизонта осталось ${num(d.horizonLeftS, 1)} с`);
   }
   return out;
 }
 
-// ── server-side truth (the engine's own view of this tram) ───────────────────
+/** Подписи для «едет по» (карточка ИСТОЧНИК ДВИЖЕНИЯ). */
+const RENDER_SOURCE_LABEL: Record<PhysicsDebugInfo['renderSource'], string> = {
+  'curve-ml': 'ML-профиль',
+  'curve-naive': 'НАИВНЫЙ профиль',
+  'client-naive': 'клиентская протяжка',
+  'raw-fix': 'замер на фиксе',
+};
+
+/** Подписи режимов поправки по фиксу. */
+const SHIM_BRANCH_LABEL: Record<PhysicsDebugInfo['shimBranch'], string> = {
+  off: 'спит (профиль свежий)',
+  ahead: 'профиль ⩾ фикса',
+  wind: 'промотка (конечное τ)',
+  walk: 'ФИКС ЗА ГОРИЗОНТОМ',
+};
+
+/** Состояние связи по-русски. */
+const CONNECTION_LABEL: Record<PhysicsDebugInfo['connection'], string> = {
+  live: 'в норме',
+  degraded: 'задержка',
+  offline: 'ОФЛАЙН',
+};
+
+// ── данные с БД (карточка движка) ────────────────────────────────────────────
 //
-// Debug mode only: the expanded panel polls the predictor's per-vehicle debug
-// endpoint every few seconds and shows what the ENGINE holds for this tram —
-// which fix the served curve was predicted from, whether it is ml-gbdt or the
-// naive substitute, whether that exact emission has reached Convex, whether
-// the ML service is answering, and the raw recent fixes from the archive.
-// This is the other half of every «какого хуя» investigation: the client card
-// says what the phone is doing, this card says what the server believes.
+// Только в дебаг-режиме: развёрнутая панель раз в несколько секунд опрашивает
+// движок про ЭТОТ трамвай — его последние фиксы, от какого фикса посчитан
+// served-профиль, ML это или наивный, дошёл ли этот пересчёт до Convex и жив
+// ли ML-сервис. Клиентские карточки говорят, что делает телефон; эта — что
+// знает сервер. Вторая половина любого «какого хуя».
 
 const SERVER_DEBUG_BASE = 'https://tram-lab.acex.sh/api/vehicle';
 const SERVER_DEBUG_POLL_MS = 3_000;
@@ -245,254 +272,12 @@ function useServerDebug(key: string): { data: ServerVehicleDebug | null; error: 
   return { data, error };
 }
 
-// ── guide mode ───────────────────────────────────────────────────────────────
-//
-// Every row knows how to explain ITSELF. `GUIDE_SECTIONS` is the single source
-// of truth — it pairs each row's label (exactly as the live readout renders it)
-// with a plain sentence. `Row` looks its own label up, so a label can never
-// drift away from its documentation, and guide mode renders the sections
-// directly without duplicating the list.
-//
-// Sources: docs/research/physics-v3-protocol.md (the frozen client/server
-// contract) and src/lib/physics/*.
-
-interface GuideSection {
-  title: string;
-  /** [row label exactly as rendered live, plain-English explanation]. */
-  rows: [string, string][];
-}
-
-const GUIDE_SECTIONS: GuideSection[] = [
-  {
-    title: 'SOURCE',
-    rows: [
-      [
-        'moving on',
-        'The data actually driving this marker right now. ML curve = the server’s ml-gbdt prediction (normal). NAIVE curve = the server substituted its simple physics walker because ML was down AND the old prediction was provably overrun. Client dead-reckon = NO curve at all; the phone extrapolates the last fix at the observed pace for up to 60 s. Frozen raw fix = no curve and no usable pace.',
-      ],
-      [
-        'transport',
-        'How curves reach the phone: convex push (production — the server pushes every prediction the moment it is computed; seq is the diff-stream cursor) or http poll (research engines v3/mix, 5 s poll).',
-      ],
-      [
-        'engine gen',
-        'Which predictor generation built the bundle, read from the bundle itself — never from the setting that asked for it. Production publishes drive-v3.',
-      ],
-      [
-        'ML anchor fix',
-        'THE fix the served prediction was computed from: metres along the route and its age. Everything the curve believes starts from this observation.',
-      ],
-      [
-        'anchor lag',
-        'How many seconds of NEWER fixes the served curve has not seen (newest fix time − anchor time). The freshness race in one number: should collapse to ~0 within one publish cycle (~2–4 s). Persistently large = the predictor is falling behind the fix stream.',
-      ],
-      [
-        'emission age',
-        'How long ago the server published this trajectory. It is also the blend anchor: continuity is measured from this instant.',
-      ],
-    ],
-  },
-  {
-    title: 'FIX-FORWARD SHIM',
-    rows: [
-      [
-        'branch',
-        'Which branch of the last-mile shim is active. off = no fix newer than the curve’s anchor (curve rendered as served). curve ≥ fix = a newer fix exists but the curve is already at/past it. winding = the curve is wound forward τ seconds so it passes through the fix. WALK = the fix is past EVERYTHING the curve predicts (τ=∞): smooth walks toward the fix at ≤2 m/s extra, fixed pins on it. WALK is the branch of the «телепортируется за фикс и стоит» bug class — screenshot this card when you see it.',
-      ],
-      ['τ wind', 'How many seconds the curve is being wound forward (the winding branch). ∞ = the walk branch.'],
-      [
-        'fix−curve',
-        'Raw gap: the newest fix minus the curve’s position at the fix instant, metres. Positive = the tram is provably ahead of what the server drew — the gap the shim exists to close.',
-      ],
-      [
-        'shim applied',
-        'Metres the shim is adding to the marker right now, after the mode’s rate limit. fixed takes the whole gap at once; smooth is limited to ≤2 m/s of extra speed.',
-      ],
-      ['walk left', 'WALK branch only: metres still to walk before the marker reaches the overrun fix.'],
-      ['AVL fix', 'The newest raw feed position the phone holds: metres along the route and its age.'],
-      [
-        'obs pace',
-        'Observed fix-over-fix speed of this tram. This is also the speed the client dead-reckon fallback would use.',
-      ],
-    ],
-  },
-  {
-    title: 'CURVES',
-    rows: [
-      [
-        'drawing',
-        'Which published curve the map is currently showing: smooth (the continuity track) or fixed (the raw model opinion). The Settings switch picks it.',
-      ],
-      [
-        'smooth',
-        'Metres along the route on the SMOOTH curve. The server bakes the join between consecutive predictions into it, so it never teleports except at a flagged discontinuity.',
-      ],
-      [
-        'fixed',
-        'Metres along the route on the FIXED curve — the model’s raw opinion, which re-anchors on every fix and is allowed to jump to get there.',
-      ],
-      [
-        'smooth−fixed',
-        'The gap between the two curves right now: positive = smooth is running ahead of the model’s opinion (it will ease off / wait to repay the lead), negative = behind (it is catching up). A tram standing mid-road with a large POSITIVE value = smooth got ahead and is waiting — report that combination.',
-      ],
-      [
-        'speed',
-        'How fast the drawn tram is moving — measured from the rendered motion (curve + shim), not modelled.',
-      ],
-      [
-        'horizon left',
-        'Seconds of curve remaining. At zero the tram coasts to a stop over 20 s and freezes dimmed — the client never invents motion beyond the data.',
-      ],
-      [
-        'discontinuity',
-        'Whether the server flagged THIS emission as a sanctioned break in continuity (trip change or a model break beyond the desync threshold), plus how many have been seen this session.',
-      ],
-    ],
-  },
-  {
-    title: 'SERVER (engine truth)',
-    rows: [
-      [
-        'curve src',
-        'What the ENGINE says it served for this tram: ml (gbdt keyframes) or naive (the learned-walker substitute during an ML outage).',
-      ],
-      [
-        '→ convex',
-        'Whether THIS exact emission has been pushed to Convex (what the phone reads). PENDING for more than a cycle = the publisher is failing.',
-      ],
-      ['ML service', 'Whether the LightGBM service is answering the engine at all.'],
-      ['anchor fix', 'The fix the engine anchored the served curve to (its own records).'],
-      ['latest fix', 'The newest fix the ENGINE holds, with its feed state.'],
-      [
-        'anchor behind',
-        'Latest engine fix minus the anchor fix, metres — how far reality has driven past the served prediction, as the server itself can see.',
-      ],
-      [
-        'phone−engine fix',
-        'Phone’s newest fix time minus the engine’s, seconds. Should be ≈0 (both read the same Convex stream); a big value means the two disagree about reality itself.',
-      ],
-      ['fix gap', 'Observed interval between this tram’s last two fixes.'],
-      ['recent fixes', 'The engine’s last archived fixes: age · metres · feed state.'],
-    ],
-  },
-  {
-    title: 'CONNECTION',
-    rows: [
-      [
-        'state',
-        'live (bundle under 15 s), degraded (15–45 s — trams keep following their curves), or offline (over 45 s, or fetches failing — banner shown, trams freeze at the end of their curves).',
-      ],
-      [
-        'bundle age',
-        'Age of the newest trajectory publication in server time (heartbeats count — a quiet fleet stays fresh). This decides the state above.',
-      ],
-      [
-        'clock offset',
-        'serverNow − this device’s clock, smoothed. Every curve is evaluated at the CORRECTED time, which is what makes two phones draw identical trams.',
-      ],
-      ['vehicles', 'How many vehicles the current bundle carries.'],
-      ['fetch', 'Whether a fetch/subscription attempt is failing right now.'],
-    ],
-  },
-  {
-    title: 'RIDER GPS (m)',
-    rows: [
-      [
-        'smooth−rider',
-        'The honest one: the drawn position minus YOUR GPS position along the line. Positive = the app is drawing the tram ahead of the one you are sitting in.',
-      ],
-      ['smooth−fix', 'Drawn position minus the last real AVL fix.'],
-      ['rider−fix', 'Your GPS position minus the AVL fix — how stale or wrong the feed itself is.'],
-      [
-        'rider filt / raw',
-        'Your filtered GPS projected onto the shape, then the unfiltered value — compare them to see the outlier filter working.',
-      ],
-      ['GPS watch', 'Whether the phone’s location watch is running. Every rider row above needs it.'],
-      ['accuracy', 'GPS horizontal accuracy. Above roughly 30 m the lag numbers get noisy.'],
-      [
-        'track offset',
-        'How far off the rail your GPS is — filtered, then raw. Large values mean the projection is guessing.',
-      ],
-    ],
-  },
-  {
-    title: 'NEXT STOP',
-    rows: [
-      ['stop', 'Next stop ahead of the drawn position.'],
-      [
-        'distance / eta',
-        'Along-shape distance to it, then when the SMOOTH curve crosses that distance. The ETA is blank past the horizon — beyond the data we genuinely do not know.',
-      ],
-      ['delay', 'Schedule delay reported by the feed. Positive = late.'],
-      [
-        'state / phase',
-        'Feed-reported state, then the derived phase: cruise, dwell (standing within 30 m of a stop), terminal (the last one), or unknown (no curves or no geometry).',
-      ],
-    ],
-  },
-];
-
-/** Flattened label → explanation lookup used by `Row` in guide mode. */
-const GUIDE: Record<string, string> = Object.fromEntries(GUIDE_SECTIONS.flatMap((s) => s.rows));
-
-const PRIMER: [string, string][] = [
-  [
-    'THE PROBLEM',
-    'The feed reports each tram only every ~20 s, and those positions are already seconds old. Everything you see moving between fixes has to be predicted.',
-  ],
-  [
-    'WHO PREDICTS',
-    'The SERVER does, for the whole fleet, every ~2 s: the ml-gbdt model predicts each tram’s next ~120 seconds, a physics generator (drive-v3) turns that into realistic keyframe curves, and every re-computation is PUSHED to the phone over Convex the moment it exists. If ML is down, the server holds the old curve while it still describes the tram, then substitutes a simple learned-physics walk («naive»).',
-  ],
-  [
-    'WHAT THE APP DOES',
-    'Almost nothing: it finds the two keyframes around "now", interpolates between them, and places that distance on the route polyline. No simulation, no controllers, no state — which is why the tram is always exactly on the rails and why backgrounding the app needs no catch-up.',
-  ],
-  [
-    'TWO CURVES',
-    'Each tram gets two: SMOOTH (continuity baked in — never teleports) and FIXED (the model’s raw opinion — re-anchors on every fix and jumps). The map draws one; this overlay always shows both, and their gap is the "smooth−fixed" number.',
-  ],
-  [
-    'ONE CLOCK',
-    'Curves are stamped in the server’s time, so the app measures its own clock error and evaluates at the corrected instant. Two phones with different clocks therefore draw the same tram in the same place.',
-  ],
-  [
-    'HONESTY',
-    'When the data stops arriving the trams follow their curves to the end and then FREEZE, dimmed, behind an explicit banner. Nothing is ever animated beyond what the server actually predicted.',
-  ],
-  [
-    'GROUND TRUTH',
-    'While you ride, your own GPS is projected onto the same line. "smooth−rider" is then the real error: positive means the app is drawing the tram ahead of the one you are in.',
-  ],
-];
-
-/** True while the panel is showing explanations instead of live values. */
-const GuideContext = createContext(false);
-
-// ── rows ─────────────────────────────────────────────────────────────────────
-
-/** Human labels for PhysicsDebugInfo.renderSource (SOURCE card). */
-const RENDER_SOURCE_LABEL: Record<PhysicsDebugInfo['renderSource'], string> = {
-  'curve-ml': 'ML curve',
-  'curve-naive': 'NAIVE curve',
-  'client-naive': 'client dead-reckon',
-  'raw-fix': 'frozen raw fix',
-};
-
-/** Human labels for the shim branch (FIX-FORWARD SHIM card). */
-const SHIM_BRANCH_LABEL: Record<PhysicsDebugInfo['shimBranch'], string> = {
-  off: 'off (curve fresh)',
-  ahead: 'curve ≥ fix',
-  wind: 'winding (finite τ)',
-  walk: 'WALK — fix past curve',
-};
-
 /**
- * The engine's own view of this tram, fetched live (see useServerDebug).
- * `clientAnchorMs` is the newest fix the PHONE holds — comparing it with the
- * engine's latest fix instantly shows whether the two even agree on reality.
+ * ДАННЫЕ С БД — взгляд движка на этот трамвай. `clientFixAtMs` — свежайший
+ * фикс ТЕЛЕФОНА: сравнение с фиксом движка мгновенно показывает, согласны ли
+ * они вообще о реальности.
  */
-function ServerCard({ tramKey, clientAnchorMs }: { tramKey: string; clientAnchorMs: number }) {
+function ServerCard({ tramKey, clientFixAtMs }: { tramKey: string; clientFixAtMs: number }) {
   const { data, error } = useServerDebug(tramKey);
   const guide = useContext(GuideContext);
   if (guide) return null;
@@ -502,74 +287,242 @@ function ServerCard({ tramKey, clientAnchorMs }: { tramKey: string; clientAnchor
   const anchorBehindM =
     data?.anchorFix && data?.latestFix ? data.latestFix.s - data.anchorFix.s : null;
   const phoneVsEngineFixS =
-    data?.latestFix ? (clientAnchorMs - data.latestFix.obsAtMs) / 1000 : null;
+    data?.latestFix ? (clientFixAtMs - data.latestFix.obsAtMs) / 1000 : null;
   const fixes = (data?.fixes ?? []).slice(0, 3).map((f) => {
     const at = f.observedAtMs ?? f.obsAtMs;
     const s = f.shapeDistM ?? f.distM;
-    const age = at != null ? `${Math.round((now - at) / 1000)}s` : '?';
-    return `${age}·${s != null ? Math.round(s) : '?'}m·${f.statePosition ?? '?'}`;
+    const age = at != null ? `${Math.round((now - at) / 1000)}с` : '?';
+    return `${age}·${s != null ? Math.round(s) : '?'}м·${f.statePosition ?? '?'}`;
   });
   return (
     <View style={styles.debugCard}>
-      <SectionTitle>SERVER (engine truth)</SectionTitle>
-      {error && <Row label="fetch" value={error} warn />}
-      {!error && !data && <Row label="fetch" value="loading…" />}
-      {data && !data.found && <Row label="entry" value="NOT IN ENGINE" warn />}
+      <SectionTitle>ДАННЫЕ С БД</SectionTitle>
+      {error && <Row label="запрос" value={error} warn />}
+      {!error && !data && <Row label="запрос" value="загрузка…" />}
+      {data && !data.found && <Row label="запись" value="НЕТ В ДВИЖКЕ" warn />}
       {data?.found && (
         <>
           <Row
-            label="curve src"
-            value={data.curveSource ?? '—'}
+            label="профиль из"
+            value={data.curveSource === 'naive' ? 'наивного прогноза' : data.curveSource === 'ml' ? 'ML-прогноза' : '—'}
             warn={data.curveSource === 'naive'}
           />
           <Row
-            label="→ convex"
+            label="→ Convex"
             value={
               !data.publish?.enabled
-                ? 'publish OFF'
+                ? 'публикация ВЫКЛ'
                 : data.publish.synced
-                  ? 'synced'
-                  : 'PENDING'
+                  ? 'доставлен'
+                  : 'В ПУТИ'
             }
             warn={!data.publish?.enabled || data.publish?.synced === false}
           />
           <Row
-            label="ML service"
-            value={data.ml ? (data.ml.ready ? 'ready' : (data.ml.lastError ?? 'not ready')) : '—'}
+            label="ML-сервис"
+            value={data.ml ? (data.ml.ready ? 'готов' : (data.ml.lastError ?? 'не готов')) : '—'}
             warn={data.ml ? !data.ml.ready : false}
           />
           <Row
-            label="anchor fix"
-            value={data.anchorFix ? `${num(data.anchorFix.s)}m · ${num(anchorAge, 0)}s` : '—'}
+            label="опорный фикс"
+            value={data.anchorFix ? `${num(data.anchorFix.s)}м · ${num(anchorAge, 0)}с` : '—'}
           />
           <Row
-            label="latest fix"
+            label="свежий фикс"
             value={
               data.latestFix
-                ? `${num(data.latestFix.s)}m · ${num(latestAge, 0)}s · ${data.latestFix.statePosition}`
+                ? `${num(data.latestFix.s)}м · ${num(latestAge, 0)}с · ${data.latestFix.statePosition}`
                 : '—'
             }
           />
           <Row
-            label="anchor behind"
-            value={anchorBehindM != null ? `${signed(anchorBehindM, 0)}m` : '—'}
+            label="опора отстала"
+            value={anchorBehindM != null ? `${signed(anchorBehindM, 0)}м` : '—'}
             warn={anchorBehindM != null && anchorBehindM > 50}
           />
           <Row
-            label="phone−engine fix"
-            value={phoneVsEngineFixS != null ? `${signed(phoneVsEngineFixS, 0)}s` : '—'}
+            label="фиксы тел−движок"
+            value={phoneVsEngineFixS != null ? `${signed(phoneVsEngineFixS, 0)}с` : '—'}
             warn={phoneVsEngineFixS != null && Math.abs(phoneVsEngineFixS) > 15}
           />
           {data.latestFix?.stuckAtM != null && (
-            <Row label="jam hold" value={`${num(data.latestFix.stuckAtM)}m`} warn />
+            <Row label="пробка" value={`держим на ${num(data.latestFix.stuckAtM)}м`} warn />
           )}
-          <Row label="fix gap" value={data.latestFix ? `${num(data.latestFix.fixGapS, 0)}s` : '—'} />
-          <Row label="recent fixes" value={fixes.join('  ') || '—'} />
+          <Row label="интервал фиксов" value={data.latestFix ? `${num(data.latestFix.fixGapS, 0)}с` : '—'} />
+          <Row label="последние фиксы" value={fixes.join('  ') || '—'} />
         </>
       )}
     </View>
   );
 }
+
+// ── гайд ─────────────────────────────────────────────────────────────────────
+//
+// Каждая строка умеет объяснить СЕБЯ: `GUIDE_SECTIONS` — единственный список
+// подписей, гайд-режим рендерит его же, так что подпись не может разъехаться
+// со своей документацией.
+
+interface GuideSection {
+  title: string;
+  /** [подпись строки ровно как в живой панели, объяснение простым языком]. */
+  rows: [string, string][];
+}
+
+const GUIDE_SECTIONS: GuideSection[] = [
+  {
+    title: 'ИСТОЧНИК ДВИЖЕНИЯ',
+    rows: [
+      [
+        'едет по',
+        'На основе чего маркер движется прямо сейчас. «ML-профиль» — норма: профиль движения, построенный из ML-прогноза. «НАИВНЫЙ профиль» — сервер подменил ML простой физикой (ML лежал, а трамвай доказуемо перегнал старый прогноз). «Клиентская протяжка» — профиля нет вообще, телефон сам тянет точку от последнего фикса с наблюдаемым темпом (до 60 с). «Замер на фиксе» — нет ни профиля, ни темпа.',
+      ],
+      [
+        'лента Convex',
+        'Профили приходят пуш-потоком из Convex в момент пересчёта; число — позиция в ленте (растёт с каждым пересчётом любой машины). Другого транспорта больше нет.',
+      ],
+      ['генератор', 'Какой генератор построил профили — по данным самой ленты. Продакшен публикует drive-v3.'],
+      [
+        'опорный фикс',
+        'ТОТ фикс, от которого посчитан текущий ML-прогноз: метры по маршруту и его возраст. Всё, во что верит профиль, начинается с этого наблюдения.',
+      ],
+      [
+        'прогноз не видел',
+        'СЛЕПАЯ ЗОНА: сколько секунд более новых фиксов served-профиль ещё не видел (время свежайшего фикса минус время опорного). В норме 0–4 с — движок пересчитывает каждые ~2 с. Стабильно большая = движок отстаёт от жизни, и клиенту приходится доводить точку поправкой по фиксу.',
+      ],
+      ['пересчёт прогноза', 'Сколько секунд назад сервер выпустил этот профиль.'],
+    ],
+  },
+  {
+    title: 'ПОПРАВКА ПО ФИКСУ',
+    rows: [
+      [
+        'режим',
+        'Что поправка делает сейчас. «Спит» — фикса новее опорного нет, профиль рисуется как есть. «Профиль ⩾ фикса» — новый фикс есть, но профиль уже на нём/впереди. «Промотка» — профиль промотан на τ секунд вперёд, чтобы пройти через фикс. «ФИКС ЗА ГОРИЗОНТОМ» — трамвай уехал дальше ВСЕГО, что профиль предсказал: smooth идёт к фиксу пешком (⩽2 м/с сверху), fixed прибит к фиксу. Это состояние твоего бага — скриншоть эту карточку.',
+      ],
+      ['промотка τ', 'На сколько секунд профиль промотан вперёд. ∞ = режим «фикс за горизонтом».'],
+      [
+        'отрыв фикса',
+        'Свежий фикс минус положение профиля в момент фикса, в метрах. Плюс = трамвай доказуемо впереди нарисованного — тот разрыв, который поправка закрывает.',
+      ],
+      [
+        'поправка сейчас',
+        'Сколько метров поправка добавляет к маркеру прямо сейчас, после ограничения скорости режима: fixed берёт весь разрыв сразу, smooth — не быстрее 2 м/с сверху.',
+      ],
+      ['осталось дойти', 'Только для «фикс за горизонтом»: сколько метров ещё идти до фикса.'],
+      [
+        'последний телепорт',
+        'Последний СКАЧОК маркера, который не объясняется ездой (вперёд больше ~20 м/с + запас, или назад больше 10 м): сколько метров и когда. Минус = маркер улетел НАЗАД. Именно эта строка ловит «телепортировался и стоит» — если она загорелась, смотри, в каком режиме была поправка и что в ДАННЫХ С БД.',
+      ],
+      ['фикс', 'Свежайший фикс на телефоне: метры по маршруту и возраст.'],
+      ['наблюдаемый темп', 'Скорость по последним двум фиксам. Ею же едет клиентская протяжка.'],
+    ],
+  },
+  {
+    title: 'ПРОФИЛИ ДВИЖЕНИЯ',
+    rows: [
+      ['рисуем', 'Какой из двух профилей показывает карта: smooth (плавный) или fixed (точный). Выбирается переключателем «Более точное положение».'],
+      ['smooth', 'Метры по маршруту на профиле smooth. Сервер вшивает в него непрерывность — он не телепортируется, кроме разрешённого скачка.'],
+      ['fixed', 'Метры по маршруту на профиле fixed — сырое мнение модели; перепривязывается к каждому фиксу и имеет право прыгать.'],
+      [
+        'разрыв точек',
+        'smooth − fixed в метрах. ПЛЮС = smooth убежала вперёд и будет ждать/ехать медленнее, пока модель догонит; если при этом скорость 0 — трамвай стоит посреди перегона именно поэтому (второй подозреваемый твоего бага, заголовок это подсветит). Минус = smooth догоняет.',
+      ],
+      ['скорость', 'С какой скоростью реально движется нарисованная точка (профиль + поправка).'],
+      ['горизонт', 'Сколько секунд профиля осталось. На нуле точка плавно докатывается и замирает притушенной — дальше данных нет.'],
+      ['скачок', 'Разрешил ли сервер этому пересчёту телепорт (смена рейса или большой рассинхрон) + сколько разрешений было за сессию.'],
+    ],
+  },
+  {
+    title: 'ДАННЫЕ С БД',
+    rows: [
+      ['профиль из', 'Чем движок посчитал served-профиль: ML-прогнозом или наивным (простая физика на время падения ML).'],
+      ['→ Convex', 'Дошёл ли ИМЕННО этот пересчёт до Convex (то, что читает телефон). «В ПУТИ» дольше пары секунд = публикация сломана.'],
+      ['ML-сервис', 'Отвечает ли LightGBM-сервис движку вообще.'],
+      ['опорный фикс', 'От какого фикса движок посчитал served-профиль (по его собственным записям).'],
+      ['свежий фикс', 'Свежайший фикс, который движок держит для этого трамвая, с состоянием из фида.'],
+      ['опора отстала', 'Свежий фикс движка минус опорный, в метрах — насколько реальность уехала от прогноза по данным самого сервера.'],
+      ['фиксы тел−движок', 'Время фикса на телефоне минус у движка, секунд. Должно быть ≈0 (оба читают одну ленту фиксов); большое = телефон и движок расходятся о самой реальности.'],
+      ['интервал фиксов', 'Наблюдаемый интервал между последними двумя фиксами этого трамвая.'],
+      ['последние фиксы', 'Последние фиксы из архива движка: возраст · метры · состояние.'],
+    ],
+  },
+  {
+    title: 'СВЯЗЬ',
+    rows: [
+      [
+        'состояние',
+        '«В норме» (апдейт моложе 15 с), «задержка» (15–45 с — трамваи продолжают ехать по профилям), «ОФЛАЙН» (старше 45 с или подписка падает — баннер, трамваи докатываются до конца профилей и замирают).',
+      ],
+      [
+        'апдейт от Convex',
+        'Сколько секунд назад пришёл последний апдейт ленты (пересчёт любой машины или сердцебиение движка — тихий флот не выглядит мёртвым). Именно он решает состояние выше.',
+      ],
+      ['сдвиг часов', 'Часы сервера минус часы телефона, сглажено. Все профили читаются по ИСПРАВЛЕННОМУ времени — поэтому два телефона рисуют трамвай в одном месте.'],
+      ['машин в ленте', 'Сколько машин сейчас в ленте профилей.'],
+      ['подписка', 'Падает ли подписка/загрузка прямо сейчас.'],
+    ],
+  },
+  {
+    title: 'GPS РАЙДЕРА (м)',
+    rows: [
+      ['точка−я', 'Честная метрика: нарисованная точка минус ТВОЁ GPS-положение вдоль маршрута. Плюс = приложение рисует трамвай впереди того, в котором ты сидишь.'],
+      ['точка−фикс', 'Нарисованная точка минус последний фикс.'],
+      ['я−фикс', 'Твоё GPS-положение минус фикс — насколько запаздывает/врёт сам фид.'],
+      ['GPS фильтр/сырой', 'Твой GPS на маршруте: фильтрованный и сырой — видно работу фильтра выбросов.'],
+      ['GPS-вотч', 'Крутится ли вотч геолокации. Все строки выше без него пусты.'],
+      ['точность', 'Горизонтальная точность GPS. Выше ~30 м числа лага шумные.'],
+      ['до рельсов', 'Насколько твой GPS в стороне от путей — фильтрованный / сырой. Много = проекция гадает.'],
+    ],
+  },
+  {
+    title: 'СЛЕДУЮЩАЯ ОСТАНОВКА',
+    rows: [
+      ['остановка', 'Следующая остановка впереди нарисованной точки.'],
+      ['метры / прибытие', 'Расстояние до неё вдоль маршрута и когда профиль smooth его пересечёт. За горизонтом прибытие пустое — дальше данных честно нет.'],
+      ['опоздание', 'Опоздание по расписанию из фида. Плюс = опаздывает.'],
+      ['состояние / фаза', 'Состояние из фида и выведенная фаза: едет, стоит на остановке, конечная.'],
+    ],
+  },
+];
+
+/** Плоский словарь подпись → объяснение для `Row` в гайд-режиме. */
+const GUIDE: Record<string, string> = Object.fromEntries(GUIDE_SECTIONS.flatMap((s) => s.rows));
+
+const PRIMER: [string, string][] = [
+  [
+    'ПРОБЛЕМА',
+    'Город сообщает о каждом трамвае только раз в ~10–20 с (фикс), и эти позиции уже устарели на секунды. Всё движение между фиксами приходится предсказывать.',
+  ],
+  [
+    'КТО ПРЕДСКАЗЫВАЕТ',
+    'Сервер, для всего флота, каждые ~2 с: ML-модель (ml-gbdt) даёт прогноз на 120 с вперёд, генератор drive-v3 превращает его в реалистичный ПРОФИЛЬ ДВИЖЕНИЯ (разгоны, торможения, остановки), и каждый пересчёт тут же ПУШится в телефон через Convex. Если ML упал — сервер держит старый профиль, пока тот описывает трамвай, а потом подставляет наивный прогноз (простая физика).',
+  ],
+  [
+    'ЧТО ДЕЛАЕТ ТЕЛЕФОН',
+    'Почти ничего: находит две точки профиля вокруг «сейчас», интерполирует и кладёт на маршрут. Плюс одна поправка: если пришёл фикс, которого профиль не видел, профиль проматывается вперёд до него (поправка по фиксу). Симуляции и состояния нет — поэтому трамвай всегда на рельсах.',
+  ],
+  [
+    'ДВА ПРОФИЛЯ',
+    'У каждого трамвая их два: SMOOTH (непрерывность вшита — не телепортируется) и FIXED (сырое мнение модели — прыгает к каждому фиксу). Карта рисует один; панель всегда показывает оба, их разность — строка «разрыв точек».',
+  ],
+  [
+    'ОДНИ ЧАСЫ',
+    'Профили размечены серверным временем; телефон меряет ошибку своих часов и читает по исправленному времени. Два телефона с разными часами рисуют один и тот же трамвай.',
+  ],
+  [
+    'ЧЕСТНОСТЬ',
+    'Когда данные перестают приходить, трамваи доезжают профили до конца, плавно докатываются и ЗАМИРАЮТ притушенными за явным баннером. Ничто не анимируется дальше реальных данных.',
+  ],
+  [
+    'ИСТИНА',
+    'Пока ты едешь, твой собственный GPS проецируется на тот же маршрут. «Точка−я» — настоящая ошибка: плюс значит приложение рисует трамвай впереди того, в котором ты сидишь.',
+  ],
+];
+
+/** Истина, пока панель показывает объяснения вместо живых значений. */
+const GuideContext = createContext(false);
+
+// ── строки ───────────────────────────────────────────────────────────────────
 
 function Row({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
   const guide = useContext(GuideContext);
@@ -577,7 +530,7 @@ function Row({ label, value, warn }: { label: string; value: string; warn?: bool
     return (
       <View style={styles.guideRow}>
         <Text style={styles.guideLabel}>{label}</Text>
-        <Text style={styles.guideHelp}>{GUIDE[label] ?? '(undocumented)'}</Text>
+        <Text style={styles.guideHelp}>{GUIDE[label] ?? '(нет описания)'}</Text>
       </View>
     );
   }
@@ -593,36 +546,10 @@ function SectionTitle({ children }: { children: string }) {
   return <Text style={styles.section}>{children}</Text>;
 }
 
-// ── component ────────────────────────────────────────────────────────────────
+// ── компонент ────────────────────────────────────────────────────────────────
 
-/** collapsed → one summary line · live → the readout · guide → what it all means. */
+/** collapsed → одна строка · live → панель · guide → что всё это значит. */
 type DebugMode = 'collapsed' | 'live' | 'guide';
-
-/** Header-band abbreviations for the physics generation (the band is tight). */
-const GEN_SHORT: Record<PhysicsEngine, string> = {
-  current: 'cur',
-  v3: 'v3',
-  mix: 'mix',
-};
-
-/**
- * The active-generation readout, derived from the BUNDLE's `generator` field
- * rather than the setting that asked for it.
- *
- * The distinction is the whole point of the row. A `gen` the server does not
- * recognise is deliberately served the published bundle instead of an error,
- * so a client that printed its own request would show a confident "v3" while
- * rendering current physics — the one failure this readout exists to catch.
- * When the two disagree the row says so and warns; with no bundle yet (the
- * moment after a swap) it shows what is being waited for, which is not a fault.
- */
-function genReadout(health: TrajectoryHealth): { value: string; warn: boolean } {
-  if (health.bundleAgeS == null) return { value: `— want ${health.gen}`, warn: false };
-  const confirmed = genFromGenerator(health.serverGen);
-  const served = health.serverGen ?? 'published';
-  if (confirmed !== health.gen) return { value: `${served} ≠ want ${health.gen}`, warn: true };
-  return { value: served, warn: confirmed !== 'current' };
-}
 
 export function DebugOverlay() {
   const insets = useSafeAreaInsets();
@@ -630,23 +557,19 @@ export function DebugOverlay() {
   const followKey = useSelectionStore((s) => s.followTramKey);
   const selectedKey = useSelectionStore((s) => s.selectedTramKey);
   const positionMode = useSettingsStore((s) => s.positionMode);
-  const physicsEngine = useSettingsStore((s) => s.physicsEngine);
   const key = followKey ?? selectedKey;
-  // 1 Hz — the header only needs line + model, not a per-frame read.
+  // 1 Гц — заголовку нужны только линия и модель, не покадровое чтение.
   const state = useTramState(key);
   const [mode, setMode] = useState<DebugMode>('live');
   const collapsed = mode === 'collapsed';
   const guide = mode === 'guide';
-  // Native CFBundleVersion proves which binary is installed on the device.
+  // Нативный CFBundleVersion — доказательство, какой бинарь стоит на девайсе.
   const buildNumber = Constants.platform?.ios?.buildNumber ?? '?';
 
   const header = key
     ? `DBG ${key}${state ? ` · L${state.snapshot.line} · ${state.model.id}` : ''}`
-    : 'DEBUG — no tram followed';
+    : 'DEBUG — трамвай не выбран';
 
-  // A compact command deck across the top. It deliberately overlays the app's
-  // normal chrome: debug mode owns this band, rather than forcing the map UI to
-  // reflow around a diagnostic tool.
   const maxPanelH = Math.min(224, Math.round(windowHeight * 0.28));
 
   return (
@@ -660,17 +583,16 @@ export function DebugOverlay() {
             onPress={() => setMode(collapsed ? 'live' : 'collapsed')}
             style={styles.headerTap}
             accessibilityRole="button"
-            accessibilityLabel="Collapse or expand the debug overlay"
+            accessibilityLabel="Свернуть или развернуть дебаг-панель"
           >
             <Text style={styles.header} numberOfLines={1}>
               {header}
             </Text>
           </Pressable>
-          {/* Matches the in-world traces (DebugMapTraces). `*` marks the curve
-              the map is actually drawing; FIX never gets one — no render mode
-              shows the raw fix, and claiming otherwise would be a lie. */}
+          {/* Совпадает с трассами на карте (DebugMapTraces). `*` — профиль,
+              который карта реально рисует; у ФИКСА звёздочки не бывает. */}
           <View style={styles.legend} pointerEvents="none">
-            <Text style={[styles.legendText, styles.legendFix]}>● FIX</Text>
+            <Text style={[styles.legendText, styles.legendFix]}>● ФИКС</Text>
             <Text style={[styles.legendText, styles.legendFixed]}>
               ● FIXED{positionMode === 'fixed' ? '*' : ''}
             </Text>
@@ -678,25 +600,13 @@ export function DebugOverlay() {
               ● SMOOTH{positionMode === 'smooth' ? '*' : ''}
             </Text>
           </View>
-          {/* The REQUESTED generation — labelled `req:` because that is all it
-              is. This band is the only part of the overlay visible while
-              collapsed and with no tram followed, so it belongs here; what the
-              server actually SERVED is on the CONNECTION card, read from the
-              bundle. Never merge the two into one number. */}
-          <Text
-            style={[styles.genChip, physicsEngine !== 'current' && styles.genChipAlt]}
-            numberOfLines={1}
-          >
-            req:{GEN_SHORT[physicsEngine]}
-          </Text>
           <Text style={styles.buildNumber}>B{buildNumber}</Text>
-          {/* Guide mode: swaps every live value for a sentence explaining what
-              that variable means, plus a primer on how the engine works. */}
+          {/* Гайд: каждая строка меняется на объяснение + букварь движка. */}
           <Pressable
             onPress={() => setMode(guide ? 'live' : 'guide')}
             style={styles.hintTap}
             accessibilityRole="button"
-            accessibilityLabel={guide ? 'Show live values' : 'Explain these values'}
+            accessibilityLabel={guide ? 'Показать живые значения' : 'Объяснить значения'}
           >
             <Text style={[styles.hint, guide && styles.hintActive]}>{guide ? '↩' : '?'}</Text>
           </Pressable>
@@ -704,14 +614,14 @@ export function DebugOverlay() {
             onPress={() => setMode(collapsed ? 'live' : 'collapsed')}
             style={styles.hintTap}
             accessibilityRole="button"
-            accessibilityLabel="Collapse or expand the debug overlay"
+            accessibilityLabel="Свернуть или развернуть дебаг-панель"
           >
             <Text style={styles.hint}>{collapsed ? '▸' : '▾'}</Text>
           </Pressable>
         </View>
 
         {!key && !guide && (
-          <Text style={styles.note}>Tap a tram and Follow it to inspect its physics.</Text>
+          <Text style={styles.note}>Выбери трамвай и включи «Следовать», чтобы разобрать его физику.</Text>
         )}
 
         {key && collapsed && <DebugCollapsed tramKey={key} />}
@@ -724,11 +634,7 @@ export function DebugOverlay() {
   );
 }
 
-/**
- * The collapsed one-liner: nothing here changes faster than the engine's own
- * phase, so it reads at 1 Hz and holds NO GPS watch (the `lag` figure was the
- * only value that needed one — it lives in the expanded readout).
- */
+/** Свёрнутая строка: ничего быстрее фазы не меняется — 1 Гц, без GPS-вотча. */
 function DebugCollapsed({ tramKey }: { tramKey: string }) {
   const [dbg, setDbg] = useState<PhysicsDebugInfo | undefined>(undefined);
 
@@ -741,17 +647,17 @@ function DebugCollapsed({ tramKey }: { tramKey: string }) {
 
   return (
     <Text style={styles.collapsed} numberOfLines={1}>
-      {dbg ? phaseLabel(dbg) : '…'} · {num(dbg?.simSpeedKmh, 0)} km/h
+      {dbg ? phaseLabel(dbg) : '…'} · {num(dbg?.simSpeedKmh, 0)} км/ч
     </Text>
   );
 }
 
-/** Guide mode: static text only — no engine reads, no GPS, no loop. */
+/** Гайд: только статический текст — без чтений движка, GPS и циклов. */
 function DebugGuide() {
   return (
     <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
       <GuideContext.Provider value>
-        <SectionTitle>HOW THE ENGINE WORKS</SectionTitle>
+        <SectionTitle>КАК РАБОТАЕТ ДВИЖОК</SectionTitle>
         {PRIMER.map(([title, body]) => (
           <View key={title} style={styles.guideRow}>
             <Text style={styles.guideLabel}>{title}</Text>
@@ -765,19 +671,14 @@ function DebugGuide() {
 }
 
 /**
- * The live readout — and the ONLY holder of the 10 Hz loop and the foreground
- * GPS watch. It is mounted solely for an expanded, non-guide panel with a tram
- * followed, which is the case the file header's perf exemption describes;
- * unmounting it releases the locator (stopping the watch) and clears the timer.
+ * Живая панель — единственный владелец 10 Гц цикла и GPS-вотча. Монтируется
+ * только развёрнутой, не в гайде и со следуемым трамваем; размонтирование
+ * освобождает локатор и чистит таймер.
  */
 function DebugLive({ tramKey }: { tramKey: string }) {
   const locator = useOnlineLocator();
   const [snap, setSnap] = useState<DebugSnapshot | null>(null);
 
-  // Numeric diagnostics update at 10 Hz. The old display-rate loop
-  // forced a complete React card/text reconciliation at display rate even
-  // though the values are formatted to 0–2 decimals. This timer is owned by
-  // the mounted live panel and cleared immediately on collapse/guide/debug-off.
   useEffect(() => {
     const read = () => setSnap(buildSnapshot(tramKey, locator));
     read();
@@ -792,7 +693,7 @@ function DebugLive({ tramKey }: { tramKey: string }) {
   const realDistM = snap?.realDistM ?? null;
   const realRawDistM = snap?.realRawDistM ?? null;
 
-  // Signed diffs (+ = the RENDERED tram is ahead of the real one).
+  // Разности со знаком (+ = нарисованный трамвай впереди настоящего).
   const lagM = dbg && realDistM != null ? dbg.simDistM - realDistM : null;
   const simVsObs = dbg ? dbg.simDistM - dbg.obsDistM : null;
   const realVsObs = realDistM != null && dbg ? realDistM - dbg.obsDistM : null;
@@ -804,140 +705,146 @@ function DebugLive({ tramKey }: { tramKey: string }) {
       contentContainerStyle={styles.liveDeck}
       showsHorizontalScrollIndicator={false}
     >
-      {!dbg && <Text style={styles.note}>No state yet (waiting for a fix).</Text>}
+      {!dbg && <Text style={styles.note}>Состояния ещё нет (ждём фикс).</Text>}
       {dbg && health && (
         <>
-          {/* WHAT IS MOVING THIS TRAM — the promotion-pipeline card. Answers,
-              in order: which data drives the marker, over which transport,
-              from which fix the ML predicted, and how far behind the newest
-              fix that prediction is. */}
+          {/* НА ЧЁМ ЕДЕТ ТРАМВАЙ — карточка пайплайна. По порядку: какие
+              данные движут маркером, из какой ленты, от какого фикса посчитан
+              ML-прогноз и насколько тот отстал от свежайшего фикса. */}
           <View style={styles.debugCard}>
             <Text style={styles.phase}>{phaseLabel(dbg)}</Text>
-            <SectionTitle>SOURCE</SectionTitle>
+            <SectionTitle>ИСТОЧНИК ДВИЖЕНИЯ</SectionTitle>
             <Row
-              label="moving on"
+              label="едет по"
               value={RENDER_SOURCE_LABEL[dbg.renderSource]}
               warn={dbg.renderSource !== 'curve-ml'}
             />
+            <Row label="лента Convex" value={`№${num(dbg.feedSeq)}`} />
+            <Row label="генератор" value={dbg.serverGen ?? '—'} />
             <Row
-              label="transport"
-              value={dbg.transport === 'convex' ? `convex push · seq ${num(dbg.feedSeq)}` : 'http poll'}
-            />
-            <Row label="engine gen" {...genReadout(health)} />
-            <Row
-              label="ML anchor fix"
+              label="опорный фикс"
               value={
                 dbg.anchorFixS != null
-                  ? `${num(dbg.anchorFixS)}m · ${num(dbg.anchorAgeS, 1)}s old`
+                  ? `${num(dbg.anchorFixS)}м · ${num(dbg.anchorAgeS, 1)}с`
                   : dbg.anchorAgeS != null
-                    ? `? · ${num(dbg.anchorAgeS, 1)}s old`
+                    ? `? · ${num(dbg.anchorAgeS, 1)}с`
                     : '—'
               }
             />
             <Row
-              label="anchor lag"
-              value={dbg.anchorLagS != null ? `${num(dbg.anchorLagS, 1)}s of fixes` : '—'}
+              label="прогноз не видел"
+              value={dbg.anchorLagS != null ? `${num(dbg.anchorLagS, 1)}с фиксов` : '—'}
               warn={dbg.anchorLagS != null && dbg.anchorLagS > 6}
             />
-            <Row label="emission age" value={dbg.emissionAgeS != null ? `${num(dbg.emissionAgeS, 1)}s` : '—'} />
+            <Row
+              label="пересчёт прогноза"
+              value={dbg.emissionAgeS != null ? `${num(dbg.emissionAgeS, 1)}с назад` : '—'}
+              warn={dbg.emissionAgeS != null && dbg.emissionAgeS > 70}
+            />
           </View>
 
-          {/* THE SHIM — the τ machinery closing the fix-vs-curve race. This is
-              the card to screenshot when a tram teleports or stands mid-road:
-              branch `walk` + a large `walk left` IS the τ=∞ bug class. */}
+          {/* ПОПРАВКА ПО ФИКСУ — механика τ. Карточка, которую скриншотишь при
+              телепорте или стоянии посреди дороги. */}
           <View style={styles.debugCard}>
-            <SectionTitle>FIX-FORWARD SHIM</SectionTitle>
+            <SectionTitle>ПОПРАВКА ПО ФИКСУ</SectionTitle>
             <Row
-              label="branch"
+              label="режим"
               value={SHIM_BRANCH_LABEL[dbg.shimBranch]}
               warn={dbg.shimBranch === 'walk'}
             />
             <Row
-              label="τ wind"
-              value={
-                dbg.shimBranch === 'walk' ? '∞' : dbg.tauS != null ? `${num(dbg.tauS, 1)}s` : '—'
-              }
+              label="промотка τ"
+              value={dbg.shimBranch === 'walk' ? '∞' : dbg.tauS != null ? `${num(dbg.tauS, 1)}с` : '—'}
             />
             <Row
-              label="fix−curve"
-              value={dbg.fixVsCurveM != null ? `${signed(dbg.fixVsCurveM, 1)}m` : '—'}
+              label="отрыв фикса"
+              value={dbg.fixVsCurveM != null ? `${signed(dbg.fixVsCurveM, 1)}м` : '—'}
               warn={dbg.fixVsCurveM != null && dbg.fixVsCurveM > 100}
             />
             <Row
-              label="shim applied"
-              value={dbg.fixForwardM != null ? `${signed(dbg.fixForwardM, 1)}m` : '—'}
+              label="поправка сейчас"
+              value={dbg.fixForwardM != null ? `${signed(dbg.fixForwardM, 1)}м` : '—'}
             />
             <Row
-              label="walk left"
-              value={dbg.walkRemainingM != null ? `${num(dbg.walkRemainingM, 1)}m` : '—'}
+              label="осталось дойти"
+              value={dbg.walkRemainingM != null ? `${num(dbg.walkRemainingM, 1)}м` : '—'}
               warn={dbg.walkRemainingM != null && dbg.walkRemainingM > 30}
             />
-            <Row label="AVL fix" value={`${num(dbg.obsDistM)}m · ${num(dbg.fixAgeS, 1)}s`} />
-            <Row label="obs pace" value={`${num(dbg.observedPaceMs * 3.6, 1)} km/h`} />
+            <Row
+              label="последний телепорт"
+              value={
+                dbg.lastJumpM != null
+                  ? `${signed(dbg.lastJumpM, 0)}м · ${num(dbg.lastJumpAgoS, 0)}с назад`
+                  : 'не было'
+              }
+              warn={dbg.lastJumpM != null && dbg.lastJumpAgoS != null && dbg.lastJumpAgoS < 120}
+            />
+            <Row label="фикс" value={`${num(dbg.obsDistM)}м · ${num(dbg.fixAgeS, 1)}с`} />
+            <Row label="наблюдаемый темп" value={`${num(dbg.observedPaceMs * 3.6, 1)} км/ч`} />
           </View>
 
           <View style={styles.debugCard}>
             <Text style={styles.phase} numberOfLines={2}>
-              {activeNotes(dbg).join(' · ') || 'nominal'}
+              {activeNotes(dbg).join(' · ') || 'всё в норме'}
             </Text>
-            <SectionTitle>CURVES</SectionTitle>
-            <Row label="drawing" value={dbg.mode} />
+            <SectionTitle>ПРОФИЛИ ДВИЖЕНИЯ</SectionTitle>
+            <Row label="рисуем" value={dbg.mode} />
             <Row label="smooth" value={num(dbg.smoothDistM)} />
             <Row label="fixed" value={num(dbg.fixedDistM)} />
             <Row
-              label="smooth−fixed"
+              label="разрыв точек"
               value={signed(dbg.deltaM, 1)}
               warn={dbg.deltaM != null && Math.abs(dbg.deltaM) > 80}
             />
-            <Row label="speed" value={`${num(dbg.simSpeedKmh, 1)} km/h`} />
+            <Row label="скорость" value={`${num(dbg.simSpeedKmh, 1)} км/ч`} />
             <Row
-              label="horizon left"
-              value={dbg.horizonLeftS != null ? `${num(dbg.horizonLeftS, 1)}s` : '—'}
+              label="горизонт"
+              value={dbg.horizonLeftS != null ? `${num(dbg.horizonLeftS, 1)}с` : '—'}
               warn={dbg.pastHorizon}
             />
-            <Row label="discontinuity" value={`${dbg.discontinuity ? 'THIS' : 'no'} · ${dbg.discontinuitiesTotal} total`} />
+            <Row label="скачок" value={`${dbg.discontinuity ? 'РАЗРЕШЁН' : 'нет'} · ${dbg.discontinuitiesTotal} всего`} />
           </View>
 
-          <ServerCard tramKey={tramKey} clientAnchorMs={dbg.obsAtMs} />
+          <ServerCard tramKey={tramKey} clientFixAtMs={dbg.obsAtMs} />
 
           <View style={styles.debugCard}>
-            <SectionTitle>CONNECTION</SectionTitle>
+            <SectionTitle>СВЯЗЬ</SectionTitle>
             <Row
-              label="state"
-              value={dbg.connection}
+              label="состояние"
+              value={CONNECTION_LABEL[dbg.connection]}
               warn={dbg.connection !== 'live'}
             />
             <Row
-              label="bundle age"
-              value={dbg.bundleAgeS != null ? `${num(dbg.bundleAgeS, 1)}s` : 'none'}
+              label="апдейт от Convex"
+              value={dbg.bundleAgeS != null ? `${num(dbg.bundleAgeS, 1)}с назад` : 'не было'}
               warn={dbg.bundleAgeS == null || dbg.bundleAgeS >= 15}
             />
-            <Row label="clock offset" value={`${signed(dbg.clockOffsetMs)}ms`} warn={health.clockImplausible} />
-            <Row label="vehicles" value={num(health.vehicleCount)} />
+            <Row label="сдвиг часов" value={`${signed(dbg.clockOffsetMs)}мс`} warn={health.clockImplausible} />
+            <Row label="машин в ленте" value={num(health.vehicleCount)} />
             <Row
-              label="fetch"
-              value={health.consecutiveFailures > 0 ? `fail ×${health.consecutiveFailures}` : health.inFlight ? 'in flight' : 'ok'}
+              label="подписка"
+              value={health.consecutiveFailures > 0 ? `ошибка ×${health.consecutiveFailures}` : 'ок'}
               warn={health.consecutiveFailures > 0}
             />
           </View>
 
           <View style={styles.debugCard}>
-            <SectionTitle>RIDER GPS Δm</SectionTitle>
-            <Row label="smooth−rider" value={signed(lagM)} warn={lagM != null && Math.abs(lagM) > 60} />
-            <Row label="smooth−fix" value={signed(simVsObs)} />
-            <Row label="rider−fix" value={signed(realVsObs)} />
-            <Row label="rider filt / raw" value={`${num(realDistM)} / ${num(realRawDistM)}`} />
-            <Row label="GPS watch" value={snap?.watchActive ? (fix ? 'live' : 'starting') : (snap?.watchError ?? 'off')} warn={!snap?.watchActive} />
-            <Row label="accuracy" value={fix?.accuracyM != null ? `${num(fix.accuracyM)}m` : '—'} warn={fix?.accuracyM != null && fix.accuracyM > 30} />
-            <Row label="track offset" value={`${num(proj?.fOffM, 1)} / ${num(proj?.gpsOffM, 1)}m`} />
+            <SectionTitle>GPS РАЙДЕРА (м)</SectionTitle>
+            <Row label="точка−я" value={signed(lagM)} warn={lagM != null && Math.abs(lagM) > 60} />
+            <Row label="точка−фикс" value={signed(simVsObs)} />
+            <Row label="я−фикс" value={signed(realVsObs)} />
+            <Row label="GPS фильтр/сырой" value={`${num(realDistM)} / ${num(realRawDistM)}`} />
+            <Row label="GPS-вотч" value={snap?.watchActive ? (fix ? 'живой' : 'стартует') : (snap?.watchError ?? 'выкл')} warn={!snap?.watchActive} />
+            <Row label="точность" value={fix?.accuracyM != null ? `${num(fix.accuracyM)}м` : '—'} warn={fix?.accuracyM != null && fix.accuracyM > 30} />
+            <Row label="до рельсов" value={`${num(proj?.fOffM, 1)} / ${num(proj?.gpsOffM, 1)}м`} />
           </View>
 
           <View style={styles.debugCard}>
-            <SectionTitle>NEXT STOP</SectionTitle>
-            <Row label="stop" value={dbg.nextStopName ?? '—'} />
-            <Row label="distance / eta" value={`${num(snap?.nextStopDistM)}m / ${dbg.nextStopEtaS != null ? `${num(dbg.nextStopEtaS)}s` : '—'}`} />
-            <Row label="delay" value={`${signed(dbg.delaySeconds)}s`} />
-            <Row label="state / phase" value={`${dbg.statePosition} / ${dbg.phase}`} />
+            <SectionTitle>СЛЕДУЮЩАЯ ОСТАНОВКА</SectionTitle>
+            <Row label="остановка" value={dbg.nextStopName ?? '—'} />
+            <Row label="метры / прибытие" value={`${num(snap?.nextStopDistM)}м / ${dbg.nextStopEtaS != null ? `${num(dbg.nextStopEtaS)}с` : '—'}`} />
+            <Row label="опоздание" value={`${signed(dbg.delaySeconds)}с`} />
+            <Row label="состояние / фаза" value={`${dbg.statePosition} / ${dbg.phase}`} />
           </View>
         </>
       )}
@@ -945,11 +852,7 @@ function DebugLive({ tramKey }: { tramKey: string }) {
   );
 }
 
-/**
- * Guide mode's body: the SAME sections and labels as the live readout, rendered
- * from GUIDE_SECTIONS. `Row` swaps the value for the explanation via context, so
- * there is exactly one list of labels in this file.
- */
+/** Тело гайда: ТЕ ЖЕ секции и подписи, что в живой панели, из GUIDE_SECTIONS. */
 function GuideBody() {
   return (
     <>
@@ -980,8 +883,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
   },
-  // Bounded by the panel's own maxHeight (screen-derived), NOT a fixed cap —
-  // the old maxHeight:520 silently cut off the GPS section on every device.
   scroll: { flexShrink: 1 },
   liveDeck: { gap: 7, paddingBottom: 2 },
   debugCard: {
@@ -991,14 +892,12 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 7,
     paddingBottom: 6,
-    width: 236,
+    width: 252,
   },
   headerRow: { alignItems: 'center', flexDirection: 'row' },
   headerTap: { flex: 1, justifyContent: 'center', minHeight: 44 },
-  // 44×44 pt minimum touch target — the glyphs stay 11 pt, the box does not.
   hintTap: { alignItems: 'center', justifyContent: 'center', minHeight: 44, minWidth: 44 },
   hintActive: { color: '#FFD479' },
-  // Guide mode: label above, explanation wrapped beneath it (full width).
   guideRow: { marginBottom: 7 },
   guideLabel: { color: '#6BE6A6', fontFamily: MONO, fontSize: 10.5, fontWeight: '700' },
   guideHelp: { color: '#C6D2DE', fontFamily: MONO, fontSize: 10, lineHeight: 13.5, marginTop: 1 },
@@ -1014,11 +913,8 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontVariant: ['tabular-nums'],
     fontWeight: '800',
+    marginRight: 2,
   },
-  // Muted while on the shipped engine, hot when the trams on screen are being
-  // drawn by an experimental one — a screenshot should not need a caption.
-  genChip: { color: '#7FB2D9', fontFamily: MONO, fontSize: 11, fontWeight: '800', marginRight: 6 },
-  genChipAlt: { color: '#B7FF4A' },
   hint: { color: '#7FB2D9', fontFamily: MONO, fontSize: 11 },
   collapsed: { color: '#DDE6EE', fontFamily: MONO, fontSize: 10.5, marginTop: 3 },
   phase: { color: '#FFD479', fontFamily: MONO, fontSize: 11, fontWeight: '700', marginTop: 4 },
