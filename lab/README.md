@@ -222,6 +222,32 @@ number that describes the screen. See the 2026-08-19 Findings entry.
 
 ## Findings log
 
+- **2026-08-21: THE PROMOTION — ml-gbdt is the production engine, curves live
+  in Convex, the lab stops being the app's dependency.** Owner verdict: the ML
+  engine (gbdt) is final. What changed:
+  - `lab/src/publish.ts` pushes every re-emission of the published chain into
+    Convex (`trajectories:publish`, token-gated; delta per `emittedAtMs`,
+    removals, heartbeat every cycle). The app subscribes over its existing
+    Convex WebSocket (`src/lib/physics/convexSource.ts`) — fix→curve-on-glass
+    ~2–4 s instead of ~7–11 s, killing most of the M2 freshness race.
+    `TRAJ_V3_PUBLISH=1` on the deployment: the published chain is `drive-v3`
+    (ml-drive 79.8 m vs ml-mode 85.6 m matched 08-19; flip-grade twice over).
+    HTTP `?gen=` endpoints stay for research; the app's «Движок физики»
+    switcher now reads: Основной (Convex) / v3 (HTTP) / mix (HTTP).
+  - ML-outage doctrine replaces group-drop: a vehicle's old curve is HELD
+    while it still describes the tram; the learned-walker naive substitute
+    (`source: 'naive'`, same generator, same limits) is emitted only when the
+    newest fix overruns the curve, the horizon ran out, or the trip changed.
+    `/api/summary → trajectories.mlHeld/naiveEmissions/publish`.
+  - Client τ=∞ fix (the «телепортируется за новый фикс и стоит» report,
+    build 18): smooth WALKS to an overrun fix at the bounded catch-up rate
+    (allowance from the curve's start, continuous with the finite-τ branch);
+    only fixed jumps. Both generators' smooth seams now resume from
+    `clientSmoothProjectionM` (the rate-limited shim twin) so the swap can no
+    longer hand the accrued catch-up back as a backward step. Plus a naive
+    client fallback (≤ 60 s dead-reckon at observed pace, dimmed) instead of
+    the frozen dot when a tram has no curve at all. Ships with build 19.
+
 - **2026-08-19: the gates were measuring the wrong thing, and the fix for
   that measured the build-16 stall.** Every gate here scores the served curve;
   the phone draws the served curve wound forward onto a fix the server had not
