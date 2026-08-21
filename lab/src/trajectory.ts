@@ -173,10 +173,48 @@ export function clientProjectionM(
   const base = evalTrack(track, atMs);
   if (track.length === 0 || !(fixS > evalTrack(track, fixAtMs))) return base;
   const reach = crossTrack(track, fixS);
-  // Past the whole curve: the phone holds at the fix (it has no more profile).
+  // Past the whole curve: the phone's FIXED marker jumps to the fix and holds
+  // there until the replacement curve lands (render.ts τ=∞ branch).
   if (!Number.isFinite(reach)) return Math.max(base, fixS);
   const tau = reach - fixAtMs;
   return tau > 0 ? evalTrack(track, atMs + tau) : base;
+}
+
+/** Mirror of the client's SMOOTH_CATCHUP_V_MS (src/lib/physics/fixForward.ts). */
+export const CLIENT_SMOOTH_CATCHUP_V_MS = 2;
+
+/**
+ * Where a PHONE is drawing the SMOOTH track at `atMs`, given the newest fix —
+ * the rate-limited twin of `clientProjectionM`. The smooth marker never jumps:
+ * inside the curve it approaches the wound-forward curve at ≤ catchup m/s of
+ * extra speed (allowance from the curve's own start, render.ts), and past the
+ * whole curve it WALKS toward the fix at the same rate (allowance from the
+ * fix's own timestamp, render.ts τ=∞ branch). The smooth continuity seam must
+ * resume from THIS — resuming from the unshifted `evalTrack(prev.smooth, t0)`
+ * hands back every meter the phone's marker had caught up, as a backward step,
+ * on every bundle swap.
+ */
+export function clientSmoothProjectionM(
+  track: TrackPoint[],
+  fixS: number,
+  fixAtMs: number,
+  atMs: number,
+  catchupVMs: number = CLIENT_SMOOTH_CATCHUP_V_MS,
+): number {
+  const base = evalTrack(track, atMs);
+  if (track.length === 0 || !(fixS > evalTrack(track, fixAtMs))) return base;
+  // The allowance datum is the CURVE's start in BOTH branches (render.ts):
+  // one datum, continuous across the finite-τ/∞ boundary, no reset per fix.
+  const capped = base + catchupVMs * Math.max(0, (atMs - track[0].t) / 1000);
+  const reach = crossTrack(track, fixS);
+  if (!Number.isFinite(reach)) {
+    if (base >= fixS) return base;
+    return Math.min(capped, fixS);
+  }
+  const tau = reach - fixAtMs;
+  if (!(tau > 0)) return base;
+  const shifted = evalTrack(track, atMs + tau);
+  return Math.min(capped, shifted);
 }
 
 /** Instantaneous speed of a kinematic track at t, m/s — exact, because v is
@@ -444,7 +482,16 @@ export function buildV2Vehicle(args: BuildV2Args): BuiltV2 | null {
   let discontinuity = false;
   let smooth = opinion;
   if (prev !== null) {
-    const sStart = evalTrack(prev.smooth.points, t0);
+    // Fix-driven re-emissions resume from where the PHONE's smooth marker is
+    // actually drawn — the rate-limited shim over the previous curve — not
+    // from the unshifted curve (same reasoning as the opinion seam floor
+    // above; the unshifted value hands the accrued catch-up back as a
+    // backward step at every swap). Age re-emissions carry no new fix, so the
+    // phone's shim is idle there and the raw evaluation is the marker.
+    const sStart =
+      args.prevFixS !== undefined && args.anchorFixS !== undefined
+        ? clientSmoothProjectionM(prev.smooth.points, args.anchorFixS, args.anchorMs, t0)
+        : evalTrack(prev.smooth.points, t0);
     const s0 = opinion.points[0].s;
     if (prev.tripId !== args.tripId || Math.abs(sStart - s0) > TRAJ_DISCONTINUITY_M) {
       discontinuity = true; // honest teleport: trip change or model break

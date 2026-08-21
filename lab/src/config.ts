@@ -3,6 +3,9 @@
 // (CONVEX_URL=http://tram-convex-backend:3210).
 
 export const CONVEX_URL = process.env.CONVEX_URL ?? 'https://tram-api.acex.sh';
+/** Shared secret for `trajectories:publish` (convex/trajectories.ts). Empty ⇒
+ * Convex publishing is disabled and the service serves HTTP only (lab mode). */
+export const ENGINE_PUSH_TOKEN = process.env.ENGINE_PUSH_TOKEN ?? '';
 export const SITE_URL = process.env.SITE_URL ?? 'https://tram-site.acex.sh';
 export const ML_URL = process.env.ML_URL ?? 'http://tram-lab-ml:8092';
 export const DB_PATH = process.env.LAB_DB ?? `${__dirname}/../data/lab.db`;

@@ -27,6 +27,11 @@ services:
       CONVEX_URL: http://tram-convex-backend:3210
       SITE_URL: http://tram-convex-backend:3211
       ML_URL: http://tram-lab-ml:8092
+      # Production promotion (2026-08-21): which generator the published chain
+      # emits, and the shared secret that enables pushing it into Convex
+      # (trajectories:publish). Values live in lab/.env on the deployment.
+      TRAJ_V3_PUBLISH: "${TRAJ_V3_PUBLISH:-0}"
+      ENGINE_PUSH_TOKEN: "${ENGINE_PUSH_TOKEN:-}"
     volumes:
       - ../:/repo:ro
       - lab-node-modules:/repo/lab/node_modules

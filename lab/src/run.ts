@@ -61,6 +61,7 @@ import {
 import { GeometryStore } from './geometry';
 import { LearnedModel } from './learned';
 import { buildMlFeatures, MlClient } from './ml';
+import { ConvexPublisher } from './publish';
 import { FreshnessCounters, PerceptualCounters, RealismCounters, SeamCounters } from './realism';
 import { schedulePosition } from './schedule';
 import { startServer } from './server';
@@ -135,6 +136,9 @@ interface TrajectoryEntry {
   fixObsAtMs: number;
   /** shapeDistM of the anchor fix (seam telemetry: how far the NEXT fix moves). */
   anchorFixS: number;
+  /** What produced the target keyframes: ml-gbdt samples, or the learned-walker
+   *  naive substitute (ML unavailable AND the old curve provably overrun). */
+  source: 'ml' | 'naive';
   /** v1 payload — the shape build-12 phones consume; NEVER change it. */
   vehicle: TrajectoryVehicle;
   /** v2 payload — physics-v3 opinion + smooth tracks over the same ML samples. */
@@ -178,6 +182,7 @@ export function start(): void {
   const geometry = new GeometryStore(store);
   const learned = new LearnedModel(store);
   const ml = new MlClient();
+  const publisher = new ConvexPublisher();
   const engine = new TramEngine({
     resolveModel: (s: TramSnapshot) => getModelSpec(regNumberToModelId(s.registrationNumber)),
   });
@@ -228,6 +233,10 @@ export function start(): void {
   /** v2 lifetime counters (never reset — /api/summary gauges). */
   let trajEmissions = 0;
   let trajDiscontinuities = 0;
+  /** ML unavailable, old curve still valid ⇒ kept serving it (owner doctrine). */
+  let trajMlHeld = 0;
+  /** ML unavailable AND old curve overrun/expired ⇒ learned-walker substitute. */
+  let trajNaiveEmissions = 0;
   /** Kinematic-limits gate over every track ever published (protocol contract). */
   const realism = new RealismCounters();
   /** Anchor-floor hotfix telemetry (owner field report 2026-08-17: the fixed
@@ -751,16 +760,13 @@ export function start(): void {
           rows.push(buildMlFeatures(v.snap, v.geom, learned, tCompute + k * TRAJ_STEP_MS));
         }
       }
+      // ML down / not ready ⇒ `pred` is null and each vehicle below decides
+      // hold-vs-naive individually. Dropping the whole group (the pre-promotion
+      // behavior) rendered every affected tram as a frozen dim dot; the
+      // production doctrine keeps the marker driving on the best available
+      // physics instead.
       const pred = await ml.predictBatch(rows);
-      if (!pred) {
-        // ML down or models not ready: drop these vehicles from the feed
-        // rather than serve keyframes anchored to a superseded fix.
-        for (const v of group) markDropped(v.key);
-        continue;
-      }
       group.forEach((v, gi) => {
-        const drop = (): void => markDropped(v.key);
-        const points: TrajectoryPoint[] = [];
         // Anchor-floor hotfix (2026-08-17, owner field report: the fixed track
         // teleported BEHIND the latest fix): the anchor fix is a hard floor —
         // the tram provably was at shapeDistM at anchor time and does not
@@ -768,21 +774,72 @@ export function start(): void {
         // every consumer of `points` (v1 feed, current gen, v3, mix) at the
         // single place the samples are built.
         const anchorS = Math.min(v.geom.totalM, Math.max(0, v.snap.shapeDistM));
-        let dsClampedHere = 0;
-        let maxS = 0;
-        for (let k = 0; k < TRAJ_POINTS; k++) {
-          const ds = pred.gbdt[gi * TRAJ_POINTS + k];
-          if (ds === null || !Number.isFinite(ds)) return drop();
-          if (ds < 0) dsClampedHere++;
-          const s = Math.min(v.geom.totalM, Math.max(anchorS, v.snap.shapeDistM + ds));
-          // Each horizon is predicted independently, so the sequence can jitter
-          // backwards; the app lerps it blindly, so clamp it monotone here.
-          maxS = k === 0 ? s : Math.max(maxS, s);
-          points.push({ t: tCompute + k * TRAJ_STEP_MS, s: round2(maxS) });
+        let source: 'ml' | 'naive' = 'ml';
+        let points: TrajectoryPoint[] | null = null;
+        if (pred) {
+          const mlPoints: TrajectoryPoint[] = [];
+          let dsClampedHere = 0;
+          let maxS = 0;
+          let valid = true;
+          for (let k = 0; k < TRAJ_POINTS; k++) {
+            const ds = pred.gbdt[gi * TRAJ_POINTS + k];
+            if (ds === null || !Number.isFinite(ds)) {
+              valid = false;
+              break;
+            }
+            if (ds < 0) dsClampedHere++;
+            const s = Math.min(v.geom.totalM, Math.max(anchorS, v.snap.shapeDistM + ds));
+            // Each horizon is predicted independently, so the sequence can jitter
+            // backwards; the app lerps it blindly, so clamp it monotone here.
+            maxS = k === 0 ? s : Math.max(maxS, s);
+            mlPoints.push({ t: tCompute + k * TRAJ_STEP_MS, s: round2(maxS) });
+          }
+          if (valid) {
+            points = mlPoints;
+            if (dsClampedHere > 0) {
+              anchorDsClampedPoints += dsClampedHere;
+              anchorDsClampedEmissions++;
+            }
+          }
         }
-        if (dsClampedHere > 0) {
-          anchorDsClampedPoints += dsClampedHere;
-          anchorDsClampedEmissions++;
+        if (points === null) {
+          // No ML answer for this vehicle. The owner's replacement doctrine
+          // (2026-08-21): KEEP the old curve while it still describes the tram
+          // — replace it only when the newest fix proves the tram drove past
+          // everything the curve predicts, the curve ran out of horizon, or
+          // the trip changed. The substitute is the learned-walker naive
+          // prediction (release holds + learned pace — the "simple physics
+          // engine"), flowing through the SAME generator below so kinematic
+          // limits and seam continuity hold for it too.
+          const held = trajectories.get(v.key);
+          const heldO = held?.v2.opinion;
+          const canHold =
+            held !== undefined &&
+            held.v2.tripId === v.snap.tripId &&
+            heldO !== undefined &&
+            heldO.length > 0 &&
+            tCompute < heldO[heldO.length - 1].t &&
+            v.snap.shapeDistM <= heldO[heldO.length - 1].s + 1;
+          if (canHold) {
+            trajMlHeld++;
+            return;
+          }
+          const naive: TrajectoryPoint[] = [];
+          let maxS = anchorS;
+          for (let k = 0; k < TRAJ_POINTS; k++) {
+            const t = tCompute + k * TRAJ_STEP_MS;
+            const walked = learned.predict(v.key, t, v.geom);
+            const paceS =
+              anchorS +
+              Math.max(0.5, learned.paceAt(v.geom.shapeId, v.geom.routeId, anchorS, t)) *
+                Math.max(0, (t - v.snap.observedAtMs) / 1000);
+            const s = walked !== null && Number.isFinite(walked) ? walked : paceS;
+            maxS = Math.max(maxS, Math.min(v.geom.totalM, Math.max(anchorS, s)));
+            naive.push({ t, s: round2(maxS) });
+          }
+          points = naive;
+          source = 'naive';
+          trajNaiveEmissions++;
         }
         // ── physics v3: opinion (+ modal stops) and smooth (+ continuity) ──
         // The modal hold mirrors learned-2h's probability model exactly (same
@@ -1026,6 +1083,7 @@ export function start(): void {
         trajectories.set(v.key, {
           fixObsAtMs: v.snap.observedAtMs,
           anchorFixS: v.snap.shapeDistM,
+          source,
           vehicle: {
             key: v.key,
             tripId: v.snap.tripId,
@@ -1047,6 +1105,16 @@ export function start(): void {
     if (trajRefreshing) return;
     trajRefreshing = true;
     refreshTrajectories()
+      .then(() =>
+        // The promotion seam: every refresh publishes its delta (or a
+        // heartbeat) to Convex, where the app now reads the curves. Detached
+        // from serving and never throws (publish.ts).
+        publisher.publishCycle(
+          trajectories,
+          trajBuiltAtMs,
+          TRAJ_V3_PUBLISH ? 'drive-v3' : 'current',
+        ),
+      )
       .catch((e) => log(`trajectory refresh error: ${e instanceof Error ? e.message : e}`))
       .finally(() => {
         trajRefreshing = false;
@@ -1378,6 +1446,10 @@ export function start(): void {
         builtAtMs: trajBuiltAtMs,
         emissions: trajEmissions,
         discontinuities: trajDiscontinuities,
+        /** ML-outage doctrine telemetry: curves held vs naive substitutes. */
+        mlHeld: trajMlHeld,
+        naiveEmissions: trajNaiveEmissions,
+        publish: publisher.gauges(),
         probe: { ok: probeOk, missing: probeMissing, staleAnchor: probeStaleAnchor, tripMismatch: probeTripMismatch },
         /** Anchor-floor hotfix telemetry: exactly where bytes may differ from
          *  the pre-hotfix builders (everywhere else: pure fn, same inputs). */

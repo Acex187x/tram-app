@@ -37,6 +37,7 @@ import { round2 } from './db';
 import {
   accelAt,
   clientProjectionM,
+  clientSmoothProjectionM,
   evalTrack,
   seamJustifiedM,
   speedAt,
@@ -1997,7 +1998,14 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     discKind = 'break'; // honest re-appearance: clients may fade once
   }
   if (prev !== null) {
-    const sStart = evalTrack(prev.smooth.points, t0);
+    // Resume from where the PHONE's smooth marker is drawn (rate-limited shim
+    // over the previous curve), not from the unshifted curve — same reasoning
+    // as the opinion seam floor above. Fix-driven re-anchors only; on an age
+    // re-emission the phone's shim is idle and the raw evaluation IS the marker.
+    const sStart =
+      args.prevFixS !== undefined && args.anchorFixS !== undefined
+        ? clientSmoothProjectionM(prev.smooth.points, args.anchorFixS, args.anchorMs, t0)
+        : evalTrack(prev.smooth.points, t0);
     seamGapM = Math.abs(sStart - s0);
     if (prev.tripId !== args.tripId) {
       discKind = 'trip';
