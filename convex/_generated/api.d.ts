@@ -14,6 +14,7 @@ import type * as calibration_keys from "../calibration/keys.js";
 import type * as calibration_models from "../calibration/models.js";
 import type * as crons from "../crons.js";
 import type * as geometry from "../geometry.js";
+import type * as geometryPack from "../geometryPack.js";
 import type * as http from "../http.js";
 import type * as ingest from "../ingest.js";
 import type * as poller from "../poller.js";
@@ -33,6 +34,7 @@ declare const fullApi: ApiFromModules<{
   "calibration/models": typeof calibration_models;
   crons: typeof crons;
   geometry: typeof geometry;
+  geometryPack: typeof geometryPack;
   http: typeof http;
   ingest: typeof ingest;
   poller: typeof poller;
