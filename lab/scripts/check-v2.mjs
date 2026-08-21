@@ -47,6 +47,9 @@ const V2_PATH = `/api/trajectories/v2${GEN === '' ? '' : `?gen=${GEN}`}`;
 const DURATION_S = Number(process.env.DURATION_S ?? 75);
 const POLL_MS = Number(process.env.POLL_MS ?? 2000);
 const CONTINUITY_TOL_M = 2;
+/** Mirror of the client's SMOOTH_CATCHUP_V_MS / trajectory.ts
+ *  CLIENT_SMOOTH_CATCHUP_V_MS — the fix-driven seam envelope's slope. */
+const CLIENT_SMOOTH_CATCHUP_V_MS = 2;
 
 // Wire-level tolerances from lab/src/config.ts — the physical limits are
 // V_MAX 16.7 m/s and +1.3/−1.4 m/s²; the slack absorbs cm/ms rounding.
@@ -521,10 +524,20 @@ function checkShadowVehicle(v, bundleAtMs, wasPresent, liveByKey, bundleVehicles
     if (!v.discontinuity) {
       const d = Math.abs(evalTrack(v.smooth, E) - evalTrack(prev.smooth, E));
       sh.contDelta.push(d);
+      // §14.7 smooth amendment (2026-08-21): fix-driven seams resume from the
+      // phone's shimmed marker; bytes are gated on the shim's envelope
+      // [curve − tol, curve + CATCHUP·(E − prevStart) + tol] (see the
+      // published-chain block for the reasoning). Age seams stay strict.
       // +0.02: both evaluations run on wire values (s rounded to cm), so a
       // server-side seam of exactly 2.00 m can read 2.01–2.02 from bytes.
-      if (d > CONTINUITY_TOL_M + 0.02) {
-        fail(`sh:${v.key}: shadow continuity broken |Δsmooth| = ${d.toFixed(2)} m (G9)`);
+      const shAllowance =
+        kind === 'fix'
+          ? CLIENT_SMOOTH_CATCHUP_V_MS * Math.max(0, (E - prev.smooth[0].t) / 1000)
+          : 0;
+      const sNewSm = evalTrack(v.smooth, E);
+      const sPrevSm = evalTrack(prev.smooth, E);
+      if (sNewSm < sPrevSm - CONTINUITY_TOL_M - 0.02 || sNewSm > sPrevSm + shAllowance + CONTINUITY_TOL_M + 0.02) {
+        fail(`sh:${v.key}: shadow continuity broken Δsmooth = ${(sNewSm - sPrevSm).toFixed(2)} m outside envelope (G9)`);
       }
       if (kind === 'fix') {
         // Direction split: gSigned > 0 = smooth BEHIND the fresh opinion (the
@@ -757,13 +770,26 @@ while (Date.now() - t0 < DURATION_S * 1000) {
       const dSmooth = Math.abs(evalTrack(v.smooth, E) - evalTrack(prev.smooth, E));
       const dOpinion = Math.abs(evalTrack(v.opinion, E) - evalTrack(prev.opinion, E));
       opinionJump.push(dOpinion);
+      // §14.7 smooth amendment (2026-08-21): FIX-driven seams resume from the
+      // PHONE's smooth marker — the previous curve plus the rate-limited
+      // fix-forward walk — not from the raw curve. The fix itself is not on
+      // the wire, but the shim is bounded by construction: projection ∈
+      // [curve, curve + CATCHUP·(E − prevStart)]. Bytes are gated on that
+      // envelope; the exact-fix assertion lives server-side (realism.ts G9).
+      // AGE re-emissions carry no new fix, so their tolerance stays strict.
+      const fixDriven = prev.anchorMs !== v.anchorMs;
+      const allowance = fixDriven
+        ? CLIENT_SMOOTH_CATCHUP_V_MS * Math.max(0, (E - prev.smooth[0].t) / 1000)
+        : 0;
       if (v.discontinuity) {
         discontinuities++;
         contDeltaDisc.push(dSmooth);
       } else {
         contDelta.push(dSmooth);
-        if (dSmooth > CONTINUITY_TOL_M) {
-          fail(`continuity broken ${v.key}: |Δsmooth| = ${dSmooth.toFixed(2)} m > ${CONTINUITY_TOL_M} m`);
+        const sNew = evalTrack(v.smooth, E);
+        const sPrev = evalTrack(prev.smooth, E);
+        if (sNew < sPrev - CONTINUITY_TOL_M || sNew > sPrev + allowance + CONTINUITY_TOL_M) {
+          fail(`continuity broken ${v.key}: Δsmooth = ${(sNew - sPrev).toFixed(2)} m outside [−${CONTINUITY_TOL_M}, +${(allowance + CONTINUITY_TOL_M).toFixed(2)}] m`);
         }
       }
       for (const dt of [0, 10_000, 30_000]) {

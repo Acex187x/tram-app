@@ -955,6 +955,8 @@ export function start(): void {
           perceptual.record({
             key: v.key,
             emittedAtMs: tCompute,
+            latestFixS: v.snap.shapeDistM,
+            anchorMs: v.snap.observedAtMs,
             kind: !prevShadow
               ? 'first'
               : prevShadow.fixObsAtMs !== v.snap.observedAtMs

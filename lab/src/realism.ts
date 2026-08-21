@@ -19,7 +19,7 @@ import {
   TRAJ_V_MAX_GATE_MS,
 } from './config';
 import type { CurveViolationDetail, DipDetail, RegimeStats } from './drive';
-import { evalTrack, seamJustifiedM, type TrackPoint } from './trajectory';
+import { clientSmoothProjectionM, evalTrack, seamJustifiedM, type TrackPoint } from './trajectory';
 
 export interface RealismReading {
   /** Per-segment mean speeds, m/s — what the client actually moves the marker at. */
@@ -651,6 +651,9 @@ export interface PerceptualEmission {
   smooth: TrackPoint[];
   /** Previous emission's smooth track (same chain), for the G9 seam. */
   prevSmooth: TrackPoint[] | null;
+  /** The newest fix under this emission (shim model for the G9 seam). */
+  latestFixS: number;
+  anchorMs: number;
   /** §14.2: request stops excluded from this emission's plan (telemetry). */
   requestSkips: { stopId: string; distM: number }[];
   /** §14.3: this emission holds at an evidence-backed jam position. */
@@ -948,9 +951,17 @@ export class PerceptualCounters {
       if (f.minutes > 0.5) this.flipRateHist.add(f.flips / f.minutes);
     }
 
-    // G9 seam (non-discontinuity re-emissions only).
+    // G9 seam (non-discontinuity re-emissions only). §14.7 smooth amendment
+    // (2026-08-21): a FIX-driven seam resumes from the PHONE's smooth marker —
+    // clientSmoothProjectionM over the previous curve — so that is the datum
+    // continuity is measured against. Age seams have no new fix (shim idle)
+    // and keep the raw-curve datum.
     if (!e.discontinuity && e.prevSmooth !== null) {
-      const d = Math.abs(evalTrack(e.smooth, e.emittedAtMs) - evalTrack(e.prevSmooth, e.emittedAtMs));
+      const datum =
+        e.kind === 'fix'
+          ? clientSmoothProjectionM(e.prevSmooth, e.latestFixS, e.anchorMs, e.emittedAtMs)
+          : evalTrack(e.prevSmooth, e.emittedAtMs);
+      const d = Math.abs(evalTrack(e.smooth, e.emittedAtMs) - datum);
       if (d > this.maxSeamM) this.maxSeamM = d;
       if (d > 2) this.seamViolations++;
     }
