@@ -112,6 +112,63 @@ export class ConvexPublisher {
     return this.lastPublished.get(key) ?? null;
   }
 
+  // ── the cold-start geometry pack (convex/geometryPack.ts) ──────────────────
+
+  private lastPackAtMs = 0;
+  private packUploads = 0;
+  private packFailures = 0;
+  private packLastError: string | null = null;
+
+  /**
+   * Upload the current pack to Convex file storage (skips when the pack has
+   * not been rebuilt since the last upload). Never throws.
+   */
+  async uploadGeometryPack(pack: {
+    buf: Uint8Array;
+    meta: { shapes: number; trips: number; gzipBytes: number };
+    atMs: number;
+  }): Promise<void> {
+    if (!this.enabled || pack.atMs === this.lastPackAtMs) return;
+    try {
+      const { uploadUrl } = await this.call<{ uploadUrl: string }>('geometryPack:startUpload', {
+        token: ENGINE_PUSH_TOKEN,
+      });
+      const res = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/gzip' },
+        // Node 22's undici accepts a Uint8Array body; the DOM lib typings the
+        // shared tsconfig uses do not know that — hence the cast, not a copy.
+        body: pack.buf as unknown as BodyInit,
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!res.ok) throw new Error(`pack upload HTTP ${res.status}`);
+      const { storageId } = (await res.json()) as { storageId: string };
+      await this.call('geometryPack:commit', {
+        token: ENGINE_PUSH_TOKEN,
+        storageId,
+        atMs: pack.atMs,
+        shapes: pack.meta.shapes,
+        trips: pack.meta.trips,
+        gzipBytes: pack.meta.gzipBytes,
+      });
+      this.lastPackAtMs = pack.atMs;
+      this.packUploads++;
+      this.packLastError = null;
+    } catch (e) {
+      this.packFailures++;
+      this.packLastError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  packGauges(): { uploads: number; failures: number; lastError: string | null; lastAtMs: number } {
+    return {
+      uploads: this.packUploads,
+      failures: this.packFailures,
+      lastError: this.packLastError,
+      lastAtMs: this.lastPackAtMs,
+    };
+  }
+
   gauges(): PublishGauges {
     return {
       enabled: this.enabled,
@@ -126,16 +183,21 @@ export class ConvexPublisher {
   }
 
   private async mutate(args: Record<string, unknown>): Promise<void> {
+    await this.call('trajectories:publish', args);
+  }
+
+  private async call<T = unknown>(path: string, args: Record<string, unknown>): Promise<T> {
     const res = await fetch(`${CONVEX_URL}/api/mutation`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: 'trajectories:publish', args, format: 'json' }),
+      body: JSON.stringify({ path, args, format: 'json' }),
       signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) throw new Error(`trajectories:publish HTTP ${res.status}`);
-    const body = (await res.json()) as { status: string; errorMessage?: string };
+    if (!res.ok) throw new Error(`${path} HTTP ${res.status}`);
+    const body = (await res.json()) as { status: string; value?: T; errorMessage?: string };
     if (body.status !== 'success') {
-      throw new Error(`trajectories:publish: ${body.errorMessage ?? body.status}`);
+      throw new Error(`${path}: ${body.errorMessage ?? body.status}`);
     }
+    return body.value as T;
   }
 }
