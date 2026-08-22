@@ -230,6 +230,14 @@ export interface PhysicsDebugInfo {
    * two-phase switching VISIBLE instead of a sub-second flash.
    */
   profileHistory: { source: 'ml' | 'naive'; ageS: number }[];
+  /**
+   * The SAME fix, two ways: its raw coordinates projected onto the route
+   * axis, minus its reported shapeDistM. The Prague feed routinely
+   * contradicts itself by ±70 m between the two — the whole pipeline lives
+   * on the axis, so this row is how «опора не там, где фикс» becomes a
+   * number instead of a mystery. Null without geometry.
+   */
+  fixCoordVsAxisM: number | null;
   /** Rendered distance in the active mode, m. */
   simDistM: number;
   /** Continuity-curve distance, m (null without a trajectory). */

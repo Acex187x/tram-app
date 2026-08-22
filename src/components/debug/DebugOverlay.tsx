@@ -369,6 +369,10 @@ const GUIDE_SECTIONS: GuideSection[] = [
         'Последний СКАЧОК маркера, который не объясняется ездой (вперёд больше ~20 м/с + запас, или назад больше 10 м): сколько метров и когда. Минус = маркер улетел НАЗАД. Именно эта строка ловит «телепортировался и стоит» — если она загорелась, смотри, в каком режиме была поправка и что в ДАННЫХ С БД.',
       ],
       ['фикс', 'Свежайший фикс на телефоне: метры по маршруту и возраст.'],
+      [
+        'коорд−ось',
+        'Один и тот же фикс в двух представлениях фида: сырые координаты, спроецированные на ось маршрута, минус заявленная дистанция по оси. Пражский фид рутинно противоречит сам себе до ±70 м (замерено 2026-08-22: у 65 % флота разъезд > 25 м, у стоящих на остановках хуже всего). Весь движок живёт на ОСИ — поэтому ОПОРА на карте (ось) и ФИКС (координаты) могут стоять в разных местах при нулевой слепой зоне: это противоречие данных города, не баг пайплайна.',
+      ],
       ['наблюдаемый темп', 'Скорость по последним двум фиксам. Ею же едет клиентская протяжка.'],
     ],
   },
@@ -705,17 +709,27 @@ function DebugLive({ tramKey }: { tramKey: string }) {
               value={dbg.emissionAgeS != null ? `${num(dbg.emissionAgeS, 1)}с назад` : '—'}
               warn={dbg.emissionAgeS != null && dbg.emissionAgeS > 70}
             />
-            {/* Историю ВИДНО, мгновенный флаг — нет: naive живёт ~1–3 с. */}
+            {/* Историю ВИДНО, мгновенный флаг — нет. Для наивных вставок
+                показано, СКОЛЬКО каждая прожила до следующего пересчёта —
+                прямой ответ на «наивный живёт дольше, чем показывают». */}
             <Row
               label="смены профиля"
               value={
                 dbg.profileHistory.length > 0
                   ? dbg.profileHistory
                       .slice(0, 4)
-                      .map((e) => `${e.source === 'naive' ? 'наив' : 'ml'} ${num(e.ageS, 0)}с`)
+                      .map((e, i, arr) => {
+                        const base = `${e.source === 'naive' ? 'наив' : 'ml'} ${num(e.ageS, 1)}с`;
+                        // lived = my age − the age of the NEXT (newer) entry
+                        const next = i > 0 ? arr[i - 1] : null;
+                        return e.source === 'naive' && next
+                          ? `${base}(жил ${num(Math.max(0, e.ageS - next.ageS), 1)}с)`
+                          : base;
+                      })
                       .join(' ← ')
                   : '—'
               }
+              warn={dbg.profileHistory[0]?.source === 'naive' && dbg.profileHistory[0].ageS > 6}
             />
           </View>
 
@@ -756,6 +770,14 @@ function DebugLive({ tramKey }: { tramKey: string }) {
               warn={dbg.lastJumpM != null && dbg.lastJumpAgoS != null && dbg.lastJumpAgoS < 120}
             />
             <Row label="фикс" value={`${num(dbg.obsDistM)}м · ${num(dbg.fixAgeS, 1)}с`} />
+            {/* Один фикс, два представления: координаты, спроецированные на
+                ось маршрута, минус заявленная дистанция. Пражский фид
+                противоречит сам себе до ±70 м — вот НА СКОЛЬКО прямо сейчас. */}
+            <Row
+              label="коорд−ось"
+              value={dbg.fixCoordVsAxisM != null ? `${signed(dbg.fixCoordVsAxisM, 0)}м` : '—'}
+              warn={dbg.fixCoordVsAxisM != null && Math.abs(dbg.fixCoordVsAxisM) > 50}
+            />
             <Row label="наблюдаемый темп" value={`${num(dbg.observedPaceMs * 3.6, 1)} км/ч`} />
           </View>
 

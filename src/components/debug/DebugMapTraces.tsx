@@ -114,7 +114,10 @@ function makeFrame(
   // dot is never active — physics v3 has no render mode that shows the raw
   // fix, so marking it would claim something untrue.
   features.push(
-    pointFeature('debug-fix', positions.fix, 'fix', `FIX · ${fixAgeS.toFixed(1)}s`, false),
+    // «коорд» в подписи — это СЫРЫЕ координаты фикса; его представление на
+    // ОСИ маршрута рисует кольцо ОПОРЫ. Разъезд между ними = противоречие
+    // самого фида (строка «коорд−ось» в оверлее), не баг рендера.
+    pointFeature('debug-fix', positions.fix, 'fix', `ФИКС·коорд ${fixAgeS.toFixed(1)}с`, false),
     pointFeature(
       'debug-fixed',
       positions.fixed,

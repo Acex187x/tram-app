@@ -20,6 +20,7 @@ import type {
   PhysicsDebugInfo,
 } from '@/lib/types';
 import { segmentIndexAt } from '@/lib/geo/polyline';
+import { projectDistanceOnPolyline } from '@/lib/golemio/gtfs';
 import { adaptTram, NAIVE_HORIZON_S } from './adapter';
 import { evalSpeedMs, evalTrajectory, trackEndMs } from './evaluator';
 import { fixForwardTauMs } from './fixForward';
@@ -394,6 +395,14 @@ export class TramFleet {
 
     const jump = this.jumps.get(key);
     const hasJump = jump !== undefined && jump.jumpAtMs > 0;
+    const geometry = this.geometries.get(key);
+    const fixCoordVsAxisM = geometry
+      ? projectDistanceOnPolyline(
+          [snapshot.coordinates[0], snapshot.coordinates[1]],
+          geometry.coordinates,
+          geometry.cumDistM,
+        ) - snapshot.shapeDistM
+      : null;
     const profileLog = this.profileLog.get(key)?.log ?? [];
     const profileHistory = profileLog
       .map((e) => ({ source: e.source, ageS: (serverNowMs - e.atMs) / 1000 }))
@@ -401,6 +410,7 @@ export class TramFleet {
 
     return {
       profileHistory,
+      fixCoordVsAxisM,
       hasTrajectory: vehicle !== undefined,
       hasGeometry: state.hasGeometry,
       mode,
