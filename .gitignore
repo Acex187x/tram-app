@@ -62,3 +62,5 @@ __pycache__/
 lab/node_modules/
 lab/.env
 lab/data/
+bench/sessions/
+bench/node_modules/

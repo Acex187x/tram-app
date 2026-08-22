@@ -1,0 +1,7 @@
+{
+  "name": "tram-physics-bench",
+  "private": true,
+  "description": "Deterministic test bench over the REAL client physics (src/lib/physics) — record live Convex streams, replay them through the exact code the phone runs, detect anomalies.",
+  "dependencies": { "tsx": "^4.19.0" },
+  "devDependencies": { "@types/node": "^22.0.0", "typescript": "^5.5.0" }
+}
