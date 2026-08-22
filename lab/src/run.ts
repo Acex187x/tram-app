@@ -47,6 +47,7 @@ import {
   TRAJ_V3_PUBLISH,
   INSTANT_NAIVE_GAP_M,
   NAIVE_LATENCY_CAP_S,
+  STUCK_COORD_EPS_M,
   TRAJ_V_MAX_MS,
   horizonBucket,
 } from './config';
@@ -60,6 +61,7 @@ import {
   STUCK_NEAR_STOP_M,
   type DriveBuilt,
 } from './drive';
+import { projectDistanceOnPolyline } from '@/lib/golemio/gtfs';
 import { GeometryStore } from './geometry';
 import { LearnedModel } from './learned';
 import { buildMlFeatures, MlClient } from './ml';
@@ -489,7 +491,18 @@ export function start(): void {
           break;
         }
       }
-      if (!nearStop) stuckAtM = snap.shapeDistM;
+      // Cross-check against the OTHER representation of the same two fixes:
+      // the axis routinely freezes while the coordinates keep driving (the
+      // ±70 m feed self-contradiction). A flat axis alone declared PHANTOM
+      // jams — the drive then held the tram mid-block for the whole next fix
+      // gap (p90 ~79 s) while the coords showed it long gone. Standing is
+      // asserted only when BOTH representations agree.
+      if (!nearStop) {
+        const coordAdvanceM =
+          projectDistanceOnPolyline(snap.coordinates, geom.coordinates, geom.cumDistM) -
+          projectDistanceOnPolyline(prev.snap.coordinates, geom.coordinates, geom.cumDistM);
+        if (Math.abs(coordAdvanceM) <= STUCK_COORD_EPS_M) stuckAtM = snap.shapeDistM;
+      }
     }
     lastFix.set(snap.key, { snap, cycle, fixGapS: gapS > 0 ? round2(gapS) : 0, stuckAtM });
   }
