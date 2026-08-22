@@ -45,6 +45,8 @@ import {
   TRAJ_STEP_MS,
   TRAJ_STAND_ASSERT_MS,
   TRAJ_V3_PUBLISH,
+  INSTANT_NAIVE_GAP_M,
+  NAIVE_LATENCY_CAP_S,
   TRAJ_V_MAX_MS,
   horizonBucket,
 } from './config';
@@ -769,16 +771,27 @@ export function start(): void {
       geom: RouteGeometry;
     }): TrajectoryPoint[] => {
       const anchorS = Math.min(v.geom.totalM, Math.max(0, v.snap.shapeDistM));
+      const fixAgeS = Math.max(0, (tCompute - v.snap.observedAtMs) / 1000);
+      // The learned walker (release holds + learned pace) is the naive model;
+      // its own anchor covers the trip guard. The FALLBACK (no walker anchor —
+      // fresh trips, cold vehicles) must not invent motion: a tram the feed
+      // says is standing holds AT its fix, and a moving one dead-reckons the
+      // feed latency only up to NAIVE_LATENCY_CAP_S — pace × unbounded fix-age
+      // inflated standing trams forward, and the next fix corrected them
+      // BACKWARD as a teleport (the build-22 «клоунада» class).
+      const standing = v.snap.statePosition === 'at_stop';
+      const latencyS = standing ? 0 : Math.min(fixAgeS, NAIVE_LATENCY_CAP_S);
       const naive: TrajectoryPoint[] = [];
       let maxS = anchorS;
       for (let k = 0; k < TRAJ_POINTS; k++) {
         const t = tCompute + k * TRAJ_STEP_MS;
         const walked = learned.predict(v.key, t, v.geom);
-        const paceS =
-          anchorS +
-          Math.max(0.5, learned.paceAt(v.geom.shapeId, v.geom.routeId, anchorS, t)) *
-            Math.max(0, (t - v.snap.observedAtMs) / 1000);
-        const s = walked !== null && Number.isFinite(walked) ? walked : paceS;
+        const fallbackS = standing
+          ? anchorS
+          : anchorS +
+            Math.max(0.5, learned.paceAt(v.geom.shapeId, v.geom.routeId, anchorS, t)) *
+              (latencyS + (k * TRAJ_STEP_MS) / 1000);
+        const s = walked !== null && Number.isFinite(walked) ? walked : fallbackS;
         maxS = Math.max(maxS, Math.min(v.geom.totalM, Math.max(anchorS, s)));
         naive.push({ t, s: round2(maxS) });
       }
@@ -876,7 +889,17 @@ export function start(): void {
             ? evalTrack(pv.opinion, tEmit)
             : 0;
         const ageFloorShadowS = ageFloorOf(prevShadow?.v2, prevShadow?.fixObsAtMs);
-        const ageFloorPubS = ageFloorOf(prevEntry?.v2, prevEntry?.fixObsAtMs);
+        // The pass-2 ML upgrade must not be floored at the pass-1 NAIVE
+        // opinion: the floor exists to damp same-evidence nowcast jitter, but
+        // here the ML answer is strictly better information about the same
+        // anchor — flooring it locked pass-1 error in, and the NEXT fix then
+        // corrected the whole chain backward as a teleport (build-22 G13).
+        // The smooth track still seams from the previous curve, so releasing
+        // the opinion floor cannot make the rendered smooth marker jump.
+        const ageFloorPubS =
+          prevEntry?.source === 'naive' && source === 'ml'
+            ? 0
+            : ageFloorOf(prevEntry?.v2, prevEntry?.fixObsAtMs);
         // §14.7 seam-rule input: the PREVIOUS emission's anchor fix, present
         // exactly when this is a FIX-DRIVEN re-emission of the same trip.
         const seamPrevFixOf = (
@@ -1086,10 +1109,23 @@ export function start(): void {
         });
     };
 
-    // ── pass 1: instant naive re-anchor for every fix-driven rebuild ────────
+    // ── pass 1: instant naive re-anchor — WHEN a correction is actually due ─
+    // The doctrine: a fresh fix must move the marker the same second it lands.
+    // But when the old ML curve already passes within INSTANT_NAIVE_GAP_M of
+    // the new fix, it IS the better answer for the next ~2 s — replacing it
+    // with a worse naive model added two seams and visible jitter to every
+    // fix window (build-22 field report). So pass 1 fires exactly when the
+    // old curve is provably wrong: gone, wrong trip, overrun entirely
+    // (the τ=∞ teleport class), or off by more than the gate.
     const instant = stale.filter((x) => {
       const entry = trajectories.get(x.key);
-      return entry === undefined || entry.fixObsAtMs !== x.snap.observedAtMs;
+      if (entry === undefined) return true;
+      if (entry.fixObsAtMs === x.snap.observedAtMs) return false; // not fix-driven
+      if (entry.v2.tripId !== x.snap.tripId) return true;
+      const o = entry.v2.opinion;
+      if (o.length === 0) return true;
+      if (x.snap.shapeDistM > o[o.length - 1].s + 1) return true; // overrun
+      return Math.abs(x.snap.shapeDistM - evalTrack(o, x.snap.observedAtMs)) > INSTANT_NAIVE_GAP_M;
     });
     for (const v of instant) {
       buildAndStore(v, naivePointsFor(v), 'naive', false);
