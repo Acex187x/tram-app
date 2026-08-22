@@ -43,12 +43,25 @@ itself). `GET /api/trajectories/v2` STAYS, byte-compatible, for the research
 generations (`?gen=v3|mix`), the lab pages and the gates.
 
 Each published vehicle carries one field the HTTP wire does not:
-`source: 'ml' | 'naive'`. `naive` marks the ML-outage substitute — the owner's
-replacement doctrine: when ML is unavailable, a vehicle's old curve is KEPT
-while it still describes the tram, and replaced by the learned-walker naive
-prediction (through the same generator, same kinematic limits) only when the
-newest fix proves the tram drove past everything the curve predicts, the curve
-ran out of horizon, or the trip changed.
+`source: 'ml' | 'naive'`, plus `anchorS` (the anchor fix's shapeDistM, for
+devtools).
+
+**Two-phase emission (owner doctrine, amended 2026-08-21 evening).** A fresh
+fix must move the FIXED point the same second it lands, never an ML round trip
+later. Every fix-driven rebuild therefore emits twice:
+
+1. **instant** — the learned-walker naive prediction (pure TS, sub-ms),
+   through the same generator and kinematic limits, published to Convex
+   immediately (`source: 'naive'`);
+2. **the ML upgrade** — when `predictBatch` returns (~0.3–2.5 s), the vehicle
+   is re-emitted from the ml-gbdt targets (`source: 'ml'`) with its own fresh
+   `emittedAtMs`, chaining through the pass-1 seam state (same anchor ⇒ the
+   age-re-emission floors apply, so the upgrade cannot step backward), and
+   replaces the naive curve in Convex.
+
+ML unavailability is therefore not a special branch any more: pass 2 simply
+never lands and the fleet keeps driving on pass-1 physics. Age-driven rebuilds
+(60 s refresh, no new fix) skip pass 1 and keep the old curve when ML is down.
 
 ## Wire: `GET /api/trajectories/v2` (research transport; same shape as the Convex rows)
 

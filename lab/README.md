@@ -222,6 +222,19 @@ number that describes the screen. See the 2026-08-19 Findings entry.
 
 ## Findings log
 
+- **2026-08-21 (evening): two-phase emission — naive физика теперь основной
+  путь каждого фикса, не пыльная ветка отказа.** Owner field verdict on build
+  21: «переключение на наивную физику вообще не работает» — правда в том, что
+  при живом ML оно и не должно было включаться: каждый фикс ждал ML-раундтрип
+  (0.3–2.5 с + очередь), и в это окно клиент вёл маркер по СТАРОЙ кривой
+  (или шёл пешком в τ=∞). Теперь `refreshTrajectories` эмитит дважды: pass 1
+  — мгновенный learned-walker профиль от нового фикса (sub-ms, `source:
+  'naive'`), опубликованный в Convex ДО обращения к ML; pass 2 — ML-апгрейд
+  тем же генератором со своим `emittedAtMs`, цепляющийся через seam-состояние
+  pass 1 (тот же якорь ⇒ age-флоры, назад шагнуть не может). ML-падение =
+  «pass 2 не пришёл», флот едет на pass-1 физике. Каждый фикс теперь
+  прогоняет наивный путь — сломаться незаметно он больше не может.
+
 - **2026-08-21: THE PROMOTION — ml-gbdt is the production engine, curves live
   in Convex, the lab stops being the app's dependency.** Owner verdict: the ML
   engine (gbdt) is final. What changed:

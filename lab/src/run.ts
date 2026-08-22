@@ -750,97 +750,81 @@ export function start(): void {
           : 1,
     );
 
-    // Chunk on VEHICLE boundaries so a failed chunk drops whole vehicles only.
-    const perChunk = Math.max(1, Math.floor(TRAJ_ML_MAX_ROWS / TRAJ_POINTS));
-    for (let i = 0; i < stale.length; i += perChunk) {
-      const group = stale.slice(i, i + perChunk);
-      const rows: number[][] = [];
-      for (const v of group) {
-        for (let k = 0; k < TRAJ_POINTS; k++) {
-          rows.push(buildMlFeatures(v.snap, v.geom, learned, tCompute + k * TRAJ_STEP_MS));
-        }
+    // ── the two-phase emission (owner doctrine, 2026-08-21 evening) ─────────
+    // A fresh fix must move the FIXED point the same second it lands, not an
+    // ML round trip later. So every fix-driven rebuild emits TWICE:
+    //   pass 1  INSTANT: the learned-walker naive prediction — pure TS, sub-ms
+    //           per vehicle — through the same generator, published to Convex
+    //           immediately (`source: 'naive'` on the wire);
+    //   pass 2  the ML upgrade: when predictBatch returns, the same vehicle is
+    //           re-emitted from the ml-gbdt targets (`source: 'ml'`), chaining
+    //           through the pass-1 emission's seam state, and replaces it in
+    //           Convex a second or two later.
+    // If ML is down, pass 2 simply never lands and the fleet keeps driving on
+    // pass-1 physics — the "switch to the simple model" is now the default
+    // path exercised on every fix, not a dusty failure branch.
+    const naivePointsFor = (v: {
+      key: string;
+      snap: TramSnapshot;
+      geom: RouteGeometry;
+    }): TrajectoryPoint[] => {
+      const anchorS = Math.min(v.geom.totalM, Math.max(0, v.snap.shapeDistM));
+      const naive: TrajectoryPoint[] = [];
+      let maxS = anchorS;
+      for (let k = 0; k < TRAJ_POINTS; k++) {
+        const t = tCompute + k * TRAJ_STEP_MS;
+        const walked = learned.predict(v.key, t, v.geom);
+        const paceS =
+          anchorS +
+          Math.max(0.5, learned.paceAt(v.geom.shapeId, v.geom.routeId, anchorS, t)) *
+            Math.max(0, (t - v.snap.observedAtMs) / 1000);
+        const s = walked !== null && Number.isFinite(walked) ? walked : paceS;
+        maxS = Math.max(maxS, Math.min(v.geom.totalM, Math.max(anchorS, s)));
+        naive.push({ t, s: round2(maxS) });
       }
-      // ML down / not ready ⇒ `pred` is null and each vehicle below decides
-      // hold-vs-naive individually. Dropping the whole group (the pre-promotion
-      // behavior) rendered every affected tram as a frozen dim dot; the
-      // production doctrine keeps the marker driving on the best available
-      // physics instead.
-      const pred = await ml.predictBatch(rows);
-      group.forEach((v, gi) => {
-        // Anchor-floor hotfix (2026-08-17, owner field report: the fixed track
-        // teleported BEHIND the latest fix): the anchor fix is a hard floor —
-        // the tram provably was at shapeDistM at anchor time and does not
-        // reverse, so an ML Δs < 0 is model error, clamped to 0. Applies to
-        // every consumer of `points` (v1 feed, current gen, v3, mix) at the
-        // single place the samples are built.
-        const anchorS = Math.min(v.geom.totalM, Math.max(0, v.snap.shapeDistM));
-        let source: 'ml' | 'naive' = 'ml';
-        let points: TrajectoryPoint[] | null = null;
-        if (pred) {
-          const mlPoints: TrajectoryPoint[] = [];
-          let dsClampedHere = 0;
-          let maxS = 0;
-          let valid = true;
-          for (let k = 0; k < TRAJ_POINTS; k++) {
-            const ds = pred.gbdt[gi * TRAJ_POINTS + k];
-            if (ds === null || !Number.isFinite(ds)) {
-              valid = false;
-              break;
-            }
-            if (ds < 0) dsClampedHere++;
-            const s = Math.min(v.geom.totalM, Math.max(anchorS, v.snap.shapeDistM + ds));
-            // Each horizon is predicted independently, so the sequence can jitter
-            // backwards; the app lerps it blindly, so clamp it monotone here.
-            maxS = k === 0 ? s : Math.max(maxS, s);
-            mlPoints.push({ t: tCompute + k * TRAJ_STEP_MS, s: round2(maxS) });
-          }
-          if (valid) {
-            points = mlPoints;
-            if (dsClampedHere > 0) {
-              anchorDsClampedPoints += dsClampedHere;
-              anchorDsClampedEmissions++;
-            }
-          }
-        }
-        if (points === null) {
-          // No ML answer for this vehicle. The owner's replacement doctrine
-          // (2026-08-21): KEEP the old curve while it still describes the tram
-          // — replace it only when the newest fix proves the tram drove past
-          // everything the curve predicts, the curve ran out of horizon, or
-          // the trip changed. The substitute is the learned-walker naive
-          // prediction (release holds + learned pace — the "simple physics
-          // engine"), flowing through the SAME generator below so kinematic
-          // limits and seam continuity hold for it too.
-          const held = trajectories.get(v.key);
-          const heldO = held?.v2.opinion;
-          const canHold =
-            held !== undefined &&
-            held.v2.tripId === v.snap.tripId &&
-            heldO !== undefined &&
-            heldO.length > 0 &&
-            tCompute < heldO[heldO.length - 1].t &&
-            v.snap.shapeDistM <= heldO[heldO.length - 1].s + 1;
-          if (canHold) {
-            trajMlHeld++;
-            return;
-          }
-          const naive: TrajectoryPoint[] = [];
-          let maxS = anchorS;
-          for (let k = 0; k < TRAJ_POINTS; k++) {
-            const t = tCompute + k * TRAJ_STEP_MS;
-            const walked = learned.predict(v.key, t, v.geom);
-            const paceS =
-              anchorS +
-              Math.max(0.5, learned.paceAt(v.geom.shapeId, v.geom.routeId, anchorS, t)) *
-                Math.max(0, (t - v.snap.observedAtMs) / 1000);
-            const s = walked !== null && Number.isFinite(walked) ? walked : paceS;
-            maxS = Math.max(maxS, Math.min(v.geom.totalM, Math.max(anchorS, s)));
-            naive.push({ t, s: round2(maxS) });
-          }
-          points = naive;
-          source = 'naive';
-          trajNaiveEmissions++;
-        }
+      return naive;
+    };
+
+    // Anchor-floor hotfix (2026-08-17): the anchor fix is a hard floor — the
+    // tram provably was at shapeDistM at anchor time and does not reverse, so
+    // an ML Δs < 0 is model error, clamped to 0; independently-predicted
+    // horizons can jitter backwards, clamped monotone. Null = unusable answer.
+    const mlPointsFor = (
+      v: { snap: TramSnapshot; geom: RouteGeometry },
+      gi: number,
+      gbdt: (number | null)[],
+    ): TrajectoryPoint[] | null => {
+      const anchorS = Math.min(v.geom.totalM, Math.max(0, v.snap.shapeDistM));
+      const points: TrajectoryPoint[] = [];
+      let dsClampedHere = 0;
+      let maxS = 0;
+      for (let k = 0; k < TRAJ_POINTS; k++) {
+        const ds = gbdt[gi * TRAJ_POINTS + k];
+        if (ds === null || !Number.isFinite(ds)) return null;
+        if (ds < 0) dsClampedHere++;
+        const sK = Math.min(v.geom.totalM, Math.max(anchorS, v.snap.shapeDistM + ds));
+        maxS = k === 0 ? sK : Math.max(maxS, sK);
+        points.push({ t: tCompute + k * TRAJ_STEP_MS, s: round2(maxS) });
+      }
+      if (dsClampedHere > 0) {
+        anchorDsClampedPoints += dsClampedHere;
+        anchorDsClampedEmissions++;
+      }
+      return points;
+    };
+
+    /** One vehicle through the generator into the published (and optionally
+     *  shadow) chain. `tEmit` is THIS emission's birth — pass 1 and pass 2
+     *  must never share one, or two different byte-sets would claim the same
+     *  blend anchor. */
+    const buildAndStore = (
+      v: { key: string; snap: TramSnapshot; geom: RouteGeometry; fixGapS: number; stuckAtM: number | null },
+      points: TrajectoryPoint[],
+      source: 'ml' | 'naive',
+      includeShadow: boolean,
+    ): void => {
+      const tEmit = Date.now();
+      const anchorS = Math.min(v.geom.totalM, Math.max(0, v.snap.shapeDistM));
         // ── physics v3: opinion (+ modal stops) and smooth (+ continuity) ──
         // The modal hold mirrors learned-2h's probability model exactly (same
         // anchor epoch, same already-standing credit, same release Normal), so
@@ -867,7 +851,7 @@ export function start(): void {
           tripId: v.snap.tripId,
           line: v.snap.line,
           anchorMs: v.snap.observedAtMs,
-          emittedAtMs: tCompute,
+          emittedAtMs: tEmit,
           raw: points,
         };
         // The drive consumes the learned surfaces through a narrow adapter so
@@ -889,7 +873,7 @@ export function start(): void {
         const prevEntry = trajectories.get(v.key);
         const ageFloorOf = (pv: V2Vehicle | undefined, pFixObsAtMs: number | undefined): number =>
           pv !== undefined && pv.tripId === v.snap.tripId && pFixObsAtMs === v.snap.observedAtMs
-            ? evalTrack(pv.opinion, tCompute)
+            ? evalTrack(pv.opinion, tEmit)
             : 0;
         const ageFloorShadowS = ageFloorOf(prevShadow?.v2, prevShadow?.fixObsAtMs);
         const ageFloorPubS = ageFloorOf(prevEntry?.v2, prevEntry?.fixObsAtMs);
@@ -917,6 +901,7 @@ export function start(): void {
           prevEntry?.anchorFixS,
         );
 
+        if (includeShadow) {
         // ── curvegen-v3 SHADOW build (design §12 phase A): its own seam
         // chain, its own realism gate + perceptual counters, never published
         // while TRAJ_V3_PUBLISH is off.
@@ -949,12 +934,12 @@ export function start(): void {
           if (shadowBuilt.vehicle.discontinuity) shadowDiscontinuities++;
           if (shadowBuilt.meta.ageFloorApplied) ageFloorShadowApplied++;
           if (shadowBuilt.meta.seamFloorApplied) seamFloorShadowApplied++;
-          realismShadow.check(v.key, 'opinion', shadowBuilt.vehicle.opinion, tCompute);
-          realismShadow.check(v.key, 'smooth', shadowBuilt.vehicle.smooth, tCompute);
-          realismShadow.checkAnchorFloor(v.key, shadowBuilt.vehicle.opinion, anchorS, tCompute);
+          realismShadow.check(v.key, 'opinion', shadowBuilt.vehicle.opinion, tEmit);
+          realismShadow.check(v.key, 'smooth', shadowBuilt.vehicle.smooth, tEmit);
+          realismShadow.checkAnchorFloor(v.key, shadowBuilt.vehicle.opinion, anchorS, tEmit);
           perceptual.record({
             key: v.key,
-            emittedAtMs: tCompute,
+            emittedAtMs: tEmit,
             latestFixS: v.snap.shapeDistM,
             anchorMs: v.snap.observedAtMs,
             kind: !prevShadow
@@ -983,7 +968,7 @@ export function start(): void {
           ) {
             seamShadow.record({
               key: v.key,
-              emittedAtMs: tCompute,
+              emittedAtMs: tEmit,
               prevOpinion: prevShadow.v2.opinion,
               newOpinion: shadowBuilt.vehicle.opinion,
               latestFixS: v.snap.shapeDistM,
@@ -991,7 +976,7 @@ export function start(): void {
               anchorMs: v.snap.observedAtMs,
               fixGapS: v.fixGapS,
               standingStart:
-                (modal !== null && modal.releaseAtMs > tCompute + TRAJ_STAND_ASSERT_MS) ||
+                (modal !== null && modal.releaseAtMs > tEmit + TRAJ_STAND_ASSERT_MS) ||
                 shadowBuilt.meta.jamHolding,
               discontinuity: shadowBuilt.vehicle.discontinuity,
             });
@@ -1005,6 +990,8 @@ export function start(): void {
             target: points,
           });
           shadowChainBroken.delete(v.key);
+        }
+
         }
 
         // ── the PUBLISHED bundle: the current generator until the flip flag
@@ -1058,9 +1045,9 @@ export function start(): void {
         // Realism gate, continuous side: measure what we are about to publish
         // exactly as a lerping client will experience it (protocol §Kinematic
         // limits). Counters are lifetime, so a regression surfaces in digests.
-        realism.check(v.key, 'opinion', v2.opinion, tCompute);
-        realism.check(v.key, 'smooth', v2.smooth, tCompute);
-        realism.checkAnchorFloor(v.key, v2.opinion, anchorS, tCompute);
+        realism.check(v.key, 'opinion', v2.opinion, tEmit);
+        realism.check(v.key, 'smooth', v2.smooth, tEmit);
+        realism.checkAnchorFloor(v.key, v2.opinion, anchorS, tEmit);
 
         // Re-anchor seam telemetry, published chain (fix-driven only).
         if (
@@ -1070,14 +1057,14 @@ export function start(): void {
         ) {
           seamPub.record({
             key: v.key,
-            emittedAtMs: tCompute,
+            emittedAtMs: tEmit,
             prevOpinion: prevEntry.v2.opinion,
             newOpinion: v2.opinion,
             latestFixS: v.snap.shapeDistM,
             prevFixS: prevEntry.anchorFixS,
             anchorMs: v.snap.observedAtMs,
             fixGapS: v.fixGapS,
-            standingStart: modal !== null && modal.releaseAtMs > tCompute + TRAJ_STAND_ASSERT_MS,
+            standingStart: modal !== null && modal.releaseAtMs > tEmit + TRAJ_STAND_ASSERT_MS,
             discontinuity: v2.discontinuity,
           });
         }
@@ -1097,6 +1084,50 @@ export function start(): void {
           opinionK: built.opinion,
           smoothK: built.smooth,
         });
+    };
+
+    // ── pass 1: instant naive re-anchor for every fix-driven rebuild ────────
+    const instant = stale.filter((x) => {
+      const entry = trajectories.get(x.key);
+      return entry === undefined || entry.fixObsAtMs !== x.snap.observedAtMs;
+    });
+    for (const v of instant) {
+      buildAndStore(v, naivePointsFor(v), 'naive', false);
+      trajNaiveEmissions++;
+    }
+    if (instant.length > 0) {
+      trajBuiltAtMs = tCompute;
+      await publisher.publishCycle(
+        trajectories,
+        tCompute,
+        TRAJ_V3_PUBLISH ? 'drive-v3' : 'current',
+      );
+    }
+
+    // ── pass 2: the ML upgrade, chunked on vehicle boundaries ───────────────
+    const perChunk = Math.max(1, Math.floor(TRAJ_ML_MAX_ROWS / TRAJ_POINTS));
+    for (let i = 0; i < stale.length; i += perChunk) {
+      const group = stale.slice(i, i + perChunk);
+      const rows: number[][] = [];
+      for (const v of group) {
+        for (let k = 0; k < TRAJ_POINTS; k++) {
+          rows.push(buildMlFeatures(v.snap, v.geom, learned, tCompute + k * TRAJ_STEP_MS));
+        }
+      }
+      const pred = await ml.predictBatch(rows);
+      if (!pred) {
+        // ML down / not ready: pass 1 already covers every fix-driven vehicle
+        // with naive physics, and an age-driven rebuild keeps its old curve.
+        trajMlHeld += group.length;
+        continue;
+      }
+      group.forEach((v, gi) => {
+        const points = mlPointsFor(v, gi, pred.gbdt);
+        if (points === null) {
+          trajMlHeld++;
+          return; // unusable ML answer for this vehicle — naive/old curve stands
+        }
+        buildAndStore(v, points, 'ml', true);
       });
     }
     trajBuiltAtMs = tCompute;
