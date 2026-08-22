@@ -21,6 +21,7 @@ import { CircleLayer, LineLayer, ShapeSource, SymbolLayer } from '@rnmapbox/maps
 import { useEffect, useRef } from 'react';
 
 import { getRuntime } from '@/hooks/tramData';
+import { useServerDebug, type ServerVehicleDebug } from './serverDebug';
 import { haversineM, pointAt, type LngLat } from '@/lib/geo/polyline';
 import { useSelectionStore } from '@/stores/selection';
 import { useSettingsStore } from '@/stores/settings';
@@ -34,6 +35,12 @@ const FIX = '#FF4FA3';
 const FIXED = '#B7FF4A';
 /** The «smooth» (continuity) curve. */
 const SMOOTH = '#4DDBFF';
+/** ML-прогноз: сырые таргет-точки, за которыми едет профиль. */
+const ML_TARGET = '#FFD479';
+/** Опорный фикс — наблюдение, ОТ которого посчитан ML-прогноз. */
+const ML_ANCHOR = '#FFFFFF';
+/** Архивные фиксы движка (где реально видели трамвай). */
+const ENG_FIX = '#FF4FA3';
 
 interface TracePoint {
   atMs: number;
@@ -126,6 +133,11 @@ export function DebugMapTraces() {
   const positionMode = useSettingsStore((s) => s.positionMode);
   const key = followKey ?? selectedKey;
   const sourceRef = useRef<ShapeSource>(null);
+  // ДАННЫЕ С БД для карты: сырые ML-таргеты + опорный фикс + архивные фиксы
+  // движка (3 с поллинг, только пока смонтированы дебаг-трассы).
+  const { data: serverData } = useServerDebug(key);
+  const serverRef = useRef<ServerVehicleDebug | null>(null);
+  serverRef.current = serverData;
   const historyRef = useRef<TraceHistory>({
     key: null,
     fixAtMs: 0,
@@ -185,6 +197,57 @@ export function DebugMapTraces() {
         state.deviationM,
         positionMode,
       );
+      // ML-слой (данные с БД): таргет-точки прогноза, опорный фикс и архивные
+      // фиксы движка — визуальная оценка «насколько модель адекватна и
+      // обновляется ли профиль». Рисуем только для ТЕКУЩЕГО рейса — таргеты
+      // чужого trip лежали бы на чужой оси.
+      const sd = serverRef.current;
+      if (sd?.found && geometry && sd.tripId === state.snapshot.tripId) {
+        const at = (sVal: number): LngLat =>
+          pointAt(
+            geometry.coordinates,
+            geometry.cumDistM,
+            Math.max(0, Math.min(geometry.totalM, sVal)),
+          );
+        const target = sd.target ?? [];
+        target.forEach((pt, i) => {
+          frame.features.push({
+            type: 'Feature',
+            id: `debug-mltarget-${i}`,
+            geometry: { type: 'Point', coordinates: at(pt.s) },
+            properties: {
+              role: 'mltarget',
+              past: pt.t < nowMs ? 1 : 0,
+              label:
+                i === target.length - 1
+                  ? `ML +${Math.max(0, Math.round((pt.t - nowMs) / 1000))}с`
+                  : '',
+            },
+          });
+        });
+        if (sd.anchorFix) {
+          frame.features.push({
+            type: 'Feature',
+            id: 'debug-mlanchor',
+            geometry: { type: 'Point', coordinates: at(sd.anchorFix.s) },
+            properties: {
+              role: 'mlanchor',
+              past: 0,
+              label: `ОПОРА ${Math.round((nowMs - sd.anchorFix.obsAtMs) / 1000)}с`,
+            },
+          });
+        }
+        (sd.fixes ?? []).slice(0, 6).forEach((f, i) => {
+          const sVal = f.shapeDistM ?? f.distM;
+          if (sVal == null) return;
+          frame.features.push({
+            type: 'Feature',
+            id: `debug-engfix-${i}`,
+            geometry: { type: 'Point', coordinates: at(sVal) },
+            properties: { role: 'engfix', past: 1, label: '' },
+          });
+        });
+      }
       void sourceRef.current?.updateShape(frame);
     };
 
@@ -224,7 +287,7 @@ export function DebugMapTraces() {
       <CircleLayer
         id="debug-position-halos"
         slot="top"
-        filter={['==', ['geometry-type'], 'Point']}
+        filter={['all', ['==', ['geometry-type'], 'Point'], ['in', ['get', 'role'], ['literal', ['fix', 'fixed', 'smooth']]]] as never}
         style={{
           circleColor: [
             'match',
@@ -250,7 +313,7 @@ export function DebugMapTraces() {
       <CircleLayer
         id="debug-position-cores"
         slot="top"
-        filter={['==', ['geometry-type'], 'Point']}
+        filter={['all', ['==', ['geometry-type'], 'Point'], ['in', ['get', 'role'], ['literal', ['fix', 'fixed', 'smooth']]]] as never}
         style={{
           circleColor: '#071015',
           circleRadius: ['case', ['==', ['get', 'active'], 1], 7, 5] as unknown as number,
@@ -265,10 +328,48 @@ export function DebugMapTraces() {
           circlePitchAlignment: 'map',
         }}
       />
+      {/* ML-прогноз: таргет-точки (золото; прошедшие — притушены), кольцо
+          опорного фикса и мелкие архивные фиксы движка. */}
+      <CircleLayer
+        id="debug-ml-targets"
+        slot="top"
+        filter={['==', ['get', 'role'], 'mltarget']}
+        style={{
+          circleColor: ML_TARGET,
+          circleOpacity: ['case', ['==', ['get', 'past'], 1], 0.25, 0.85] as unknown as number,
+          circleRadius: ['case', ['==', ['get', 'past'], 1], 3, 4.5] as unknown as number,
+          circleStrokeColor: '#071015',
+          circleStrokeWidth: 1,
+          circlePitchAlignment: 'map',
+        }}
+      />
+      <CircleLayer
+        id="debug-ml-anchor"
+        slot="top"
+        filter={['==', ['get', 'role'], 'mlanchor']}
+        style={{
+          circleColor: 'rgba(0,0,0,0)',
+          circleRadius: 10,
+          circleStrokeColor: ML_ANCHOR,
+          circleStrokeWidth: 2.5,
+          circlePitchAlignment: 'map',
+        }}
+      />
+      <CircleLayer
+        id="debug-eng-fixes"
+        slot="top"
+        filter={['==', ['get', 'role'], 'engfix']}
+        style={{
+          circleColor: ENG_FIX,
+          circleOpacity: 0.35,
+          circleRadius: 2.5,
+          circlePitchAlignment: 'map',
+        }}
+      />
       <SymbolLayer
         id="debug-position-labels"
         slot="top"
-        filter={['==', ['geometry-type'], 'Point']}
+        filter={['all', ['==', ['geometry-type'], 'Point'], ['!=', ['get', 'label'], '']] as never}
         style={{
           textField: ['get', 'label'] as unknown as string,
           textFont: ['DIN Pro Bold', 'Arial Unicode MS Regular'],

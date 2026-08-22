@@ -88,6 +88,16 @@ export class TramFleet {
     string,
     { tripId: string; s: number; atMs: number; jumpM: number; jumpAtMs: number }
   >();
+  /**
+   * Profile-emission log per vehicle (devtools): which source produced each
+   * adopted emission and when. The naive→ml switch lives ~1–3 s — far too
+   * brief for a human watching a 10 Hz readout — so the overlay renders this
+   * ring instead of the instantaneous value alone.
+   */
+  private profileLog = new Map<
+    string,
+    { lastEmittedAtMs: number; log: { source: 'ml' | 'naive'; atMs: number }[] }
+  >();
   /** Render mode mirrored from the settings store by the runtime. */
   private mode: RenderMode = 'smooth';
 
@@ -151,6 +161,9 @@ export class TramFleet {
     this.paces = nextPaces;
     for (const key of this.jumps.keys()) {
       if (!nextSnapshots.has(key)) this.jumps.delete(key); // departed vehicles
+    }
+    for (const key of this.profileLog.keys()) {
+      if (!nextSnapshots.has(key)) this.profileLog.delete(key);
     }
   }
 
@@ -249,6 +262,21 @@ export class TramFleet {
     // Teleport watch — active render mode only, so a diagnostics read in the
     // other mode cannot record a phantom jump.
     if (mode === this.mode) this.watchJump(snapshot, state.simDistM, serverNowMs);
+    // Profile-emission log: one entry per adopted emission (emittedAtMs edge).
+    const vehicle = this.trajectories.getVehicle(snapshot.key);
+    if (vehicle && Number.isFinite(vehicle.emittedAtMs)) {
+      const entry = this.profileLog.get(snapshot.key);
+      if (!entry) {
+        this.profileLog.set(snapshot.key, {
+          lastEmittedAtMs: vehicle.emittedAtMs,
+          log: [{ source: vehicle.source ?? 'ml', atMs: vehicle.emittedAtMs }],
+        });
+      } else if (entry.lastEmittedAtMs !== vehicle.emittedAtMs) {
+        entry.lastEmittedAtMs = vehicle.emittedAtMs;
+        entry.log.push({ source: vehicle.source ?? 'ml', atMs: vehicle.emittedAtMs });
+        if (entry.log.length > 5) entry.log.shift();
+      }
+    }
     return state;
   }
 
@@ -366,8 +394,13 @@ export class TramFleet {
 
     const jump = this.jumps.get(key);
     const hasJump = jump !== undefined && jump.jumpAtMs > 0;
+    const profileLog = this.profileLog.get(key)?.log ?? [];
+    const profileHistory = profileLog
+      .map((e) => ({ source: e.source, ageS: (serverNowMs - e.atMs) / 1000 }))
+      .reverse();
 
     return {
+      profileHistory,
       hasTrajectory: vehicle !== undefined,
       hasGeometry: state.hasGeometry,
       mode,
