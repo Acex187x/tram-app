@@ -121,7 +121,8 @@ export class Detectors {
         nearStopM > 40 &&
         sCoord != null &&
         sCoord - diag.simDistM > 60 &&
-        Math.abs(diag.simDistM - snap.shapeDistM) > 40
+        Math.abs(diag.simDistM - snap.shapeDistM) > 40 &&
+        diag.fixAgeS < 30
       ) {
         once(`smr-${Math.round(tr.standSinceMs / 1000)}`, {
           kind: 'stand-mid-road',
@@ -136,13 +137,18 @@ export class Detectors {
       // платформы — это данные города, не аномалия рендера.
       const offAxisM = Math.abs(diag.simDistM - snap.shapeDistM);
       const offCoordM = sCoord != null ? Math.abs(diag.simDistM - sCoord) : Infinity;
+      // …и только при СВЕЖЕМ фиксе: судить прогноз по фиксу 100+ секундной
+      // давности нельзя — hunt3 показал, что «маркер не у остановки» при
+      // молчащем фиде это ML, правильно уехавший вперёд (следующий фикс
+      // подтверждал предсказанное место).
       if (
         standS >= 10 &&
         snap.statePosition === 'at_stop' &&
         geom &&
         snap.lastStopId &&
         offAxisM > 40 &&
-        offCoordM > 40
+        offCoordM > 40 &&
+        diag.fixAgeS < 30
       ) {
         const claimed = geom.stops.find((st) => st.stopId === snap.lastStopId);
         if (claimed && Math.abs(claimed.distM - diag.simDistM) > 60) {
