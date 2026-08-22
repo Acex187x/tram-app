@@ -6,6 +6,19 @@ export const CONVEX_URL = process.env.CONVEX_URL ?? 'https://tram-api.acex.sh';
 /** Shared secret for `trajectories:publish` (convex/trajectories.ts). Empty ⇒
  * Convex publishing is disabled and the service serves HTTP only (lab mode). */
 export const ENGINE_PUSH_TOKEN = process.env.ENGINE_PUSH_TOKEN ?? '';
+
+/** Two-phase emission, pass-1 gate: the instant naive re-anchor is emitted
+ * only when the old curve is MATERIALLY wrong about the new fix (further off
+ * than this), overrun entirely, or gone. Below the gate the still-valid ML
+ * curve keeps rendering until the pass-2 upgrade — an unconditional naive
+ * middle step degraded every fix window with a worse model + two extra seams
+ * (build-22 field report: «нестабильно, клоунада»). */
+export const INSTANT_NAIVE_GAP_M = 25;
+
+/** Naive walker fallback: cap on how many seconds of feed latency it may
+ * dead-reckon past the fix (a standing tram must not be inflated forward by
+ * pace × fix-age — the build-22 backward-teleport source). */
+export const NAIVE_LATENCY_CAP_S = 15;
 export const SITE_URL = process.env.SITE_URL ?? 'https://tram-site.acex.sh';
 export const ML_URL = process.env.ML_URL ?? 'http://tram-lab-ml:8092';
 export const DB_PATH = process.env.LAB_DB ?? `${__dirname}/../data/lab.db`;
