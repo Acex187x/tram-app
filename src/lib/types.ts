@@ -224,6 +224,12 @@ export interface PhysicsDebugInfo {
    */
   lastJumpM: number | null;
   lastJumpAgoS: number | null;
+  /**
+   * Last profile emissions adopted for this tram, newest first (≤5): what
+   * produced each and how long ago it was emitted. Makes the naive→ml
+   * two-phase switching VISIBLE instead of a sub-second flash.
+   */
+  profileHistory: { source: 'ml' | 'naive'; ageS: number }[];
   /** Rendered distance in the active mode, m. */
   simDistM: number;
   /** Continuity-curve distance, m (null without a trajectory). */

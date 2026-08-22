@@ -55,6 +55,7 @@ import {
   type OnlineProjection,
 } from '@/lib/motionlog';
 import type { PhysicsDebugInfo, TramPublicState } from '@/lib/types';
+import { useServerDebug } from './serverDebug';
 import { useSelectionStore } from '@/stores/selection';
 import { useSettingsStore } from '@/stores/settings';
 
@@ -222,58 +223,6 @@ const CONNECTION_LABEL: Record<PhysicsDebugInfo['connection'], string> = {
 // ли ML-сервис. Клиентские карточки говорят, что делает телефон; эта — что
 // знает сервер. Вторая половина любого «какого хуя».
 
-const SERVER_DEBUG_BASE = 'https://tram-lab.acex.sh/api/vehicle';
-const SERVER_DEBUG_POLL_MS = 3_000;
-
-interface ServerVehicleDebug {
-  found: boolean;
-  atMs?: number;
-  tripId?: string;
-  emittedAtMs?: number;
-  curveSource?: 'ml' | 'naive' | null;
-  anchorFix?: { obsAtMs: number; s: number } | null;
-  latestFix?: {
-    obsAtMs: number;
-    s: number;
-    statePosition: string;
-    fixGapS: number;
-    stuckAtM: number | null;
-  } | null;
-  ml?: { ready: boolean; lastOkMs: number; lastError: string | null };
-  publish?: { enabled: boolean; emittedAtMs: number | null; synced: boolean };
-  fixes?: { observedAtMs?: number; obsAtMs?: number; shapeDistM?: number; distM?: number; statePosition?: string }[];
-}
-
-function useServerDebug(key: string): { data: ServerVehicleDebug | null; error: string | null } {
-  const [data, setData] = useState<ServerVehicleDebug | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    setData(null);
-    setError(null);
-    const read = async () => {
-      try {
-        const res = await fetch(`${SERVER_DEBUG_BASE}/${encodeURIComponent(key)}/debug`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const body = (await res.json()) as ServerVehicleDebug;
-        if (alive) {
-          setData(body);
-          setError(null);
-        }
-      } catch (e) {
-        if (alive) setError(e instanceof Error ? e.message : String(e));
-      }
-    };
-    void read();
-    const id = setInterval(() => void read(), SERVER_DEBUG_POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, [key]);
-  return { data, error };
-}
-
 /**
  * ДАННЫЕ С БД — взгляд движка на этот трамвай. `clientFixAtMs` — свежайший
  * фикс ТЕЛЕФОНА: сравнение с фиксом движка мгновенно показывает, согласны ли
@@ -392,6 +341,10 @@ const GUIDE_SECTIONS: GuideSection[] = [
         'СЛЕПАЯ ЗОНА: сколько секунд более новых фиксов served-профиль ещё не видел (время свежайшего фикса минус время опорного). В норме 0–4 с — движок пересчитывает каждые ~2 с. Стабильно большая = движок отстаёт от жизни, и клиенту приходится доводить точку поправкой по фиксу.',
       ],
       ['пересчёт прогноза', 'Сколько секунд назад сервер выпустил этот профиль.'],
+      [
+        'смены профиля',
+        'Последние принятые пересчёты, свежий слева: чем посчитан каждый (ml или наив) и сколько секунд назад выпущен. Наивная вставка живёт всего ~1–3 с до ML-апгрейда — мгновенно её не поймать, а здесь она остаётся видимой. Паттерн «наив N с ← ml…» на проблемном фиксе = мгновенная коррекция сработала; сплошные ml = старый профиль был достаточно точен и вставка не потребовалась.',
+      ],
     ],
   },
   {
@@ -601,6 +554,7 @@ export function DebugOverlay() {
             <Text style={[styles.legendText, styles.legendSmooth]}>
               ● SMOOTH{positionMode === 'smooth' ? '*' : ''}
             </Text>
+            <Text style={[styles.legendText, styles.legendMl]}>● ML</Text>
           </View>
           <Text style={styles.buildNumber}>B{buildNumber}</Text>
           {/* Гайд: каждая строка меняется на объяснение + букварь движка. */}
@@ -750,6 +704,18 @@ function DebugLive({ tramKey }: { tramKey: string }) {
               label="пересчёт прогноза"
               value={dbg.emissionAgeS != null ? `${num(dbg.emissionAgeS, 1)}с назад` : '—'}
               warn={dbg.emissionAgeS != null && dbg.emissionAgeS > 70}
+            />
+            {/* Историю ВИДНО, мгновенный флаг — нет: naive живёт ~1–3 с. */}
+            <Row
+              label="смены профиля"
+              value={
+                dbg.profileHistory.length > 0
+                  ? dbg.profileHistory
+                      .slice(0, 4)
+                      .map((e) => `${e.source === 'naive' ? 'наив' : 'ml'} ${num(e.ageS, 0)}с`)
+                      .join(' ← ')
+                  : '—'
+              }
             />
           </View>
 
@@ -917,6 +883,7 @@ const styles = StyleSheet.create({
   legendFix: { color: '#FF4FA3' },
   legendFixed: { color: '#B7FF4A' },
   legendSmooth: { color: '#4DDBFF' },
+  legendMl: { color: '#FFD479' },
   buildNumber: {
     color: '#FFD479',
     fontFamily: MONO,
