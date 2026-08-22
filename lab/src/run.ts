@@ -838,6 +838,21 @@ export function start(): void {
     ): void => {
       const tEmit = Date.now();
       const anchorS = Math.min(v.geom.totalM, Math.max(0, v.snap.shapeDistM));
+      // The target grid is anchored at tCompute, but THIS emission is born at
+      // tEmit — up to a couple of ML-latency seconds later — and the protocol
+      // horizon (≥ 120 s past emittedAtMs) is measured from the birth. The v2
+      // builders therefore consume a PADDED grid (one extra keyframe
+      // continuing the final segment's pace) so the horizon never comes up
+      // seconds short (the check-v2 «horizon 119s» class introduced by the
+      // two-phase restructure). The v1 feed keeps the exact 13-point shape —
+      // its wire contract is frozen for build-12 phones.
+      let padded = points;
+      if (points.length >= 2) {
+        const last = points[points.length - 1];
+        const prev = points[points.length - 2];
+        const padS = Math.min(v.geom.totalM, last.s + Math.max(0, last.s - prev.s));
+        padded = [...points, { t: last.t + TRAJ_STEP_MS, s: round2(padS) }];
+      }
         // ── physics v3: opinion (+ modal stops) and smooth (+ continuity) ──
         // The modal hold mirrors learned-2h's probability model exactly (same
         // anchor epoch, same already-standing credit, same release Normal), so
@@ -865,7 +880,7 @@ export function start(): void {
           line: v.snap.line,
           anchorMs: v.snap.observedAtMs,
           emittedAtMs: tEmit,
-          raw: points,
+          raw: padded,
         };
         // The drive consumes the learned surfaces through a narrow adapter so
         // its unit tests can inject constants (design §8: builder ≠ measure).
