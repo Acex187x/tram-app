@@ -15,6 +15,14 @@ export const ENGINE_PUSH_TOKEN = process.env.ENGINE_PUSH_TOKEN ?? '';
  * (build-22 field report: «нестабильно, клоунада»). */
 export const INSTANT_NAIVE_GAP_M = 25;
 
+/** §14.3 jam cross-check: the axis (shape_dist) routinely freezes while the
+ * same fixes' COORDINATES keep driving (feed self-contradiction, ±70 m —
+ * measured 2026-08-22). A jam is asserted only when the coords' projected
+ * advance between the two fixes is also under this bound; a bigger advance is
+ * movement evidence and vetoes the phantom hold («трамвай стоит и ждёт далеко
+ * от старого фикса» — owner field report, build 23). */
+export const STUCK_COORD_EPS_M = 40;
+
 /** Naive walker fallback: cap on how many seconds of feed latency it may
  * dead-reckon past the fix (a standing tram must not be inflated forward by
  * pace × fix-age — the build-22 backward-teleport source). */
