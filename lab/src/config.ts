@@ -15,6 +15,22 @@ export const ENGINE_PUSH_TOKEN = process.env.ENGINE_PUSH_TOKEN ?? '';
  * (build-22 field report: «нестабильно, клоунада»). */
 export const INSTANT_NAIVE_GAP_M = 25;
 
+/** ── fused fix axis (2026-08-22) ─────────────────────────────────────────
+ * The feed's two representations of one fix — coordinates vs shape_dist —
+ * contradict each other by up to ±70 m, and the AXIS is the one that freezes
+ * (it also snaps to stops) while the coordinates are the actual sensor. The
+ * engine therefore re-derives the axis value from the coordinates whenever
+ * the two disagree beyond FUSE_COORD_DISAGREE_M and the projection lands
+ * within FUSE_OFFTRACK_MAX_M of the rail, with a monotone guard (trams do
+ * not reverse; a backward projection is distrusted beyond
+ * FUSE_BACKWARD_TOL_M). One axis for everything downstream: ML anchors and
+ * features, jam evidence, seams, published anchorS. Kill switch:
+ * FUSE_FIX_AXIS=0. */
+export const FUSE_FIX_AXIS = (process.env.FUSE_FIX_AXIS ?? '1') === '1';
+export const FUSE_COORD_DISAGREE_M = 30;
+export const FUSE_OFFTRACK_MAX_M = 35;
+export const FUSE_BACKWARD_TOL_M = 15;
+
 /** §14.3 jam cross-check: the axis (shape_dist) routinely freezes while the
  * same fixes' COORDINATES keep driving (feed self-contradiction, ±70 m —
  * measured 2026-08-22). A jam is asserted only when the coords' projected
