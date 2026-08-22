@@ -55,9 +55,14 @@ export class Detectors {
       };
       this.tracks.set(key, tr);
     }
-    // Прогрев: первые 20 с реплей (как и телефон при холодном старте) честно
-    // прыгает с сырых фиксов на первые кривые — это не полевые телепорты.
-    const warmupOver = nowMs - this.firstTickMs > 20_000;
+    // Прогрев: первые 45 с реплей (как и телефон при холодном старте) честно
+    // прыгает с сырых фиксов на первые кривые и доигрывает сид геометрий —
+    // это не полевые аномалии. Глушим ВСЕ детекторы, не только телепорты.
+    const warmupOver = nowMs - this.firstTickMs > 45_000;
+    if (!warmupOver) {
+      tr.prevSource = diag.renderSource;
+      return;
+    }
     const sourceSwitched = tr.prevSource !== null && tr.prevSource !== diag.renderSource;
     tr.prevSource = diag.renderSource;
     const once = (id: string, a: Omit<Anomaly, 'key' | 'atMs' | 'diag'>) => {
@@ -109,17 +114,37 @@ export class Detectors {
           (m, st) => Math.min(m, Math.abs(st.distM - diag.simDistM)),
           Infinity,
         ) ?? Infinity;
-      if (standS >= 10 && nearStopM > 40 && sCoord != null && sCoord - diag.simDistM > 60) {
+      // Честный рендер очереди (маркер на оси фикса, координаты смещены) —
+      // данные города, не аномалия: требуем расхождения маркера с ОСЬЮ.
+      if (
+        standS >= 10 &&
+        nearStopM > 40 &&
+        sCoord != null &&
+        sCoord - diag.simDistM > 60 &&
+        Math.abs(diag.simDistM - snap.shapeDistM) > 40
+      ) {
         once(`smr-${Math.round(tr.standSinceMs / 1000)}`, {
           kind: 'stand-mid-road',
           detail: `стоит ${standS.toFixed(0)}с в ${nearStopM.toFixed(0)}м от остановки, координаты фикса на ${(sCoord - diag.simDistM).toFixed(0)}м впереди`,
         });
       }
       // 4) at_stop, но маркер не у заявленной остановки.
-      if (standS >= 10 && snap.statePosition === 'at_stop' && geom) {
-        const claimed = geom.stops.find(
-          (st) => st.stopId === (snap.lastStopId ?? snap.nextStopId),
-        );
+      // «Заявленная остановка» — только lastStopId: nextStopId у at_stop
+      // фикса это остановка ВПЕРЕДИ, стоять не у неё — норма подъезда.
+      // …и только когда МАРКЕР расходится с ОБОИМИ представлениями фикса:
+      // трамвай, честно нарисованный на своём фиксе в очереди за 120 м до
+      // платформы — это данные города, не аномалия рендера.
+      const offAxisM = Math.abs(diag.simDistM - snap.shapeDistM);
+      const offCoordM = sCoord != null ? Math.abs(diag.simDistM - sCoord) : Infinity;
+      if (
+        standS >= 10 &&
+        snap.statePosition === 'at_stop' &&
+        geom &&
+        snap.lastStopId &&
+        offAxisM > 40 &&
+        offCoordM > 40
+      ) {
+        const claimed = geom.stops.find((st) => st.stopId === snap.lastStopId);
         if (claimed && Math.abs(claimed.distM - diag.simDistM) > 60) {
           once(`wrong-${Math.round(tr.standSinceMs / 1000)}`, {
             kind: 'stand-at-wrong-spot',
