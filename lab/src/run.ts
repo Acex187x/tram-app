@@ -48,6 +48,10 @@ import {
   INSTANT_NAIVE_GAP_M,
   NAIVE_LATENCY_CAP_S,
   STUCK_COORD_EPS_M,
+  FUSE_FIX_AXIS,
+  FUSE_COORD_DISAGREE_M,
+  FUSE_OFFTRACK_MAX_M,
+  FUSE_BACKWARD_TOL_M,
   TRAJ_V_MAX_MS,
   horizonBucket,
 } from './config';
@@ -61,6 +65,7 @@ import {
   STUCK_NEAR_STOP_M,
   type DriveBuilt,
 } from './drive';
+import { haversineM, pointAt } from '@/lib/geo/polyline';
 import { projectDistanceOnPolyline } from '@/lib/golemio/gtfs';
 import { GeometryStore } from './geometry';
 import { LearnedModel } from './learned';
@@ -239,6 +244,9 @@ export function start(): void {
   let trajDiscontinuities = 0;
   /** ML unavailable, old curve still valid ⇒ kept serving it (owner doctrine). */
   let trajMlHeld = 0;
+  /** Fused-axis telemetry: how often and how far coords overrode shape_dist. */
+  let fuseApplied = 0;
+  let fuseMetersSum = 0;
   /** ML unavailable AND old curve overrun/expired ⇒ learned-walker substitute. */
   let trajNaiveEmissions = 0;
   /** Kinematic-limits gate over every track ever published (protocol contract). */
@@ -331,7 +339,41 @@ export function start(): void {
     scoreBuf.push(full);
   }
 
-  function processSnapshot(snap: TramSnapshot, batchAtMs: number, events: ScoringEvent[]): void {
+  /**
+   * The fused fix axis (config §fused): re-derive shapeDistM from the
+   * coordinates when the feed's two representations of this fix contradict
+   * each other. Everything downstream of processSnapshot — learned model, ML
+   * features, jam evidence, trajectory anchors, published anchorS — sees ONE
+   * axis, the one backed by the actual sensor.
+   */
+  function fuseSnap(snap: TramSnapshot): TramSnapshot {
+    if (!FUSE_FIX_AXIS) return snap;
+    const geom = geometry.resolve(snap.tripId);
+    if (!geom) return snap;
+    const sProj = projectDistanceOnPolyline(snap.coordinates, geom.coordinates, geom.cumDistM);
+    if (Math.abs(sProj - snap.shapeDistM) <= FUSE_COORD_DISAGREE_M) return snap;
+    // Sanity: a projection that lands far off the rail is a guess, not a fix.
+    if (haversineM(pointAt(geom.coordinates, geom.cumDistM, sProj), snap.coordinates) > FUSE_OFFTRACK_MAX_M) {
+      return snap;
+    }
+    // Monotone guard against this vehicle's own previous fused fix: trams do
+    // not reverse, so a strongly backward projection is capped, not obeyed.
+    const prevF = lastFix.get(snap.key);
+    let fused = sProj;
+    if (
+      prevF &&
+      prevF.snap.tripId === snap.tripId &&
+      fused < prevF.snap.shapeDistM - FUSE_BACKWARD_TOL_M
+    ) {
+      fused = prevF.snap.shapeDistM - FUSE_BACKWARD_TOL_M;
+    }
+    fuseApplied++;
+    fuseMetersSum += Math.abs(fused - snap.shapeDistM);
+    return { ...snap, shapeDistM: round2(Math.max(0, Math.min(geom.totalM, fused))) };
+  }
+
+  function processSnapshot(rawSnap: TramSnapshot, batchAtMs: number, events: ScoringEvent[]): void {
+    const snap = fuseSnap(rawSnap);
     const prev = lastFix.get(snap.key);
     const isNew = !prev || snap.observedAtMs > prev.snap.observedAtMs;
     fleet.set(snap.key, snap);
@@ -1395,7 +1437,8 @@ export function start(): void {
     if (cursor === null) {
       const full = await fetchFullFleet();
       fleet.clear();
-      for (const v of full.vehicles) {
+      for (const raw of full.vehicles) {
+        const v = fuseSnap(raw);
         fleet.set(v.key, v);
         learned.reseed(v);
         lastFix.set(v.key, { snap: v, cycle, fixGapS: 0, stuckAtM: null });
@@ -1547,6 +1590,10 @@ export function start(): void {
         mlHeld: trajMlHeld,
         naiveEmissions: trajNaiveEmissions,
         publish: publisher.gauges(),
+        fusedAxis: {
+          applied: fuseApplied,
+          meanM: fuseApplied > 0 ? round2(fuseMetersSum / fuseApplied) : 0,
+        },
         geometryPack: publisher.packGauges(),
         probe: { ok: probeOk, missing: probeMissing, staleAnchor: probeStaleAnchor, tripMismatch: probeTripMismatch },
         /** Anchor-floor hotfix telemetry: exactly where bytes may differ from
