@@ -161,7 +161,9 @@ function phaseLabel(d: PhysicsDebugInfo): string {
 function activeNotes(d: PhysicsDebugInfo): string[] {
   const out: string[] = [];
   if (d.connection !== 'live') out.push(d.connection === 'offline' ? 'ОФЛАЙН' : 'ЗАДЕРЖКА ЛЕНТЫ');
-  if (d.renderSource === 'curve-naive') out.push('НАИВНЫЙ прогноз (ML лежал)');
+  if (d.renderSource === 'curve-naive' && d.emissionAgeS != null && d.emissionAgeS > 6) {
+    out.push('НАИВНЫЙ прогноз завис (ML-апгрейд не пришёл)');
+  }
   if (d.renderSource === 'client-naive') out.push('клиентская протяжка');
   if (!d.hasTrajectory) out.push('профиля нет');
   else if (d.shimBranch === 'walk') out.push(`фикс за горизонтом — дойти ${num(d.walkRemainingM, 0)} м`);
@@ -374,7 +376,7 @@ const GUIDE_SECTIONS: GuideSection[] = [
     rows: [
       [
         'едет по',
-        'На основе чего маркер движется прямо сейчас. «ML-профиль» — норма: профиль движения, построенный из ML-прогноза. «НАИВНЫЙ профиль» — сервер подменил ML простой физикой (ML лежал, а трамвай доказуемо перегнал старый прогноз). «Клиентская протяжка» — профиля нет вообще, телефон сам тянет точку от последнего фикса с наблюдаемым темпом (до 60 с). «Замер на фиксе» — нет ни профиля, ни темпа.',
+        'На основе чего маркер движется прямо сейчас. «ML-профиль» — профиль из ML-прогноза. «НАИВНЫЙ профиль» — простая быстрая физика: сервер эмитит её МГНОВЕННО на каждый новый фикс, а через ~1–3 с заменяет ML-профилем — короткие вспышки наивного здесь штатны; подсветка загорается только если наивный завис (ML-апгрейд не пришёл за 6 с). «Клиентская протяжка» — профиля нет вообще, телефон тянет точку от последнего фикса с наблюдаемым темпом (до 60 с). «Замер на фиксе» — нет ни профиля, ни темпа.',
       ],
       [
         'лента Convex',
@@ -714,10 +716,18 @@ function DebugLive({ tramKey }: { tramKey: string }) {
           <View style={styles.debugCard}>
             <Text style={styles.phase}>{phaseLabel(dbg)}</Text>
             <SectionTitle>ИСТОЧНИК ДВИЖЕНИЯ</SectionTitle>
+            {/* Наивный профиль — ШТАТНАЯ первая фаза каждого фикса (сервер
+                эмитит его мгновенно, ML-апгрейд приходит через ~1–3 с), так
+                что свежий наивный не тревога. Тревога — наивный, который так
+                и не сменился ML-профилем. */}
             <Row
               label="едет по"
               value={RENDER_SOURCE_LABEL[dbg.renderSource]}
-              warn={dbg.renderSource !== 'curve-ml'}
+              warn={
+                dbg.renderSource === 'curve-naive'
+                  ? dbg.emissionAgeS != null && dbg.emissionAgeS > 6
+                  : dbg.renderSource !== 'curve-ml'
+              }
             />
             <Row label="лента Convex" value={`№${num(dbg.feedSeq)}`} />
             <Row label="генератор" value={dbg.serverGen ?? '—'} />
