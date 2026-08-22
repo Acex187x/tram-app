@@ -52,6 +52,7 @@ import {
   FUSE_COORD_DISAGREE_M,
   FUSE_OFFTRACK_MAX_M,
   FUSE_BACKWARD_TOL_M,
+  FUSE_MAX_CORRECTION_M,
   TRAJ_V_MAX_MS,
   horizonBucket,
 } from './config';
@@ -351,7 +352,12 @@ export function start(): void {
     const geom = geometry.resolve(snap.tripId);
     if (!geom) return snap;
     const sProj = projectDistanceOnPolyline(snap.coordinates, geom.coordinates, geom.cumDistM);
-    if (Math.abs(sProj - snap.shapeDistM) <= FUSE_COORD_DISAGREE_M) return snap;
+    const disagreeM = Math.abs(sProj - snap.shapeDistM);
+    if (disagreeM <= FUSE_COORD_DISAGREE_M) return snap;
+    // Ambiguity guard: loops/opposite rails make the nearest-point projection
+    // land a lap or a direction away — a "correction" beyond any plausible
+    // feed contradiction is projection error, not evidence.
+    if (disagreeM > FUSE_MAX_CORRECTION_M) return snap;
     // Sanity: a projection that lands far off the rail is a guess, not a fix.
     if (haversineM(pointAt(geom.coordinates, geom.cumDistM, sProj), snap.coordinates) > FUSE_OFFTRACK_MAX_M) {
       return snap;

@@ -30,6 +30,11 @@ export const FUSE_FIX_AXIS = (process.env.FUSE_FIX_AXIS ?? '1') === '1';
 export const FUSE_COORD_DISAGREE_M = 30;
 export const FUSE_OFFTRACK_MAX_M = 35;
 export const FUSE_BACKWARD_TOL_M = 15;
+/** A correction bigger than this is NOT a feed contradiction (those measure
+ * ≤ ~150 m) — it is an ambiguous projection: loops and opposite-direction
+ * rails sit within FUSE_OFFTRACK_MAX_M of each other, and the nearest-point
+ * projection can land a lap/direction away (9383: −510 m). Distrust it. */
+export const FUSE_MAX_CORRECTION_M = 250;
 
 /** §14.3 jam cross-check: the axis (shape_dist) routinely freezes while the
  * same fixes' COORDINATES keep driving (feed self-contradiction, ±70 m —
