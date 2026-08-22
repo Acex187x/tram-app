@@ -1157,6 +1157,20 @@ export function start(): void {
           seamFloorPubApplied++;
         }
         const v2 = built.vehicle;
+        // Наследование санкционированного скачка: если pass-1 naive-эмиссия
+        // несла discontinuity, а ML-апгрейд заменяет её в окне, где телефон
+        // мог её ещё не отрисовать, апгрейд ОБЯЗАН нести флаг тоже — иначе
+        // клиентский предохранитель (который телепортируется только по
+        // флагу) навсегда заблокирует возврат маркера (hunt2, Δ+225…+340).
+        if (
+          source === 'ml' &&
+          prevEntry?.source === 'naive' &&
+          prevEntry.v2.discontinuity &&
+          prevEntry.v2.tripId === v.snap.tripId &&
+          tEmit - prevEntry.v2.emittedAtMs < 5_000
+        ) {
+          v2.discontinuity = true;
+        }
         trajEmissions++;
         if (v2.discontinuity) trajDiscontinuities++;
         // Realism gate, continuous side: measure what we are about to publish
