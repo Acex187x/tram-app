@@ -1,0 +1,5 @@
+{
+  "extends": "../lab/tsconfig.runtime.json",
+  "compilerOptions": { "baseUrl": "..", "types": ["node"] },
+  "include": ["src/**/*.ts", "../src/lib/**/*.ts"]
+}
