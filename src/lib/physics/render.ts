@@ -109,25 +109,38 @@ export function renderedDistM(
     const raw = curveWithCoast(track, tMs, endMs);
     if (raw >= fixS) return raw;
     if (catchupVMs === Number.POSITIVE_INFINITY) return fixS;
-    const walked = raw + catchupVMs * Math.max(0, (tMs - trackStartMs(track)) / 1000);
+    const walked = raw + catchupVMs * Math.max(0, (tMs - allowanceDatumMs(track, fixAtMs)) / 1000);
     return walked < fixS ? walked : fixS;
   }
   const shifted = curveWithCoast(track, tMs + tau, endMs);
   if (catchupVMs === Number.POSITIVE_INFINITY) return shifted;
   // Rate-limited approach (smooth): never jump to the shifted curve, walk to
   // it at `catchupVMs` on top of the served curve's own motion.
-  //
-  // The allowance is measured from the CURVE's own start, not from the fix.
-  // Measuring it from the fix looked natural and was a bug: a fresh fix reset
-  // the allowance to zero every ~20 s, so the marker gave back everything it
-  // had caught up and stepped BACKWARD ~28 m (up to ~44 m) on every AVL
-  // update — in the default render mode. The curve's start only moves when the
-  // bundle does, and at that moment τ collapses to ~0 anyway because the new
-  // curve is anchored to this very fix, so there is nothing left to give back.
   const capped =
     curveWithCoast(track, tMs, endMs) +
-    catchupVMs * Math.max(0, (tMs - trackStartMs(track)) / 1000);
+    catchupVMs * Math.max(0, (tMs - allowanceDatumMs(track, fixAtMs)) / 1000);
   return capped < shifted ? capped : shifted;
+}
+
+/**
+ * Datum the smooth catch-up allowance accrues from.
+ *
+ * The bench post-mortem (hunt1, 2026-08-22) closed the debate both earlier
+ * datums lost:
+ *  - from the FIX alone: every AVL update reset the allowance and the marker
+ *    stepped backward ~28 m (the build-17 bug);
+ *  - from the CURVE START alone: a 60–70 s old curve had pre-accrued a
+ *    120–140 m allowance bank, so the instant a fresh fix flipped τ on, the
+ *    whole shift was taken in ONE frame — 66 % of all field teleports.
+ * `max(curve start, fix observation)` starts the 2 m/s walk at the moment the
+ * evidence appeared, with no pre-accrued bank — still a pure function of
+ * server timestamps (deterministic across clients). The backward step the
+ * fix-datum used to cause is now stopped by the per-frame slew guard
+ * (adapter.ts `RenderGuard`), which owns cross-frame monotonicity.
+ */
+function allowanceDatumMs(track: Float64Array, fixAtMs: number): number {
+  const start = trackStartMs(track);
+  return Number.isFinite(fixAtMs) && fixAtMs > start ? fixAtMs : start;
 }
 
 /**

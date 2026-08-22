@@ -43,6 +43,7 @@ import {
   TRAJ_CONVERGE_MIN_S,
   TRAJ_CONVERGE_MS,
   TRAJ_DISCONTINUITY_M,
+  TRAJ_OVERRUN_DISC_M,
   TRAJ_HOLD_MIN_MS,
   TRAJ_HOLD_V_MS,
   TRAJ_MAX_POINTS,
@@ -203,9 +204,16 @@ export function clientSmoothProjectionM(
 ): number {
   const base = evalTrack(track, atMs);
   if (track.length === 0 || !(fixS > evalTrack(track, fixAtMs))) return base;
-  // The allowance datum is the CURVE's start in BOTH branches (render.ts):
-  // one datum, continuous across the finite-τ/∞ boundary, no reset per fix.
-  const capped = base + catchupVMs * Math.max(0, (atMs - track[0].t) / 1000);
+  // Allowance datum = max(curve start, fix observation) — the hunt1 verdict,
+  // mirrored from render.ts allowanceDatumMs: a curve-start datum pre-accrues
+  // a 100+ m bank spent in one frame (66 % of field teleports), a fix-only
+  // datum resets on every AVL update; the max starts the 2 m/s walk at the
+  // moment the evidence appeared. Cross-frame monotonicity of the phone's
+  // marker is owned by its slew guard (adapter.ts), which this projection
+  // deliberately does NOT model — the guard only delays, and modelling the
+  // delay would under-floor the seam.
+  const datumMs = fixAtMs > track[0].t ? fixAtMs : track[0].t;
+  const capped = base + catchupVMs * Math.max(0, (atMs - datumMs) / 1000);
   const reach = crossTrack(track, fixS);
   if (!Number.isFinite(reach)) {
     if (base >= fixS) return base;
@@ -369,6 +377,10 @@ export interface BuildV2Args {
    *  is CURRENT standing evidence and wins: the honest correction back to the
    *  platform is shown. */
   anchorFixS?: number;
+  /** Ленточная (сырая) ось того же фикса — то, что реально держит ТЕЛЕФОН.
+   *  Клиент-модель швов считает от неё; fused anchorFixS остаётся границей
+   *  улик (seamJustifiedM) и G10-флором. */
+  clientFixS?: number;
   prevFixS?: number;
   fixGapS?: number;
 }
@@ -428,7 +440,12 @@ export function buildV2Vehicle(args: BuildV2Args): BuiltV2 | null {
     // Where the PHONE is drawing the previous curve, not where the curve as
     // served sits: the client holds this fix already and winds the curve
     // forward to it (clientProjectionM / src/lib/physics/fixForward.ts).
-    const prevO = clientProjectionM(prev.opinion.points, args.anchorFixS, args.anchorMs, t0);
+    const prevO = clientProjectionM(
+      prev.opinion.points,
+      args.clientFixS ?? args.anchorFixS,
+      args.anchorMs,
+      t0,
+    );
     const justified = seamJustifiedM({
       anchorFixS: args.anchorFixS,
       anchorMs: args.anchorMs,
@@ -490,11 +507,26 @@ export function buildV2Vehicle(args: BuildV2Args): BuiltV2 | null {
     // phone's shim is idle there and the raw evaluation is the marker.
     const sStart =
       args.prevFixS !== undefined && args.anchorFixS !== undefined
-        ? clientSmoothProjectionM(prev.smooth.points, args.anchorFixS, args.anchorMs, t0)
+        ? clientSmoothProjectionM(prev.smooth.points, args.clientFixS ?? args.anchorFixS, args.anchorMs, t0)
         : evalTrack(prev.smooth.points, t0);
     const s0 = opinion.points[0].s;
-    if (prev.tripId !== args.tripId || Math.abs(sStart - s0) > TRAJ_DISCONTINUITY_M) {
-      discontinuity = true; // honest teleport: trip change or model break
+    // Доказанный перелёт (hunt1): шов дальше, чем трамвай физически мог
+    // доехать по свежей улике ⇒ санкционированный скачок, а не минуты
+    // ожидания, пока opinion «доедет» до убежавшего маркера.
+    const overrun =
+      args.prevFixS !== undefined &&
+      args.anchorFixS !== undefined &&
+      sStart >
+        seamJustifiedM({
+          anchorFixS: args.anchorFixS,
+          anchorMs: args.anchorMs,
+          emittedAtMs: t0,
+          prevFixS: args.prevFixS,
+          fixGapS: args.fixGapS ?? 0,
+        }) +
+          TRAJ_OVERRUN_DISC_M;
+    if (prev.tripId !== args.tripId || overrun || Math.abs(sStart - s0) > TRAJ_DISCONTINUITY_M) {
+      discontinuity = true; // honest teleport: trip change, proven overrun, or model break
     } else {
       // Track the OPINION curve (already physical) rather than the raw target,
       // so the smooth track converges onto exactly what it is chasing.

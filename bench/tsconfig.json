@@ -1,5 +1,14 @@
 {
   "extends": "../lab/tsconfig.runtime.json",
-  "compilerOptions": { "baseUrl": "..", "types": ["node"] },
-  "include": ["src/**/*.ts", "../src/lib/**/*.ts"]
+  "compilerOptions": {
+    "baseUrl": "..",
+    "types": [
+      "node",
+      "geojson"
+    ],
+    "ignoreDeprecations": "6.0"
+  },
+  "include": [
+    "src/**/*.ts"
+  ]
 }

@@ -36,6 +36,12 @@ export const FUSE_BACKWARD_TOL_M = 15;
  * projection can land a lap/direction away (9383: −510 m). Distrust it. */
 export const FUSE_MAX_CORRECTION_M = 250;
 
+/** Санкционированный скачок при ДОКАЗАННОМ перелёте: если smooth-шов должен
+ * стартовать дальше, чем трамвай физически мог доехать (seamJustifiedM) плюс
+ * этот запас — маркер минутами ждал бы впереди, пока opinion «доедет»
+ * (hunt1: 47 случаев, до 385 м). Свежая улика не масштабируется фикс-гэпом. */
+export const TRAJ_OVERRUN_DISC_M = 60;
+
 /** §14.3 jam cross-check: the axis (shape_dist) routinely freezes while the
  * same fixes' COORDINATES keep driving (feed self-contradiction, ±70 m —
  * measured 2026-08-22). A jam is asserted only when the coords' projected

@@ -92,7 +92,24 @@ export interface AdaptInput {
    * fallback when this tram has no curves at all; 0 ⇒ stand on the fix.
    */
   observedPaceMs?: number;
+  /**
+   * Per-frame slew guard (fleet.ts): where THIS tram was rendered last frame.
+   * Applied to the SMOOTH mode only — the never-teleport track: the marker may
+   * not step backward past the previous frame and may not advance faster than
+   * SLEW_MAX_MS between frames, except across a server-sanctioned
+   * discontinuity / trip change (`allowJump`). `fixed` is licensed to jump and
+   * is never guarded. The hard, last-line guarantee the bench demanded: no
+   * composition bug upstream can teleport the smooth marker again.
+   */
+  guard?: { prevS: number; prevAtMs: number; allowJump: boolean };
 }
+
+/** Max forward slew of the guarded smooth marker, m/s (V_MAX 16.7 + headroom). */
+export const SLEW_MAX_MS = 25;
+/** Backward slack for numeric noise, m. */
+export const SLEW_BACK_TOL_M = 0.5;
+/** Frame gaps beyond this are a resume/seek, not an animation frame. */
+export const SLEW_MAX_FRAME_GAP_MS = 5_000;
 
 /**
  * How long the naive fallback dead-reckons past the fix before freezing, s.
@@ -195,6 +212,23 @@ export function adaptTram(input: AdaptInput): TramPublicState {
       simSpeedKmh = paceMs * 3.6;
     }
     pastHorizon = true;
+  }
+
+  // The per-frame slew guard — smooth mode only, before any position math.
+  const guard = input.guard;
+  if (
+    mode === 'smooth' &&
+    guard &&
+    !guard.allowJump &&
+    serverNowMs > guard.prevAtMs &&
+    serverNowMs - guard.prevAtMs <= SLEW_MAX_FRAME_GAP_MS
+  ) {
+    const dtS = (serverNowMs - guard.prevAtMs) / 1000;
+    const floor = guard.prevS - SLEW_BACK_TOL_M;
+    const ceil = guard.prevS + SLEW_MAX_MS * dtS;
+    if (simDistM < floor) simDistM = floor;
+    else if (simDistM > ceil) simDistM = ceil;
+    simDistM = clampToShape(simDistM, geometry);
   }
 
   const position = geometry

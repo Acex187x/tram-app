@@ -355,19 +355,25 @@ describe('fix-forward — the newest fix moves the curve, it does not pin it', (
     // Fix observed at T0+20 s, 110 m ahead of the smooth curve (1190 m). The
     // smooth track may not teleport, so it walks to the wound-forward curve at
     // SMOOTH_CATCHUP_V_MS on top of its own motion. The allowance accrues from
-    // the CURVE's start, so by T0+20 s it is already 40 m.
+    // THE FIX OBSERVATION (hunt1 post-mortem: a curve-start datum pre-accrues
+    // a 100+ m bank that is spent in one frame — 66 % of field teleports), so
+    // at the fix instant it is exactly zero.
     const v = vehicleFrom();
     const fix = newerFix(1_300);
     const at20 = adapt(v, T0 + 20_000, geo, 'smooth', fix);
     const at25 = adapt(v, T0 + 25_000, geo, 'smooth', fix);
-    expect(at20.simDistM).toBeCloseTo(1_230, 6); // 1190 + 2 m/s × 20 s
-    expect(at25.simDistM).toBeCloseTo(1_290, 6); // 1240 + 2 m/s × 25 s
+    expect(at20.simDistM).toBeCloseTo(1_190, 6); // raw curve + 0 allowance yet
+    expect(at25.simDistM).toBeCloseTo(1_250, 6); // 1240 + 2 m/s × 5 s
     expect(at25.simSpeedKmh).toBeCloseTo(43.2, 6); // 12 m/s: 10 curve + 2 catch-up
-    // …it never overshoots the wound-forward curve, and stops catching up once
-    // it gets there: the shifted curve is 1300 at T0+20 s, +10 m/s after.
+    // …it never overshoots the wound-forward curve (τ = 11 s ⇒ shifted is
+    // smooth(t+11 s)); at 60 s the allowance (80 m) is still short of the
+    // 110 m offset, at 80 s the catch-up has completed.
     const at60 = adapt(v, T0 + 60_000, geo, 'smooth', fix);
-    expect(at60.simDistM).toBeCloseTo(1_700, 6); // = smooth(60+11 s), fully caught up
-    expect(at60.simSpeedKmh).toBeCloseTo(36, 6);
+    expect(at60.simDistM).toBeCloseTo(1_670, 6); // 1590 + 2 m/s × 40 s, capped
+    expect(at60.simSpeedKmh).toBeCloseTo(43.2, 6);
+    const at80 = adapt(v, T0 + 80_000, geo, 'smooth', fix);
+    expect(at80.simDistM).toBeCloseTo(1_900, 6); // = smooth(80+11 s), caught up
+    expect(at80.simSpeedKmh).toBeCloseTo(36, 6);
   });
 
   it('the ETA never says «arriving now» for a stop the marker is short of', () => {
@@ -379,7 +385,7 @@ describe('fix-forward — the newest fix moves the curve, it does not pin it', (
     const stopped = straightGeometry([{ distM: 1_250, name: 'B' }]);
     const fix = newerFix(1_300);
     const state = adapt(vehicleFrom(), T0 + 20_000, stopped, 'smooth', fix);
-    expect(state.simDistM).toBeCloseTo(1_230, 6); // 20 m short of the stop
+    expect(state.simDistM).toBeCloseTo(1_190, 6); // 60 m short of the stop
     expect(state.nextStopName).toBe('B');
     expect(state.nextStopEtaS).toBeGreaterThan(1);
     // Walk forward: by the instant the ETA named, the marker HAS reached the

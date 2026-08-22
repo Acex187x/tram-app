@@ -67,7 +67,7 @@ import {
   type DriveBuilt,
 } from './drive';
 import { haversineM, pointAt } from '@/lib/geo/polyline';
-import { projectDistanceOnPolyline } from '@/lib/golemio/gtfs';
+import { projectDistanceOnPolyline, projectNearOnPolyline } from '@/lib/golemio/gtfs';
 import { GeometryStore } from './geometry';
 import { LearnedModel } from './learned';
 import { buildMlFeatures, MlClient } from './ml';
@@ -106,6 +106,9 @@ const DAY_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' });
 
 interface LastFix {
   snap: TramSnapshot;
+  /** Ленточная (сырая) ось фикса — то, что видит ТЕЛЕФОН. Fused-ось живёт в
+   *  snap.shapeDistM; клиент-модель швов обязана считать от сырой. */
+  rawShapeDistM: number;
   cycle: number;
   /** Observed gap between the last two genuinely-new fixes, s (0 = only one
    *  seen). Feeds the curvegen-v3 gap-aware discontinuity threshold T_disc. */
@@ -349,14 +352,26 @@ export function start(): void {
    */
   function fuseSnap(snap: TramSnapshot): TramSnapshot {
     if (!FUSE_FIX_AXIS) return snap;
+    // BENCH VERDICT (hunt1, 205 событий): парковочные координаты стоящего у
+    // платформы трамвая систематически проецируются на −60…−73 м от неё, а
+    // ось at_stop-фикса Golemio прибивает РОВНО к остановке — и она ПРАВА.
+    // Фьюзить at_stop-фиксы = утащить якорь модального холда от платформы.
+    if (snap.statePosition === 'at_stop') return snap;
     const geom = geometry.resolve(snap.tripId);
     if (!geom) return snap;
-    const sProj = projectDistanceOnPolyline(snap.coordinates, geom.coordinates, geom.cumDistM);
+    // Оконная проекция вокруг заявленной оси (±FUSE_MAX_CORRECTION_M + запас):
+    // петли линии 16 (Δ417/425 м между проходами) ловят глобальную
+    // ближайшую точку на чужой круг — окно делает проекцию однозначной.
+    const sProj = projectNearOnPolyline(
+      snap.coordinates,
+      geom.coordinates,
+      geom.cumDistM,
+      snap.shapeDistM,
+      FUSE_MAX_CORRECTION_M + 50,
+    );
+    if (sProj === null) return snap;
     const disagreeM = Math.abs(sProj - snap.shapeDistM);
     if (disagreeM <= FUSE_COORD_DISAGREE_M) return snap;
-    // Ambiguity guard: loops/opposite rails make the nearest-point projection
-    // land a lap or a direction away — a "correction" beyond any plausible
-    // feed contradiction is projection error, not evidence.
     if (disagreeM > FUSE_MAX_CORRECTION_M) return snap;
     // Sanity: a projection that lands far off the rail is a guess, not a fix.
     if (haversineM(pointAt(geom.coordinates, geom.cumDistM, sProj), snap.coordinates) > FUSE_OFFTRACK_MAX_M) {
@@ -552,7 +567,7 @@ export function start(): void {
         if (Math.abs(coordAdvanceM) <= STUCK_COORD_EPS_M) stuckAtM = snap.shapeDistM;
       }
     }
-    lastFix.set(snap.key, { snap, cycle, fixGapS: gapS > 0 ? round2(gapS) : 0, stuckAtM });
+    lastFix.set(snap.key, { snap, cycle, fixGapS: gapS > 0 ? round2(gapS) : 0, stuckAtM, rawShapeDistM: rawSnap.shapeDistM });
   }
 
   async function resolveEvents(events: ScoringEvent[]): Promise<void> {
@@ -610,6 +625,7 @@ export function start(): void {
       geom: RouteGeometry;
       fixGapS: number;
       stuckAtM: number | null;
+      clientFixS: number;
     }[] = [];
     for (const [key, lf] of lastFix) {
       const entry = trajectories.get(key);
@@ -623,7 +639,7 @@ export function start(): void {
         markDropped(key); // no geometry ⇒ no s-axis to predict along
         continue;
       }
-      stale.push({ key, snap: lf.snap, geom, fixGapS: lf.fixGapS, stuckAtM: lf.stuckAtM });
+      stale.push({ key, snap: lf.snap, geom, fixGapS: lf.fixGapS, stuckAtM: lf.stuckAtM, clientFixS: lf.rawShapeDistM });
     }
     if (stale.length === 0) {
       trajBuiltAtMs = tCompute; // set validated, nothing to recompute
@@ -671,7 +687,7 @@ export function start(): void {
             evalTrack(entry.v2.opinion, t) > evalTrack(lead.opinion, t) - 0.5 ||
             evalTrack(entry.v2.smooth, t) > evalTrack(lead.smooth, t) - 0.5
           ) {
-            stale.push({ key, snap: lf.snap, geom: g, fixGapS: lf.fixGapS, stuckAtM: lf.stuckAtM });
+            stale.push({ key, snap: lf.snap, geom: g, fixGapS: lf.fixGapS, stuckAtM: lf.stuckAtM, clientFixS: lf.rawShapeDistM });
             staleKeys.add(key);
             break;
           }
@@ -892,7 +908,7 @@ export function start(): void {
      *  must never share one, or two different byte-sets would claim the same
      *  blend anchor. */
     const buildAndStore = (
-      v: { key: string; snap: TramSnapshot; geom: RouteGeometry; fixGapS: number; stuckAtM: number | null },
+      v: { key: string; snap: TramSnapshot; geom: RouteGeometry; fixGapS: number; stuckAtM: number | null; clientFixS: number },
       points: TrajectoryPoint[],
       source: 'ml' | 'naive',
       includeShadow: boolean,
@@ -1039,7 +1055,7 @@ export function start(): void {
           perceptual.record({
             key: v.key,
             emittedAtMs: tEmit,
-            latestFixS: v.snap.shapeDistM,
+            latestFixS: v.clientFixS,
             anchorMs: v.snap.observedAtMs,
             kind: !prevShadow
               ? 'first'
@@ -1070,7 +1086,7 @@ export function start(): void {
               emittedAtMs: tEmit,
               prevOpinion: prevShadow.v2.opinion,
               newOpinion: shadowBuilt.vehicle.opinion,
-              latestFixS: v.snap.shapeDistM,
+              latestFixS: v.clientFixS,
               prevFixS: prevShadow.anchorFixS,
               anchorMs: v.snap.observedAtMs,
               fixGapS: v.fixGapS,
@@ -1112,6 +1128,7 @@ export function start(): void {
               fixGapS: v.fixGapS,
               ageFloorS: ageFloorPubS,
               anchorFixS: v.snap.shapeDistM,
+              clientFixS: v.clientFixS,
               prevFixS: seamPrevFixPubS,
               stuckAtM: v.stuckAtM,
               leader: leaderFor(trajectories, v.key, v.geom.shapeId, v.snap.shapeDistM),
@@ -1124,6 +1141,7 @@ export function start(): void {
               prev: prevPub,
               ageFloorS: ageFloorPubS,
               anchorFixS: v.snap.shapeDistM,
+              clientFixS: v.clientFixS,
               prevFixS: seamPrevFixPubS,
               fixGapS: v.fixGapS,
             });
@@ -1159,7 +1177,7 @@ export function start(): void {
             emittedAtMs: tEmit,
             prevOpinion: prevEntry.v2.opinion,
             newOpinion: v2.opinion,
-            latestFixS: v.snap.shapeDistM,
+            latestFixS: v.clientFixS,
             prevFixS: prevEntry.anchorFixS,
             anchorMs: v.snap.observedAtMs,
             fixGapS: v.fixGapS,
@@ -1447,7 +1465,7 @@ export function start(): void {
         const v = fuseSnap(raw);
         fleet.set(v.key, v);
         learned.reseed(v);
-        lastFix.set(v.key, { snap: v, cycle, fixGapS: 0, stuckAtM: null });
+        lastFix.set(v.key, { snap: v, cycle, fixGapS: 0, stuckAtM: null, rawShapeDistM: raw.shapeDistM });
       }
       cursor = full.seq;
       pollerHealth = full.poller;
