@@ -32,6 +32,8 @@ import {
   TRAJ_SIM_STEP_MS,
   TRAJ_STAND_ASSERT_MS,
   TRAJ_V_MAX_MS,
+  TRAJ_DISCONTINUITY_M,
+  TRAJ_OVERRUN_DISC_M,
 } from './config';
 import { round2 } from './db';
 import {
@@ -502,6 +504,8 @@ export interface DriveArgs {
   /** The anchor fix's shapeDistM (the G10 floor), m — the §14.4 seam clamp
    *  may reduce the nowcast toward the leader curve but never below this. */
   anchorFixS?: number;
+  /** Ленточная (сырая) ось фикса — то, что держит телефон (клиент-модель швов). */
+  clientFixS?: number;
   /** §14.7 seam rule inputs, set on FIX-DRIVEN re-emissions only: the
    *  PREVIOUS emission's anchor fix position (with fixGapS above, the observed
    *  fix-over-fix speed). When the previous opinion's projection at t0 is
@@ -1846,7 +1850,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     // been on screen since build 17.
     const prevO = clientProjectionM(
       prev.opinion.points,
-      args.anchorFixS,
+      args.clientFixS ?? args.anchorFixS,
       args.anchorMs,
       t0,
     );
@@ -2004,13 +2008,34 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     // re-emission the phone's shim is idle and the raw evaluation IS the marker.
     const sStart =
       args.prevFixS !== undefined && args.anchorFixS !== undefined
-        ? clientSmoothProjectionM(prev.smooth.points, args.anchorFixS, args.anchorMs, t0)
+        ? clientSmoothProjectionM(prev.smooth.points, args.clientFixS ?? args.anchorFixS, args.anchorMs, t0)
         : evalTrack(prev.smooth.points, t0);
     seamGapM = Math.abs(sStart - s0);
     if (prev.tripId !== args.tripId) {
       discKind = 'trip';
     } else {
       tDiscM = discThresholdM(args.fixGapS, surfaces.paceAt(sStart, t0));
+      // Fix-driven ре-эмиссия несёт СВЕЖУЮ улику: лицензия на скачок не
+      // должна масштабироваться фикс-гэпом (hunt1: после молчания 40–96 с шов
+      // 200–1000 м полз минутами под gap-раздутым tDisc). Плоские 150 м; плюс
+      // доказанный перелёт — шов дальше физически достижимого + запас.
+      if (args.prevFixS !== undefined) {
+        tDiscM = Math.min(tDiscM, TRAJ_DISCONTINUITY_M);
+        if (
+          args.anchorFixS !== undefined &&
+          sStart >
+            seamJustifiedM({
+              anchorFixS: args.anchorFixS,
+              anchorMs: args.anchorMs,
+              emittedAtMs: t0,
+              prevFixS: args.prevFixS,
+              fixGapS: args.fixGapS,
+            }) +
+              TRAJ_OVERRUN_DISC_M
+        ) {
+          discKind = 'gap';
+        }
+      }
       if (seamGapM > tDiscM) discKind = 'gap';
     }
     if (discKind === 'none') {

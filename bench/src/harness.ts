@@ -16,8 +16,14 @@ import { TramFleet } from '@/lib/physics/fleet';
 import { TrajectoryStore } from '@/lib/physics/trajectoryStore';
 import type { TrajectoryBatchWire, TrajectoryMetaWire } from '@/lib/physics/convexSource';
 import type { PhysicsDebugInfo, RouteGeometry, TramPublicState, TramSnapshot } from '@/lib/types';
-import { getModelSpec, regNumberToModelId } from '@/lib/fleet/registry';
 import { servedToRouteGeometry, type ServedGeometry } from '@/lib/golemio/gtfs';
+
+// Как в lab/src/run.ts: реестр моделей тянет .tsx-паки иконок, которые чужды
+// node-only tsconfig — реестр подключается через require, минуя typecheck.
+/* eslint-disable @typescript-eslint/no-require-imports */
+const { getModelSpec, regNumberToModelId } =
+  require('@/lib/fleet/registry') as typeof import('@/lib/fleet/registry');
+/* eslint-enable @typescript-eslint/no-require-imports */
 
 /** Одно записанное событие сессии (bench/sessions/*.jsonl, по строке на событие). */
 export type SessionEvent =
@@ -54,7 +60,7 @@ export class Bench {
     switch (e.kind) {
       case 'geometry': {
         try {
-          const g = servedToRouteGeometry(e.served);
+          const g = servedToRouteGeometry(e.served, e.t);
           if (g) this.geoms.set(e.tripId, g);
         } catch {
           // кривая геометрия = трамвай без маршрута, как и на телефоне

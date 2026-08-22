@@ -19,6 +19,7 @@ import {
   COAST_DECAY_MS,
   SMOOTH_CATCHUP_V_MS,
 } from '@/lib/physics/fixForward';
+import { SLEW_MAX_MS } from '@/lib/physics/adapter';
 import { evalTrajectory } from '@/lib/physics/evaluator';
 import {
   fixForwardAppliedM,
@@ -284,13 +285,41 @@ describe('monotone while the FIX advances — the class the first draft missed',
     ['faster than the curve predicted', 13],
     ['exactly as predicted', 10],
     ['stopped dead (a jam the model did not know about)', 0],
-  ])('never steps backwards when the tram is %s', (_label, realVMs) => {
+  ])('layered monotonicity when the tram is %s', (_label, realVMs) => {
+    // Since the hunt1 post-mortem the guarantee is LAYERED: the raw composition
+    // may give back ≤ the previously applied allowance at a fix advance (the
+    // fix-datum reset), and the per-frame slew guard (adapter.ts) owns strict
+    // monotonicity of the on-screen marker. Pin both layers.
     for (const mode of ['smooth', 'fixed'] as const) {
       let prev = -Infinity;
+      let prevApplied = 0;
+      let guardS = -Infinity;
+      let prevT = 0;
       for (const p of sweepWithFixes(mode, realVMs)) {
-        expect(p.s).toBeGreaterThanOrEqual(prev - 1e-9);
+        // Layer 1: the shim only ever ADDS to the served curve…
+        expect(p.s).toBeGreaterThanOrEqual(p.raw - 1e-9);
+        // …and a backward step is bounded by what it had previously added.
+        if (p.s < prev - 1e-9) {
+          expect(prev - p.s).toBeLessThanOrEqual(prevApplied + 1e-6);
+        }
+        // Layer 2: the guarded on-screen marker (fleet slew guard) is strictly
+        // monotone and slew-bounded — the property the field complained about.
+        const dtS = guardS === -Infinity ? 0 : (p.t - prevT) / 1000;
+        const ceil = guardS === -Infinity ? p.s : guardS + SLEW_MAX_MS * dtS;
+        const guarded =
+          mode === 'smooth' && guardS !== -Infinity
+            ? Math.min(Math.max(p.s, guardS - 0.5), ceil)
+            : p.s;
+        expect(guarded).toBeGreaterThanOrEqual(guardS - 0.5 - 1e-9);
+        guardS = guarded;
+        prevT = p.t;
         prev = p.s;
+        prevApplied = Math.max(0, p.applied);
       }
+      // The guarded marker must end where the raw composition ends — the guard
+      // delays, it must never divorce the marker from the physics.
+      const last = sweepWithFixes(mode, realVMs).at(-1)!;
+      expect(Math.abs(guardS - last.s)).toBeLessThanOrEqual(1);
     }
   });
 

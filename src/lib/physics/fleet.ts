@@ -251,20 +251,35 @@ export class TramFleet {
     serverNowMs: number,
     mode: RenderMode,
   ): TramPublicState {
+    const vehicle = this.trajectories.getVehicle(snapshot.key);
+    // A server-sanctioned break: the FIRST frame rendering a new emission
+    // flagged `discontinuity` may jump (trip change / proven desync). The
+    // slew guard steps aside and the teleport watch grants amnesty — a
+    // sanctioned break is the protocol working, not a defect.
+    const logEntry = this.profileLog.get(snapshot.key);
+    const allowJump =
+      vehicle?.discontinuity === true &&
+      Number.isFinite(vehicle.emittedAtMs) &&
+      logEntry?.lastEmittedAtMs !== vehicle.emittedAtMs;
+    const j = this.jumps.get(snapshot.key);
     const state = adaptTram({
       snapshot,
       model: this.models.get(snapshot.key) ?? this.resolveModel(snapshot),
       geometry: this.geometries.get(snapshot.key),
-      vehicle: this.trajectories.getVehicle(snapshot.key),
+      vehicle,
       serverNowMs,
       mode,
       observedPaceMs: this.paces.get(snapshot.key)?.vMs ?? 0,
+      // The per-frame slew guard (adapter.ts): smooth may not teleport, ever.
+      guard:
+        mode === this.mode && j && j.tripId === snapshot.tripId
+          ? { prevS: j.s, prevAtMs: j.atMs, allowJump }
+          : undefined,
     });
     // Teleport watch — active render mode only, so a diagnostics read in the
     // other mode cannot record a phantom jump.
-    if (mode === this.mode) this.watchJump(snapshot, state.simDistM, serverNowMs);
+    if (mode === this.mode) this.watchJump(snapshot, state.simDistM, serverNowMs, allowJump);
     // Profile-emission log: one entry per adopted emission (emittedAtMs edge).
-    const vehicle = this.trajectories.getVehicle(snapshot.key);
     if (vehicle && Number.isFinite(vehicle.emittedAtMs)) {
       const entry = this.profileLog.get(snapshot.key);
       if (!entry) {
@@ -289,7 +304,7 @@ export class TramFleet {
    * bug class). Gaps over 5 s (background, culled stretch) reset instead of
    * judging — across a long gap any displacement is legitimate motion.
    */
-  private watchJump(snapshot: TramSnapshot, s: number, atMs: number): void {
+  private watchJump(snapshot: TramSnapshot, s: number, atMs: number, allowJump = false): void {
     const j = this.jumps.get(snapshot.key);
     if (!j || j.tripId !== snapshot.tripId) {
       this.jumps.set(snapshot.key, {
@@ -299,6 +314,12 @@ export class TramFleet {
         jumpM: 0,
         jumpAtMs: 0,
       });
+      return;
+    }
+    if (allowJump) {
+      // Sanctioned discontinuity: rebase without judging (amnesty).
+      j.s = s;
+      j.atMs = atMs;
       return;
     }
     const dtMs = atMs - j.atMs;

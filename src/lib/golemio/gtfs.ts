@@ -219,6 +219,57 @@ const PROJECTION_BACK_TOL_M = 5;
  * forward candidate exists we fall back to the globally nearest segment,
  * clamped to `minDistM`.
  */
+/**
+ * Windowed twin of `projectDistanceOnPolyline`: projects `coord` ONLY onto the
+ * polyline segments whose along-distance lies within `windowM` of `aroundS`.
+ * Self-overlapping shapes (line-16 loops sit 400+ m apart in cumDist but
+ * meters apart on the ground) make the global nearest-point projection land a
+ * lap away; a window around the claimed axis value keeps it unambiguous.
+ * Returns null when no segment intersects the window.
+ */
+export function projectNearOnPolyline(
+  coord: [number, number],
+  coordinates: [number, number][],
+  cumDistM: number[],
+  aroundS: number,
+  windowM: number,
+): number | null {
+  if (coordinates.length < 2) return null;
+  const lat0 = (coord[1] * Math.PI) / 180;
+  const kx = Math.cos(lat0) * 111_320;
+  const ky = 110_540;
+  const px = coord[0] * kx;
+  const py = coord[1] * ky;
+  const lo = aroundS - windowM;
+  const hi = aroundS + windowM;
+
+  let bestS: number | null = null;
+  let bestSq = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const a = cumDistM[i] ?? 0;
+    const b = cumDistM[i + 1] ?? a;
+    if (b < lo || a > hi) continue;
+    const ax = coordinates[i][0] * kx;
+    const ay = coordinates[i][1] * ky;
+    const bx = coordinates[i + 1][0] * kx;
+    const by = coordinates[i + 1][1] * ky;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const segLenSq = dx * dx + dy * dy;
+    let t = segLenSq > 0 ? ((px - ax) * dx + (py - ay) * dy) / segLenSq : 0;
+    if (t < 0) t = 0;
+    else if (t > 1) t = 1;
+    const cx = ax + t * dx;
+    const cy = ay + t * dy;
+    const distSq = (px - cx) * (px - cx) + (py - cy) * (py - cy);
+    if (distSq < bestSq) {
+      bestSq = distSq;
+      bestS = a + t * (b - a);
+    }
+  }
+  return bestS;
+}
+
 export function projectDistanceOnPolyline(
   coord: [number, number],
   coordinates: [number, number][],
