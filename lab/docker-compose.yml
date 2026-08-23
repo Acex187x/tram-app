@@ -46,6 +46,29 @@ services:
       retries: 5
       start_period: 240s
 
+  watch:
+    # Живой симулятор-вотчер (bench/src/live.ts): ведёт НАСТОЯЩИЙ клиентский
+    # код на живых Convex-потоках 24/7, судит оба режима рендера детекторами
+    # полевых жалоб + контракт эмиссий, пишет аномалии в lab.db (Grafana) и
+    # сохраняет кольцевые окна для детерминированного реплея.
+    image: node:22-bookworm
+    container_name: tram-watch
+    working_dir: /repo
+    command: bash -lc "cd /repo/bench && npm ci --no-audit --no-fund && cd /repo && exec ./bench/node_modules/.bin/tsx bench/src/live.ts"
+    environment:
+      TSX_TSCONFIG_PATH: /repo/bench/tsconfig.json
+      LAB_DB: /data/lab.db
+      BENCH_OUT: /data/bench
+      CONVEX_URL: http://tram-convex-backend:3210
+      SITE_URL: http://tram-convex-backend:3211
+    volumes:
+      - ../:/repo:ro
+      - bench-node-modules:/repo/bench/node_modules
+      - lab-data:/data
+    restart: unless-stopped
+    networks:
+      - dokploy-network
+
   ml:
     image: python:3.12-slim
     container_name: tram-lab-ml
@@ -85,6 +108,7 @@ services:
 
 volumes:
   lab-node-modules:
+  bench-node-modules:
   lab-data:
   grafana-data:
 

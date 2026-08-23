@@ -11,7 +11,9 @@ export interface Anomaly {
     | 'stand-mid-road' // стоит вне остановки, хотя координаты фикса уехали вперёд
     | 'behind-coords' // маркер устойчиво позади координат свежайшего фикса
     | 'stand-at-wrong-spot' // at_stop, но маркер далеко от заявленной остановки
-    | 'walk-episode'; // τ=∞: фикс за горизонтом профиля
+    | 'walk-episode' // τ=∞: фикс за горизонтом профиля
+    | 'ahead-of-coords' // маркер устойчиво ВПЕРЕДИ координат свежего фикса
+    | 'anchor-mismatch'; // контракт: anchorS эмиссии ≠ ось фикса с тем же anchorMs
   key: string;
   atMs: number;
   detail: string;
@@ -19,6 +21,7 @@ export interface Anomaly {
 }
 
 interface Track {
+  aheadSinceMs: number;
   standSinceMs: number;
   standAtM: number;
   behindSinceMs: number;
@@ -45,6 +48,7 @@ export class Detectors {
     let tr = this.tracks.get(key);
     if (!tr) {
       tr = {
+        aheadSinceMs: 0,
         standSinceMs: 0,
         standAtM: 0,
         behindSinceMs: 0,
@@ -160,6 +164,20 @@ export class Detectors {
       }
     } else {
       tr.standSinceMs = 0;
+    }
+
+    // 3б) маркер устойчиво ВПЕРЕДИ координат свежего фикса (ночной класс:
+    // модель уезжает от стоящего трамвая; ловим ОБЕ стороны разъезда).
+    if (sCoord != null && diag.simDistM - sCoord > 100 && diag.fixAgeS < 30) {
+      if (tr.aheadSinceMs === 0) tr.aheadSinceMs = nowMs;
+      if ((nowMs - tr.aheadSinceMs) / 1000 >= 15) {
+        once(`ahd-${Math.round(tr.aheadSinceMs / 1000)}`, {
+          kind: 'ahead-of-coords',
+          detail: `маркер ${diag.simDistM.toFixed(0)}м впереди координат фикса ${sCoord.toFixed(0)}м на ${(diag.simDistM - sCoord).toFixed(0)}м (фиксу ${diag.fixAgeS.toFixed(0)}с, источник ${diag.renderSource}, режим ${diag.shimBranch})`,
+        });
+      }
+    } else {
+      tr.aheadSinceMs = 0;
     }
 
     // 3) маркер устойчиво позади координат фикса.
