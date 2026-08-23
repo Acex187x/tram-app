@@ -352,13 +352,22 @@ export function start(): void {
    */
   function fuseSnap(snap: TramSnapshot): TramSnapshot {
     if (!FUSE_FIX_AXIS) return snap;
-    // BENCH VERDICT (hunt1, 205 событий): парковочные координаты стоящего у
-    // платформы трамвая систематически проецируются на −60…−73 м от неё, а
-    // ось at_stop-фикса Golemio прибивает РОВНО к остановке — и она ПРАВА.
-    // Фьюзить at_stop-фиксы = утащить якорь модального холда от платформы.
-    if (snap.statePosition === 'at_stop') return snap;
     const geom = geometry.resolve(snap.tripId);
     if (!geom) return snap;
+    // BENCH VERDICT (hunt1, 205 событий): у платформы ось at_stop-фикса
+    // прибита РОВНО к остановке и права (парковочные координаты систематически
+    // −60…−73 м) — там фьюжн вреден. НО (журнал 9093, 2026-08-23): базы
+    // остановок Golemio и нашей геометрии местами расходятся на ~114 м —
+    // «at_stop»-ось, севшая ПОСРЕДИ нашего перегона, это их остановка не на
+    // нашем месте, и доверять ей = маркер стоит посреди дороги впереди
+    // координат. Доверяем at_stop-оси только у НАШЕЙ остановки (≤60 м);
+    // иначе фикс фьюзится как обычный.
+    if (snap.statePosition === 'at_stop') {
+      for (const st of geom.stops) {
+        if (Math.abs(st.distM - snap.shapeDistM) <= 60) return snap;
+        if (st.distM > snap.shapeDistM + 60) break;
+      }
+    }
     // Оконная проекция вокруг заявленной оси (±FUSE_MAX_CORRECTION_M + запас):
     // петли линии 16 (Δ417/425 м между проходами) ловят глобальную
     // ближайшую точку на чужой круг — окно делает проекцию однозначной.
