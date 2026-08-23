@@ -231,6 +231,14 @@ export interface PhysicsDebugInfo {
    */
   profileHistory: { source: 'ml' | 'naive'; ageS: number }[];
   /**
+   * ЖУРНАЛ этого трамвая (девтулсы): всё, что с ним происходило, с
+   * длительностями — телепорты, смены источника движения и режима поправки,
+   * пересчёты прогноза, новые фиксы, стоянки, смены рейса. Ведётся ТОЛЬКО
+   * для трамваев, которых читают через getDiagnostics (ноль цены для
+   * обычного рендера); новьё первым, ≤30 записей.
+   */
+  events: { atMs: number; ageS: number; kind: string; text: string; warn: boolean }[];
+  /**
    * The SAME fix, two ways: its raw coordinates projected onto the route
    * axis, minus its reported shapeDistM. The Prague feed routinely
    * contradicts itself by ±70 m between the two — the whole pipeline lives

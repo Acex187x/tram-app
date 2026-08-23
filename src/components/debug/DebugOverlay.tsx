@@ -434,6 +434,15 @@ const GUIDE_SECTIONS: GuideSection[] = [
     ],
   },
   {
+    title: 'ЖУРНАЛ',
+    rows: [
+      [
+        'журнал событий',
+        'Хроника всего, что происходило с этим трамваем, новьё сверху, с длительностями. Типы: ТЕЛЕПОРТ (скачок маркера + в каком режиме поправки и на каком источнике он случился), «источник» (смены ML-профиль/наивный/протяжка/замер — и сколько длился прежний), «поправка» (смены режимов доводки, в т.ч. сколько длился «фикс за горизонтом»), «пересчёт» (принята новая эмиссия: ml или наивная, возраст опоры, разрешён ли скачок), «фикс» (новый фикс: сдвиг по оси, лаг доставки, коорд−ось если разъехались), «стоянка» (сколько простоял и где — у остановки или посреди перегона), «рейс». Подсвеченное — то, на что стоит смотреть. Журнал ведётся, пока трамвай открыт в дебаге (последние ~5 минут наблюдения).',
+      ],
+    ],
+  },
+  {
     title: 'СЛЕДУЮЩАЯ ОСТАНОВКА',
     rows: [
       ['остановка', 'Следующая остановка впереди нарисованной точки.'],
@@ -837,6 +846,25 @@ function DebugLive({ tramKey }: { tramKey: string }) {
             <Row label="до рельсов" value={`${num(proj?.fOffM, 1)} / ${num(proj?.gpsOffM, 1)}м`} />
           </View>
 
+          {/* ЖУРНАЛ: всё, что происходило с этим трамваем, с длительностями —
+              «мигнуло и не поймал» больше не существует. */}
+          <View style={[styles.debugCard, styles.journalCard]}>
+            <SectionTitle>ЖУРНАЛ</SectionTitle>
+            {dbg.events.length === 0 && <Text style={styles.note}>пока тихо…</Text>}
+            {dbg.events.slice(0, 14).map((e, i) => (
+              <View key={`${e.atMs}-${i}`} style={styles.journalRow}>
+                <Text style={styles.journalAge}>-{num(e.ageS, 0)}с</Text>
+                <Text style={styles.journalKind}>{e.kind}</Text>
+                <Text
+                  style={[styles.journalText, e.warn && styles.valueWarn]}
+                  numberOfLines={2}
+                >
+                  {e.text}
+                </Text>
+              </View>
+            ))}
+          </View>
+
           <View style={styles.debugCard}>
             <SectionTitle>СЛЕДУЮЩАЯ ОСТАНОВКА</SectionTitle>
             <Row label="остановка" value={dbg.nextStopName ?? '—'} />
@@ -927,6 +955,11 @@ const styles = StyleSheet.create({
     marginTop: 7,
   },
   row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 0.5 },
+  journalCard: { width: 320 },
+  journalRow: { flexDirection: 'row', gap: 5, paddingVertical: 0.5, alignItems: 'flex-start' },
+  journalAge: { color: '#7FB2D9', fontFamily: MONO, fontSize: 9.5, width: 34, textAlign: 'right' },
+  journalKind: { color: '#6BE6A6', fontFamily: MONO, fontSize: 9.5, fontWeight: '700', width: 62 },
+  journalText: { color: '#EAF1F7', fontFamily: MONO, fontSize: 9.5, flex: 1 },
   label: { color: '#9AA7B4', fontFamily: MONO, fontSize: 10.5, flexShrink: 0 },
   value: { color: '#EAF1F7', fontFamily: MONO, fontSize: 10.5, fontWeight: '600', flexShrink: 1, textAlign: 'right' },
   valueWarn: { color: '#FF8F6B' },

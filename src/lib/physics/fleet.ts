@@ -99,6 +99,29 @@ export class TramFleet {
     string,
     { lastEmittedAtMs: number; log: { source: 'ml' | 'naive'; atMs: number }[] }
   >();
+  /**
+   * ЖУРНАЛ (девтулсы): состояние переходов + кольцо событий на трамвай.
+   * Живёт только для ключей, которые читают через getDiagnostics; ключи, не
+   * читанные 5 минут, выметаются на ingest.
+   */
+  private eventLogs = new Map<
+    string,
+    {
+      lastQueryMs: number;
+      ring: { atMs: number; kind: string; text: string; warn: boolean }[];
+      prevSource: PhysicsDebugInfo['renderSource'] | null;
+      sourceSinceMs: number;
+      prevShim: PhysicsDebugInfo['shimBranch'] | null;
+      shimSinceMs: number;
+      prevEmittedAtMs: number;
+      prevObsAtMs: number;
+      prevObsS: number;
+      prevTripId: string;
+      standSinceMs: number;
+      standAtM: number;
+      lastJumpSeenAtMs: number;
+    }
+  >();
   /** Render mode mirrored from the settings store by the runtime. */
   private mode: RenderMode = 'smooth';
 
@@ -165,6 +188,10 @@ export class TramFleet {
     }
     for (const key of this.profileLog.keys()) {
       if (!nextSnapshots.has(key)) this.profileLog.delete(key);
+    }
+    const staleLogMs = Date.now() - 5 * 60_000;
+    for (const [key, log] of this.eventLogs) {
+      if (!nextSnapshots.has(key) || log.lastQueryMs < staleLogMs) this.eventLogs.delete(key);
     }
   }
 
@@ -429,7 +456,133 @@ export class TramFleet {
       .map((e) => ({ source: e.source, ageS: (serverNowMs - e.atMs) / 1000 }))
       .reverse();
 
+    // ── ЖУРНАЛ: переходы состояний с длительностями (только для читаемых) ──
+    let elog = this.eventLogs.get(key);
+    if (!elog) {
+      elog = {
+        lastQueryMs: 0,
+        ring: [],
+        prevSource: renderSource,
+        sourceSinceMs: serverNowMs,
+        prevShim: shimBranch,
+        shimSinceMs: serverNowMs,
+        prevEmittedAtMs: vehicle?.emittedAtMs ?? 0,
+        prevObsAtMs: snapshot.observedAtMs,
+        prevObsS: snapshot.shapeDistM,
+        prevTripId: snapshot.tripId,
+        standSinceMs: 0,
+        standAtM: 0,
+        lastJumpSeenAtMs: 0,
+      };
+      this.eventLogs.set(key, elog);
+    }
+    elog.lastQueryMs = Date.now();
+    const push = (kind: string, text: string, warn = false): void => {
+      elog!.ring.push({ atMs: serverNowMs, kind, text, warn });
+      if (elog!.ring.length > 40) elog!.ring.shift();
+    };
+    const SRC_RU: Record<PhysicsDebugInfo['renderSource'], string> = {
+      'curve-ml': 'ML-профиль',
+      'curve-naive': 'наивный профиль',
+      'client-naive': 'клиентская протяжка',
+      'raw-fix': 'замер на фиксе',
+    };
+    const SHIM_RU: Record<PhysicsDebugInfo['shimBranch'], string> = {
+      off: 'спит',
+      ahead: 'профиль⩾фикса',
+      wind: 'промотка',
+      walk: 'ФИКС ЗА ГОРИЗОНТОМ',
+    };
+    // Телепорт (jump-watch зафиксировал новый скачок).
+    if (hasJump && jump.jumpAtMs !== elog.lastJumpSeenAtMs) {
+      elog.lastJumpSeenAtMs = jump.jumpAtMs;
+      push(
+        'ТЕЛЕПОРТ',
+        `${jump.jumpM >= 0 ? '+' : ''}${jump.jumpM.toFixed(0)}м (поправка: ${SHIM_RU[shimBranch]}, ехал по: ${SRC_RU[renderSource]})`,
+        true,
+      );
+    }
+    // Смена рейса.
+    if (snapshot.tripId !== elog.prevTripId) {
+      push('рейс', `новый рейс (${elog.prevTripId.slice(0, 12)}… → ${snapshot.tripId.slice(0, 12)}…)`);
+      elog.prevTripId = snapshot.tripId;
+    }
+    // Пересчёт прогноза (принята новая эмиссия).
+    if (vehicle && Number.isFinite(vehicle.emittedAtMs) && vehicle.emittedAtMs !== elog.prevEmittedAtMs) {
+      elog.prevEmittedAtMs = vehicle.emittedAtMs;
+      const anchorAge = Number.isFinite(vehicle.anchorMs)
+        ? ((serverNowMs - vehicle.anchorMs) / 1000).toFixed(0)
+        : '?';
+      push(
+        'пересчёт',
+        `${vehicle.source === 'naive' ? 'наивный' : 'ml'} · опоре ${anchorAge}с${vehicle.discontinuity ? ' · СКАЧОК РАЗРЕШЁН' : ''}`,
+        vehicle.discontinuity,
+      );
+    }
+    // Новый фикс: сдвиг по оси + лаг доставки.
+    if (snapshot.observedAtMs !== elog.prevObsAtMs) {
+      const dS = snapshot.shapeDistM - elog.prevObsS;
+      const lagS = ((serverNowMs - snapshot.observedAtMs) / 1000).toFixed(0);
+      push(
+        'фикс',
+        `${dS >= 0 ? '+' : ''}${dS.toFixed(0)}м по оси · лаг ${lagS}с${fixCoordVsAxisM != null && Math.abs(fixCoordVsAxisM) > 30 ? ` · коорд−ось ${fixCoordVsAxisM >= 0 ? '+' : ''}${fixCoordVsAxisM.toFixed(0)}м` : ''}`,
+        fixCoordVsAxisM != null && Math.abs(fixCoordVsAxisM) > 60,
+      );
+      elog.prevObsAtMs = snapshot.observedAtMs;
+      elog.prevObsS = snapshot.shapeDistM;
+    }
+    // Смена источника движения (с длительностью прежнего).
+    if (renderSource !== elog.prevSource) {
+      const durS = ((serverNowMs - elog.sourceSinceMs) / 1000).toFixed(1);
+      push(
+        'источник',
+        `${SRC_RU[elog.prevSource ?? renderSource]} → ${SRC_RU[renderSource]} (было ${durS}с)`,
+        renderSource !== 'curve-ml',
+      );
+      elog.prevSource = renderSource;
+      elog.sourceSinceMs = serverNowMs;
+    }
+    // Смена режима поправки (сколько длился прежний — в т.ч. walk-эпизоды).
+    if (shimBranch !== elog.prevShim) {
+      const durS = ((serverNowMs - elog.shimSinceMs) / 1000).toFixed(1);
+      push(
+        'поправка',
+        `${SHIM_RU[elog.prevShim ?? shimBranch]} → ${SHIM_RU[shimBranch]} (${SHIM_RU[elog.prevShim ?? shimBranch]} длился ${durS}с)`,
+        shimBranch === 'walk' || elog.prevShim === 'walk',
+      );
+      elog.prevShim = shimBranch;
+      elog.shimSinceMs = serverNowMs;
+    }
+    // Стоянки: событие на ОКОНЧАНИИ (сколько простоял и где).
+    const standingNow = state.simSpeedKmh <= 1;
+    if (standingNow && elog.standSinceMs === 0) {
+      elog.standSinceMs = serverNowMs;
+      elog.standAtM = state.simDistM;
+    } else if (!standingNow && elog.standSinceMs > 0) {
+      const durS = (serverNowMs - elog.standSinceMs) / 1000;
+      if (durS >= 3) {
+        let nearest = Infinity;
+        let nearestName = '';
+        for (const st of geometry?.stops ?? []) {
+          const d = Math.abs(st.distM - elog.standAtM);
+          if (d < nearest) {
+            nearest = d;
+            nearestName = st.name;
+          }
+        }
+        const where =
+          nearest <= 40 ? `у ${nearestName}` : `посреди перегона (${nearest.toFixed(0)}м от остановки)`;
+        push('стоянка', `стоял ${durS.toFixed(0)}с ${where}`, nearest > 40 && durS >= 10);
+      }
+      elog.standSinceMs = 0;
+    }
+    const events = elog.ring
+      .slice(-30)
+      .reverse()
+      .map((e) => ({ ...e, ageS: (serverNowMs - e.atMs) / 1000 }));
+
     return {
+      events,
       profileHistory,
       fixCoordVsAxisM,
       hasTrajectory: vehicle !== undefined,
