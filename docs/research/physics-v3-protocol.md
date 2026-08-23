@@ -46,22 +46,20 @@ Each published vehicle carries one field the HTTP wire does not:
 `source: 'ml' | 'naive'`, plus `anchorS` (the anchor fix's shapeDistM, for
 devtools).
 
-**Two-phase emission (owner doctrine, amended 2026-08-21 evening).** A fresh
-fix must move the FIXED point the same second it lands, never an ML round trip
-later. Every fix-driven rebuild therefore emits twice:
+**One emission per fix (owner doctrine, amended 2026-08-24; supersedes the
+two-phase emission of 2026-08-21).** Every fix-driven rebuild goes straight to
+ml-gbdt: the ML round trip (~0.3–2.5 s) is fully covered on the client by the
+matured fix-forward shim (`fixed` jumps to the fresh fix via wind/τ=∞ the
+moment it lands, `smooth` closes under the slew guard), so the former instant
+naive pass-1 bought ~1–2 s on a pipeline that is ~10–13 s late upstream while
+costing an extra seam and a source flap on every correction.
 
-1. **instant** — the learned-walker naive prediction (pure TS, sub-ms),
-   through the same generator and kinematic limits, published to Convex
-   immediately (`source: 'naive'`);
-2. **the ML upgrade** — when `predictBatch` returns (~0.3–2.5 s), the vehicle
-   is re-emitted from the ml-gbdt targets (`source: 'ml'`) with its own fresh
-   `emittedAtMs`, chaining through the pass-1 seam state (same anchor ⇒ the
-   age-re-emission floors apply, so the upgrade cannot step backward), and
-   replaces the naive curve in Convex.
-
-ML unavailability is therefore not a special branch any more: pass 2 simply
-never lands and the fleet keeps driving on pass-1 physics. Age-driven rebuilds
-(60 s refresh, no new fix) skip pass 1 and keep the old curve when ML is down.
+The naive learned-walker remains STRICTLY the outage fallback: when
+`predictBatch` fails (service down / unusable answer) AND the old curve is
+provably wrong about the new fix (gone, wrong trip, overrun, or off by more
+than `INSTANT_NAIVE_GAP_M`), the vehicle is emitted from naive targets
+(`source: 'naive'`, same generator and limits). A still-valid old curve is
+held instead — an ML blip must not degrade a good prediction.
 
 ## Wire: `GET /api/trajectories/v2` (research transport; same shape as the Convex rows)
 

@@ -1226,38 +1226,13 @@ export function start(): void {
         });
     };
 
-    // ── pass 1: instant naive re-anchor — WHEN a correction is actually due ─
-    // The doctrine: a fresh fix must move the marker the same second it lands.
-    // But when the old ML curve already passes within INSTANT_NAIVE_GAP_M of
-    // the new fix, it IS the better answer for the next ~2 s — replacing it
-    // with a worse naive model added two seams and visible jitter to every
-    // fix window (build-22 field report). So pass 1 fires exactly when the
-    // old curve is provably wrong: gone, wrong trip, overrun entirely
-    // (the τ=∞ teleport class), or off by more than the gate.
-    const instant = stale.filter((x) => {
-      const entry = trajectories.get(x.key);
-      if (entry === undefined) return true;
-      if (entry.fixObsAtMs === x.snap.observedAtMs) return false; // not fix-driven
-      if (entry.v2.tripId !== x.snap.tripId) return true;
-      const o = entry.v2.opinion;
-      if (o.length === 0) return true;
-      if (x.snap.shapeDistM > o[o.length - 1].s + 1) return true; // overrun
-      return Math.abs(x.snap.shapeDistM - evalTrack(o, x.snap.observedAtMs)) > INSTANT_NAIVE_GAP_M;
-    });
-    for (const v of instant) {
-      buildAndStore(v, naivePointsFor(v), 'naive', false);
-      trajNaiveEmissions++;
-    }
-    if (instant.length > 0) {
-      trajBuiltAtMs = tCompute;
-      await publisher.publishCycle(
-        trajectories,
-        tCompute,
-        TRAJ_V3_PUBLISH ? 'drive-v3' : 'current',
-      );
-    }
-
-    // ── pass 2: the ML upgrade, chunked on vehicle boundaries ───────────────
+    // ── ML на каждый фикс, chunked on vehicle boundaries ────────────────────
+    // Двухфазка (мгновенный наивный + ML-апгрейд) удалена 2026-08-24 по
+    // решению владельца: клиентский шим (промотка/τ=∞ + предохранитель)
+    // закрывает окно ML-раундтрипа сам, а наивная вставка на 0.1–1.5 с
+    // давала лишний шов и мигание на каждую коррекцию. Наивный профиль
+    // остаётся строго ОТКАЗНЫМ резервом: ML лёг/вернул мусор — а старая
+    // кривая доказуемо неправа — строим learned-walker вместо ML.
     const perChunk = Math.max(1, Math.floor(TRAJ_ML_MAX_ROWS / TRAJ_POINTS));
     for (let i = 0; i < stale.length; i += perChunk) {
       const group = stale.slice(i, i + perChunk);
@@ -1268,19 +1243,30 @@ export function start(): void {
         }
       }
       const pred = await ml.predictBatch(rows);
-      if (!pred) {
-        // ML down / not ready: pass 1 already covers every fix-driven vehicle
-        // with naive physics, and an age-driven rebuild keeps its old curve.
-        trajMlHeld += group.length;
-        continue;
-      }
       group.forEach((v, gi) => {
-        const points = mlPointsFor(v, gi, pred.gbdt);
-        if (points === null) {
-          trajMlHeld++;
-          return; // unusable ML answer for this vehicle — naive/old curve stands
+        const points = pred ? mlPointsFor(v, gi, pred.gbdt) : null;
+        if (points !== null) {
+          buildAndStore(v, points, 'ml', true);
+          return;
         }
-        buildAndStore(v, points, 'ml', true);
+        // ML недоступен. Доктрина владельца: старую кривую ДЕРЖИМ, пока она
+        // описывает трамвай; наивный резерв — только когда она доказуемо
+        // неправа (нет/чужой рейс/перегнана/промах > INSTANT_NAIVE_GAP_M).
+        const entry = trajectories.get(v.key);
+        const o = entry?.v2.opinion;
+        const wrong =
+          entry === undefined ||
+          entry.v2.tripId !== v.snap.tripId ||
+          o === undefined ||
+          o.length === 0 ||
+          v.snap.shapeDistM > o[o.length - 1].s + 1 ||
+          Math.abs(v.snap.shapeDistM - evalTrack(o, v.snap.observedAtMs)) > INSTANT_NAIVE_GAP_M;
+        if (!wrong) {
+          trajMlHeld++;
+          return;
+        }
+        buildAndStore(v, naivePointsFor(v), 'naive', false);
+        trajNaiveEmissions++;
       });
     }
     trajBuiltAtMs = tCompute;
