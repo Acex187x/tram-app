@@ -64,6 +64,8 @@ MODELS_DIR = os.environ.get("MODELS_DIR", "/data/models")
 PORT = int(os.environ.get("ML_PORT", "8092"))
 PRAGUE = ZoneInfo("Europe/Prague")
 MIN_PAIRS = 4000
+# Вес ночных (00–06 Праги) обучающих пар — компенсация их доли ~5–7 %.
+NIGHT_SAMPLE_WEIGHT = 3.0
 TRAIN_HOUR_UTC = 2
 RETRAIN_MIN_INTERVAL_S = 20 * 3600
 
@@ -248,7 +250,12 @@ def train_once():
         n_estimators=400, learning_rate=0.05, num_leaves=63,
         min_child_samples=30, n_jobs=2, verbose=-1,
     )
-    gbdt.fit(X_tr, y_tr)
+    # Ночной апвейт (вердикт 2026-08-22): ночь — 5–7 % выборки, GBDT почти не
+    # платил за ночной хвост (тайминг-холды) и деградировал на +18–30 % p90 в
+    # 00–06. Час восстанавливаем из hourSin/hourCos (фичи 3/4).
+    hour = (np.arctan2(X_tr[:, 3], X_tr[:, 4]) / (2 * np.pi) * 24) % 24
+    w_tr = np.where(hour < 6.0, NIGHT_SAMPLE_WEIGHT, 1.0)
+    gbdt.fit(X_tr, y_tr, sample_weight=w_tr)
     mae_gbdt = float(np.mean(np.abs(gbdt.predict(X_te) - y_te)))
 
     mlp = make_pipeline(

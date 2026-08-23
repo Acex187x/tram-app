@@ -4,7 +4,7 @@
 // lists, timelines, planner and feature builder read is derived here, purely,
 // so this suite is where "the app still means what it says" is enforced.
 
-import { adaptTram, nearestStopIndex, nextStopIndex, DWELL_NEAR_STOP_M } from '@/lib/physics/adapter';
+import { adaptTram, SLEW_BACK_TOL_M, SLEW_MAX_FRAME_GAP_MS, SLEW_MAX_MS, nearestStopIndex, nextStopIndex, DWELL_NEAR_STOP_M } from '@/lib/physics/adapter';
 import { parseBundle, type ParsedVehicle } from '@/lib/physics/bundle';
 import { SMOOTH_CATCHUP_V_MS } from '@/lib/physics/fixForward';
 import { pointAt } from '@/lib/geo/polyline';
@@ -429,5 +429,59 @@ describe('observed (raw fix) fields survive for the fix overlay', () => {
     const state = adaptNoGeo(vehicleFrom(), T0);
     expect(state.observedPosition).toEqual([14.4, 50.08]);
     expect(state.observedBearing).toBe(90);
+  });
+});
+
+describe('покадровый предохранитель (guard) — smooth физически не телепортируется', () => {
+  // Последний рубеж после hunt1: какая бы ошибка ни пришла сверху (шов
+  // сервера, композиция шима, смена бандла) — экранный smooth-маркер не
+  // шагает назад и не летит быстрее SLEW_MAX_MS. Санкционированный
+  // discontinuity (allowJump) — единственная дверь.
+  const guarded = (
+    mode: 'smooth' | 'fixed',
+    prevS: number,
+    dtMs: number,
+    fixS: number,
+    allowJump = false,
+  ) =>
+    adaptTram({
+      snapshot: snapshot({ shapeDistM: fixS, observedAtMs: T0 + 20_000 }),
+      model: MODEL,
+      geometry: straightGeometry(),
+      vehicle: vehicleFrom(),
+      serverNowMs: T0 + 20_000 + dtMs,
+      mode,
+      guard: { prevS, prevAtMs: T0 + 20_000, allowJump },
+    });
+
+  it('не даёт шагнуть назад дальше допуска на шум', () => {
+    // Кривая на ~1200 м; предыдущий кадр рисовал 1500 — маркер остаётся у
+    // 1500 (floor), а не прыгает назад на 300 м.
+    const s = guarded('smooth', 1_500, 100, 1_200).simDistM;
+    expect(s).toBeGreaterThanOrEqual(1_500 - SLEW_BACK_TOL_M - 1e-9);
+  });
+
+  it('ограничивает рывок вперёд SLEW_MAX_MS', () => {
+    // Кривая требует 2000 при прошлом кадре 1200 и dt=100мс → максимум
+    // 1200 + 25·0.1 = 1202.5.
+    const s = guarded('smooth', 1_200, 100, 2_000).simDistM;
+    expect(s).toBeLessThanOrEqual(1_200 + SLEW_MAX_MS * 0.1 + 1e-9);
+  });
+
+  it('санкционированный discontinuity открывает дверь (allowJump)', () => {
+    const s = guarded('smooth', 1_500, 100, 1_200, true).simDistM;
+    expect(s).toBeLessThan(1_400); // прыжок назад разрешён
+  });
+
+  it('fixed не охраняется — его лицензия прыгать', () => {
+    const s = guarded('fixed', 1_500, 100, 1_300).simDistM;
+    // Прыгнул на промотанную к фиксу кривую (1300 + 0.1с езды), floor не мешал.
+    expect(s).toBeGreaterThanOrEqual(1_300);
+    expect(s).toBeLessThan(1_305);
+  });
+
+  it('большой разрыв кадров (resume) — это seek, не анимация: guard молчит', () => {
+    const s = guarded('smooth', 100, SLEW_MAX_FRAME_GAP_MS + 1_000, 1_300).simDistM;
+    expect(s).toBeGreaterThan(1_000); // никакого «ползти от 100 м после резюма»
   });
 });

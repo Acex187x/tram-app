@@ -1583,6 +1583,58 @@ export function start(): void {
     geometry.fetchFail = 0;
   }
 
+  // ── publishing/ML health sampler (health_minute, 2026-08-23) ──────────────
+  // The Convex-push / fused-axis / emission-mix gauges live only in this
+  // process's memory (lifetime counters on /api/summary) — Grafana cannot see
+  // them, and a restart zeroes them. Once a minute the sampler persists the
+  // PER-MINUTE DELTAS of those counters plus a few point-in-time gauges, so
+  // the production-health dashboard reads real rates, not lifetime totals.
+  let healthPrev = {
+    pushes: 0,
+    failures: 0,
+    heartbeats: 0,
+    vehiclesPushed: 0,
+    fuseApplied: 0,
+    fuseMetersSum: 0,
+    emissions: 0,
+    naiveEmissions: 0,
+  };
+
+  function sampleHealth(): void {
+    const nowMs = Date.now();
+    const g = publisher.gauges();
+    const pack = publisher.packGauges();
+    const dFuse = fuseApplied - healthPrev.fuseApplied;
+    const dFuseM = fuseMetersSum - healthPrev.fuseMetersSum;
+    const dEmissions = trajEmissions - healthPrev.emissions;
+    const dNaive = trajNaiveEmissions - healthPrev.naiveEmissions;
+    store.writeHealthMinute({
+      atMs: nowMs,
+      publishPushes: g.pushes - healthPrev.pushes,
+      publishFailures: g.failures - healthPrev.failures,
+      publishHeartbeats: g.heartbeats - healthPrev.heartbeats,
+      vehiclesPushed: g.vehiclesPushed - healthPrev.vehiclesPushed,
+      fusedApplied: dFuse,
+      fusedMeanM: dFuse > 0 ? round2(dFuseM / dFuse) : null,
+      naiveEmissions: dNaive,
+      mlEmissions: Math.max(0, dEmissions - dNaive),
+      mlReady: ml.modelsReady ? 1 : 0,
+      bundleFleet: trajectories.size,
+      convexBatchAgeS: lastBatchAtMs > 0 ? round2((nowMs - lastBatchAtMs) / 1000) : null,
+      packAgeS: pack.lastAtMs > 0 ? round2((nowMs - pack.lastAtMs) / 1000) : null,
+    });
+    healthPrev = {
+      pushes: g.pushes,
+      failures: g.failures,
+      heartbeats: g.heartbeats,
+      vehiclesPushed: g.vehiclesPushed,
+      fuseApplied,
+      fuseMetersSum,
+      emissions: trajEmissions,
+      naiveEmissions: trajNaiveEmissions,
+    };
+  }
+
   function getLive(): { atMs: number; vehicles: LiveVehicle[] } {
     const nowMs = Date.now();
     const states = engine.getStates(nowMs);
@@ -1755,7 +1807,16 @@ export function start(): void {
     getShadowTrajectories,
     getVehicleDebug,
     getGeometryPack,
-    isHealthy: () => Date.now() - lastBatchAtMs < 120_000,
+    // Здоровье = И поток фиксов, И доставка кривых до Convex: движок, который
+    // считает, но не публикует, для телефонов мёртв — healthcheck обязан это
+    // видеть (docker restart: unless-stopped + алерт-панель в Grafana).
+    isHealthy: () => {
+      const now = Date.now();
+      if (now - lastBatchAtMs >= 120_000) return false;
+      const pub = publisher.gauges();
+      if (pub.enabled && pub.lastOkAtMs > 0 && now - pub.lastOkAtMs >= 60_000) return false;
+      return true;
+    },
   });
 
   // ── loops ──────────────────────────────────────────────────────────────────
@@ -1772,6 +1833,7 @@ export function start(): void {
 
   setInterval(() => engine.tick(Date.now()), TICK_MS);
   setInterval(rollup, ROLLUP_MS);
+  setInterval(sampleHealth, 60_000);
   // Cold-start geometry pack → Convex file storage (the app reads it from
   // tram-site since 2026-08-21). First upload once the fleet has geometry,
   // then refresh every 5 min; uploadGeometryPack itself skips unchanged packs.

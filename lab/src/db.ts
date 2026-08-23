@@ -19,6 +19,28 @@ export interface ScoreRow {
   latencyS: number;
 }
 
+/** One persisted minute of publishing/ML health (see health_minute DDL:
+ *  counter fields are per-minute deltas, the rest point-in-time gauges). */
+export interface HealthMinuteRow {
+  atMs: number;
+  publishPushes: number;
+  publishFailures: number;
+  publishHeartbeats: number;
+  vehiclesPushed: number;
+  fusedApplied: number;
+  /** Mean fused-axis correction over THIS minute's applications, m. */
+  fusedMeanM: number | null;
+  naiveEmissions: number;
+  /** ML-sourced published emissions this minute (= emissions − naive). */
+  mlEmissions: number;
+  mlReady: 0 | 1;
+  bundleFleet: number;
+  /** Age of the newest ingested Convex batch at sample time, s. */
+  convexBatchAgeS: number | null;
+  /** Age of the last geometry pack accepted by Convex, s. */
+  packAgeS: number | null;
+}
+
 export function openDb(): Database.Database {
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
   const db = new Database(DB_PATH);
@@ -130,6 +152,28 @@ export function openDb(): Database.Database {
       maeHoldout REAL NOT NULL,
       PRIMARY KEY (tsMin, model)
     );
+
+    -- Minute sampler over publishing/ML health (2026-08-23): the /api/summary
+    -- gauges are lifetime in-memory counters and vanish on restart — Grafana
+    -- needs the PER-MINUTE deltas persisted. Counters (pushes, failures,
+    -- heartbeats, vehiclesPushed, fusedApplied, naive/ml emissions) are deltas
+    -- over the sampling minute; mlReady/bundleFleet/ages are point-in-time
+    -- gauges at the sample instant.
+    CREATE TABLE IF NOT EXISTS health_minute (
+      atMs INTEGER PRIMARY KEY,
+      publishPushes INTEGER NOT NULL,
+      publishFailures INTEGER NOT NULL,
+      publishHeartbeats INTEGER NOT NULL,
+      vehiclesPushed INTEGER NOT NULL,
+      fusedApplied INTEGER NOT NULL,
+      fusedMeanM REAL,
+      naiveEmissions INTEGER NOT NULL,
+      mlEmissions INTEGER NOT NULL,
+      mlReady INTEGER NOT NULL,
+      bundleFleet INTEGER NOT NULL,
+      convexBatchAgeS REAL,
+      packAgeS REAL
+    );
   `);
   // Additive migration (2026-08-11): feed-discontinuity events skipped by the
   // scoring gate, per rollup minute.
@@ -159,6 +203,7 @@ export class Store {
   private insRollup;
   private insLearnRollup;
   private insIngestRollup;
+  private insHealthMinute;
 
   constructor(db: Database.Database) {
     this.db = db;
@@ -183,6 +228,9 @@ export class Store {
     this.insIngestRollup = db.prepare(`INSERT OR REPLACE INTO rollup_ingest
       (tsMin, fixes, batches, vehicles, withGeometry, geomFetchOk, geomFetchFail, avgLatencyS, avgFixGapS, pollerFleetSize, pollerRunning, discarded)
       VALUES (@tsMin, @fixes, @batches, @vehicles, @withGeometry, @geomFetchOk, @geomFetchFail, @avgLatencyS, @avgFixGapS, @pollerFleetSize, @pollerRunning, @discarded)`);
+    this.insHealthMinute = db.prepare(`INSERT OR REPLACE INTO health_minute
+      (atMs, publishPushes, publishFailures, publishHeartbeats, vehiclesPushed, fusedApplied, fusedMeanM, naiveEmissions, mlEmissions, mlReady, bundleFleet, convexBatchAgeS, packAgeS)
+      VALUES (@atMs, @publishPushes, @publishFailures, @publishHeartbeats, @vehiclesPushed, @fusedApplied, @fusedMeanM, @naiveEmissions, @mlEmissions, @mlReady, @bundleFleet, @convexBatchAgeS, @packAgeS)`);
   }
 
   addFix(row: {
@@ -225,6 +273,10 @@ export class Store {
 
   writeIngestRollup(row: { tsMin: number; fixes: number; batches: number; vehicles: number; withGeometry: number; geomFetchOk: number; geomFetchFail: number; avgLatencyS: number | null; avgFixGapS: number | null; pollerFleetSize: number | null; pollerRunning: number | null; discarded: number }): void {
     this.insIngestRollup.run(row);
+  }
+
+  writeHealthMinute(row: HealthMinuteRow): void {
+    this.insHealthMinute.run(row);
   }
 
   getMeta(k: string): string | null {

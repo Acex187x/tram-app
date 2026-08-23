@@ -229,14 +229,31 @@ export function DebugMapTraces() {
           });
         });
         if (sd.anchorFix) {
+          const anchorPt = at(sd.anchorFix.s);
+          // Опора и ФИКС — часто ОДНО наблюдение в двух представлениях
+          // (ось vs координаты). Пунктир + дельта в подписи говорят это
+          // явно — вместо «почему опора не там, где фикс, что за бред».
+          const sameObservation =
+            Math.abs(sd.anchorFix.obsAtMs - state.snapshot.observedAtMs) < 1_500;
+          const deltaM = haversineM(anchorPt, fix);
+          if (sameObservation && deltaM > 15) {
+            frame.features.push({
+              type: 'Feature',
+              id: 'debug-anchor-link',
+              geometry: { type: 'LineString', coordinates: [anchorPt, fix] },
+              properties: { role: 'anchorlink' },
+            });
+          }
           frame.features.push({
             type: 'Feature',
             id: 'debug-mlanchor',
-            geometry: { type: 'Point', coordinates: at(sd.anchorFix.s) },
+            geometry: { type: 'Point', coordinates: anchorPt },
             properties: {
               role: 'mlanchor',
               past: 0,
-              label: `ОПОРА ${Math.round((nowMs - sd.anchorFix.obsAtMs) / 1000)}с`,
+              label:
+                `ОПОРА ${Math.round((nowMs - sd.anchorFix.obsAtMs) / 1000)}с` +
+                (sameObservation && deltaM > 15 ? `·Δ${Math.round(deltaM)}м` : ''),
             },
           });
         }
@@ -331,6 +348,19 @@ export function DebugMapTraces() {
           circlePitchAlignment: 'map',
         }}
       />
+      {/* Пунктир «одно наблюдение, два представления»: ОПОРА (ось) ↔ ФИКС
+          (координаты). */}
+      <LineLayer
+        id="debug-anchor-link"
+        slot="top"
+        filter={['==', ['get', 'role'], 'anchorlink']}
+        style={{
+          lineColor: '#C6D2DE',
+          lineDasharray: [0.8, 1.6],
+          lineOpacity: 0.7,
+          lineWidth: 1.5,
+        }}
+      />
       {/* ML-прогноз: таргет-точки (золото; прошедшие — притушены), кольцо
           опорного фикса и мелкие архивные фиксы движка. */}
       <CircleLayer
@@ -380,7 +410,18 @@ export function DebugMapTraces() {
           textColor: '#FFFFFF',
           textHaloColor: '#071015',
           textHaloWidth: 2,
-          textOffset: [0, -2.1],
+          // Каждой роли — свой угол: совпадающие точки (FIXED==ОПОРА==SMOOTH
+          // у стоящего трамвая) больше не печатают подписи друг на друге.
+          textOffset: [
+            'match',
+            ['get', 'role'],
+            'fix', ['literal', [0, -2.1]],
+            'fixed', ['literal', [0, 2.4]],
+            'smooth', ['literal', [2.6, -1.6]],
+            'mlanchor', ['literal', [-2.6, 1.8]],
+            'mltarget', ['literal', [0, -1.6]],
+            ['literal', [0, -2.1]],
+          ] as unknown as [number, number],
           textAllowOverlap: true,
           textIgnorePlacement: true,
         }}

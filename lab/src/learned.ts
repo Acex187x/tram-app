@@ -363,9 +363,17 @@ export class LearnedModel {
 
     if (a.atStop && a.nextStopId != null) {
       // Remaining hold = learned release minus the time already observed
-      // standing (capped: never hold longer than 60 s from the anchor).
-      const hold = Math.min(60, Math.max(0, this.releaseAt(a.nextStopId, t) - a.standingS)) * 1000;
-      t += hold;
+      // standing. Ночной вердикт 2026-08-22: EWMA-среднее (~23 с) физически
+      // не представляет тайминг-холды 2–5 мин, и жёсткий кап 60 с заставлял
+      // волкер уезжать от стоящего трамвая (70 % ночного хвоста — перелёт).
+      // За mean+2σ отстоянного — хвостовая эвристика: остаток растёт с уже
+      // отстоянным (Линди), кап 180 с.
+      const { mean, sd } = this.releaseStats(a.nextStopId, t);
+      const holdS =
+        a.standingS > mean + 2 * sd
+          ? Math.min(180, a.standingS * 0.5)
+          : Math.min(90, Math.max(0, this.releaseAt(a.nextStopId, t) - a.standingS));
+      t += holdS * 1000;
       if (tMs <= t) return s;
     }
 
