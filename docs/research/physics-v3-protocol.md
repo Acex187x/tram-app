@@ -81,6 +81,13 @@ Decay eligible evidence to `tEval`, matching the online feature horizon.
 Disclose that historical learned surfaces currently use today's aggregates;
 this separate limitation does not justify leaking future corridor samples.
 
+The modal stop-release clock uses the same observation epoch:
+`t0 = anchor.observedAtMs`, with measured already-standing credit and learned
+release duration. Do not add the legacy five-second feed-latency offset to
+this epoch: transport delay does not postpone the vehicle's departure.
+The frozen legacy comparison engine may retain its original clock, but new
+published v3 trajectories must use observation time consistently.
+
 The annotation corrects an implementation mismatch with the original
 prediction architecture §7.4: its scorer called for `s_predicted(t_fix)`,
 while the v2 training/scoring implementation used the later ingest clock.
