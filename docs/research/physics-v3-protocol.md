@@ -94,6 +94,34 @@ while the v2 training/scoring implementation used the later ingest clock.
 Public AVL timestamps are still a proxy for vehicle observation time; rider
 GPS remains the higher-quality calibration source when available.
 
+## Geometry coherence amendment — contradictory route axes (2026-09-05)
+
+A reported shape distance is usable only on a compatible route geometry. A
+captured vehicle reported distance zero while its GPS was over 10 km from that
+axis point and neither reported last/next stop existed on the served variant.
+Projecting its GPS onto another part of that variant would invent a route.
+
+The client and server share a pure coherence check. A decisive contradiction
+requires **both** non-null reported stop IDs to be absent from the served trip
+and the GPS coordinate to lie more than 500 m from the reported distance's
+point on its shape. Missing geometry, coordinates or stop identifiers cannot
+by themselves prove a contradiction. Ordinary near-platform offsets and a
+single missing stop ID must retain the established bounded correction path.
+
+On a decisive contradiction, the server does not learn, score or construct a
+trajectory on that axis; an existing trajectory is withdrawn. Diagnostics
+retain the reason and the underlying observation. The client ignores curves
+on that axis and may show the raw observed GPS coordinate as stale, without
+route extrapolation or projection onto an alternative variant. Re-evaluate
+when either the fix or geometry changes and resume ordinary motion when the
+evidence is coherent. Cache this check outside the frame loop.
+
+This is a source-validity gate, not a new motion policy. It adds no mandatory
+wire fields and does not change the public AVL ingestion service. Validation
+must include the captured contradictory case, coherent route starts, large
+but explainable route offsets, missing IDs and recovery after geometry/fix
+replacement. Accuracy comparisons must disclose excluded contradictory axes.
+
 ## Presentation amendment — bounded forward catch-up (2026-09-05)
 
 The existing smooth-marker guard is the sole allowed presentation
