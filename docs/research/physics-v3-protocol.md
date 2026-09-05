@@ -87,6 +87,65 @@ while the v2 training/scoring implementation used the later ingest clock.
 Public AVL timestamps are still a proxy for vehicle observation time; rider
 GPS remains the higher-quality calibration source when available.
 
+## Presentation amendment — bounded forward catch-up (2026-09-05)
+
+The existing smooth-marker guard is the sole allowed presentation
+state. Server curve/fix evaluation remains a pure deterministic function and
+continues to expose its unguarded target independently from displayed position.
+
+Only a frame actually submitted by the map renderer may update a guard's last
+position, timestamp and displayed interval velocity. UI, inspector, future
+probes and offscreen culling reads must not advance or consume this state.
+The guard is scoped to a vehicle, trip and geometry coordinate axis. Late join,
+trip/geometry change, an explicitly sanctioned discontinuity, or a frame gap
+longer than five seconds initializes at the current raw target; no old velocity
+may leak across that reset. Fixed mode retains the raw projection.
+
+For a contiguous smooth frame with interval dt seconds, raw target x and last
+presented position p and interval velocity v, choose:
+
+    displayed = clamp(x, p, p + min(25, max(0,v) + A*dt)*dt)
+
+A = 2.5 m/s² is a presentation catch-up cap, not a claim about tram physics. This bounds
+forward catch-up while retaining the existing 25 m/s correction ceiling. It
+never invents forward coasting beyond the target. Displayed interval speed is
+(displayed-p)/dt, including when the raw target was reachable; a same-instant
+read retains the last displayed speed. Geometry endpoints are a hard boundary.
+
+There is deliberately no global braking-acceleration promise. When a revised
+source target moves behind the marker, forward overshoot would worsen both
+accuracy and false holds. The marker can stop immediately at its existing
+position. Such corrections remain visible in diagnostics; a future explicit
+presentation transition would require its own evidence and contract amendment.
+No new predictor, integrator, platform location, target trajectory, or smoothing
+controller is introduced.
+
+The raw target remains identical across clients. Presented positions depend on
+the map's frame history and initialization, an explicit exception to raw
+projection determinism already present in the guard. Verify 10/30/60 Hz, read
+interleaving, late join/resume, discontinuity consumption, fresh fixes behind
+the last frame, stop holds, geometry replacement and offscreen culling.
+
+Validation must use identical received wire captures and compare held vehicle
+time, per-state hold episode p90/max, signed target gaps, historical displayed
+position against later-arriving AVL fixes at their observation timestamps,
+speed/acceleration steps, and host CPU. State labels from latest AVL fixes are
+reported states, not proof of a vehicle's state now. Do not call present position
+minus an old at_stop fix a measured stop overshoot. No candidate is acceptable
+merely because its acceleration histogram looks physical.
+
+The adoption comparison uses a frozen 2,340.876-second public Convex capture
+with 10,902,307 geometry-known frame samples at 30 Hz. Held vehicle time falls
+from 13,673 to 10,766 seconds, and launches exceeding 1 m/s per frame fall from
+2,958 to zero. The cost is behind-target p99 increasing from 9.72/5.93 m to
+29.50/29.79 m for reported at_stop/on_track fixes. Historical displayed-position
+MAE against later-arriving AVL observations increases by 0.66/0.17 m. These
+are presentation tradeoffs on the old production model, not ground-truth
+accuracy guarantees. The longest holds remain unchanged (253/131 seconds);
+several involve stale fixes and flat targets, so they are not all guard-caused
+false stops. A fully acceleration-and-braking-bounded candidate was rejected
+because coasting beyond revised targets multiplied false holds and overshoot.
+
 ## Design goals it encodes (owner's words, distilled)
 
 1. Client physics = ONE pure function: `(trajectory bundle, newest fix, nowMs)
