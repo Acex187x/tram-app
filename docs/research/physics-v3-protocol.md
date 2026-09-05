@@ -46,6 +46,39 @@ backward steps, speed/acceleration bounds, revision speed jumps, and CPU.
 The extra field is deployed server-side only after the Convex validator
 accepts it; old producers and clients remain supported throughout.
 
+## ML target-clock amendment — feature contract version 3 (2026-09-05)
+
+The model predicts position at an **observation-time horizon**. A training
+pair uses `tEval = next.observedAtMs`, `gapS = (tEval − prev.observedAtMs)/1000`,
+and target `next.shapeDistM − prev.shapeDistM`. Arrival/ingest time is
+transport telemetry, never a substitute for the target's timestamp. At
+inference `tEval` is the absolute instant of the requested trajectory knot;
+therefore a knot for wall time now predicts position now, rather than the
+position belonging to a delayed observation arriving now.
+
+This changes target semantics even though the 13 feature columns keep their
+order. It requires `FEATURE_VERSION = 3` on both trainer and predictor.
+Version-2 persisted models must not load under version 3, and inference
+requests with a mismatched version must fail closed to the existing bounded
+outage policy. Train and validate an isolated candidate before coordinating
+the ML service and predictor rollout; the client wire remains version 2.
+
+Validation separates two clocks: observation-time position error (primary)
+and ingest latency (transport). Score an already-issued curve at the next
+fix's `observedAtMs`; do not score a curve issued after that instant as if it
+had predicted the observation. Historical arrival-time scores remain labeled
+as such and must not be mixed with the new primary series. Training/holdout
+splits are chronological across the **whole fleet**, not the order of
+vehicle keys. Keep same-trip pairs and physical jump/gap rejection. Report
+MAE, bias and p90 by anchor state and horizon, with matched sample counts;
+compare both candidates on exactly the same holdout observations.
+
+The annotation corrects an implementation mismatch with the original
+prediction architecture §7.4: its scorer called for `s_predicted(t_fix)`,
+while the v2 training/scoring implementation used the later ingest clock.
+Public AVL timestamps are still a proxy for vehicle observation time; rider
+GPS remains the higher-quality calibration source when available.
+
 ## Design goals it encodes (owner's words, distilled)
 
 1. Client physics = ONE pure function: `(trajectory bundle, newest fix, nowMs)
