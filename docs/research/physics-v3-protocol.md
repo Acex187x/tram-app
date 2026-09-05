@@ -73,6 +73,14 @@ vehicle keys. Keep same-trip pairs and physical jump/gap rejection. Report
 MAE, bias and p90 by anchor state and horizon, with matched sample counts;
 compare both candidates on exactly the same holdout observations.
 
+Offline corridor features may use only measured samples whose **arrival**
+preceded the prediction issue time (the anchor's receipt in a fix-pair
+replay). The target pair's speed and later-arriving samples are unavailable
+inputs, even when their observation timestamps precede the target arrival.
+Decay eligible evidence to `tEval`, matching the online feature horizon.
+Disclose that historical learned surfaces currently use today's aggregates;
+this separate limitation does not justify leaking future corridor samples.
+
 The annotation corrects an implementation mismatch with the original
 prediction architecture §7.4: its scorer called for `s_predicted(t_fix)`,
 while the v2 training/scoring implementation used the later ingest clock.
