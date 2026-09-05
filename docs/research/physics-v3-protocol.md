@@ -4,6 +4,48 @@ Status: FROZEN 2026-08-16 for the final-physics program (owner directive).
 Both workstreams build against THIS file; change it only by editing this file
 first, in its own commit.
 
+## Compatible amendment — clock samples and knot velocities (2026-09-05)
+
+This additive amendment retains `protocolVersion: 2`, both track names, the
+24-knot budget, and all legacy position/kinematic gates. Existing clients
+continue reading `{t,s}` and ignore the optional `v` field below.
+
+**Clock:** Convex feed query results can be cached. Their `serverNowMs` is
+the query transaction's clock, not a delivery timestamp, so a client must
+not repeatedly derive its offset from seed, batch, or meta delivery. The
+read-only query `clock:now({nonce: string}) → {serverNowMs: number}` accepts
+a unique request nonce to force a fresh transaction. A client estimates
+offset against the local request/response midpoint, rejects round trips
+over 2 seconds, refreshes on foreground and at most once per minute, and
+slews subsequent corrections without reversing render time. If this
+optional query is unavailable it retains local/last-known time and reports
+the clock as unsynchronized, while continuing to consume the fleet.
+
+**Velocity:** each opinion/smooth knot may additionally carry `v`, the
+generator's instantaneous velocity in metres per second at `t`. Legacy
+`s` and `t` stay byte-compatible. A capable client may evaluate a segment
+using cubic Hermite interpolation through its two positions and velocities,
+with tangents `v₀·Δt` and `v₁·Δt` (Δt in seconds). It uses the cubic only
+when both velocities are finite, its derivative stays in `[0,16.7] m/s`,
+and its acceleration stays in `[-1.4,+1.3] m/s²` over the **whole** segment;
+the derivative's interior extremum and both acceleration endpoints must
+be checked analytically. Otherwise that segment retains legacy linear
+interpolation. A zero-distance hold remains exactly constant. Missing or
+invalid velocity metadata never drops an otherwise valid legacy trajectory.
+
+Forward evaluation, inverse crossing-time lookup, terminal coast speed,
+diagnostics, and the server's client-projection seam must use the same
+eligible segment representation. Inversion must remain bounded and exploit
+monotonicity. Client preparation/cache work belongs at parse time; per-frame
+evaluation remains allocation-free. This does not authorize a second
+client motion controller or moving platform holds to different positions.
+
+Validation must compare identical recorded fixes/curves with legacy and
+velocity-aware evaluators: position-error distribution, hold duration,
+backward steps, speed/acceleration bounds, revision speed jumps, and CPU.
+The extra field is deployed server-side only after the Convex validator
+accepts it; old producers and clients remain supported throughout.
+
 ## Design goals it encodes (owner's words, distilled)
 
 1. Client physics = ONE pure function: `(trajectory bundle, newest fix, nowMs)
