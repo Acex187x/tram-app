@@ -1,0 +1,10 @@
+samples=60
+cpu_mean_percent=22.58
+cpu_median_percent=21.55
+cpu_p95_percent=29.40
+cpu_max_percent=35.50
+memory_start_mib=294.0
+memory_end_mib=297.0
+memory_peak_mib=297.0
+threads_min=32
+threads_max=32

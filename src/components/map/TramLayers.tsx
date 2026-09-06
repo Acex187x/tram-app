@@ -84,6 +84,7 @@ import {
   type BadgeAnchorMemory,
 } from '@/lib/render/featureBuilder';
 import { HiddenFrameAcks, SourceWriter } from '@/lib/render/sourceWriter';
+import { VisualPayload } from '@/lib/render/visualPayload';
 import { fadePresentationWithSource, tramOpacity } from '@/lib/render/styleExpr';
 import type { PlannerItinerary, Viewport } from '@/lib/types';
 import { useFavoritesStore } from '@/stores/favorites';
@@ -372,6 +373,8 @@ export function TramLayers({
   // Mapbox even though presentation/physics continue sampling every frame.
   const sourceWriterRef = useRef(new SourceWriter());
   const hiddenAcksRef = useRef(new HiddenFrameAcks());
+  const pointPayloadRef = useRef(new VisualPayload());
+  const badgePayloadRef = useRef(new VisualPayload());
   const lastPointsPushMsRef = useRef(0);
   // Scope fast transition delivery to the current map, not dormant offscreen fades.
   const lastVisibleKeysRef = useRef(new Set<string>());
@@ -524,18 +527,16 @@ export function TramLayers({
           // still wakes Mapbox's GeoJSON parser + Metal render loop. Push the
           // empty FC once when the last visible tram leaves, then stay silent
           // until a tram enters the viewport again.
-          const pointsEmpty = frame.points.features.length === 0;
           deliveries.push(sourceWriterRef.current.send('trams-points', pointsRef.current,
-            pointsEmpty ? EMPTY_FC_STRING : JSON.stringify(frame.points), nowMs,
+            pointPayloadRef.current.serialize(frame.points, viewport.zoom, forcePush), nowMs,
           ));
           // Decluttered badge anchors + leaders, same cadence as the points.
           // Empty outside the badge band (stringify+push skipped while it
           // STAYS empty; the one clearing push stops stale badges — the badge
           // layers' zoom gates hide them anyway until then).
           const badgesFC = (frame.badges ?? EMPTY_FC) as GeoJSON.FeatureCollection;
-          const badgesEmpty = badgesFC.features.length === 0;
           deliveries.push(sourceWriterRef.current.send('trams-badges', badgesRef.current,
-            badgesEmpty ? EMPTY_FC_STRING : JSON.stringify(badgesFC), nowMs,
+            badgePayloadRef.current.serialize(badgesFC, viewport.zoom, forcePush), nowMs,
           ));
         }
 

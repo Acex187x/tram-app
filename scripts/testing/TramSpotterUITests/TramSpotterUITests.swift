@@ -22,6 +22,28 @@ final class TramSpotterUITests: XCTestCase {
         }
     }
 
+    func test09ViewerIdleAndResume() throws {
+        app.launch()
+        app.open(URL(string: "fablespotsthetram://model/kt8d5")!)
+        button("Show the whole tram", timeout: 40).tap()
+        settle(3)
+        shot("thermal-viewer-idle-start")
+        // Bounded quiet window for the external process CPU sampler. No
+        // interaction, auto-orbit or active mechanism should submit GL work.
+        settle(65)
+        shot("thermal-viewer-idle-end")
+        let doors = app.switches["Open model doors"]
+        doors.tap(); settle(2)
+        XCTAssertEqual(doors.value as? String, "1")
+        shot("thermal-viewer-door-open")
+        XCUIDevice.shared.press(.home)
+        settle(15)
+        app.activate()
+        button("Inspect the front of the tram").tap()
+        shot("thermal-viewer-resumed-front")
+        button("Close 3D viewer").tap()
+    }
+
     func test06RideTimingMetadata() throws {
         // The runner stages the explicitly synthetic UI-only fixture. It is
         // never used as route/GPS accuracy evidence or a user ride recording.
@@ -325,6 +347,7 @@ final class TramSpotterUITests: XCTestCase {
     }
 
     func test02AllModelMechanisms() throws {
+        app.launch() // Establish accessibility before a standalone deep-link run.
         for id in ["t3", "t3rp", "t3rplf", "kt8d5", "14t", "15t", "52t"] {
             // XCUIApplication.open(URL) is a supported XCTest API since iOS16.4.
             app.open(URL(string: "fablespotsthetram://model/\(id)")!)

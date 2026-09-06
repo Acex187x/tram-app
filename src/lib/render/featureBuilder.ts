@@ -361,7 +361,7 @@ function sectionsAlongShape(
           state.pastHorizon,
           scale,
           opacityOf(state.presentationOpacity),
-          opacityOf(state.sourceOpacity),
+          sourceOpacityOf(state.sourceOpacity),
         ),
       );
     }
@@ -379,7 +379,7 @@ function sectionsAlongShape(
             state.pastHorizon,
             scale,
             opacityOf(state.presentationOpacity),
-          opacityOf(state.sourceOpacity),
+          sourceOpacityOf(state.sourceOpacity),
           ),
         );
       }
@@ -695,7 +695,10 @@ export function declutterBadges(
         pick = slot;
         break;
       }
-      if (over < bestOverlap) {
+      // Absolute map coordinates introduce tiny floating-point area noise.
+      // Equal-overlap slots must keep deterministic preference instead of
+      // sending a dense badge pile to a new side on every translated frame.
+      if (over < bestOverlap - 0.001) {
         bestOverlap = over;
         best = slot;
       }
@@ -733,7 +736,7 @@ export function declutterBadges(
         // points layers do — a stale plate must not look livelier than its dot.
         stale: c.stale ? 1 : 0,
         presentationOpacity: opacityOf(c.presentationOpacity),
-        sourceOpacity: opacityOf(c.sourceOpacity),
+        sourceOpacity: sourceOpacityOf(c.sourceOpacity),
         off: [r2(dxPx / s), r2(-FACE_GAP_PX + dyPx / s)],
         toff: [
           r2(FACE_TEXT_OFFSET_X_EM + dxPx / textSize),
@@ -752,6 +755,13 @@ export function declutterBadges(
 /** Build one render frame from engine states. */
 export function opacityOf(value: number | undefined): number {
   return value === undefined || !Number.isFinite(value) ? 1 : Math.max(0, Math.min(1, value));
+}
+
+/** Freshness is a minute-long confidence ramp, not a frame animation. A 1%
+ * display step prevents old stationary observations from invalidating native
+ * geometry at 30 Hz. Exact age/opacity remains available in diagnostics. */
+export function sourceOpacityOf(value: number | undefined): number {
+  return Math.round(opacityOf(value) * 100) / 100;
 }
 
 export function buildFrame(
@@ -837,7 +847,7 @@ export function buildFrame(
           // controller. Dimming expresses missing future trajectory evidence.
           stale: state.pastHorizon ? 1 : 0,
           presentationOpacity: opacityOf(state.presentationOpacity),
-          sourceOpacity: opacityOf(state.sourceOpacity),
+          sourceOpacity: sourceOpacityOf(state.sourceOpacity),
         },
       });
       // Badge declutter candidate: visible band-2 badges only. Pinned
@@ -851,7 +861,7 @@ export function buildFrame(
           pinned: selected === 1 || favorite === 1,
           stale: state.pastHorizon,
           presentationOpacity: opacityOf(state.presentationOpacity),
-          sourceOpacity: opacityOf(state.sourceOpacity),
+          sourceOpacity: sourceOpacityOf(state.sourceOpacity),
         });
       }
     }

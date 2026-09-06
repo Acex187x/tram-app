@@ -6,6 +6,9 @@ passed a physical-device thermal soak. Earlier engine findings are retained in
 the historical section below. See [architecture](architecture.md) for the data
 contracts and [candidate evidence](testing/tracking-candidate.md) for dated results.
 
+Build39 thermal regression fixes and measured limits are recorded in
+[the September6 hotfix](testing/thermal-hotfix-2026-09-06.md).
+
 ## Current rendering and data flow
 
 The server computes motion profiles. `RemoteFeed` streams identity and AVL
@@ -83,6 +86,10 @@ the current-build comparison below.
   native source is busy, the map does not advance the presentation controller
   or follow camera; ingestion continues. A long delivery gap uses the explicit
   resume transition. Native API acknowledgement does not prove a GPU frame.
+- GeoJSON decoding uses one serial background queue. Mapbox mutation and delivery
+  acknowledgement remain on the main thread. View removal and declarative shape
+  changes invalidate pending decodes; the native token is consumed immediately
+  before application, not before background decoding.
 - The native resolver registers its latest token before asynchronous view lookup
   (which can retry for 10 s). Delayed old callbacks cannot overwrite newer data.
 - Model shadows are off. Mapbox's native render ceiling is 60 fps, including on
@@ -99,14 +106,17 @@ the current-build comparison below.
 
 ### Model viewer budget
 
-Physical devices use native-size PBR rendering,4×MSAA, approximately 30 fps while
-idle and display-paced interaction. Simulator OpenGL is software rasterized;
+Physical devices use native-size PBR rendering and4×MSAA on demand. A stationary
+viewer schedules no frames or timers. Interaction and door animation are capped
+at30 fps; indicators request only their400 ms lamp-state edges. There is no
+automatic turntable. Simulator OpenGL is software rasterized;
 it instead uses Lambert materials, no MSAA and a 640 px maximum-edge render
-target, upscaled once to the native view at approximately 12 fps. These rendering
+target, upscaled once to the native view at at most12 fps while changing. These rendering
 paths share geometry and mechanism metadata, but Simulator shading/resolution
 are not evidence of physical-device PBR quality.
 
-The next animation frame is scheduled after the Expo GL flush barrier, preventing
+A next frame is scheduled only for an active mechanism or an explicit scene
+invalidation, after the Expo GL flush barrier, preventing
 an unbounded native command backlog. Backgrounding cancels frame scheduling;
 foregrounding restarts it. Unmount disposes renderer, targets, geometries and
 materials. Door and indicator controls update refs; animation is imperative.

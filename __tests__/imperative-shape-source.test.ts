@@ -24,7 +24,7 @@ describe('imperatively-fed ShapeSources', () => {
       join(process.cwd(), 'src/components/map/TramLayers.tsx'),
       'utf8',
     );
-    expect(source).toContain('const pointsEmpty = frame.points.features.length === 0');
+    expect(source).toContain('pointPayloadRef.current.serialize(frame.points, viewport.zoom, forcePush)');
     expect(source).toContain('sourceWriterRef.current.send');
     expect(source).not.toContain('pointsEmptyRef');
   });

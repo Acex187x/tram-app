@@ -1,38 +1,107 @@
 diff --git a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSource.swift b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSource.swift
-index 5f6a0c0..4150131 100644
+index 5f6a0c0..0ae9c13 100644
 --- a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSource.swift
 +++ b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSource.swift
-@@ -171,6 +171,28 @@ public class RNMBXShapeSource : RNMBXSource {
+@@ -7,6 +7,7 @@ private let LOG_TAG = "RNMBXShapeSource"
+ public class RNMBXShapeSource : RNMBXSource {
+   @objc public var url : String? {
+     didSet {
++      shapeUpdateGeneration &+= 1
+       parseJSON(url) { [weak self] result in
+         guard let self = self else { return }
+ 
+@@ -29,6 +30,7 @@ public class RNMBXShapeSource : RNMBXSource {
+ 
+   @objc public var shape : String? {
+     didSet {
++      shapeUpdateGeneration &+= 1
+       shapeAnimator?.unsubscribe(consumer: self)
+       shapeAnimator = nil
+       
+@@ -61,6 +63,7 @@ public class RNMBXShapeSource : RNMBXSource {
+   }
+   
+   public override func removeFromMap(_ map: RNMBXMapView, mapView: MapView, reason: RemovalReason) -> Bool {
++    shapeUpdateGeneration &+= 1
+     if (reason == .ViewRemoval) {
+       shapeAnimator?.unsubscribe(consumer: self)
+     }
+@@ -171,6 +174,65 @@ public class RNMBXShapeSource : RNMBXSource {
      }
    }
    
 +  /** Update GeoJSON without changing the React/Fabric `shape` prop. */
 +  @objc public func updateShape(
 +    shapeJSON: String,
++    shouldApply: @escaping () -> Bool,
 +    resolver: @escaping RCTPromiseResolveBlock,
 +    rejecter: @escaping RCTPromiseRejectBlock
 +  ) {
-+    do {
-+      let obj: GeoJSONObject = try parse(shapeJSON)
-+      shapeObject = obj
-+      guard let map = self.map,
-+            self.source != nil,
-+            map.mapboxMap.style.sourceExists(withId: id) else {
-+        resolver(false)
-+        return
++    shapeUpdateGeneration &+= 1
++    let generation = shapeUpdateGeneration
++    // Decode immutable data off the UI thread. SourceWriter bounds each source
++    // to one in-flight frame; this serial queue also bounds decoder concurrency.
++    Self.shapeDecodeQueue.async { [weak self] in
++      let result = Result { try Self.decodeShape(shapeJSON) }
++      DispatchQueue.main.async { [weak self] in
++        let currentToken = shouldApply()
++        guard currentToken, let self = self, self.shapeUpdateGeneration == generation else {
++          resolver(false)
++          return
++        }
++        switch result {
++        case .success(let obj):
++          guard let map = self.map, self.source != nil,
++                map.mapboxMap.style.sourceExists(withId: self.id) else {
++            resolver(false)
++            return
++          }
++          do {
++            try map.mapboxMap.style.updateGeoJSONSource(withId: self.id, geoJSON: obj)
++            self.shapeObject = obj
++            resolver(true)
++          } catch { rejecter(error.localizedDescription, "Error.updateShape", error) }
++        case .failure(let error):
++          rejecter(error.localizedDescription, "Error.updateShape", error)
++        }
 +      }
-+      try map.mapboxMap.style.updateGeoJSONSource(withId: id, geoJSON: obj)
-+      resolver(true)
-+    } catch {
-+      rejecter(error.localizedDescription, "Error.updateShape", error)
++    }
++  }
++
++  private static let shapeDecodeQueue = DispatchQueue(label: "RNMBX.ShapeDecode", qos: .userInitiated)
++  private var shapeUpdateGeneration: UInt64 = 0
++
++  private static func decodeShape(_ shape: String) throws -> GeoJSONObject {
++    let bytes = Data(shape.utf8)
++    let decoded: GeoJSONSourceData
++    do { decoded = try JSONDecoder().decode(GeoJSONSourceData.self, from: bytes) }
++    catch {
++      let original = error
++      do { return .geometry(try JSONDecoder().decode(Geometry.self, from: bytes)) }
++      catch { throw original }
++    }
++    switch decoded {
++    case .empty: return .featureCollection(FeatureCollection(features: []))
++    case .feature(let value): return .feature(value)
++    case .featureCollection(let value): return .featureCollection(value)
++    case .geometry(let value): return .geometry(value)
++    case .string: throw RNMBXError.parseError("url as shape is not supported when updating a ShapeSource")
 +    }
 +  }
 +
    deinit {
      shapeAnimator?.unsubscribe(consumer: self)
    }
+@@ -434,6 +496,7 @@ extension RNMBXShapeSource
+ 
+ extension RNMBXShapeSource: ShapeAnimationConsumer {
+   func shapeUpdated(shape: Turf.GeoJSONObject) {
++    shapeUpdateGeneration &+= 1
+     shapeObject = shape
+     doUpdate { (style) in
+       logged("RCTMGLShapeSource.setShape") {
 diff --git a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSourceModule.mm b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSourceModule.mm
-index 11a7d70..60e21e5 100644
+index 11a7d70..5e016f3 100644
 --- a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSourceModule.mm
 +++ b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSourceModule.mm
 @@ -4,10 +4,13 @@
@@ -50,7 +119,7 @@ index 11a7d70..60e21e5 100644
  
  RCT_EXPORT_MODULE();
  
-@@ -41,6 +44,22 @@ RCT_EXPORT_METHOD(getClusterChildren:(nonnull NSNumber *)viewRef featureJSON:(NS
+@@ -41,6 +44,24 @@ RCT_EXPORT_METHOD(getClusterChildren:(nonnull NSNumber *)viewRef featureJSON:(NS
      } reject:reject methodName:@"getClusterChildren"];
  }
  
@@ -59,11 +128,13 @@ index 11a7d70..60e21e5 100644
 +    const int64_t viewTag = viewRef.longLongValue;
 +    const uint64_t token = _shapeUpdates.begin(viewTag);
 +    [self withShapeSource:viewRef block:^(RNMBXShapeSource *view) {
-+        if (!self->_shapeUpdates.consume(viewTag, token)) {
++        if (!self->_shapeUpdates.isCurrent(viewTag, token)) {
 +            resolve(@NO);
 +            return;
 +        }
-+        [view updateShapeWithShapeJSON:shapeJSON resolver:resolve rejecter:reject];
++        [view updateShapeWithShapeJSON:shapeJSON shouldApply:^BOOL {
++            return self->_shapeUpdates.consume(viewTag, token);
++        } resolver:resolve rejecter:reject];
 +    } reject:^(NSString *code, NSString *message, NSError *error) {
 +        self->_shapeUpdates.consume(viewTag, token);
 +        reject(code, message, error);
@@ -75,10 +146,10 @@ index 11a7d70..60e21e5 100644
   [self withShapeSource:viewRef block:^(RNMBXShapeSource *view) {
 diff --git a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeUpdateGate.h b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeUpdateGate.h
 new file mode 100644
-index 0000000..2c5f866
+index 0000000..1cf404e
 --- /dev/null
 +++ b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeUpdateGate.h
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,41 @@
 +#pragma once
 +#ifdef __cplusplus
 +#include <cstdint>
@@ -95,6 +166,11 @@ index 0000000..2c5f866
 +    const auto token = ++sequence_;
 +    pending_[view] = token;
 +    return token;
++  }
++  bool isCurrent(int64_t view, uint64_t token) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    const auto found = pending_.find(view);
++    return found != pending_.end() && found->second == token;
 +  }
 +  bool consume(int64_t view, uint64_t token) {
 +    std::lock_guard<std::mutex> lock(mutex_);
@@ -115,7 +191,6 @@ index 0000000..2c5f866
 +}
 +
 +#endif // __cplusplus: CocoaPods also imports public headers from Objective-C/Swift.
-
 diff --git a/node_modules/@rnmapbox/maps/lib/module/components/ShapeSource.js b/node_modules/@rnmapbox/maps/lib/module/components/ShapeSource.js
 index 8ebd274..f742be6 100644
 --- a/node_modules/@rnmapbox/maps/lib/module/components/ShapeSource.js

@@ -5,7 +5,7 @@ import { registerEmbeddedTextures } from '@/components/model/embeddedTextures';
 // _layout as model/[id]). Renders ALL body sections of MODEL_SPECS[id] with
 // expo-gl + three.js, laid nose-to-tail like a real consist (front = −Z, same
 // convention as scripts/render-model.mjs). Orbit with a pan gesture, pinch to
-// dolly, gentle turntable when untouched. Written defensively: every GL/GLB
+// dolly. Stationary scenes perform no rendering work. Written defensively: every GL/GLB
 // step is guarded — failures land in a friendly error state, never a crash.
 import { Asset } from 'expo-asset';
 import { isDevice } from 'expo-device';
@@ -34,8 +34,6 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   fitRadius,
   fitCabRadius,
-  IDLE_SPIN_DEG_PER_S,
-  IDLE_SPIN_DELAY_MS,
   INITIAL_AZIMUTH_DEG,
   INITIAL_ELEVATION_DEG,
   layoutSections,
@@ -54,6 +52,7 @@ import { Colors, TextScale } from '@/constants/theme';
 import { MODEL_SPECS } from '@/lib/fleet/modelSpecs';
 import { modelClipPlanes } from '@/components/model/clipPlanes';
 import { useSimulatorMaterials } from '@/components/model/simulatorMaterials';
+import { createDemandRenderer, nextMechanismFrame } from '@/components/model/demandRenderer';
 import { createModelRenderSurface } from '@/components/model/renderSurface';
 import { VIEWER_MODEL_ASSETS } from '@/components/model/viewerAssets';
 import { SegmentedPills } from '@/components/ui/SegmentedPills';
@@ -85,8 +84,8 @@ if (nav && typeof nav.userAgent !== 'string') {
 }
 
 const CAMERA_FOV_DEG = 40;
-/** Idle frame budget ≈ 30 fps; interacting renders at full rAF rate. */
-const IDLE_FRAME_MS = 33;
+/** Bound explicit gestures and door animation to 30 fps, including ProMotion. */
+const DEVICE_FRAME_MS = 33;
 const SIMULATOR_FRAME_MS = 83;
 const SIMULATOR_RENDER_MAX_EDGE = 640;
 
@@ -114,10 +113,8 @@ interface GlSession {
   camera: THREE.PerspectiveCamera;
   background: THREE.Color;
   target: THREE.Vector3;
-  raf: number;
-  lastRenderMs: number;
+  scheduler: ReturnType<typeof createDemandRenderer>;
   disposed: boolean;
-  renderFrame: () => void;
   mechanisms: ModelMechanisms;
   bounds: THREE.Box3;
   overviewRadius: number;
@@ -199,7 +196,7 @@ function disposeObject(root: THREE.Object3D, extras: THREE.Material[] = []) {
 
 function disposeSession(session: GlSession) {
   session.disposed = true;
-  cancelAnimationFrame(session.raf);
+  session.scheduler.dispose();
   disposeObject(session.scene, session.mechanisms.materialsToDispose);
   session.renderSurface.dispose();
   try {
@@ -269,13 +266,10 @@ export default function ModelViewerScreen() {
   const panStartRef = useRef<OrbitState>(INITIAL_ORBIT);
   const pinchStartRef = useRef<OrbitState>(INITIAL_ORBIT);
   const zoomClampRef = useRef({ min: 5, max: 120 });
-  const activeGesturesRef = useRef(0);
-  const lastInteractionRef = useRef(0);
   const backgroundRef = useRef(background);
   const sessionRef = useRef<GlSession | null>(null);
   const mountedRef = useRef(true);
   const reduceMotionRef = useRef(false);
-  const autoSpinRef = useRef(true);
   const doorTransitionRef = useRef(CLOSED_DOORS);
   const signalRef = useRef<{
     direction: IndicatorDirection;
@@ -295,28 +289,22 @@ export default function ModelViewerScreen() {
       appActiveRef.current = state === 'active';
       const session = sessionRef.current;
       if (!session || session.disposed) return;
-      cancelAnimationFrame(session.raf);
-      session.raf = 0;
-      if (appActiveRef.current) {
-        session.lastRenderMs = Date.now();
-        lastInteractionRef.current = Date.now();
-        session.renderFrame();
-      }
+      session.scheduler.setActive(appActiveRef.current);
     });
     return () => subscription.remove();
   }, []);
 
-  // Reduce Motion suppresses the endless turntable (the initial 3/4-front pose
-  // is kept — drag still works). A ref, so the render loop reads it for free.
+  // Reduce Motion makes mechanism controls settle immediately.
   useEffect(() => {
     let alive = true;
     AccessibilityInfo.isReduceMotionEnabled()
       .then((v) => {
-        if (alive) reduceMotionRef.current = v;
+        if (alive) { reduceMotionRef.current = v; sessionRef.current?.scheduler.request(); }
       })
       .catch(() => {});
     const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', (v) => {
       reduceMotionRef.current = v;
+      sessionRef.current?.scheduler.request();
     });
     return () => {
       alive = false;
@@ -327,6 +315,7 @@ export default function ModelViewerScreen() {
   // Keep the render loop's background in sync with the system theme.
   useEffect(() => {
     backgroundRef.current = background;
+    sessionRef.current?.scheduler.request();
   }, [background]);
 
   // Unknown / missing id → graceful back (route can be deep-linked).
@@ -438,6 +427,7 @@ export default function ModelViewerScreen() {
           max: r0 * ZOOM_MAX_FACTOR,
         };
 
+        const frameBudgetMs = isDevice ? DEVICE_FRAME_MS : SIMULATOR_FRAME_MS;
         const session: GlSession = {
           gl,
           renderer,
@@ -451,10 +441,8 @@ export default function ModelViewerScreen() {
           camera,
           background: backgroundColor,
           target,
-          raf: 0,
-          lastRenderMs: 0,
+          scheduler: createDemandRenderer(() => frame(), frameBudgetMs),
           disposed: false,
-          renderFrame: () => {},
           mechanisms,
           bounds: total,
           overviewRadius: r0,
@@ -464,13 +452,9 @@ export default function ModelViewerScreen() {
         };
         sessionRef.current = session;
 
-        // ── render loop: full rate while touched, ~30 fps turntable idle ────
-        const frame = () => {
-          if (session.disposed || !appActiveRef.current) {
-            session.raf = 0;
-            return;
-          }
-          session.raf = 0;
+        // Render only after input, layout/theme changes or a mechanism edge.
+        const frame = (): number | null => {
+          if (session.disposed || !appActiveRef.current) return null;
           // Native framebuffer dimensions follow layout; Expo's initial JS
           // drawingBuffer properties stay stale. Using them crops the roof
           // after the ready-state controls increase the bottom card's height.
@@ -493,29 +477,6 @@ export default function ModelViewerScreen() {
             session.camera.updateProjectionMatrix();
           }
           const now = Date.now();
-          const interacting =
-            activeGesturesRef.current > 0 || now - lastInteractionRef.current < 250;
-          const frameBudgetMs = isDevice ? (interacting ? 0 : IDLE_FRAME_MS) : SIMULATOR_FRAME_MS;
-          if (now - session.lastRenderMs < frameBudgetMs) {
-            session.raf = requestAnimationFrame(frame);
-            return;
-          }
-          const dtS = Math.min(now - session.lastRenderMs, 100) / 1000;
-          session.lastRenderMs = now;
-
-          if (
-            !reduceMotionRef.current &&
-            autoSpinRef.current &&
-            !interacting &&
-            now - lastInteractionRef.current > IDLE_SPIN_DELAY_MS
-          ) {
-            const o = orbitRef.current;
-            orbitRef.current = {
-              ...o,
-              azimuthDeg: o.azimuthDeg + IDLE_SPIN_DEG_PER_S * dtS,
-            };
-          }
-
           const pos = orbitToPosition(orbitRef.current, session.target);
           session.camera.position.set(pos.x, pos.y, pos.z);
           session.camera.lookAt(session.target);
@@ -548,19 +509,17 @@ export default function ModelViewerScreen() {
             console.warn('[model-viewer] rendering failed', error);
             disposeSession(session);
             if (mountedRef.current) setStatus('error');
-            return;
+            return null;
           }
-          if (!session.disposed && appActiveRef.current) session.raf = requestAnimationFrame(frame);
+          return nextMechanismFrame(now, doorTransitionRef.current, signal.direction,
+            signal.startedAtMs, reduceMotionRef.current, frameBudgetMs);
         };
-        session.renderFrame = frame;
         setMechanismsAvailable({
           doors: mechanisms.doors.length > 0,
           indicators: mechanisms.indicators.length > 0,
         });
-        lastInteractionRef.current = Date.now() - IDLE_SPIN_DELAY_MS; // start turntable immediately
-        frame();
-        // The first render can fail synchronously and dispose this session.
-        // Preserve its error state instead of advertising a blank ready view.
+        session.scheduler.setActive(appActiveRef.current);
+        // Rendering errors asynchronously replace ready with the error state.
         if (!session.disposed) setStatus('ready');
       } catch (e) {
         console.warn('[model-viewer] failed to build 3D scene', e);
@@ -580,24 +539,22 @@ export default function ModelViewerScreen() {
   // gesture owns its start state and merges only its own axes into the shared
   // orbit, so a two-finger orbit-while-zooming doesn't fight itself. ─────────
   const noteInteraction = useCallback(() => {
-    lastInteractionRef.current = Date.now();
+    sessionRef.current?.scheduler.request();
   }, []);
   const endGesture = useCallback(() => {
-    activeGesturesRef.current = Math.max(0, activeGesturesRef.current - 1);
     noteInteraction();
   }, [noteInteraction]);
 
   /* eslint-disable react-hooks/refs -- the builder callbacks below are DEFERRED
      (they fire on touch, never during render), but the rule only sees closures
      handed to a function that IS called during render and has to assume the
-     worst. The orbit deliberately lives in refs: the 60 fps GL loop reads it, so
+     worst. The orbit deliberately lives in refs: the demand renderer reads it, so
      holding it in state would re-render the tree on every finger move (perf
      invariant #1). */
   const panGesture = Gesture.Pan()
     .runOnJS(true)
     .maxPointers(1)
     .onBegin(() => {
-      activeGesturesRef.current += 1;
       panStartRef.current = orbitRef.current;
       noteInteraction();
     })
@@ -608,13 +565,13 @@ export default function ModelViewerScreen() {
         azimuthDeg: o.azimuthDeg,
         elevationDeg: o.elevationDeg,
       };
+      noteInteraction();
     })
     .onFinalize(endGesture);
 
   const pinchGesture = Gesture.Pinch()
     .runOnJS(true)
     .onBegin(() => {
-      activeGesturesRef.current += 1;
       pinchStartRef.current = orbitRef.current;
       noteInteraction();
     })
@@ -622,14 +579,14 @@ export default function ModelViewerScreen() {
       const { min, max } = zoomClampRef.current;
       const o = pinchOrbit(pinchStartRef.current, e.scale, min, max);
       orbitRef.current = { ...orbitRef.current, radiusM: o.radiusM };
+      noteInteraction();
     })
     .onFinalize(endGesture);
 
   const gesture = Gesture.Simultaneous(panGesture, pinchGesture);
   /* eslint-enable react-hooks/refs */
 
-  // Non-gesture orbiting for VoiceOver. Touching lastInteractionRef makes the
-  // loop render at full rate for 250 ms so the nudge is actually drawn.
+  // Non-gesture orbiting for VoiceOver invalidates the stationary scene.
   const onRotateAction = (e: AccessibilityActionEvent) => {
     const o = orbitRef.current;
     const delta = e.nativeEvent.actionName === 'increment' ? ROTATE_ACTION_DEG : -ROTATE_ACTION_DEG;
@@ -637,14 +594,13 @@ export default function ModelViewerScreen() {
       ...o,
       azimuthDeg: normalizeAzimuthDeg(o.azimuthDeg + delta),
     };
-    lastInteractionRef.current = Date.now();
+    sessionRef.current?.scheduler.request();
   };
 
   const onViewPreset = (view: 'whole' | 'front' | 'rear') => {
     const session = sessionRef.current;
     if (!session || !spec) return;
-    lastInteractionRef.current = Date.now();
-    autoSpinRef.current = view === 'whole';
+    sessionRef.current?.scheduler.request();
     if (view === 'whole') {
       session.target.copy(session.overviewTarget);
       orbitRef.current = {
@@ -685,13 +641,13 @@ export default function ModelViewerScreen() {
       now,
       reduceMotionRef.current,
     );
-    lastInteractionRef.current = now;
+    sessionRef.current?.scheduler.request();
     setDoorsOpen(open);
   };
   const onIndicatorChange = (key: string) => {
     const direction = key as IndicatorDirection;
     signalRef.current = { direction, startedAtMs: Date.now() };
-    lastInteractionRef.current = Date.now();
+    sessionRef.current?.scheduler.request();
     setIndicator(direction);
   };
 
@@ -736,6 +692,7 @@ export default function ModelViewerScreen() {
                   width: Math.max(1, Math.round(layout.width * scale)),
                   height: Math.max(1, Math.round(layout.height * scale)),
                 };
+                sessionRef.current?.scheduler.request();
               }}
             />
           </GestureDetector>
