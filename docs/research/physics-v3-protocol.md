@@ -53,6 +53,26 @@ frames from the headline metric. Compare accuracy, prolonged holds, actual
 platform crossings, both acceleration signs, jerk, hidden time and native map
 cadence on identical inputs; a source `at_stop` label alone is not stop truth.
 
+## Driver ceiling evidence correction (2026-09-06)
+
+The former universal 13.9 m/s "50 km/h network cap" is not an accurate description
+of Prague tram operation. DPP documents 60 km/h on the
+[Barrandov viaduct](https://www.dpp.cz/spolecnost/pro-media/tiskove-zpravy/detail/278_1178-dpp-vymeni-dalsi-prazce-v-metru-na-lince-c-a-osadi-nova-svodidla-na-tramvajove-trati-hlubocepy-barrandov)
+and 60/65 km/h on parts of
+[Ohrada–Palmovka](https://www.dpp.cz/spolecnost/pro-media/tiskove-zpravy/detail/278_2187-dpp-dokoncil-rekonstrukci-tramvajove-trate-ohrada-palmovka-od-soboty-budou-mit-praha-3-a-praha-8-opet-prime-tramvajove-spojeni).
+The [15T specification](https://www.dpp.cz/vozovy-park/tramvaje/skoda-15t) lists
+60 km/h operating speed. These sources disprove a universal 50 km/h ceiling;
+they do not supply a complete, current per-segment speed-limit map.
+
+The candidate driver may raise its upper envelope ceiling from 13.9 to the
+existing wire bound of 16.7 m/s. This is not a commanded pace or permission to
+raise local curve speeds: learned/observed pace, curvature, braking, platform
+service and leader constraints remain active. The wire bound and interpolation
+gates do not change. A paired 833-emission ablation changed GPS-projected smooth
+MAE from 93.20 to 92.40 m; it explains only part of the long fast-trip lag. Some
+faster real segments can still exceed this modeling ceiling; report that limit
+rather than asserting a network-wide legal speed.
+
 ## Causal trip-pace feature contract version 4 (2026-09-06)
 
 The isolated candidate may promote an independently validated version-4 ML
