@@ -53,6 +53,30 @@ frames from the headline metric. Compare accuracy, prolonged holds, actual
 platform crossings, both acceleration signs, jerk, hidden time and native map
 cadence on identical inputs; a source `at_stop` label alone is not stop truth.
 
+## Review deployment availability amendment (2026-09-06)
+
+An optional private trajectory deployment may use the already configured public
+production trajectory service as a read-only fallback. Production-only builds
+retain one source. After 15 seconds without an initial seed or advancing
+publication, a review build attempts the public source; it keeps the last
+accepted curves aging until a replacement seed arrives. A quiet fleet's advancing
+publisher heartbeat counts as progress. Replayed cached metadata does not.
+
+While on the fallback, a bounded primary probe runs at most every two minutes.
+Recovery requires a valid seed and at least five seconds of advancing publisher
+progress; a probe closes after twenty seconds if this is not established. Only
+one endpoint supplies displayed data. Probing may briefly own a second socket,
+with a bounded fleet snapshot; old-generation callbacks cannot mutate the active
+store. Backgrounding closes both sockets and every watchdog/probe timer.
+
+The active source, fallback reason and recovery probe must be visible in health.
+A public fallback uses the production predictor, not the isolated candidate;
+never label those results as candidate validation. Source sequence cursors belong
+to separate epochs. Switching sources replaces the fleet atomically, invalidates
+old clock samples, retains the last applied time offset until a fresh nonce reply
+and slews the new offset. Compatible trip/axis presentation state survives the
+switch; the visible-continuity amendment still applies to every revision.
+
 ## Compatible amendment — clock samples and knot velocities (2026-09-05)
 
 This additive amendment retains `protocolVersion: 2`, both track names, the
