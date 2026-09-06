@@ -63,6 +63,27 @@ formerly trusted. Preserve trusted-cell means/variance and do not retune the
 fallback values as part of this parity correction. Shared boundary fixtures
 must cover lookup time, stored update time and below/at-threshold weights.
 
+## Review-candidate geometry availability (2026-09-06)
+
+A private review build may prefer an explicitly configured geometry-pack URL
+from the same predictor candidate. The direct Lab pack refreshes more often
+than its uploaded site copy and retains content-derived geometry identities.
+The default public application keeps its existing public origin.
+
+A preferred request has a three-second completion deadline, including body
+parsing. Public fallback and supplementation may fill missing trip entries;
+neither may replace resident authoritative geometry or a preferred provisional
+entry. Coherence and unique stop-corridor checks still apply to every seed.
+Per-trip authoritative requests continue independently, without waiting for a
+pack. Abort/background must stop the attempt, prevent late seeding and permit
+a fresh attempt on resume. A hung native fetch must not defeat the deadline.
+
+Measure each source at its actual receipt time. Do not insert a later pack into
+an earlier replay, or equate route availability with fresh GPS. The September6
+paired pack-only capture isolates fewer missing-geometry seconds; it deliberately
+omits per-trip refinement and contains an upstream observation outage, so it is
+not by itself an accuracy acceptance gate.
+
 ## Missing-axis continuity and first-axis adoption (2026-09-06)
 
 The receipt-timed geometry replay reproduces 76 transitions in its first five
