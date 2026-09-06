@@ -53,6 +53,47 @@ frames from the headline metric. Compare accuracy, prolonged holds, actual
 platform crossings, both acceleration signs, jerk, hidden time and native map
 cadence on identical inputs; a source `at_stop` label alone is not stop truth.
 
+## Continuous producer and approach-phase amendment (2026-09-06)
+
+A version-2 vehicle may advertise `motionPolicy: "continuous-v1"`. Absence or an
+unknown value retains legacy behavior. This capability means that compatible
+same-trip, same-axis smooth emissions join the exact shared eligible Hermite
+position of the preceding emitted chain, with bounded inherited velocity and
+acceleration. Disagreement with a newer observation alone does not authorize a
+visible position reset. Trip/axis changes remain explicit discontinuities.
+
+For this capability only, the client disables its **smooth-track** forward-fix
+position shim: a second client displacement would destroy the producer's seam
+and make the next continuous emission appear behind the displayed tram. Fixed
+track behavior, raw observations and error diagnostics remain available. Client
+presentation still follows the visible-continuity amendment. Public fallback
+producers without this capability retain their measured legacy behavior.
+
+The raw provider `at_stop` field denotes an announced stop/closest anchor, not
+proof of zero speed or open doors. A source marked `at_stop` can be admitted as
+an approach when a corridor-validated GPS projection and exact current-platform
+ID/sequence place it more than 30 m and no more than 150 m before that platform,
+with observation age below 120 seconds. Integrate opinion from that observation's
+actual epoch and projected route distance through the ordinary platform plan,
+then crop at emission time; do not start a new arrival hold at the earlier
+announcement anchor. Initial pace uses a causal preceding projected observation
+5–120 seconds earlier, nonnegative displacement and a 16.7 m/s cap, or the
+learned fallback constrained to 2–13.9 m/s. The existing physical envelope still
+applies. Near-platform modal dwell remains probable, not verified door telemetry.
+
+Legacy learned dwell cells were indexed by the **next** stop. Planned dwell for
+an actual platform must adapt that convention through a unique ordered successor.
+Ambiguous or terminal mappings use the untrusted 18±8 second fallback rather than
+borrow another platform's learned cell. Request-stop service eligibility follows
+the explicit PID amendment below. Diagnostics expose approach admission, source
+age, GPS projection and pace evidence; they must not relabel `at_stop` as verified
+stationarity. The 13-column version-3 ML artifact is unchanged by this amendment.
+
+Release requires paired full-chain replay: all visible transitions, GPS-projected
+and raw-anchor errors reported separately, guarded-held vehicle-time, required
+platform crossings and acceleration/braking/jerk. Partial replacement curves must
+start from their actual captured predecessor, and coverage must be reported.
+
 ## Platform service eligibility amendment (2026-09-06)
 
 Route geometry may carry `RouteStop.requestOnly?: boolean`. It is true only
