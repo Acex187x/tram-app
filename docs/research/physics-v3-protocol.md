@@ -73,6 +73,25 @@ MAE from 93.20 to 92.40 m; it explains only part of the long fast-trip lag. Some
 faster real segments can still exceed this modeling ceiling; report that limit
 rather than asserting a network-wide legal speed.
 
+## Cold-start geometry identity amendment (2026-09-06)
+
+Provider `shapeId` values may be reused across GTFS generations, including the
+opposite travel direction. A cold-start pack must not deduplicate different
+coordinate/ordered-platform axes under that identifier. New packs may attach an
+optional content-derived `geometryKey` to each shape entry; `trips` references
+that key, while the shape's original `shapeId` remains unchanged. Legacy entries
+without a key retain the old lookup format. Hash input includes coordinate axis
+and ordered platform identities/distances, excluding sibling timetable epochs.
+Ambiguous duplicate keys must not pick an arbitrary last entry.
+
+A provisional pack shape is not authoritative even for spatial placement. When
+a live fix supplies both last/next platform identities, a provisional shape
+that lacks their ordered occurrence is rejected without waiting for a500m GPS
+contradiction. The client requests visible rejected provisional trips at the
+existing high-priority geometry lane. The ordinary per-trip result replaces the
+provisional shape; compatible axes preserve visible continuity. This does not
+license snapping to a different direction or trusting sibling stop times.
+
 ## Causal trip-pace feature contract version 4 (2026-09-06)
 
 The isolated candidate may promote an independently validated version-4 ML
