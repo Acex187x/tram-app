@@ -83,6 +83,18 @@ version-3 meanings and ordering; append, in order: `lastLegPace`, `motionTrust`,
 runtime builder must agree. Mismatch fails closed to the existing bounded outage
 policy, never a silent padding/truncation of a version-3 model.
 
+The Python feature extractor must mirror TypeScript `LearnedModel` trust at the
+lookup time: decay stored weight from `updatedAtMs` with the existing 14-day
+half-life before choosing the segment/shape/route/global pace or release fallback.
+The trip-pace ratio uses that same lookup at the observation-pair time; horizon
+features use their evaluation time. Comparing the original stored weight alone
+is a training/serving defect, not an alternative feature policy. Shared fixtures
+must cover a cell crossing the trust threshold and its fallback chain. Existing
+frozen slow-cell snapshots remain explicitly identified as snapshots, not a
+reconstruction of the exact historical learned state; temporal holdout reports
+must disclose that limitation. A corrected model requires re-export, matched
+holdout and actual served-row parity before replacing the candidate artifact.
+
 Motion history advances only in source receipt order, per vehicle and trip, with
 no target-pair information. A changed trip resets it; non-new observation epochs
 do not advance it or become training inputs. A usable pace pair is on the same
