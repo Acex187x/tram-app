@@ -53,6 +53,27 @@ frames from the headline metric. Compare accuracy, prolonged holds, actual
 platform crossings, both acceleration signs, jerk, hidden time and native map
 cadence on identical inputs; a source `at_stop` label alone is not stop truth.
 
+## Platform service eligibility amendment (2026-09-06)
+
+Route geometry may carry `RouteStop.requestOnly?: boolean`. It is true only
+when the authoritative PID GTFS `stop_times` row for the exact trip, stop ID
+and stop sequence has both `pickup_type = 3` and `drop_off_type = 3`. Other
+known combinations are false. Missing metadata, ambiguous joins and old cached
+geometry are treated as ordinary required stops. The predictor's learned
+request-stop skip policy is gated by `requestOnly === true`; terminal stops
+retain their existing required-stop rule. A raw AVL `at_stop` label never
+establishes request-stop eligibility.
+
+Converters preserve this optional property. Convex validators accept it without
+changing the trajectory wire version; old clients may ignore it. An isolated
+candidate that still reads production geometry can join a derived public PID
+GTFS metadata overlay, strictly by trip ID, stop ID and stop sequence. Its source
+date and unmatched counts must be exposed. Stale or absent overlay data cannot
+turn an unknown stop into a request stop. No production deployment is implied.
+
+Validation includes 0/0 ordinary stops, 3/3 request stops, mixed service flags,
+terminal and missing/ambiguous metadata, plus captured actual platform crossings.
+
 ## Review deployment availability amendment (2026-09-06)
 
 An optional private trajectory deployment may use the already configured public
