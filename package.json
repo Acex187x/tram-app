@@ -43,10 +43,14 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@gltf-transform/core": "4.5.0",
+    "@gltf-transform/functions": "4.5.0",
+    "@types/better-sqlite3": "7.6.12",
     "@types/jest": "29.5.14",
     "@types/react": "~19.2.2",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~57.0.0",
+    "gltf-validator": "2.0.0-dev.3.10",
     "jest": "~29.7.0",
     "jest-expo": "~57.0.1",
     "patch-package": "8.0.0",

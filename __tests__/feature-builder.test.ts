@@ -178,7 +178,7 @@ describe('section placement on an L-shaped track', () => {
     }
   });
 
-  it('keeps the coupled trailer 14.5 m behind even at the shape start', () => {
+  it('keeps the coupled trailer 15.104 m behind even at the shape start', () => {
     const state = makeState('8123', geo, 5, { model: makeSpec1() });
     const frame = buildFrame([state], WIDE, opts(geo, { coupledPairFn: () => true }));
     expect(frame.sections.features).toHaveLength(2);
@@ -243,7 +243,7 @@ describe('coupled T3 pairs', () => {
     [],
   );
 
-  it('duplicates the single section 14.5 m behind along the shape', () => {
+  it('duplicates the single section 15.104 m behind along the shape', () => {
     const state = makeState('8123', geo, 100, { model: makeSpec1() });
     const frame = buildFrame([state], WIDE, opts(geo, { coupledPairFn: (k) => k === '8123' }));
     expect(frame.sections.features).toHaveLength(2);
@@ -257,6 +257,17 @@ describe('coupled T3 pairs', () => {
     );
     expect(d).toBeCloseTo(COUPLED_OFFSET_M, 0);
     expect(angularDiff(lead.properties.bearing, trail.properties.bearing)).toBeLessThan(1);
+  });
+
+  it('keeps the longer PLF bodies separated in a coupled pair', () => {
+    const model = { ...makeSpec1(), id: 't3rplf' as const, totalLengthM: 15.1,
+      sections: [{ modelKey: 't3rplf', lengthM: 15.1 }] };
+    const state = makeState('8284', geo, 100, { model });
+    const frame = buildFrame([state], WIDE, opts(geo, { coupledPairFn: () => true }));
+    const [lead, trail] = frame.sections.features;
+    const distance = haversineM(lead.geometry.coordinates as LngLat, trail.geometry.coordinates as LngLat);
+    expect(distance).toBeCloseTo(16.2, 1);
+    expect(distance - model.totalLengthM).toBeGreaterThan(.35);
   });
 });
 

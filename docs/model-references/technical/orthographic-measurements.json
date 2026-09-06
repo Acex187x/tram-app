@@ -1,0 +1,225 @@
+{
+  "method": "Rigid section and bellows boundaries measured in orthographic primary-source drawings, calibrated to published overall body lengths. Suggested symmetric rounded fits, NOT certified engineering dimensions. Approximate \u00b10.05\u20130.10m section/door/pivot precision; collision or articulation engineering must use original dimensioned CAD.",
+  "52t": {
+    "source_url": "https://admin.skodagroup.com/wp-content/uploads/2025/02/TRAM-PRAHA.pdf",
+    "pdf_page_one_based": 2,
+    "overall_m": 31.99,
+    "rigid_sections_front_to_rear_m": [
+      9,
+      3.5,
+      3.79,
+      3.5,
+      9
+    ],
+    "joint_gap_m": 0.8,
+    "bogie_centers_from_front_m": [
+      2.3,
+      11.56,
+      20.43,
+      29.69
+    ],
+    "axle_spacing_scaled_m": 1.8,
+    "published_wheel_diameter_m": 0.64,
+    "passenger_door_centers_from_front_m": [
+      4.85,
+      7.86,
+      15.28,
+      24.08,
+      27.12
+    ],
+    "driver_door_center_from_front_m": 1.94,
+    "passenger_door_clear_width_published_m": 1.3,
+    "pixel_calibration": {
+      "image": "52t-side-plan.png",
+      "rear_end_x": 19,
+      "front_end_x": 1273,
+      "rigid_boundaries_rear_to_front_x": [
+        [
+          19,
+          373
+        ],
+        [
+          404,
+          542
+        ],
+        [
+          573,
+          721
+        ],
+        [
+          752,
+          889
+        ],
+        [
+          920,
+          1273
+        ]
+      ],
+      "bogie_pivots_rear_to_front_x": [
+        108,
+        472,
+        819,
+        1182
+      ]
+    }
+  },
+  "14t": {
+    "source_url": "https://pid.cz/wp-content/uploads/system/sk_tram/SK_tram_priloha_manual_jednotneho_vzhledu_vozidel_2023-01-01.pdf",
+    "pdf_page_one_based": 7,
+    "overall_m": 30.25,
+    "rigid_sections_front_to_rear_m": [
+      6.265,
+      5.48,
+      3.38,
+      5.48,
+      6.265
+    ],
+    "joint_gap_m": 0.845,
+    "bogie_centers_from_front_m": [
+      4.55,
+      15.125,
+      25.7
+    ],
+    "axle_spacing_published_m": 1.88,
+    "passenger_door_centers_from_front_m": [
+      8.22,
+      11.52,
+      18.77,
+      22.1,
+      27.86
+    ],
+    "driver_door_center_from_front_m": 2.36,
+    "passenger_door_counts_front_to_rear": [
+      0,
+      2,
+      0,
+      2,
+      1
+    ],
+    "pixel_calibration": {
+      "image": "14t-side-pid.png",
+      "rear_end_x": 36,
+      "front_end_x": 1405,
+      "rigid_boundaries_rear_to_front_x": [
+        [
+          36,
+          320
+        ],
+        [
+          357,
+          605
+        ],
+        [
+          644,
+          797
+        ],
+        [
+          835,
+          1083
+        ],
+        [
+          1122,
+          1405
+        ]
+      ],
+      "bogie_pivots_rear_to_front_x": [
+        242.5,
+        720,
+        1200.5
+      ]
+    },
+    "additional_primary_four_view_url": "https://praha.eu/documents/d/praha/zapis_z_jednani_komise_rady_hl_m_prahy_1_3517600",
+    "additional_primary_four_view_page_one_based": 4
+  },
+  "kt8d5": {
+    "source_url": "https://pid.cz/wp-content/uploads/system/sk_tram/SK_tram_priloha_manual_jednotneho_vzhledu_vozidel_2023-01-01.pdf",
+    "pdf_page_one_based": 7,
+    "overall_m": 30.3,
+    "rigid_sections_front_to_rear_m": [
+      10.9,
+      6.5,
+      10.9
+    ],
+    "joint_gap_m": 1.0,
+    "articulation_centers_from_front_m": [
+      11.4,
+      18.9
+    ],
+    "outer_bogie_centers_from_front_m": [
+      3.9,
+      26.4
+    ],
+    "pixel_calibration": {
+      "image": "kt8-side-pid.png",
+      "body_endpoints_x": [
+        55,
+        1643
+      ],
+      "bellows_boundaries_left_to_right_x": [
+        [
+          627,
+          679
+        ],
+        [
+          1020,
+          1070
+        ]
+      ],
+      "bellows_widths_scaled_m": [
+        0.9922,
+        0.954
+      ]
+    },
+    "notes": "Body endpoints exclude projecting couplers. Gap width from visible physical bellows; 1.0m symmetric rounded fit. Centers agree with dimensioned articulation centers supplied by root. About \u00b10.04\u20130.06m visual-fit uncertainty."
+  },
+  "15t": {
+    "source_url": "https://www.schaeffler.com/remotemedien/media/_shared_media/08_media_library/01_publications/schaeffler_2/datasheet_1/downloads_4/rfb_005_de_en.pdf",
+    "pdf_page_one_based": 2,
+    "source_figure": "Figure 2, credited Skoda CZ",
+    "overall_m": 31.4,
+    "rigid_sections_front_to_rear_m": [
+      10.4,
+      8.6,
+      10.4
+    ],
+    "joint_gap_m": 1.0,
+    "articulation_centers_from_front_m": [
+      10.9,
+      20.5
+    ],
+    "pixel_calibration": {
+      "image": "15t-side-plan-schaeffler.png",
+      "rear_end_x": 46,
+      "front_end_x": 1715,
+      "bellows_boundaries_rear_to_front_x": [
+        [
+          597,
+          653
+        ],
+        [
+          1110,
+          1163
+        ]
+      ],
+      "bellows_widths_scaled_m": [
+        1.0536,
+        0.9971
+      ],
+      "rigid_boundaries_rear_to_front_x": [
+        [
+          46,
+          597
+        ],
+        [
+          653,
+          1110
+        ],
+        [
+          1163,
+          1715
+        ]
+      ]
+    },
+    "notes": "1.0m is a symmetric rounded physical bellows fit, not a printed dimension. About \u00b10.04\u20130.06m visual-fit uncertainty. Keep bogie wheel-midpoints distinct from eccentric end-bogie articulation pivots; root separately verified wheel axle and pivot dimensions."
+  }
+}

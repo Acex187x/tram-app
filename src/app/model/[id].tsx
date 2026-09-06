@@ -5,6 +5,7 @@
 // dolly, gentle turntable when untouched. Written defensively: every GL/GLB
 // step is guarded — failures land in a friendly error state, never a crash.
 import { Asset } from 'expo-asset';
+import { isDevice } from 'expo-device';
 import { GLView, type ExpoWebGLRenderingContext } from 'expo-gl';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
@@ -12,6 +13,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
+  AppState,
+  Button,
+  Switch,
   StyleSheet,
   Text,
   useColorScheme,
@@ -25,6 +29,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 import {
   fitRadius,
+  fitCabRadius,
   IDLE_SPIN_DEG_PER_S,
   IDLE_SPIN_DELAY_MS,
   INITIAL_AZIMUTH_DEG,
@@ -42,7 +47,23 @@ import {
 import { CircleControl } from '@/components/maps-kit/CircleControl';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { Colors, TextScale } from '@/constants/theme';
-import { MODEL_ASSETS, MODEL_SPECS } from '@/lib/fleet/modelSpecs';
+import { MODEL_SPECS } from '@/lib/fleet/modelSpecs';
+import { modelClipPlanes } from '@/components/model/clipPlanes';
+import { useSimulatorMaterials } from '@/components/model/simulatorMaterials';
+import { createModelRenderSurface } from '@/components/model/renderSurface';
+import { VIEWER_MODEL_ASSETS } from '@/components/model/viewerAssets';
+import { SegmentedPills } from '@/components/ui/SegmentedPills';
+import {
+  bindMechanisms,
+  applyMechanisms,
+  type ModelMechanisms,
+} from '@/components/model/mechanisms';
+import {
+  CLOSED_DOORS,
+  changeDoorTarget,
+  doorProgress,
+  type IndicatorDirection,
+} from '@/components/model/mechanismMath';
 import type { TramModelId, TramModelSpec } from '@/lib/types';
 
 // React Native defines `navigator` without `userAgent`; GLTFLoader (r162)
@@ -50,7 +71,10 @@ import type { TramModelId, TramModelSpec } from '@/lib/types';
 const nav = globalThis.navigator as { userAgent?: string } | undefined;
 if (nav && typeof nav.userAgent !== 'string') {
   try {
-    Object.defineProperty(nav, 'userAgent', { value: 'ReactNative ExpoGL', configurable: true });
+    Object.defineProperty(nav, 'userAgent', {
+      value: 'ReactNative ExpoGL',
+      configurable: true,
+    });
   } catch {
     // non-configurable navigator: GLTFLoader will fail loudly instead
   }
@@ -59,6 +83,8 @@ if (nav && typeof nav.userAgent !== 'string') {
 const CAMERA_FOV_DEG = 40;
 /** Idle frame budget ≈ 30 fps; interacting renders at full rAF rate. */
 const IDLE_FRAME_MS = 33;
+const SIMULATOR_FRAME_MS = 83;
+const SIMULATOR_RENDER_MAX_EDGE = 640;
 
 /** VoiceOver intercepts pan/pinch, so orbiting is also offered as actions. */
 const ROTATE_ACTIONS = [
@@ -79,6 +105,7 @@ const INITIAL_ORBIT: OrbitState = {
 interface GlSession {
   gl: ExpoWebGLRenderingContext;
   renderer: THREE.WebGLRenderer;
+  renderSurface: ReturnType<typeof createModelRenderSurface>;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   background: THREE.Color;
@@ -86,6 +113,11 @@ interface GlSession {
   raf: number;
   lastRenderMs: number;
   disposed: boolean;
+  renderFrame: () => void;
+  mechanisms: ModelMechanisms;
+  bounds: THREE.Box3;
+  overviewRadius: number;
+  overviewTarget: THREE.Vector3;
   /** Drawing-buffer size the renderer/camera are currently fitted to. */
   bufW: number;
   bufH: number;
@@ -119,62 +151,51 @@ function addLights(scene: THREE.Scene) {
   scene.add(fill);
 }
 
-/** Soft dark radial-gradient ground circle (fake contact shadow). */
-function makeGroundCircle(radiusM: number): THREE.Mesh {
-  const material = new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    uniforms: { uOpacity: { value: 0.3 } },
-    vertexShader:
-      'varying vec2 vUv;\n' +
-      'void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    fragmentShader:
-      'varying vec2 vUv;\n' +
-      'uniform float uOpacity;\n' +
-      'void main() {\n' +
-      '  float d = length(vUv - 0.5) * 2.0;\n' +
-      '  float a = uOpacity * smoothstep(1.0, 0.15, d);\n' +
-      '  gl_FragColor = vec4(0.0, 0.0, 0.0, a);\n' +
-      '}',
-  });
-  const mesh = new THREE.Mesh(new THREE.CircleGeometry(radiusM, 48), material);
-  mesh.rotation.x = -Math.PI / 2;
-  return mesh;
-}
-
 /** Load + parse every section GLB of a spec. Throws if none can be loaded. */
 async function loadSections(spec: TramModelSpec): Promise<THREE.Group[]> {
   const loader = new GLTFLoader();
   const objects: THREE.Group[] = [];
-  for (const section of spec.sections) {
-    const moduleId = MODEL_ASSETS[section.modelKey];
-    if (!moduleId) continue; // asset missing from the bundle — skip defensively
-    const asset = Asset.fromModule(moduleId);
-    await asset.downloadAsync();
-    const uri = asset.localUri ?? asset.uri;
-    const res = await fetch(uri);
-    const buffer = await res.arrayBuffer();
-    const gltf = await loader.parseAsync(buffer, '');
-    objects.push(gltf.scene);
+  try {
+    for (const section of spec.sections) {
+      const moduleId = VIEWER_MODEL_ASSETS[section.modelKey];
+      if (!moduleId) throw new Error(`Missing viewer section ${section.modelKey}`);
+      const asset = Asset.fromModule(moduleId);
+      await asset.downloadAsync();
+      const uri = asset.localUri ?? asset.uri;
+      const res = await fetch(uri);
+      const buffer = await res.arrayBuffer();
+      const gltf = await loader.parseAsync(buffer, '');
+      objects.push(gltf.scene);
+    }
+  } catch (error) {
+    objects.forEach((object) => disposeObject(object));
+    throw error;
   }
   if (objects.length === 0) throw new Error(`no GLB sections loaded for ${spec.id}`);
   return objects;
 }
 
+function disposeObject(root: THREE.Object3D, extras: THREE.Material[] = []) {
+  const materials = new Set(extras);
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    mesh.geometry?.dispose();
+    const material = mesh.material as THREE.Material | THREE.Material[] | undefined;
+    if (Array.isArray(material)) material.forEach((m) => materials.add(m));
+    else if (material) materials.add(material);
+  });
+  materials.forEach((material) => material.dispose());
+}
+
 function disposeSession(session: GlSession) {
   session.disposed = true;
   cancelAnimationFrame(session.raf);
-  session.scene.traverse((obj) => {
-    const mesh = obj as THREE.Mesh;
-    if (mesh.geometry) mesh.geometry.dispose();
-    const material = mesh.material as THREE.Material | THREE.Material[] | undefined;
-    if (Array.isArray(material)) material.forEach((m) => m.dispose());
-    else if (material) material.dispose();
-  });
+  disposeObject(session.scene, session.mechanisms.materialsToDispose);
+  session.renderSurface.dispose();
   try {
     session.renderer.dispose();
   } catch {
-    // renderer teardown after the GL context is already gone — ignore
+    /* context already released */
   }
 }
 
@@ -196,16 +217,15 @@ function SpecChip({
     <View
       style={[
         styles.chip,
-        { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.06)' },
+        {
+          backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.06)',
+        },
       ]}
       accessible
       accessibilityLabel={a11yLabel ?? label}
     >
       <SymbolView name={icon} size={12} tintColor={c.textSecondary} />
-      <Text
-        style={[styles.chipText, { color: c.text }]}
-        maxFontSizeMultiplier={TextScale.compact}
-      >
+      <Text style={[styles.chipText, { color: c.text }]} maxFontSizeMultiplier={TextScale.compact}>
         {label}
       </Text>
     </View>
@@ -225,6 +245,13 @@ export default function ModelViewerScreen() {
   const background = viewerBackgroundColor(scheme);
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [cardHeight, setCardHeight] = useState(240);
+  const [doorsOpen, setDoorsOpen] = useState(false);
+  const [indicator, setIndicator] = useState<IndicatorDirection>('off');
+  const [mechanismsAvailable, setMechanismsAvailable] = useState({
+    doors: false,
+    indicators: false,
+  });
 
   // Refs shared between gestures and the render loop (no re-renders per frame).
   const orbitRef = useRef<OrbitState>(INITIAL_ORBIT);
@@ -237,6 +264,32 @@ export default function ModelViewerScreen() {
   const sessionRef = useRef<GlSession | null>(null);
   const mountedRef = useRef(true);
   const reduceMotionRef = useRef(false);
+  const autoSpinRef = useRef(true);
+  const doorTransitionRef = useRef(CLOSED_DOORS);
+  const signalRef = useRef<{
+    direction: IndicatorDirection;
+    startedAtMs: number;
+  }>({ direction: 'off', startedAtMs: 0 });
+  const appActiveRef = useRef(
+    AppState.currentState !== 'background' && AppState.currentState !== 'inactive',
+  );
+  const contextGenerationRef = useRef(0);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      appActiveRef.current = state === 'active';
+      const session = sessionRef.current;
+      if (!session || session.disposed) return;
+      cancelAnimationFrame(session.raf);
+      session.raf = 0;
+      if (appActiveRef.current) {
+        session.lastRenderMs = Date.now();
+        lastInteractionRef.current = Date.now();
+        session.renderFrame();
+      }
+    });
+    return () => subscription.remove();
+  }, []);
 
   // Reduce Motion suppresses the endless turntable (the initial 3/4-front pose
   // is kept — drag still works). A ref, so the render loop reads it for free.
@@ -269,19 +322,25 @@ export default function ModelViewerScreen() {
     }
   }, [spec, router]);
 
-  // Dispose GL resources on unmount (and flag so an in-flight setup bails).
-  useEffect(
-    () => () => {
+  // Dispose GL resources and invalidate setup work on unmount.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
       mountedRef.current = false;
+      contextGenerationRef.current++;
       if (sessionRef.current) disposeSession(sessionRef.current);
       sessionRef.current = null;
-    },
-    [],
-  );
+    };
+  }, []);
 
   const onContextCreate = useCallback(
     async (gl: ExpoWebGLRenderingContext) => {
       if (!spec) return;
+      const generation = ++contextGenerationRef.current;
+      if (sessionRef.current) disposeSession(sessionRef.current);
+      sessionRef.current = null;
+      setStatus('loading');
+      setMechanismsAvailable({ doors: false, indicators: false });
       let renderer: THREE.WebGLRenderer | null = null;
       try {
         const width = gl.drawingBufferWidth;
@@ -313,34 +372,36 @@ export default function ModelViewerScreen() {
 
         // ── consist: all sections nose-to-tail, front toward −Z end ─────────
         const sections = await loadSections(spec);
-        if (!mountedRef.current) {
+        if (!mountedRef.current || generation !== contextGenerationRef.current) {
+          sections.forEach((section) => disposeObject(section));
           renderer.dispose();
           return;
         }
         const group = new THREE.Group();
-        const extents = sections.map((obj) => {
-          const box = new THREE.Box3().setFromObject(obj);
-          return { minZ: box.min.z, maxZ: box.max.z };
-        });
-        const offsets = layoutSections(extents);
+        // Match map placement using body lengths, not protruding lamps,
+        // collectors or shared bogie geometry in the mesh bounding boxes.
+        const extents = spec.sections.map(({ lengthM }) => ({
+          minZ: -lengthM / 2,
+          maxZ: lengthM / 2,
+        }));
+        const offsets = layoutSections(extents, spec.jointGapM);
         sections.forEach((obj, i) => {
           obj.position.z = offsets[i];
           group.add(obj);
         });
         scene.add(group);
+        const replacedMaterials = isDevice ? [] : useSimulatorMaterials(group);
+        const mechanisms = bindMechanisms(group);
+        mechanisms.materialsToDispose.push(...replacedMaterials);
 
         const total = new THREE.Box3().setFromObject(group);
         const target = total.getCenter(new THREE.Vector3());
         const size = total.getSize(new THREE.Vector3());
 
-        const ground = makeGroundCircle(Math.max(size.x, size.z) * 0.72);
-        ground.position.set(target.x, total.min.y - 0.02, target.z);
-        scene.add(ground);
-
         // expo-gl WebGL1 quirk (verified on-simulator): the scene stays blank
         // unless at least one MeshBasicMaterial object is drawn — it primes the
         // program pipeline for the PBR materials. A 1 cm cube hidden 1 m below
-        // the ground disc costs nothing and makes everything render.
+        // the model costs nothing and makes everything render.
         const pipelinePrimer = new THREE.Mesh(
           new THREE.BoxGeometry(0.01, 0.01, 0.01),
           new THREE.MeshBasicMaterial({ color: 0x000000 }),
@@ -357,11 +418,20 @@ export default function ModelViewerScreen() {
           elevationDeg: INITIAL_ELEVATION_DEG,
           radiusM: r0,
         };
-        zoomClampRef.current = { min: Math.max(2, r0 * ZOOM_MIN_FACTOR), max: r0 * ZOOM_MAX_FACTOR };
+        zoomClampRef.current = {
+          min: Math.max(2, r0 * ZOOM_MIN_FACTOR),
+          max: r0 * ZOOM_MAX_FACTOR,
+        };
 
         const session: GlSession = {
           gl,
           renderer,
+          renderSurface: createModelRenderSurface(
+            renderer,
+            width,
+            height,
+            isDevice ? null : SIMULATOR_RENDER_MAX_EDGE,
+          ),
           scene,
           camera,
           background: backgroundColor,
@@ -369,6 +439,11 @@ export default function ModelViewerScreen() {
           raf: 0,
           lastRenderMs: 0,
           disposed: false,
+          renderFrame: () => {},
+          mechanisms,
+          bounds: total,
+          overviewRadius: r0,
+          overviewTarget: target.clone(),
           bufW: width,
           bufH: height,
         };
@@ -376,8 +451,11 @@ export default function ModelViewerScreen() {
 
         // ── render loop: full rate while touched, ~30 fps turntable idle ────
         const frame = () => {
-          if (session.disposed) return;
-          session.raf = requestAnimationFrame(frame);
+          if (session.disposed || !appActiveRef.current) {
+            session.raf = 0;
+            return;
+          }
+          session.raf = 0;
           // expo-gl reallocates the drawing buffer on every native layout pass
           // (GLView.layoutSubviews), but three keeps the viewport and camera
           // aspect it was built with — an iPad rotation or Stage Manager resize
@@ -390,35 +468,80 @@ export default function ModelViewerScreen() {
             session.bufW = bw;
             session.bufH = bh;
             session.renderer.setSize(bw, bh, false);
+            session.renderSurface.resize(bw, bh);
             session.camera.aspect = bw / Math.max(1, bh);
             session.camera.updateProjectionMatrix();
           }
           const now = Date.now();
           const interacting =
             activeGesturesRef.current > 0 || now - lastInteractionRef.current < 250;
-          if (!interacting && now - session.lastRenderMs < IDLE_FRAME_MS) return;
+          const frameBudgetMs = isDevice ? (interacting ? 0 : IDLE_FRAME_MS) : SIMULATOR_FRAME_MS;
+          if (now - session.lastRenderMs < frameBudgetMs) {
+            session.raf = requestAnimationFrame(frame);
+            return;
+          }
           const dtS = Math.min(now - session.lastRenderMs, 100) / 1000;
           session.lastRenderMs = now;
 
           if (
             !reduceMotionRef.current &&
+            autoSpinRef.current &&
             !interacting &&
             now - lastInteractionRef.current > IDLE_SPIN_DELAY_MS
           ) {
             const o = orbitRef.current;
-            orbitRef.current = { ...o, azimuthDeg: o.azimuthDeg + IDLE_SPIN_DEG_PER_S * dtS };
+            orbitRef.current = {
+              ...o,
+              azimuthDeg: o.azimuthDeg + IDLE_SPIN_DEG_PER_S * dtS,
+            };
           }
 
           const pos = orbitToPosition(orbitRef.current, session.target);
           session.camera.position.set(pos.x, pos.y, pos.z);
           session.camera.lookAt(session.target);
+          const clip = modelClipPlanes(pos, session.target, session.bounds.min, session.bounds.max);
+          if (clip.near !== session.camera.near || clip.far !== session.camera.far) {
+            session.camera.near = clip.near;
+            session.camera.far = clip.far;
+            session.camera.updateProjectionMatrix();
+          }
           session.background.set(backgroundRef.current);
-          session.renderer.render(session.scene, session.camera);
-          session.gl.endFrameEXP();
+          const signal = signalRef.current;
+          applyMechanisms(
+            session.mechanisms,
+            doorProgress(doorTransitionRef.current, now, reduceMotionRef.current),
+            signal.direction,
+            now,
+            signal.startedAtMs,
+            reduceMotionRef.current,
+          );
+          try {
+            session.renderSurface.render(session.scene, session.camera);
+            session.gl.endFrameEXP();
+            // endFrameEXP queues work asynchronously. Without a completion
+            // barrier, a software GL renderer accumulates minutes of frames;
+            // iOS then blocks background/close waiting for that queue to drain.
+            // flushEXP is Expo's supported native-command barrier. Schedule
+            // the next frame only after this frame has crossed it.
+            session.gl.flushEXP();
+          } catch (error) {
+            console.warn('[model-viewer] rendering failed', error);
+            disposeSession(session);
+            if (mountedRef.current) setStatus('error');
+            return;
+          }
+          if (!session.disposed && appActiveRef.current) session.raf = requestAnimationFrame(frame);
         };
+        session.renderFrame = frame;
+        setMechanismsAvailable({
+          doors: mechanisms.doors.length > 0,
+          indicators: mechanisms.indicators.length > 0,
+        });
         lastInteractionRef.current = Date.now() - IDLE_SPIN_DELAY_MS; // start turntable immediately
         frame();
-        setStatus('ready');
+        // The first render can fail synchronously and dispose this session.
+        // Preserve its error state instead of advertising a blank ready view.
+        if (!session.disposed) setStatus('ready');
       } catch (e) {
         console.warn('[model-viewer] failed to build 3D scene', e);
         if (e instanceof Error) console.warn('[model-viewer] stack:', e.stack);
@@ -427,7 +550,7 @@ export default function ModelViewerScreen() {
         } catch {
           // best-effort cleanup on a half-initialized context
         }
-        if (mountedRef.current) setStatus('error');
+        if (mountedRef.current && generation === contextGenerationRef.current) setStatus('error');
       }
     },
     [spec],
@@ -490,8 +613,66 @@ export default function ModelViewerScreen() {
   const onRotateAction = (e: AccessibilityActionEvent) => {
     const o = orbitRef.current;
     const delta = e.nativeEvent.actionName === 'increment' ? ROTATE_ACTION_DEG : -ROTATE_ACTION_DEG;
-    orbitRef.current = { ...o, azimuthDeg: normalizeAzimuthDeg(o.azimuthDeg + delta) };
+    orbitRef.current = {
+      ...o,
+      azimuthDeg: normalizeAzimuthDeg(o.azimuthDeg + delta),
+    };
     lastInteractionRef.current = Date.now();
+  };
+
+  const onViewPreset = (view: 'whole' | 'front' | 'rear') => {
+    const session = sessionRef.current;
+    if (!session || !spec) return;
+    lastInteractionRef.current = Date.now();
+    autoSpinRef.current = view === 'whole';
+    if (view === 'whole') {
+      session.target.copy(session.overviewTarget);
+      orbitRef.current = {
+        azimuthDeg: INITIAL_AZIMUTH_DEG,
+        elevationDeg: INITIAL_ELEVATION_DEG,
+        radiusM: fitRadius(
+          session.bounds.getSize(new THREE.Vector3()),
+          CAMERA_FOV_DEG,
+          session.camera.aspect,
+        ),
+      };
+    } else {
+      const front = view === 'front';
+      session.target.set(
+        session.overviewTarget.x,
+        session.bounds.min.y + spec.heightM * 0.52,
+        front ? session.bounds.min.z + 0.65 : session.bounds.max.z - 0.65,
+      );
+      const radius = fitCabRadius(
+        { x: spec.widthM * 1.08, y: spec.heightM, z: 2.2 },
+        CAMERA_FOV_DEG,
+        session.camera.aspect,
+      );
+      orbitRef.current = {
+        azimuthDeg: front ? 0 : 180,
+        elevationDeg: 5,
+        radiusM: radius,
+      };
+      zoomClampRef.current.min = Math.min(zoomClampRef.current.min, 2);
+    }
+  };
+
+  const onDoorsChange = (open: boolean) => {
+    const now = Date.now();
+    doorTransitionRef.current = changeDoorTarget(
+      doorTransitionRef.current,
+      open,
+      now,
+      reduceMotionRef.current,
+    );
+    lastInteractionRef.current = now;
+    setDoorsOpen(open);
+  };
+  const onIndicatorChange = (key: string) => {
+    const direction = key as IndicatorDirection;
+    signalRef.current = { direction, startedAtMs: Date.now() };
+    lastInteractionRef.current = Date.now();
+    setIndicator(direction);
   };
 
   const onClose = () => {
@@ -510,7 +691,13 @@ export default function ModelViewerScreen() {
         // The label/actions live on a plain View wrapper: props set directly on
         // the GLView are swallowed by the native GL surface.
         <View
-          style={styles.gl}
+          style={[
+            styles.gl,
+            {
+              marginTop: insets.top + 56,
+              marginBottom: cardHeight + Math.max(insets.bottom, 12) + 24,
+            },
+          ]}
           accessible
           accessibilityRole="image"
           accessibilityLabel={`3D model of ${spec.name}, ${spec.manufacturer}, ${spec.totalLengthM.toFixed(1)} metres long`}
@@ -518,7 +705,12 @@ export default function ModelViewerScreen() {
           onAccessibilityAction={onRotateAction}
         >
           <GestureDetector gesture={gesture}>
-            <GLView style={styles.gl} msaaSamples={4} onContextCreate={onContextCreate} />
+            <GLView
+              key={spec.id}
+              style={styles.gl}
+              msaaSamples={isDevice ? 4 : 0}
+              onContextCreate={onContextCreate}
+            />
           </GestureDetector>
         </View>
       )}
@@ -526,7 +718,9 @@ export default function ModelViewerScreen() {
       {status === 'loading' && (
         <View style={styles.centerOverlay} pointerEvents="none">
           <ActivityIndicator size="large" color={c.textSecondary} />
-          <Text style={[styles.loadingText, { color: c.textSecondary }]}>Building {spec.name}…</Text>
+          <Text style={[styles.loadingText, { color: c.textSecondary }]}>
+            Building {spec.name}…
+          </Text>
         </View>
       )}
 
@@ -552,7 +746,10 @@ export default function ModelViewerScreen() {
 
       {/* Model card — bottom */}
       <GlassPanel style={[styles.infoGlass, { bottom: Math.max(insets.bottom, 12) + 8 }]}>
-        <View style={styles.infoContent}>
+        <View
+          style={styles.infoContent}
+          onLayout={(event) => setCardHeight(Math.ceil(event.nativeEvent.layout.height))}
+        >
           <Text style={[styles.infoName, { color: c.text }]} numberOfLines={1}>
             {spec.name}
           </Text>
@@ -568,6 +765,57 @@ export default function ModelViewerScreen() {
             <SpecChip icon="arrow.left.and.right" label={`${spec.widthM.toFixed(2)} m wide`} />
             <SpecChip icon="gauge.with.needle" label={`${spec.maxSpeedKmh} km/h`} />
           </View>
+          {status === 'ready' && (
+            <View style={styles.presetRow}>
+              <Button
+                title="Whole tram"
+                onPress={() => onViewPreset('whole')}
+                accessibilityLabel="Show the whole tram"
+              />
+              <Button
+                title="Front"
+                onPress={() => onViewPreset('front')}
+                accessibilityLabel="Inspect the front of the tram"
+              />
+              <Button
+                title="Rear"
+                onPress={() => onViewPreset('rear')}
+                accessibilityLabel="Inspect the rear of the tram"
+              />
+            </View>
+          )}
+          {status === 'ready' && (mechanismsAvailable.doors || mechanismsAvailable.indicators) && (
+            <View style={styles.mechanisms}>
+              <Text style={[styles.demoLabel, { color: c.textSecondary }]}>Demo</Text>
+              {mechanismsAvailable.doors && (
+                <View style={styles.mechanismRow}>
+                  <Text style={[styles.mechanismLabel, { color: c.text }]}>Doors</Text>
+                  <Switch
+                    value={doorsOpen}
+                    onValueChange={onDoorsChange}
+                    accessibilityLabel="Open model doors"
+                  />
+                </View>
+              )}
+              {mechanismsAvailable.indicators && (
+                <View style={styles.mechanismRow}>
+                  <Text style={[styles.mechanismLabel, { color: c.text }]}>Indicators</Text>
+                  <View style={styles.signalSegments}>
+                    <SegmentedPills
+                      appearance={scheme}
+                      selectedKey={indicator}
+                      onChange={onIndicatorChange}
+                      segments={[
+                        { key: 'left', label: 'Left' },
+                        { key: 'off', label: 'Off' },
+                        { key: 'right', label: 'Right' },
+                      ]}
+                    />
+                  </View>
+                </View>
+              )}
+            </View>
+          )}
           {/* Gesture-only hint: hidden from VoiceOver, which orbits via the
               rotate actions on the model instead. */}
           <View
@@ -615,8 +863,29 @@ const styles = StyleSheet.create({
   closeSlot: { position: 'absolute', right: 16 },
   errorTitle: { fontSize: 17, fontWeight: '700' },
   gl: { flex: 1 },
-  hintRow: { alignItems: 'center', flexDirection: 'row', gap: 5, marginTop: 10 },
+  hintRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 5,
+    marginTop: 10,
+  },
   hintText: { fontSize: 11 },
+  presetRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  mechanisms: { marginTop: 10, gap: 8 },
+  mechanismRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  mechanismLabel: { fontSize: 14, fontWeight: '500' },
+  demoLabel: { fontSize: 11, fontWeight: '600' },
+  signalSegments: { flex: 1, maxWidth: 245 },
   infoContent: { paddingHorizontal: 18, paddingVertical: 14 },
   infoGlass: { left: 16, position: 'absolute', right: 16 },
   infoName: { fontSize: 18, fontWeight: '700', letterSpacing: -0.3 },

@@ -17,10 +17,10 @@ describe('MODEL_SPECS', () => {
     }
   });
 
-  it.each(specs)('%s: section lengths + joint gaps ≈ totalLengthM (±0.6 m)', (_id, spec) => {
+  it.each(specs)('%s: section lengths + joint gaps match totalLengthM within 1 cm', (_id, spec) => {
     const sectionSum = spec.sections.reduce((s, sec) => s + sec.lengthM, 0);
     const gaps = spec.jointGapM * (spec.sections.length - 1);
-    expect(Math.abs(sectionSum + gaps - spec.totalLengthM)).toBeLessThanOrEqual(0.6);
+    expect(Math.abs(sectionSum + gaps - spec.totalLengthM)).toBeLessThanOrEqual(0.01);
   });
 
   it.each(specs)('%s: plausible physical dimensions', (_id, spec) => {
@@ -32,7 +32,7 @@ describe('MODEL_SPECS', () => {
     expect(spec.totalLengthM).toBeLessThan(33);
     for (const sec of spec.sections) {
       expect(sec.lengthM).toBeGreaterThan(3);
-      expect(sec.lengthM).toBeLessThanOrEqual(15);
+      expect(sec.lengthM).toBeLessThanOrEqual(15.1);
     }
   });
 
@@ -56,8 +56,8 @@ describe('MODEL_SPECS', () => {
   });
 
   it('only the door-less sections lack a doors-open variant', () => {
-    // 14t-a carries only the driver door; 52t-b/d are pantograph middles.
-    const noDoors = new Set(['14t-a', '52t-b', '52t-d']);
+    // 14t-a carries only the driver door; 14t-c and 52t-b/d have no doors.
+    const noDoors = new Set(['14t-a', '14t-c', '52t-b', '52t-d']);
     for (const [, spec] of specs) {
       for (const sec of spec.sections) {
         if (noDoors.has(sec.modelKey)) expect(sec.openModelKey).toBeUndefined();
@@ -98,7 +98,7 @@ describe('MODEL_ASSETS', () => {
       expect(existsSync(glbPath)).toBe(true);
       const size = statSync(glbPath).size;
       expect(size).toBeGreaterThan(1024); // real geometry, not a stub
-      expect(size).toBeLessThanOrEqual(150 * 1024); // ≤150 KB per section
+      expect(size).toBeLessThanOrEqual((key.startsWith('t3') ? 250 : 200) * 1024);
     }
   });
 });

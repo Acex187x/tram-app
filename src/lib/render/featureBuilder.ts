@@ -121,8 +121,8 @@ export const MARKER_OBSTACLE_HALF_PX = 10;
 export const BADGE_PITCH_Y_SCALE = Math.cos((55 * Math.PI) / 180);
 /** Approx digit advance as a fraction of textSize (DIN Pro Bold digits). */
 const BADGE_TEXT_CHAR_EM = 0.6;
-/** Second unit of a coupled T3 pair trails this far behind the first, meters. */
-export const COUPLED_OFFSET_M = 14.5;
+/** Standard T3 spacing; the longer PLF needs its own body length + coupling gap. */
+export const COUPLED_OFFSET_M = 15.104;
 /** Right-hand-traffic offset: every tram is shifted this far right of its bearing. */
 export const TRACK_OFFSET_M = 1.35;
 
@@ -347,7 +347,8 @@ function sectionsAlongShape(
       );
     }
     if (coupled) {
-      const trailed = placeAt(coordinates, cumDistM, centerDist - COUPLED_OFFSET_M);
+      const coupledOffsetM = spec.id === 't3rplf' ? 16.2 : COUPLED_OFFSET_M;
+      const trailed = placeAt(coordinates, cumDistM, centerDist - coupledOffsetM);
       if (isFinitePos(trailed.position) && Number.isFinite(trailed.bearing)) {
         out.push(
           sectionFeature(

@@ -1,0 +1,236 @@
+{
+  "t3rp": [
+    {
+      "file": "docs/model-references/t3rp-01.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/tatra-t3r-p",
+      "image": "https://www.dpp.cz/data/photo_gallery/2842/thumbs/2024-05-12-12-07-03-894-596-24-mhd-tram-1049a_01.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/t3rp-02.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/tatra-t3r-p",
+      "image": "https://www.dpp.cz/data/photo_gallery/2842/thumbs/2024-05-12-12-07-37-894-596-24-mhd-nocni-20230720-60-foto-vaclav-holic.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/t3rp-03.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/tatra-t3r-p",
+      "image": "https://www.dpp.cz/data/photo_gallery/2842/thumbs/2024-05-12-12-03-34-894-596-24-mhd-tram-1164a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/t3rp-04.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/tatra-t3r-p",
+      "image": "https://www.dpp.cz/data/photo_gallery/2842/thumbs/2024-05-12-12-04-34-894-596-24-mhd-tram-1168a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/t3rp-05.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/tatra-t3r-p",
+      "image": "https://www.dpp.cz/data/photo_gallery/2842/thumbs/2024-05-12-12-05-07-894-596-24-mhd-tram-542a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    }
+  ],
+  "t3rplf": [
+    {
+      "file": "docs/model-references/t3rplf-01.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/tatra-t3r-plf",
+      "image": "https://www.dpp.cz/data/photo_gallery/2843/thumbs/2024-05-12-12-17-55-894-596-24-mhd-tram-1078a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/t3rplf-02.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/tatra-t3r-plf",
+      "image": "https://www.dpp.cz/data/photo_gallery/2843/thumbs/2024-05-12-12-15-21-894-596-24-20230105-02a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/t3rplf-03.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/tatra-t3r-plf",
+      "image": "https://www.dpp.cz/data/photo_gallery/2843/thumbs/2024-05-12-12-12-05-894-596-24-mhd-tram-1159a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/t3rplf-04.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/tatra-t3r-plf",
+      "image": "https://www.dpp.cz/data/photo_gallery/2843/thumbs/2024-05-12-12-12-04-894-596-24-mhd-tram-1165a_01.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/t3rplf-05.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/tatra-t3r-plf",
+      "image": "https://www.dpp.cz/data/photo_gallery/2843/thumbs/2024-05-12-12-17-53-894-596-24-mhd-tram-1195a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    }
+  ],
+  "kt8d5": [
+    {
+      "file": "docs/model-references/kt8d5-01.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/tatra-kt8d5-rn2p",
+      "image": "https://www.dpp.cz/data/photo_gallery/2841/thumbs/2024-05-12-11-58-42-894-596-24-mhd-tram-529a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/kt8d5-02.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/tatra-kt8d5-rn2p",
+      "image": "https://www.dpp.cz/data/photo_gallery/2841/thumbs/2024-05-12-11-58-42-894-596-24-mhd-tram-549a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/kt8d5-03.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/tatra-kt8d5-rn2p",
+      "image": "https://www.dpp.cz/data/photo_gallery/2841/thumbs/2024-05-12-11-57-27-894-596-24-mhd-tram-963a_01.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/kt8d5-04.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/tatra-kt8d5-rn2p",
+      "image": "https://www.dpp.cz/data/photo_gallery/2841/thumbs/2024-05-12-11-53-16-894-596-24-mhd-tram-971a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/kt8d5-05.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/tatra-kt8d5-rn2p",
+      "image": "https://www.dpp.cz/data/photo_gallery/2841/thumbs/2024-05-12-11-53-39-894-596-24-strasnice-hostivar-021-foto-vaclav-holic_01.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    }
+  ],
+  "14t": [
+    {
+      "file": "docs/model-references/14t-01.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/skoda-14t",
+      "image": "https://www.dpp.cz/data/photo_gallery/2840/thumbs/2024-09-12-13-23-36-894-596-24-mhd-tram-1042a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/14t-02.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/skoda-14t",
+      "image": "https://www.dpp.cz/data/photo_gallery/2840/thumbs/2024-12-12-08-12-46-894-596-24-mhd-tram-426a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/14t-03.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/skoda-14t",
+      "image": "https://www.dpp.cz/data/photo_gallery/2840/thumbs/2024-12-12-08-14-16-894-596-24-mhd-tram-885a_01.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/14t-04.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/skoda-14t",
+      "image": "https://www.dpp.cz/data/photo_gallery/2840/thumbs/2024-12-12-08-15-54-894-596-24-mhd-tram-908a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/14t-05.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/skoda-14t",
+      "image": "https://www.dpp.cz/data/photo_gallery/2840/thumbs/2024-09-12-13-23-36-894-596-24-mhd-tram-757a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    }
+  ],
+  "15t": [
+    {
+      "file": "docs/model-references/15t-01.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/skoda-15t",
+      "image": "https://www.dpp.cz/data/photo_gallery/2836/thumbs/2024-02-12-12-35-09-894-596-24-mhd-tram-1012a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/15t-02.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/skoda-15t",
+      "image": "https://www.dpp.cz/data/photo_gallery/2836/thumbs/2024-02-12-12-32-32-894-596-24-mhd-tram-1039a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/15t-03.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/skoda-15t",
+      "image": "https://www.dpp.cz/data/photo_gallery/2836/thumbs/2024-02-12-12-32-07-894-596-24-mhd-tram-1139a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/15t-04.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/skoda-15t",
+      "image": "https://www.dpp.cz/data/photo_gallery/2836/thumbs/2024-02-12-12-31-06-894-596-24-mhd-tram-546a-kopie.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/15t-05.jpg",
+      "source": "https://www.dpp.cz/vozovy-park/tramvaje/skoda-15t",
+      "image": "https://www.dpp.cz/data/photo_gallery/2836/thumbs/2024-02-12-12-31-30-894-596-24-mhd-tram-548a.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    }
+  ],
+  "52t": [
+    {
+      "file": "docs/model-references/52t-01.jpg",
+      "source": "https://www.dpp.cz/spolecnost/o-spolecnosti/vozovy-park/tramvaje/skoda-52t",
+      "image": "https://www.dpp.cz/data/photo_gallery/3217/thumbs/2025-18-12-12-52-10-894-596-24-tram-52t-004-foto-dpp-petr-hejna.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/52t-02.jpg",
+      "source": "https://www.dpp.cz/spolecnost/o-spolecnosti/vozovy-park/tramvaje/skoda-52t",
+      "image": "https://www.dpp.cz/data/photo_gallery/3217/thumbs/2025-18-12-12-52-10-894-596-24-tram-52t-009-foto-dpp-petr-hejna.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/52t-03.jpg",
+      "source": "https://www.dpp.cz/spolecnost/o-spolecnosti/vozovy-park/tramvaje/skoda-52t",
+      "image": "https://www.dpp.cz/data/photo_gallery/3217/thumbs/2025-18-12-12-52-10-894-596-24-tram-52t-012-foto-dpp-petr-hejna.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/52t-04.jpg",
+      "source": "https://www.dpp.cz/spolecnost/o-spolecnosti/vozovy-park/tramvaje/skoda-52t",
+      "image": "https://www.dpp.cz/data/photo_gallery/3217/thumbs/2025-18-12-12-52-10-894-596-24-tram-52t-015-foto-dpp-petr-hejna.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/52t-05.jpg",
+      "source": "https://www.dpp.cz/spolecnost/o-spolecnosti/vozovy-park/tramvaje/skoda-52t",
+      "image": "https://www.dpp.cz/data/photo_gallery/3217/thumbs/2025-18-12-12-52-10-894-596-24-tram-52t-021-foto-dpp-petr-hejna.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/52t-06.jpg",
+      "source": "https://www.dpp.cz/spolecnost/o-spolecnosti/vozovy-park/tramvaje/skoda-52t",
+      "image": "https://www.dpp.cz/data/photo_gallery/3217/thumbs/2025-18-12-12-52-10-894-596-24-tram-52t-100-foto-dpp-petr-hejna.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/52t-07.jpg",
+      "source": "https://www.dpp.cz/spolecnost/o-spolecnosti/vozovy-park/tramvaje/skoda-52t",
+      "image": "https://www.dpp.cz/data/photo_gallery/3217/thumbs/2025-18-12-12-52-10-894-596-24-tram-52t-115-foto-dpp-petr-hejna.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/52t-08.jpg",
+      "source": "https://www.dpp.cz/spolecnost/o-spolecnosti/vozovy-park/tramvaje/skoda-52t",
+      "image": "https://www.dpp.cz/data/photo_gallery/3217/thumbs/2025-18-12-12-52-10-894-596-24-tram-52t-14-foto-dpp-petr-hejna_01.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/52t-09.jpg",
+      "source": "https://www.dpp.cz/spolecnost/o-spolecnosti/vozovy-park/tramvaje/skoda-52t",
+      "image": "https://www.dpp.cz/data/photo_gallery/3217/thumbs/2025-18-12-12-52-10-894-596-24-tram-52t-154-foto-dpp-petr-hejna.jpg",
+      "credit": "DPP; reference only, not bundled in app"
+    }
+  ],
+  "t3": [
+    {
+      "file": "docs/model-references/t3-01.jpg",
+      "source": "https://commons.wikimedia.org/wiki/File:Albertov,_historick%C3%A1_Tatra_T3,_detail.jpg",
+      "credit": "Photographer and license: linked Wikimedia file page; original image, reference only"
+    },
+    {
+      "file": "docs/model-references/t3-02.jpg",
+      "source": "https://commons.wikimedia.org/wiki/File:Albertov,_historick%C3%A1_Tatra_T3,_p%C5%99ehazov%C3%A1n%C3%AD_v%C3%BDhybky.jpg",
+      "credit": "Photographer and license: linked Wikimedia file page; original image, reference only"
+    },
+    {
+      "file": "docs/model-references/t3-dpp.webp",
+      "source": "https://fanshop.dpp.cz/pohlednice-historicky-tramvajovy-vuz-tatra-t3-c-6102-321/",
+      "image": "https://fanshop.dpp.cz/data/cache/thumb_1200-630-12/products/321/109af7c068d933346ac4e03ef8defea0/197_pohlednice_tatra_t3.webp?s=09ce096ef07002ed54f628ba0349fffb",
+      "credit": "DPP; reference only"
+    }
+  ]
+}

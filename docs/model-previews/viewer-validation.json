@@ -1,0 +1,154 @@
+[
+  {
+    "key": "t3-viewer",
+    "KB": 248.6,
+    "movableLeaves": 12,
+    "indicatorLenses": 4,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "t3rp-viewer",
+    "KB": 250.5,
+    "movableLeaves": 12,
+    "indicatorLenses": 4,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "t3rplf-viewer",
+    "KB": 268.2,
+    "movableLeaves": 12,
+    "indicatorLenses": 4,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "kt8d5-a-viewer",
+    "KB": 190.5,
+    "movableLeaves": 12,
+    "indicatorLenses": 2,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "kt8d5-b-viewer",
+    "KB": 99.7,
+    "movableLeaves": 8,
+    "indicatorLenses": 0,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "kt8d5-c-viewer",
+    "KB": 190.5,
+    "movableLeaves": 12,
+    "indicatorLenses": 2,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "14t-a-viewer",
+    "KB": 140.6,
+    "movableLeaves": 0,
+    "indicatorLenses": 2,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "14t-b-viewer",
+    "KB": 64.2,
+    "movableLeaves": 4,
+    "indicatorLenses": 0,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "14t-c-viewer",
+    "KB": 63,
+    "movableLeaves": 0,
+    "indicatorLenses": 0,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "14t-d-viewer",
+    "KB": 64.1,
+    "movableLeaves": 4,
+    "indicatorLenses": 0,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "14t-e-viewer",
+    "KB": 120.5,
+    "movableLeaves": 2,
+    "indicatorLenses": 2,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "15t-a-viewer",
+    "KB": 181.8,
+    "movableLeaves": 4,
+    "indicatorLenses": 2,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "15t-b-viewer",
+    "KB": 99.7,
+    "movableLeaves": 4,
+    "indicatorLenses": 0,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "15t-c-viewer",
+    "KB": 162.2,
+    "movableLeaves": 4,
+    "indicatorLenses": 2,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "52t-a-viewer",
+    "KB": 169.2,
+    "movableLeaves": 4,
+    "indicatorLenses": 2,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "52t-b-viewer",
+    "KB": 63.1,
+    "movableLeaves": 0,
+    "indicatorLenses": 0,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "52t-c-viewer",
+    "KB": 57,
+    "movableLeaves": 2,
+    "indicatorLenses": 0,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "52t-d-viewer",
+    "KB": 63.1,
+    "movableLeaves": 0,
+    "indicatorLenses": 0,
+    "errors": 0,
+    "warnings": 0
+  },
+  {
+    "key": "52t-e-viewer",
+    "KB": 130.8,
+    "movableLeaves": 4,
+    "indicatorLenses": 2,
+    "errors": 0,
+    "warnings": 0
+  }
+]

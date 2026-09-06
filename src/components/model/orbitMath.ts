@@ -29,7 +29,7 @@ export const AZIMUTH_DEG_PER_PX = 0.4;
 export const ELEVATION_DEG_PER_PX = 0.25;
 
 /** Initial 3/4-front view (matches scripts/render-model.mjs --thumb). */
-export const INITIAL_AZIMUTH_DEG = -32;
+export const INITIAL_AZIMUTH_DEG = 32;
 export const INITIAL_ELEVATION_DEG = 14;
 
 /** Dolly clamps as multiples of the initial fitted radius. */
@@ -51,7 +51,7 @@ export function clamp(v: number, lo: number, hi: number): number {
 
 /** Wrap an azimuth into [−180, 180) so it never grows unbounded. */
 export function normalizeAzimuthDeg(deg: number): number {
-  const wrapped = ((deg + 180) % 360 + 360) % 360 - 180;
+  const wrapped = ((((deg + 180) % 360) + 360) % 360) - 180;
   return wrapped;
 }
 
@@ -123,12 +123,7 @@ export function layoutSections(
  * Camera distance that frames a whole bbox of the given size (bounding-sphere
  * fit against the tighter of the vertical/horizontal FOV, small margin).
  */
-export function fitRadius(
-  size: Vec3,
-  fovDeg: number,
-  aspect: number,
-  marginFactor = 1.08,
-): number {
+export function fitRadius(size: Vec3, fovDeg: number, aspect: number, marginFactor = 1.08): number {
   const sphereR = 0.5 * Math.hypot(size.x, size.y, size.z);
   if (!(sphereR > 0) || !(fovDeg > 0) || !(aspect > 0)) return 10;
   const vFov = (fovDeg * Math.PI) / 180;
@@ -140,4 +135,24 @@ export function fitRadius(
 /** Theme-aware viewer background (per iteration-3 spec). */
 export function viewerBackgroundColor(scheme: 'dark' | 'light'): string {
   return scheme === 'dark' ? '#101014' : '#ECECF2';
+}
+
+/** Fit a front/rear inspection box rather than an all-orbit bounding sphere.
+ * Rotation in elevation projects depth into height; nearest corners remain
+ * inside the frustum. Whole-consist free orbit still uses fitRadius. */
+export function fitCabRadius(
+  size: Vec3,
+  fovDeg: number,
+  aspect: number,
+  elevationDeg = 5,
+  marginFactor = 1.08,
+): number {
+  if (!(fovDeg > 0) || !(aspect > 0)) return 10;
+  const angle = (elevationDeg * Math.PI) / 180;
+  const height = Math.abs(size.y * Math.cos(angle)) + Math.abs(size.z * Math.sin(angle));
+  const depth = Math.abs(size.y * Math.sin(angle)) + Math.abs(size.z * Math.cos(angle));
+  const tanV = Math.tan((fovDeg * Math.PI) / 360);
+  return (
+    Math.max(Math.abs(size.x) / (2 * tanV * aspect), height / (2 * tanV)) * marginFactor + depth / 2
+  );
 }

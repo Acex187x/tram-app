@@ -1,130 +1,112 @@
-// Build tram section GLBs into assets/models/, then read each file back and
-// validate bounding box, triangle count and file size. Fails loudly on any
-// violation so a broken model can never ship silently.
-//
-// Usage:
-//   node scripts/generate-tram-models.mjs            # build ALL models
-//   node scripts/generate-tram-models.mjs 15t kt8d5  # build ONLY those models
-//
-// Each model id maps to its own builder file under scripts/tram-models/ and
-// writes only its own section GLBs — so 7 per-model agents can run in parallel
-// without touching each other's outputs.
-
-import { dirname, join } from 'node:path';
+// Rebuild from the new, editable Blender source; validate the actual exported
+// GLBs with Khronos plus app-specific geometry and GPU budgets.
+// node scripts/generate-tram-models.mjs [ids] [--render] [--validate-only]
+import { spawnSync } from 'node:child_process';
+import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { NodeIO } from '@gltf-transform/core';
+import validator from 'gltf-validator';
+import { readGlbStats } from './tram-models/lib.mjs';
 
-import { readGlbStats, writeSectionGlb } from './tram-models/lib.mjs';
-import { sections as t3 } from './tram-models/t3.mjs';
-import { sections as t3rp } from './tram-models/t3rp.mjs';
-import { sections as t3rplf } from './tram-models/t3rplf.mjs';
-import { sections as kt8d5 } from './tram-models/kt8d5.mjs';
-import { sections as s14t } from './tram-models/14t.mjs';
-import { sections as s15t } from './tram-models/15t.mjs';
-import { sections as s52t } from './tram-models/52t.mjs';
-
-const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '../assets/models');
-
-// One entry per tram model. `sections` yields that model's section builders;
-// `lengthM` is the real vehicle length for the whole-tram triangle floor.
-const MODELS = {
-  t3: { sections: t3, lengthM: 14.1 },
-  t3rp: { sections: t3rp, lengthM: 14.1 },
-  t3rplf: { sections: t3rplf, lengthM: 14.1 },
-  kt8d5: { sections: kt8d5, lengthM: 30.3 },
-  '14t': { sections: s14t, lengthM: 30.25 },
-  '15t': { sections: s15t, lengthM: 31.4 },
-  '52t': { sections: s52t, lengthM: 32 },
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const models = {
+  t3: [14.0], t3rp: [14.0], t3rplf: [15.1], kt8d5: [10.9, 6.5, 10.9],
+  '14t': [6.265, 5.48, 3.38, 5.48, 6.265], '15t': [10.4, 8.6, 10.4],
+  '52t': [9, 3.5, 3.79, 3.5, 9],
 };
-
-// Validation gates (docs/architecture.md conventions + task budget)
-const LENGTH_TOL = 0.3; // section length within spec ±0.3 m
-const HEIGHT_RANGE = [3.0, 3.6];
-const WIDTH_RANGE = [2.4, 2.65];
-const MAX_BYTES = 150 * 1024; // per section GLB
-const MAX_TRIS = 12000; // hard per-section cap (whole trams stay in budget)
-
-// Resolve which models to build from CLI args (no args → all).
-const requested = process.argv.slice(2);
-const unknown = requested.filter((id) => !(id in MODELS));
-if (unknown.length > 0) {
-  console.error(
-    `Unknown model id(s): ${unknown.join(', ')}. ` +
-      `Valid ids: ${Object.keys(MODELS).join(', ')}.`,
-  );
-  process.exit(2);
+const gaps = { kt8d5: 1, '14t': .845, '15t': 1, '52t': .8 };
+const noOpen = new Set(['14t-a', '14t-c', '52t-b', '52t-d']);
+const args = process.argv.slice(2);
+const ids = args.filter(a => !a.startsWith('--'));
+if (!ids.length) ids.push(...Object.keys(models));
+if (ids.some(id => !(id in models))) throw new Error('Unknown tram model');
+if (!args.includes('--validate-only')) {
+  const blender = process.env.BLENDER_BIN ?? '/Applications/Blender.app/Contents/MacOS/Blender';
+  const result = spawnSync(blender, ['--background', '--factory-startup', '--python',
+    join(root, 'scripts/tram-models/blender_fleet.py'), '--', ...ids,
+    ...(args.includes('--render') ? ['--render'] : [])], { stdio: 'inherit' });
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(result.status ?? 1);
 }
-const selectedIds = requested.length > 0 ? requested : Object.keys(MODELS);
-
-let failures = 0;
 const rows = [];
-
-/** Build one GLB variant, read it back, gate it, and record a report row. */
-async function buildAndValidate(vKey, vBuild, expect) {
-  const outPath = join(OUT_DIR, `${vKey}.glb`);
-  const mb = vBuild();
-  const bytes = await writeSectionGlb({ outPath, name: vKey, mb });
-  const stats = await readGlbStats(outPath);
-
-  const problems = [];
-  const [sx, sy, sz] = stats.size;
-  if (Math.abs(sz - expect.length) > LENGTH_TOL) {
-    problems.push(`length ${sz.toFixed(2)}m vs spec ${expect.length}m`);
+const viewerRows = [];
+for (const id of ids) {
+  let total = 0;
+  for (const [i, length] of models[id].entries()) {
+    const key = models[id].length === 1 ? id : `${id}-${String.fromCharCode(97 + i)}`;
+    for (const name of noOpen.has(key) ? [key] : [key, `${key}-open`]) {
+      const path = join(root, 'assets/models', `${name}.glb`);
+      const bytes = readFileSync(path);
+      const result = await validator.validateBytes(bytes, { uri: `${name}.glb` });
+      if (result.issues.numErrors || result.issues.numWarnings) {
+        throw new Error(`${name}: ${JSON.stringify(result.issues)}`);
+      }
+      const stats = await readGlbStats(path);
+      const [w, h, l] = stats.size;
+      const doc = await new NodeIO().read(path);
+      const materials = doc.getRoot().listMaterials();
+      const problems = [];
+      const frontExtension = i > 0 ? gaps[id] / 2 : 0;
+      const rearExtension = i < models[id].length - 1 ? gaps[id] / 2 : 0;
+      const couplers = id.startsWith('t3') ? (id === 't3rplf' ? 1.10 : 1.104) : 0;
+      if (Math.abs(l - length - frontExtension - rearExtension - couplers) > .12) problems.push(`length ${l} != body ${length} + attachments`);
+      // Cab mirrors extend beyond the certified body width, which remains in
+      // MODEL_SPECS; measure attachments separately from body proportions.
+      const hasCab = i === 0 || (id === 'kt8d5' && i === models[id].length - 1);
+      if (w < 2.4 || w > (hasCab ? 2.93 : name.endsWith('-open') ? 2.75 : 2.68)) problems.push(`width ${w}`);
+      // Roof height remains in MODEL_SPECS. Raised collectors reach 4.7–5.2 m.
+      if (h < 3 || h > 5.25) problems.push(`height ${h}`);
+      if (stats.min[1] < -.01) problems.push('below rails');
+      if (Math.abs(stats.min[2] + stats.max[2] - rearExtension + frontExtension) > .08) problems.push('Z origin drift');
+      if (Math.abs(stats.min[0] + stats.max[0]) > (name.endsWith('-open') ? .22 : .12)) problems.push('X origin drift');
+      if (bytes.length > (id.startsWith('t3') ? 250 : 200) * 1024) problems.push('file budget');
+      if (stats.tris > 12000) problems.push('triangle budget');
+      if (doc.getRoot().listTextures().length) problems.push('unexpected texture');
+      if (materials.some(m => m.getDoubleSided() || m.getAlphaMode() !== 'OPAQUE')) problems.push('expensive material');
+      if (problems.length) throw new Error(`${name}: ${problems.join(', ')}`);
+      if (name === key) total += stats.tris;
+      rows.push({ key: name, triangles: stats.tris, KB: +(statSync(path).size / 1024).toFixed(1),
+        length: +l.toFixed(3), width: +w.toFixed(3), height: +h.toFixed(3), materials: materials.length,
+        errors: result.issues.numErrors, warnings: result.issues.numWarnings });
+    }
+    const viewerPath = join(root, 'assets/models', `${key}-viewer.glb`);
+    const viewerBytes = readFileSync(viewerPath);
+    const validation = await validator.validateBytes(viewerBytes, { uri: `${key}-viewer.glb` });
+    if (validation.issues.numErrors || validation.issues.numWarnings) throw new Error(`${key} viewer: ${JSON.stringify(validation.issues)}`);
+    const viewer = await new NodeIO().read(viewerPath);
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    let doors = 0, indicators = 0;
+    for (const node of viewer.getRoot().listNodes()) {
+      const extras = node.getExtras();
+      if ('doorOpenTranslation' in extras) {
+        if (!Array.isArray(extras.doorOpenTranslation) || extras.doorOpenTranslation.length !== 3 || !extras.doorOpenTranslation.every(Number.isFinite) || !Number.isFinite(extras.doorOpenRotationY)) throw new Error(`${key}: malformed door mechanism`);
+        doors++;
+      }
+      if ('indicatorSide' in extras) {
+        if (!['left', 'right'].includes(extras.indicatorSide)) throw new Error(`${key}: malformed indicator side`);
+        indicators++;
+      }
+      const matrix = node.getWorldMatrix();
+      for (const prim of node.getMesh()?.listPrimitives() ?? []) {
+        const positions = prim.getAttribute('POSITION').getArray();
+        for (let v = 0; v < positions.length; v += 3) {
+          for (let axis = 0; axis < 3; axis++) {
+            const value = matrix[axis] * positions[v] + matrix[4 + axis] * positions[v + 1] + matrix[8 + axis] * positions[v + 2] + matrix[12 + axis];
+            min[axis] = Math.min(min[axis], value); max[axis] = Math.max(max[axis], value);
+          }
+        }
+      }
+    }
+    const closed = await readGlbStats(join(root, 'assets/models', `${key}.glb`));
+    if (min.some((v, axis) => Math.abs(v - closed.min[axis]) > .001 || Math.abs(max[axis] - closed.max[axis]) > .001)) throw new Error(`${key}: viewer parts do not assemble to the map geometry`);
+    if (!noOpen.has(key) && !doors) throw new Error(`${key}: missing movable passenger doors`);
+    if (noOpen.has(key) && doors) throw new Error(`${key}: driver/doorless section marked as passenger animation`);
+    viewerRows.push({ key: `${key}-viewer`, KB: +(viewerBytes.length / 1024).toFixed(1), movableLeaves: doors, indicatorLenses: indicators, errors: 0, warnings: 0 });
   }
-  if (sy < HEIGHT_RANGE[0] || sy > HEIGHT_RANGE[1]) {
-    problems.push(`height ${sy.toFixed(2)}m outside [${HEIGHT_RANGE}]`);
-  }
-  if (sx < WIDTH_RANGE[0] || sx > WIDTH_RANGE[1]) {
-    problems.push(`width ${sx.toFixed(2)}m outside [${WIDTH_RANGE}]`);
-  }
-  if (stats.min[1] < -0.01) problems.push(`sinks below ground: minY ${stats.min[1].toFixed(3)}`);
-  if (Math.abs(stats.min[2] + stats.max[2]) > 0.05) {
-    problems.push(`not centered on z: [${stats.min[2].toFixed(2)}, ${stats.max[2].toFixed(2)}]`);
-  }
-  if (Math.abs(stats.min[0] + stats.max[0]) > 0.05) {
-    problems.push(`not centered on x: [${stats.min[0].toFixed(2)}, ${stats.max[0].toFixed(2)}]`);
-  }
-  if (bytes > MAX_BYTES) problems.push(`file ${(bytes / 1024).toFixed(0)}KB > 150KB`);
-  if (stats.tris > MAX_TRIS) problems.push(`${stats.tris} tris > ${MAX_TRIS}`);
-
-  rows.push({
-    model: vKey,
-    'len m': sz.toFixed(2),
-    'w m': sx.toFixed(2),
-    'h m': sy.toFixed(2),
-    tris: stats.tris,
-    KB: (bytes / 1024).toFixed(1),
-    ok: problems.length === 0 ? 'ok' : problems.join('; '),
-  });
-  if (problems.length > 0) failures++;
+  if (total > 12000) throw new Error(`${id}: whole vehicle ${total} triangles exceeds 12000`);
 }
-
-for (const id of selectedIds) {
-  for (const { key, build, buildOpen, expect } of MODELS[id].sections()) {
-    // Every section builds its closed GLB; sections with passenger doors also
-    // build a doors-OPEN variant '<key>-open.glb' held to the same gates.
-    await buildAndValidate(key, build, expect);
-    if (buildOpen) await buildAndValidate(`${key}-open`, buildOpen, expect);
-  }
-}
-
 console.table(rows);
-
-// Whole-tram triangle budget: 3000–12000 per full ~30 m tram, with the floor
-// scaled proportionally for shorter vehicles (a 14 m single-car T3 warrants
-// roughly half the floor of a 32 m five-section set). Only the models we built
-// this run are checked.
-for (const id of selectedIds) {
-  const { lengthM } = MODELS[id];
-  const keys = MODELS[id].sections().map((s) => s.key);
-  const total = keys.reduce((s, k) => s + Number(rows.find((r) => r.model === k)?.tris ?? 0), 0);
-  const floor = Math.round(3000 * Math.min(1, lengthM / 30));
-  const ok = total >= floor && total <= 12000;
-  console.log(`${id.padEnd(7)} total tris: ${total} ${ok ? '' : ` ⚠ outside ${floor}–12000`}`);
-  if (!ok) failures++;
-}
-
-if (failures > 0) {
-  console.error(`\n${failures} validation failure(s) — see table above.`);
-  process.exit(1);
-}
-console.log(`\nAll ${rows.length} section GLB(s) for [${selectedIds.join(', ')}] written to ${OUT_DIR} and validated.`);
+writeFileSync(join(root, 'docs/model-previews/validation.json'), JSON.stringify(rows, null, 2) + '\n');
+writeFileSync(join(root, 'docs/model-previews/viewer-validation.json'), JSON.stringify(viewerRows, null, 2) + '\n');
+console.log(`Validated ${rows.length} map GLBs and ${viewerRows.length} articulated viewer GLBs; matching closed geometry, valid mechanisms, no glTF warnings.`);

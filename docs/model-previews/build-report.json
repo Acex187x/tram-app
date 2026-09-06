@@ -1,0 +1,240 @@
+[
+  {
+    "key": "t3",
+    "length": 14.0,
+    "width": 2.5,
+    "triangles": 6253,
+    "bytes": 229188
+  },
+  {
+    "key": "t3-open",
+    "length": 14.0,
+    "width": 2.5,
+    "triangles": 6073,
+    "bytes": 222352
+  },
+  {
+    "key": "t3rp",
+    "length": 14.0,
+    "width": 2.5,
+    "triangles": 6159,
+    "bytes": 230516
+  },
+  {
+    "key": "t3rp-open",
+    "length": 14.0,
+    "width": 2.5,
+    "triangles": 5979,
+    "bytes": 223680
+  },
+  {
+    "key": "t3rplf",
+    "length": 15.1,
+    "width": 2.48,
+    "triangles": 6651,
+    "bytes": 248960
+  },
+  {
+    "key": "t3rplf-open",
+    "length": 15.1,
+    "width": 2.48,
+    "triangles": 6471,
+    "bytes": 242124
+  },
+  {
+    "key": "kt8d5-a",
+    "length": 10.9,
+    "width": 2.48,
+    "triangles": 4047,
+    "bytes": 170400
+  },
+  {
+    "key": "kt8d5-a-open",
+    "length": 10.9,
+    "width": 2.48,
+    "triangles": 3999,
+    "bytes": 168776
+  },
+  {
+    "key": "kt8d5-b",
+    "length": 6.5,
+    "width": 2.48,
+    "triangles": 1770,
+    "bytes": 86588
+  },
+  {
+    "key": "kt8d5-b-open",
+    "length": 6.5,
+    "width": 2.48,
+    "triangles": 1710,
+    "bytes": 84312
+  },
+  {
+    "key": "kt8d5-c",
+    "length": 10.9,
+    "width": 2.48,
+    "triangles": 4047,
+    "bytes": 170372
+  },
+  {
+    "key": "kt8d5-c-open",
+    "length": 10.9,
+    "width": 2.48,
+    "triangles": 3999,
+    "bytes": 168744
+  },
+  {
+    "key": "14t-a",
+    "length": 6.265,
+    "width": 2.46,
+    "triangles": 3637,
+    "bytes": 137704
+  },
+  {
+    "key": "14t-b",
+    "length": 5.48,
+    "width": 2.46,
+    "triangles": 978,
+    "bytes": 56304
+  },
+  {
+    "key": "14t-b-open",
+    "length": 5.48,
+    "width": 2.46,
+    "triangles": 954,
+    "bytes": 55016
+  },
+  {
+    "key": "14t-c",
+    "length": 3.38,
+    "width": 2.46,
+    "triangles": 1330,
+    "bytes": 64524
+  },
+  {
+    "key": "14t-d",
+    "length": 5.48,
+    "width": 2.46,
+    "triangles": 978,
+    "bytes": 56304
+  },
+  {
+    "key": "14t-d-open",
+    "length": 5.48,
+    "width": 2.46,
+    "triangles": 954,
+    "bytes": 55016
+  },
+  {
+    "key": "14t-e",
+    "length": 6.265,
+    "width": 2.46,
+    "triangles": 3045,
+    "bytes": 116928
+  },
+  {
+    "key": "14t-e-open",
+    "length": 6.265,
+    "width": 2.46,
+    "triangles": 3033,
+    "bytes": 116288
+  },
+  {
+    "key": "15t-a",
+    "length": 10.4,
+    "width": 2.46,
+    "triangles": 4503,
+    "bytes": 175132
+  },
+  {
+    "key": "15t-a-open",
+    "length": 10.4,
+    "width": 2.46,
+    "triangles": 4479,
+    "bytes": 173844
+  },
+  {
+    "key": "15t-b",
+    "length": 8.6,
+    "width": 2.46,
+    "triangles": 1854,
+    "bytes": 92472
+  },
+  {
+    "key": "15t-b-open",
+    "length": 8.6,
+    "width": 2.46,
+    "triangles": 1830,
+    "bytes": 91184
+  },
+  {
+    "key": "15t-c",
+    "length": 10.4,
+    "width": 2.46,
+    "triangles": 3976,
+    "bytes": 155104
+  },
+  {
+    "key": "15t-c-open",
+    "length": 10.4,
+    "width": 2.46,
+    "triangles": 3952,
+    "bytes": 153816
+  },
+  {
+    "key": "52t-a",
+    "length": 9,
+    "width": 2.5,
+    "triangles": 3943,
+    "bytes": 157828
+  },
+  {
+    "key": "52t-a-open",
+    "length": 9,
+    "width": 2.5,
+    "triangles": 3919,
+    "bytes": 156544
+  },
+  {
+    "key": "52t-b",
+    "length": 3.5,
+    "width": 2.5,
+    "triangles": 1330,
+    "bytes": 64628
+  },
+  {
+    "key": "52t-c",
+    "length": 3.79,
+    "width": 2.5,
+    "triangles": 888,
+    "bytes": 53384
+  },
+  {
+    "key": "52t-c-open",
+    "length": 3.79,
+    "width": 2.5,
+    "triangles": 876,
+    "bytes": 52740
+  },
+  {
+    "key": "52t-d",
+    "length": 3.5,
+    "width": 2.5,
+    "triangles": 1330,
+    "bytes": 64628
+  },
+  {
+    "key": "52t-e",
+    "length": 9,
+    "width": 2.5,
+    "triangles": 3077,
+    "bytes": 123084
+  },
+  {
+    "key": "52t-e-open",
+    "length": 9,
+    "width": 2.5,
+    "triangles": 3053,
+    "bytes": 121800
+  }
+]
