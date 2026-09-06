@@ -53,6 +53,16 @@ frames from the headline metric. Compare accuracy, prolonged holds, actual
 platform crossings, both acceleration signs, jerk, hidden time and native map
 cadence on identical inputs; a source `at_stop` label alone is not stop truth.
 
+## Learned modal-release trust parity (2026-09-06)
+
+The same 14-day effective-weight threshold applies to `releaseStats` modal
+release distributions as to `releaseAt` and the ML feature extractor. A cell
+whose decayed weight is below the existing trust threshold must use the
+existing untrusted-cell fallback distribution, even if its stored weight was
+formerly trusted. Preserve trusted-cell means/variance and do not retune the
+fallback values as part of this parity correction. Shared boundary fixtures
+must cover lookup time, stored update time and below/at-threshold weights.
+
 ## Missing-axis continuity and first-axis adoption (2026-09-06)
 
 The receipt-timed geometry replay reproduces 76 transitions in its first five
