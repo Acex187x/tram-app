@@ -298,7 +298,7 @@ describe('ride schema v4 — completeness contract', () => {
     const keys = Object.keys(JSON.parse(h.fs.lines(rel)[1]));
     const v3Tail = ['bias', 'posMode', 'gpsDist', 'gpsOffM', 'lagM'];
     const v4Appended = ['tripId', 'fLat', 'fLng', 'rej', 'fDist', 'fOffM', 'fLagM'];
-    expect(keys.slice(-12)).toEqual([...v3Tail, ...v4Appended]);
+    expect(keys.slice(-16, -4)).toEqual([...v3Tail, ...v4Appended]);
   });
 
   it('outlier fixes are written raw, flagged with rej, and counted', async () => {

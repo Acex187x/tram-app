@@ -67,3 +67,11 @@ describe('future curves and hold diagnoses', () => {
     expect(geometryEvidence(debug({geometryCoherence:'valid'})).detail).toContain('не гарантия точности');
   });
 });
+
+
+it('does not mistake an acknowledged hidden rebase for a real stop or unexplained freeze', () => {
+  const result = diagnose(debug({ simSpeedKmh: 0 }), [], [], { presentationTransitionReason: 'trip-change', presentationOpacity: 0 });
+  expect(result.title).toBe('Перенос через скрытое состояние');
+  expect(result.detail).toContain('Видимость 0 %');
+  expect(result.detail).toContain('не физическая остановка');
+});

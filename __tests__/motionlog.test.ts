@@ -226,8 +226,8 @@ describe('MotionLog daily logging', () => {
     expect(rec).toMatchObject({ obsAt: 999_500, statePos: 'at_stop', delayS: 42, nextSeq: 7 });
     // New keys are appended AFTER the historic ones — old lines stay a prefix.
     const keys = Object.keys(rec);
-    expect(keys.slice(-4)).toEqual(['obsAt', 'statePos', 'delayS', 'nextSeq']);
-    expect(keys.indexOf('mode')).toBe(keys.length - 5);
+    expect(keys.slice(-8, -4)).toEqual(['obsAt', 'statePos', 'delayS', 'nextSeq']);
+    expect(keys.indexOf('mode')).toBe(keys.length - 9);
   });
 
   it('force-flushes once the buffer reaches FLUSH_AT_LINES', () => {
@@ -260,9 +260,8 @@ describe('MotionLog daily logging', () => {
   });
 
   it('evicts the oldest files first when the directory exceeds its cap', () => {
-    // Cap = one ~300-byte old file + one flushed record line (~220 B since the
-    // R7 schema-v2 fields) — so eviction must drop exactly the two oldest files.
-    const h = makeLog({ dirCapBytes: 600 });
+    // Cap = one 300-byte old file + one current record including timing fields — so eviction must drop exactly the two oldest files.
+    const h = makeLog({ dirCapBytes: 850 });
     // Three ~300-byte log files at increasing timestamps.
     for (let i = 0; i < 3; i++) {
       h.fs.append(`${LOG_DIR}/day${i}.jsonl`, 'x'.repeat(300));
@@ -430,12 +429,12 @@ describe('MotionLog ride recording', () => {
     expect(rec.lagM).toBeNull();
     // New keys are appended AFTER the historic ones — old lines stay a prefix.
     const keys = Object.keys(rec);
-    expect(keys.slice(-16)).toEqual([
+    expect(keys.slice(-20, -4)).toEqual([
       'obsAt', 'statePos', 'delayS', 'nextSeq', 'bias', 'posMode',
       'gpsDist', 'gpsOffM', 'lagM',
       'tripId', 'fLat', 'fLng', 'rej', 'fDist', 'fOffM', 'fLagM',
     ]);
-    expect(keys.indexOf('phase')).toBe(keys.length - 17);
+    expect(keys.indexOf('phase')).toBe(keys.length - 21);
   });
 
   it('records nulls for sim fields when no state is available', async () => {

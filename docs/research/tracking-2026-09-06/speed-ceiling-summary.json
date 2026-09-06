@@ -1,0 +1,2153 @@
+{
+  "note": "Research-only sampled debug chains; missing publications are not reconstructed. Frozen250m learned surfaces. Candidate history replaces recorded previous in subsequent sampled emissions. Approach uses unambiguous projectedGPS30..150m beforeexactcurrentplatform and causal previous projectedvelocity, else learnedpace fallback. Opinion simulated atobservation then croppedatemission; sameaxis discontinuity suppressed. GPSproxy isnotdoors-open groundtruth.",
+  "missing": 2455,
+  "admitted": 445,
+  "emissions": 833,
+  "all": {
+    "n": 628,
+    "gpsN": 627,
+    "actual": {
+      "opinion": {
+        "anchor": {
+          "mae": 87.89314676189831,
+          "bias": -32.05273435769869
+        },
+        "gps": {
+          "mae": 85.92042264361001,
+          "bias": -37.051066850248176
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 93.98337603596761,
+          "bias": -36.3069594069191
+        },
+        "gps": {
+          "mae": 92.51758743286548,
+          "bias": -41.30713235574754
+        }
+      }
+    },
+    "reconstructed": {
+      "opinion": {
+        "anchor": {
+          "mae": 87.76717371673986,
+          "bias": -30.912927503652597
+        },
+        "gps": {
+          "mae": 85.7386673283008,
+          "bias": -35.90944195931733
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 93.73450228027103,
+          "bias": -35.257908860881216
+        },
+        "gps": {
+          "mae": 92.21535961713658,
+          "bias": -40.25640856761336
+        }
+      }
+    },
+    "chained": {
+      "opinion": {
+        "anchor": {
+          "mae": 87.78231141514607,
+          "bias": -30.911681196996213
+        },
+        "gps": {
+          "mae": 85.76022153456994,
+          "bias": -35.90819366493103
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 93.84158761921499,
+          "bias": -35.34906714079215
+        },
+        "gps": {
+          "mae": 92.3535396754077,
+          "bias": -40.3477782181402
+        }
+      }
+    },
+    "continuous": {
+      "opinion": {
+        "anchor": {
+          "mae": 87.78231141514607,
+          "bias": -30.911681196996213
+        },
+        "gps": {
+          "mae": 85.76022153456994,
+          "bias": -35.90819366493103
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 103.56597909209778,
+          "bias": -41.199007091175275
+        },
+        "gps": {
+          "mae": 103.71206627667847,
+          "bias": -46.20864316717481
+        }
+      }
+    },
+    "phaseContinuous": {
+      "opinion": {
+        "anchor": {
+          "mae": 92.13592320643168,
+          "bias": -23.384053799111268
+        },
+        "gps": {
+          "mae": 89.58134588929785,
+          "bias": -28.584621073762918
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 106.75420339025273,
+          "bias": -38.15426812789485
+        },
+        "gps": {
+          "mae": 107.42510062674539,
+          "bias": -43.372497944590975
+        }
+      }
+    },
+    "phaseLegacy": {
+      "opinion": {
+        "anchor": {
+          "mae": 89.62683212958098,
+          "bias": -22.296401012305548
+        },
+        "gps": {
+          "mae": 87.16900952495055,
+          "bias": -27.495233593517327
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 103.35790286027634,
+          "bias": -37.16748481115066
+        },
+        "gps": {
+          "mae": 103.34557702274996,
+          "bias": -42.3841408107546
+        }
+      }
+    },
+    "phaseModal": {
+      "opinion": {
+        "anchor": {
+          "mae": 91.53138693647924,
+          "bias": -16.451696827481094
+        },
+        "gps": {
+          "mae": 88.55167659398285,
+          "bias": -21.64120771142842
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 104.77620062875928,
+          "bias": -27.11202041193523
+        },
+        "gps": {
+          "mae": 104.32330417197966,
+          "bias": -32.312638988254946
+        }
+      }
+    },
+    "phaseService": {
+      "opinion": {
+        "anchor": {
+          "mae": 81.29746004752802,
+          "bias": -30.506730311472957
+        },
+        "gps": {
+          "mae": 78.32618716002018,
+          "bias": -35.63932761836513
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 94.3911682992843,
+          "bias": -46.452872763401096
+        },
+        "gps": {
+          "mae": 93.20025087331818,
+          "bias": -51.60970461092709
+        }
+      }
+    },
+    "implemented": {
+      "opinion": {
+        "anchor": {
+          "mae": 81.29746004752802,
+          "bias": -30.506730311472957
+        },
+        "gps": {
+          "mae": 78.32618716002018,
+          "bias": -35.63932761836513
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 94.3911682992843,
+          "bias": -46.452872763401096
+        },
+        "gps": {
+          "mae": 93.20025087331818,
+          "bias": -51.60970461092709
+        }
+      }
+    },
+    "implemented60": {
+      "opinion": {
+        "anchor": {
+          "mae": 81.49054840302134,
+          "bias": -30.154528362324022
+        },
+        "gps": {
+          "mae": 78.52757071225274,
+          "bias": -35.286563943619456
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 93.56439554448875,
+          "bias": -45.42442278729885
+        },
+        "gps": {
+          "mae": 92.399561203447,
+          "bias": -50.57961436373057
+        }
+      }
+    }
+  },
+  "onTrack": {
+    "n": 277,
+    "gpsN": 277,
+    "actual": {
+      "opinion": {
+        "anchor": {
+          "mae": 63.933597028481124,
+          "bias": -1.1719097800551945
+        },
+        "gps": {
+          "mae": 64.22685129336648,
+          "bias": -3.4082135871643016
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 67.77859177916324,
+          "bias": 8.955066665234352
+        },
+        "gps": {
+          "mae": 66.30546954390134,
+          "bias": 6.718762858125245
+        }
+      }
+    },
+    "reconstructed": {
+      "opinion": {
+        "anchor": {
+          "mae": 64.8142796254792,
+          "bias": -0.2828223859717611
+        },
+        "gps": {
+          "mae": 65.10764232907994,
+          "bias": -2.519126193080868
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 68.52972762014006,
+          "bias": 9.787668775027248
+        },
+        "gps": {
+          "mae": 67.06079717537047,
+          "bias": 7.551364967918142
+        }
+      }
+    },
+    "chained": {
+      "opinion": {
+        "anchor": {
+          "mae": 64.82615105868891,
+          "bias": -0.27738562576736586
+        },
+        "gps": {
+          "mae": 65.11951376228967,
+          "bias": -2.513689432876473
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 68.73001897355444,
+          "bias": 9.61313983409535
+        },
+        "gps": {
+          "mae": 67.276296974717,
+          "bias": 7.376836026986242
+        }
+      }
+    },
+    "continuous": {
+      "opinion": {
+        "anchor": {
+          "mae": 64.82615105868891,
+          "bias": -0.27738562576736586
+        },
+        "gps": {
+          "mae": 65.11951376228967,
+          "bias": -2.513689432876473
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 81.1399988420977,
+          "bias": 6.531932606090086
+        },
+        "gps": {
+          "mae": 81.42726183861322,
+          "bias": 4.295628798980979
+        }
+      }
+    },
+    "phaseContinuous": {
+      "opinion": {
+        "anchor": {
+          "mae": 68.50473085206852,
+          "bias": 19.720288547634297
+        },
+        "gps": {
+          "mae": 67.64543397787023,
+          "bias": 17.483984740525187
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 86.4990922863162,
+          "bias": 13.35611649152107
+        },
+        "gps": {
+          "mae": 86.32855748341579,
+          "bias": 11.119812684411965
+        }
+      }
+    },
+    "phaseLegacy": {
+      "opinion": {
+        "anchor": {
+          "mae": 67.52708102105927,
+          "bias": 20.12188220122886
+        },
+        "gps": {
+          "mae": 66.27661686313192,
+          "bias": 17.885578394119754
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 83.69071258593347,
+          "bias": 12.225570975772438
+        },
+        "gps": {
+          "mae": 83.08368928667765,
+          "bias": 9.98926716866333
+        }
+      }
+    },
+    "phaseModal": {
+      "opinion": {
+        "anchor": {
+          "mae": 71.60118540518894,
+          "bias": 27.935092031068894
+        },
+        "gps": {
+          "mae": 69.98174278893595,
+          "bias": 25.698788223959777
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 87.68702058179959,
+          "bias": 24.067392230046284
+        },
+        "gps": {
+          "mae": 87.26957734186716,
+          "bias": 21.831088422937174
+        }
+      }
+    },
+    "phaseService": {
+      "opinion": {
+        "anchor": {
+          "mae": 54.65693287446744,
+          "bias": 10.237428378843147
+        },
+        "gps": {
+          "mae": 54.0799715539928,
+          "bias": 8.00112457173404
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 68.15466948262686,
+          "bias": 0.19504335194253164
+        },
+        "gps": {
+          "mae": 67.70478961408567,
+          "bias": -2.0412604551665754
+        }
+      }
+    },
+    "implemented": {
+      "opinion": {
+        "anchor": {
+          "mae": 54.65693287446744,
+          "bias": 10.237428378843147
+        },
+        "gps": {
+          "mae": 54.0799715539928,
+          "bias": 8.00112457173404
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 68.15466948262686,
+          "bias": 0.19504335194253164
+        },
+        "gps": {
+          "mae": 67.70478961408567,
+          "bias": -2.0412604551665754
+        }
+      }
+    },
+    "implemented60": {
+      "opinion": {
+        "anchor": {
+          "mae": 55.282719251956294,
+          "bias": 10.834243765073914
+        },
+        "gps": {
+          "mae": 54.70532471848527,
+          "bias": 8.597939957964808
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 67.74763715106945,
+          "bias": 0.9688405353380936
+        },
+        "gps": {
+          "mae": 67.22566188811473,
+          "bias": -1.2674632717710137
+        }
+      }
+    }
+  },
+  "atStop": {
+    "n": 351,
+    "gpsN": 350,
+    "actual": {
+      "opinion": {
+        "anchor": {
+          "mae": 106.80139541191714,
+          "bias": -56.42307170244873
+        },
+        "gps": {
+          "mae": 103.08933482651703,
+          "bias": -63.676982147031595
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 114.6635049223915,
+          "bias": -72.02656402796323
+        },
+        "gps": {
+          "mae": 113.26260644784581,
+          "bias": -79.31619799644115
+        }
+      }
+    },
+    "reconstructed": {
+      "opinion": {
+        "anchor": {
+          "mae": 105.88099611924463,
+          "bias": -55.08540362216422
+        },
+        "gps": {
+          "mae": 102.06664997054135,
+          "bias": -62.33549186573871
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 113.62544980407812,
+          "bias": -70.80669804933316
+        },
+        "gps": {
+          "mae": 112.12339903533436,
+          "bias": -78.09284648001982
+        }
+      }
+    },
+    "chained": {
+      "opinion": {
+        "anchor": {
+          "mae": 105.89871146853247,
+          "bias": -55.08746431161264
+        },
+        "gps": {
+          "mae": 102.09586740006041,
+          "bias": -62.33755844287129
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 113.6589793994086,
+          "bias": -70.8320623887804
+        },
+        "gps": {
+          "mae": 112.2003860413829,
+          "bias": -78.11840149214028
+        }
+      }
+    },
+    "continuous": {
+      "opinion": {
+        "anchor": {
+          "mae": 105.89871146853247,
+          "bias": -55.08746431161264
+        },
+        "gps": {
+          "mae": 102.09586740006041,
+          "bias": -62.33755844287129
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 121.26397490192694,
+          "bias": -78.86701363289178
+        },
+        "gps": {
+          "mae": 121.3488972176615,
+          "bias": -86.1791669803895
+        }
+      }
+    },
+    "phaseContinuous": {
+      "opinion": {
+        "anchor": {
+          "mae": 110.78504081941925,
+          "bias": -57.40087097873669
+        },
+        "gps": {
+          "mae": 106.9420533163418,
+          "bias": -65.0446319610709
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 122.73900617028218,
+          "bias": -78.8049135397987
+        },
+        "gps": {
+          "mae": 124.12150762875186,
+          "bias": -86.49926949954474
+        }
+      }
+    },
+    "phaseLegacy": {
+      "opinion": {
+        "anchor": {
+          "mae": 107.06737645169095,
+          "bias": -55.77179830617743
+        },
+        "gps": {
+          "mae": 103.70384600301841,
+          "bias": -63.41090479516152
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 118.87873393148139,
+          "bias": -76.14718980538916
+        },
+        "gps": {
+          "mae": 119.38141388815586,
+          "bias": -83.83395226875116
+        }
+      }
+    },
+    "phaseModal": {
+      "opinion": {
+        "anchor": {
+          "mae": 107.25977959792485,
+          "bias": -51.480587180239894
+        },
+        "gps": {
+          "mae": 103.24845277683409,
+          "bias": -59.10743306600709
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 118.26253360029162,
+          "bias": -67.50147141429669
+        },
+        "gps": {
+          "mae": 117.82011083466868,
+          "bias": -75.1635318251128
+        }
+      }
+    },
+    "phaseService": {
+      "opinion": {
+        "anchor": {
+          "mae": 102.32146582227956,
+          "bias": -62.66095241180784
+        },
+        "gps": {
+          "mae": 97.51533493964756,
+          "bias": -70.1776283516722
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 115.09632548507962,
+          "bias": -83.26618548120784
+        },
+        "gps": {
+          "mae": 113.37808735562501,
+          "bias": -90.83958755705753
+        }
+      }
+    },
+    "implemented": {
+      "opinion": {
+        "anchor": {
+          "mae": 102.32146582227956,
+          "bias": -62.66095241180784
+        },
+        "gps": {
+          "mae": 97.51533493964756,
+          "bias": -70.1776283516722
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 115.09632548507962,
+          "bias": -83.26618548120784
+        },
+        "gps": {
+          "mae": 113.37808735562501,
+          "bias": -90.83958755705753
+        }
+      }
+    },
+    "implemented60": {
+      "opinion": {
+        "anchor": {
+          "mae": 102.17308024018664,
+          "bias": -62.501792975683585
+        },
+        "gps": {
+          "mae": 97.38117682732008,
+          "bias": -70.01801417430187
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 113.93830459000763,
+          "bias": -82.03677019576163
+        },
+        "gps": {
+          "mae": 112.3229043758671,
+          "bias": -89.60665965650998
+        }
+      }
+    }
+  },
+  "approach": {
+    "n": 353,
+    "gpsN": 352,
+    "actual": {
+      "opinion": {
+        "anchor": {
+          "mae": 77.12216673507363,
+          "bias": -22.799359162670633
+        },
+        "gps": {
+          "mae": 78.99080749114546,
+          "bias": -27.175774584192258
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 79.99536640304275,
+          "bias": -17.528272773900937
+        },
+        "gps": {
+          "mae": 81.94232648869446,
+          "bias": -21.880905964311637
+        }
+      }
+    },
+    "reconstructed": {
+      "opinion": {
+        "anchor": {
+          "mae": 77.12319997149208,
+          "bias": -22.606404543095465
+        },
+        "gps": {
+          "mae": 79.00528713681292,
+          "bias": -26.98227150753687
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 79.87823005739008,
+          "bias": -17.362651608197794
+        },
+        "gps": {
+          "mae": 81.84292869809669,
+          "bias": -21.714814078682252
+        }
+      }
+    },
+    "chained": {
+      "opinion": {
+        "anchor": {
+          "mae": 77.12873408950101,
+          "bias": -22.598417590560636
+        },
+        "gps": {
+          "mae": 79.01775891797696,
+          "bias": -26.97426186479598
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 80.04403216172031,
+          "bias": -17.507578582080626
+        },
+        "gps": {
+          "mae": 82.04325955944115,
+          "bias": -21.860270308446005
+        }
+      }
+    },
+    "continuous": {
+      "opinion": {
+        "anchor": {
+          "mae": 77.12873408950101,
+          "bias": -22.598417590560636
+        },
+        "gps": {
+          "mae": 79.01775891797696,
+          "bias": -26.97426186479598
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 91.50803281334306,
+          "bias": -23.508647130159734
+        },
+        "gps": {
+          "mae": 94.81821910121725,
+          "bias": -27.88122835298033
+        }
+      }
+    },
+    "phaseContinuous": {
+      "opinion": {
+        "anchor": {
+          "mae": 84.37080130949525,
+          "bias": -7.718518451664018
+        },
+        "gps": {
+          "mae": 85.34591770867952,
+          "bias": -12.436948214735834
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 97.62106961322388,
+          "bias": -17.607168113860073
+        },
+        "gps": {
+          "mae": 99.65616869015393,
+          "bias": -22.343191198509302
+        }
+      }
+    },
+    "phaseLegacy": {
+      "opinion": {
+        "anchor": {
+          "mae": 79.90299849772359,
+          "bias": -4.6365434240832375
+        },
+        "gps": {
+          "mae": 81.21281961487354,
+          "bias": -9.34621757628124
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 92.20337447577765,
+          "bias": -14.630695403533638
+        },
+        "gps": {
+          "mae": 93.59334109611214,
+          "bias": -19.358262599801247
+        }
+      }
+    },
+    "phaseModal": {
+      "opinion": {
+        "anchor": {
+          "mae": 83.58710571139858,
+          "bias": 3.5105610323225243
+        },
+        "gps": {
+          "mae": 83.73394957452682,
+          "bias": -1.1759679367606908
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 95.93638211642158,
+          "bias": -5.372877636809925
+        },
+        "gps": {
+          "mae": 97.2675665886246,
+          "bias": -10.074144214422082
+        }
+      }
+    },
+    "phaseService": {
+      "opinion": {
+        "anchor": {
+          "mae": 69.23041993909548,
+          "bias": -16.606202887442215
+        },
+        "gps": {
+          "mae": 69.98628240418277,
+          "bias": -21.20857537249766
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 82.01046880570593,
+          "bias": -28.822978523275566
+        },
+        "gps": {
+          "mae": 82.63191980463559,
+          "bias": -33.457923991743804
+        }
+      }
+    },
+    "implemented": {
+      "opinion": {
+        "anchor": {
+          "mae": 69.23041993909548,
+          "bias": -16.606202887442215
+        },
+        "gps": {
+          "mae": 69.98628240418277,
+          "bias": -21.20857537249766
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 82.01046880570593,
+          "bias": -28.822978523275566
+        },
+        "gps": {
+          "mae": 82.63191980463559,
+          "bias": -33.457923991743804
+        }
+      }
+    },
+    "implemented60": {
+      "opinion": {
+        "anchor": {
+          "mae": 69.62862712145429,
+          "bias": -16.044470462915672
+        },
+        "gps": {
+          "mae": 70.39698449330969,
+          "bias": -20.64524711721962
+        }
+      },
+      "smooth": {
+        "anchor": {
+          "mae": 81.61704715922875,
+          "bias": -28.14057286080549
+        },
+        "gps": {
+          "mae": 82.19637147371881,
+          "bias": -32.7735796768235
+        }
+      }
+    }
+  },
+  "seams": {
+    "actual": {
+      "n": 795,
+      "over1": 437,
+      "backward": 81,
+      "maxForward": 882.889226268202,
+      "maxBackward": -450.5304046946512,
+      "worst": [
+        {
+          "key": "9365",
+          "at": 1788689284071,
+          "seam": 882.889226268202,
+          "disc": "gap"
+        },
+        {
+          "key": "9354",
+          "at": 1788688343046,
+          "seam": 849.4735923627559,
+          "disc": "gap"
+        },
+        {
+          "key": "9432",
+          "at": 1788688000752,
+          "seam": 672.1416758282649,
+          "disc": "gap"
+        },
+        {
+          "key": "9342",
+          "at": 1788688448922,
+          "seam": 602.7699999999995,
+          "disc": "none"
+        },
+        {
+          "key": "9360",
+          "at": 1788688090067,
+          "seam": 479.1204305987176,
+          "disc": "gap"
+        }
+      ]
+    },
+    "reconstructed": {
+      "n": 795,
+      "over1": 472,
+      "backward": 95,
+      "maxForward": 884.2258409887218,
+      "maxBackward": -450.5304046946512,
+      "worst": [
+        {
+          "key": "9365",
+          "at": 1788689284071,
+          "seam": 884.2258409887218,
+          "disc": "gap"
+        },
+        {
+          "key": "9354",
+          "at": 1788688343046,
+          "seam": 849.4735923627559,
+          "disc": "gap"
+        },
+        {
+          "key": "9432",
+          "at": 1788688000752,
+          "seam": 672.1416758282649,
+          "disc": "gap"
+        },
+        {
+          "key": "9342",
+          "at": 1788688448922,
+          "seam": 602.7699999999995,
+          "disc": "none"
+        },
+        {
+          "key": "9360",
+          "at": 1788688090067,
+          "seam": 479.1204305987176,
+          "disc": "gap"
+        }
+      ]
+    },
+    "chained": {
+      "n": 795,
+      "over1": 436,
+      "backward": 81,
+      "maxForward": 884.4542216328009,
+      "maxBackward": -450.53019243324525,
+      "worst": [
+        {
+          "key": "9365",
+          "at": 1788689284071,
+          "seam": 884.4542216328009,
+          "disc": "gap"
+        },
+        {
+          "key": "9354",
+          "at": 1788688343046,
+          "seam": 849.4735923627559,
+          "disc": "gap"
+        },
+        {
+          "key": "9432",
+          "at": 1788688000752,
+          "seam": 672.1416758282649,
+          "disc": "gap"
+        },
+        {
+          "key": "9342",
+          "at": 1788688448922,
+          "seam": 602.7699999999995,
+          "disc": "none"
+        },
+        {
+          "key": "9360",
+          "at": 1788688090067,
+          "seam": 479.1204305987176,
+          "disc": "gap"
+        }
+      ]
+    },
+    "continuous": {
+      "n": 795,
+      "over1": 60,
+      "backward": 19,
+      "maxForward": 681.4490621904679,
+      "maxBackward": -259.37626090766753,
+      "worst": [
+        {
+          "key": "9432",
+          "at": 1788688000752,
+          "seam": 681.4490621904679,
+          "disc": "none"
+        },
+        {
+          "key": "9342",
+          "at": 1788688448922,
+          "seam": 603.2799999999997,
+          "disc": "none"
+        },
+        {
+          "key": "9511",
+          "at": 1788689178883,
+          "seam": 380.14999999999964,
+          "disc": "none"
+        },
+        {
+          "key": "8764",
+          "at": 1788688042719,
+          "seam": 380.0400000000009,
+          "disc": "none"
+        },
+        {
+          "key": "9271",
+          "at": 1788688434945,
+          "seam": 358.6800000000003,
+          "disc": "none"
+        }
+      ]
+    },
+    "phaseContinuous": {
+      "n": 795,
+      "over1": 58,
+      "backward": 14,
+      "maxForward": 678.0846588056629,
+      "maxBackward": -246.1111507522437,
+      "worst": [
+        {
+          "key": "9432",
+          "at": 1788688000752,
+          "seam": 678.0846588056629,
+          "disc": "none"
+        },
+        {
+          "key": "9342",
+          "at": 1788688448922,
+          "seam": 595.2799999999997,
+          "disc": "none"
+        },
+        {
+          "key": "8764",
+          "at": 1788688042719,
+          "seam": 378.3700000000008,
+          "disc": "none"
+        },
+        {
+          "key": "9511",
+          "at": 1788689178883,
+          "seam": 361.119999999999,
+          "disc": "none"
+        },
+        {
+          "key": "9096",
+          "at": 1788687980520,
+          "seam": 335.25,
+          "disc": "none"
+        }
+      ]
+    },
+    "phaseLegacy": {
+      "n": 795,
+      "over1": 59,
+      "backward": 15,
+      "maxForward": 678.0846588056629,
+      "maxBackward": -246.1111507522437,
+      "worst": [
+        {
+          "key": "9432",
+          "at": 1788688000752,
+          "seam": 678.0846588056629,
+          "disc": "none"
+        },
+        {
+          "key": "9342",
+          "at": 1788688448922,
+          "seam": 533.2299999999996,
+          "disc": "none"
+        },
+        {
+          "key": "8764",
+          "at": 1788688042719,
+          "seam": 384.9200000000001,
+          "disc": "none"
+        },
+        {
+          "key": "9271",
+          "at": 1788688434945,
+          "seam": 375.8200000000006,
+          "disc": "none"
+        },
+        {
+          "key": "9511",
+          "at": 1788689178883,
+          "seam": 361.119999999999,
+          "disc": "none"
+        }
+      ]
+    },
+    "phaseModal": {
+      "n": 795,
+      "over1": 60,
+      "backward": 18,
+      "maxForward": 678.0846588056629,
+      "maxBackward": -246.1111507522437,
+      "worst": [
+        {
+          "key": "9432",
+          "at": 1788688000752,
+          "seam": 678.0846588056629,
+          "disc": "none"
+        },
+        {
+          "key": "9342",
+          "at": 1788688448922,
+          "seam": 603.7199999999993,
+          "disc": "none"
+        },
+        {
+          "key": "8764",
+          "at": 1788688042719,
+          "seam": 380.53000000000065,
+          "disc": "none"
+        },
+        {
+          "key": "9271",
+          "at": 1788688434945,
+          "seam": 335.9900000000007,
+          "disc": "none"
+        },
+        {
+          "key": "9096",
+          "at": 1788687980520,
+          "seam": 334.4900000000007,
+          "disc": "none"
+        }
+      ]
+    },
+    "phaseService": {
+      "n": 795,
+      "over1": 59,
+      "backward": 12,
+      "maxForward": 643.332451470098,
+      "maxBackward": -245.1871917165845,
+      "worst": [
+        {
+          "key": "9432",
+          "at": 1788688000752,
+          "seam": 643.332451470098,
+          "disc": "none"
+        },
+        {
+          "key": "9342",
+          "at": 1788688448922,
+          "seam": 594.9299999999994,
+          "disc": "none"
+        },
+        {
+          "key": "9324",
+          "at": 1788689666878,
+          "seam": 458.02000000000044,
+          "disc": "none"
+        },
+        {
+          "key": "9271",
+          "at": 1788688434945,
+          "seam": 380.15000000000055,
+          "disc": "none"
+        },
+        {
+          "key": "9511",
+          "at": 1788689178883,
+          "seam": 361.34000000000015,
+          "disc": "none"
+        }
+      ]
+    },
+    "implemented": {
+      "n": 795,
+      "over1": 59,
+      "backward": 12,
+      "maxForward": 643.332451470098,
+      "maxBackward": -245.1871917165845,
+      "worst": [
+        {
+          "key": "9432",
+          "at": 1788688000752,
+          "seam": 643.332451470098,
+          "disc": "none"
+        },
+        {
+          "key": "9342",
+          "at": 1788688448922,
+          "seam": 594.9299999999994,
+          "disc": "none"
+        },
+        {
+          "key": "9324",
+          "at": 1788689666878,
+          "seam": 458.02000000000044,
+          "disc": "none"
+        },
+        {
+          "key": "9271",
+          "at": 1788688434945,
+          "seam": 380.15000000000055,
+          "disc": "none"
+        },
+        {
+          "key": "9511",
+          "at": 1788689178883,
+          "seam": 361.34000000000015,
+          "disc": "none"
+        }
+      ]
+    },
+    "implemented60": {
+      "n": 795,
+      "over1": 59,
+      "backward": 12,
+      "maxForward": 643.294528623639,
+      "maxBackward": -245.1871917165845,
+      "worst": [
+        {
+          "key": "9432",
+          "at": 1788688000752,
+          "seam": 643.294528623639,
+          "disc": "none"
+        },
+        {
+          "key": "9342",
+          "at": 1788688448922,
+          "seam": 594.9299999999994,
+          "disc": "none"
+        },
+        {
+          "key": "9324",
+          "at": 1788689666878,
+          "seam": 458.02000000000044,
+          "disc": "none"
+        },
+        {
+          "key": "9271",
+          "at": 1788688434945,
+          "seam": 380.15000000000055,
+          "disc": "none"
+        },
+        {
+          "key": "9511",
+          "at": 1788689178883,
+          "seam": 361.34000000000015,
+          "disc": "none"
+        }
+      ]
+    }
+  },
+  "physics": {
+    "actual": {
+      "opinion": {
+        "emissions": 833,
+        "meta": {
+          "knots": 24,
+          "pressureDrops": 0,
+          "budgetForced": true,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": null
+        },
+        "sums": {
+          "knots": 15871,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 1,
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 5,
+          "collisionViolations": 86,
+          "collisionMaxPenM": -5550.94,
+          "collisionPenAt0M": -7697.71,
+          "collisionGapM": 671.6,
+          "infeasibleSkips": 1
+        }
+      },
+      "smooth": {
+        "emissions": 833,
+        "meta": {
+          "knots": 24,
+          "pressureDrops": 0,
+          "budgetForced": true,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": null
+        },
+        "sums": {
+          "knots": 17946,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 8,
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 3,
+          "collisionViolations": 41,
+          "collisionMaxPenM": -5644.830000000001,
+          "collisionPenAt0M": -9003.300000000001,
+          "collisionGapM": 644.97,
+          "infeasibleSkips": 7
+        }
+      }
+    },
+    "reconstructed": {
+      "opinion": {
+        "emissions": 833,
+        "meta": {
+          "knots": 24,
+          "pressureDrops": 0,
+          "budgetForced": true,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": null
+        },
+        "sums": {
+          "knots": 15854,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 1,
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 5,
+          "collisionViolations": 86,
+          "collisionMaxPenM": -5562.350000000001,
+          "collisionPenAt0M": -7697.71,
+          "collisionGapM": 671.6,
+          "infeasibleSkips": 1
+        }
+      },
+      "smooth": {
+        "emissions": 833,
+        "meta": {
+          "knots": 24,
+          "pressureDrops": 0,
+          "budgetForced": true,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": null
+        },
+        "sums": {
+          "knots": 17943,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 6,
+          "midSegmentStops": 1,
+          "jamHolds": 0,
+          "queueHolds": 3,
+          "collisionViolations": 62,
+          "collisionMaxPenM": -5646.87,
+          "collisionPenAt0M": -9003.300000000001,
+          "collisionGapM": 644.97,
+          "infeasibleSkips": 6
+        }
+      }
+    },
+    "chained": {
+      "opinion": {
+        "emissions": 833,
+        "meta": {
+          "knots": 24,
+          "pressureDrops": 0,
+          "budgetForced": true,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": null
+        },
+        "sums": {
+          "knots": 15850,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 1,
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 5,
+          "collisionViolations": 86,
+          "collisionMaxPenM": -5562.05,
+          "collisionPenAt0M": -7697.71,
+          "collisionGapM": 671.6,
+          "infeasibleSkips": 1
+        }
+      },
+      "smooth": {
+        "emissions": 833,
+        "meta": {
+          "knots": 24,
+          "pressureDrops": 0,
+          "budgetForced": true,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": null
+        },
+        "sums": {
+          "knots": 17964,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 6,
+          "midSegmentStops": 1,
+          "jamHolds": 0,
+          "queueHolds": 3,
+          "collisionViolations": 64,
+          "collisionMaxPenM": -5647.099999999999,
+          "collisionPenAt0M": -9009.150000000001,
+          "collisionGapM": 644.08,
+          "infeasibleSkips": 8
+        }
+      }
+    },
+    "continuous": {
+      "opinion": {
+        "emissions": 833,
+        "meta": {
+          "knots": 24,
+          "pressureDrops": 0,
+          "budgetForced": true,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": null
+        },
+        "sums": {
+          "knots": 15850,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 1,
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 5,
+          "collisionViolations": 86,
+          "collisionMaxPenM": -5562.05,
+          "collisionPenAt0M": -7697.71,
+          "collisionGapM": 671.6,
+          "infeasibleSkips": 1
+        }
+      },
+      "smooth": {
+        "emissions": 833,
+        "meta": {
+          "knots": 24,
+          "pressureDrops": 0,
+          "budgetForced": true,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": {
+            "catchSteps": 24,
+            "catchCeilBound": 14,
+            "catchCeilBelowRef": 0,
+            "catchEnvBound": 0,
+            "catchRampBound": 0,
+            "ceilShortfallSum": 18.55894735480608,
+            "hfBehindSteps": 24,
+            "hfCeilBound": 9,
+            "yieldSteps": 0,
+            "yieldOutrun": 0
+          }
+        },
+        "sums": {
+          "knots": 18389,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 11,
+          "midSegmentStops": 1,
+          "jamHolds": 0,
+          "queueHolds": 3,
+          "collisionViolations": 46,
+          "collisionMaxPenM": -5242.49,
+          "collisionPenAt0M": -8781.11,
+          "collisionGapM": 613.65,
+          "infeasibleSkips": 17
+        }
+      }
+    },
+    "phaseContinuous": {
+      "opinion": {
+        "emissions": 833,
+        "meta": {
+          "knots": 24,
+          "pressureDrops": 0,
+          "budgetForced": true,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": null
+        },
+        "sums": {
+          "knots": 16184,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 5,
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 5,
+          "collisionViolations": 54,
+          "collisionMaxPenM": -5644.67,
+          "collisionPenAt0M": -7749.589999999999,
+          "collisionGapM": 672.1,
+          "infeasibleSkips": 15
+        }
+      },
+      "smooth": {
+        "emissions": 833,
+        "meta": {
+          "knots": 24,
+          "pressureDrops": 0,
+          "budgetForced": true,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": {
+            "catchSteps": 24,
+            "catchCeilBound": 14,
+            "catchCeilBelowRef": 0,
+            "catchEnvBound": 0,
+            "catchRampBound": 0,
+            "ceilShortfallSum": 18.55894735480608,
+            "hfBehindSteps": 24,
+            "hfCeilBound": 9,
+            "yieldSteps": 0,
+            "yieldOutrun": 0
+          }
+        },
+        "sums": {
+          "knots": 18229,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 10,
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 2,
+          "collisionViolations": 8,
+          "collisionMaxPenM": -5328.74,
+          "collisionPenAt0M": -8750.060000000001,
+          "collisionGapM": 646.41,
+          "infeasibleSkips": 27
+        }
+      }
+    },
+    "phaseLegacy": {
+      "opinion": {
+        "emissions": 833,
+        "meta": {
+          "knots": 20,
+          "pressureDrops": 0,
+          "budgetForced": false,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": null
+        },
+        "sums": {
+          "knots": 16136,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 6,
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 5,
+          "collisionViolations": 53,
+          "collisionMaxPenM": -5644.77,
+          "collisionPenAt0M": -7749.589999999999,
+          "collisionGapM": 672.1,
+          "infeasibleSkips": 15
+        }
+      },
+      "smooth": {
+        "emissions": 833,
+        "meta": {
+          "knots": 24,
+          "pressureDrops": 0,
+          "budgetForced": true,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": {
+            "catchSteps": 24,
+            "catchCeilBound": 14,
+            "catchCeilBelowRef": 0,
+            "catchEnvBound": 0,
+            "catchRampBound": 0,
+            "ceilShortfallSum": 18.55894735480608,
+            "hfBehindSteps": 24,
+            "hfCeilBound": 9,
+            "yieldSteps": 0,
+            "yieldOutrun": 0
+          }
+        },
+        "sums": {
+          "knots": 18235,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 12,
+          "midSegmentStops": 1,
+          "jamHolds": 0,
+          "queueHolds": 2,
+          "collisionViolations": 0,
+          "collisionMaxPenM": -5333.65,
+          "collisionPenAt0M": -8704.45,
+          "collisionGapM": 613.11,
+          "infeasibleSkips": 27
+        }
+      }
+    },
+    "phaseModal": {
+      "opinion": {
+        "emissions": 833,
+        "meta": {
+          "knots": 24,
+          "pressureDrops": 0,
+          "budgetForced": true,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": null
+        },
+        "sums": {
+          "knots": 16281,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 3,
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 5,
+          "collisionViolations": 54,
+          "collisionMaxPenM": -5691.76,
+          "collisionPenAt0M": -7749.589999999999,
+          "collisionGapM": 672.1,
+          "infeasibleSkips": 14
+        }
+      },
+      "smooth": {
+        "emissions": 833,
+        "meta": {
+          "knots": 24,
+          "pressureDrops": 0,
+          "budgetForced": true,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": {
+            "catchSteps": 24,
+            "catchCeilBound": 14,
+            "catchCeilBelowRef": 0,
+            "catchEnvBound": 0,
+            "catchRampBound": 0,
+            "ceilShortfallSum": 18.55894735480608,
+            "hfBehindSteps": 24,
+            "hfCeilBound": 9,
+            "yieldSteps": 0,
+            "yieldOutrun": 0
+          }
+        },
+        "sums": {
+          "knots": 18206,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 11,
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 3,
+          "collisionViolations": 16,
+          "collisionMaxPenM": -5282.66,
+          "collisionPenAt0M": -8578.64,
+          "collisionGapM": 613.3199999999999,
+          "infeasibleSkips": 29
+        }
+      }
+    },
+    "phaseService": {
+      "opinion": {
+        "emissions": 833,
+        "meta": {
+          "knots": 20,
+          "pressureDrops": 0,
+          "budgetForced": false,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": null
+        },
+        "sums": {
+          "knots": 17684,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 14,
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 3,
+          "collisionViolations": 55,
+          "collisionMaxPenM": -5861.3,
+          "collisionPenAt0M": -7867.329999999999,
+          "collisionGapM": 672.1,
+          "infeasibleSkips": 31
+        }
+      },
+      "smooth": {
+        "emissions": 833,
+        "meta": {
+          "knots": 24,
+          "pressureDrops": 0,
+          "budgetForced": true,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": {
+            "catchSteps": 24,
+            "catchCeilBound": 14,
+            "catchCeilBelowRef": 0,
+            "catchEnvBound": 0,
+            "catchRampBound": 0,
+            "ceilShortfallSum": 18.55894735480608,
+            "hfBehindSteps": 24,
+            "hfCeilBound": 9,
+            "yieldSteps": 0,
+            "yieldOutrun": 0
+          }
+        },
+        "sums": {
+          "knots": 18832,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 33,
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 2,
+          "collisionViolations": 27,
+          "collisionMaxPenM": -5855.139999999999,
+          "collisionPenAt0M": -9020.59,
+          "collisionGapM": 646.41,
+          "infeasibleSkips": 40
+        }
+      }
+    },
+    "implemented": {
+      "opinion": {
+        "emissions": 833,
+        "meta": {
+          "knots": 20,
+          "pressureDrops": 0,
+          "budgetForced": false,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": null
+        },
+        "sums": {
+          "knots": 17684,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 14,
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 3,
+          "collisionViolations": 55,
+          "collisionMaxPenM": -5861.3,
+          "collisionPenAt0M": -7867.329999999999,
+          "collisionGapM": 672.1,
+          "infeasibleSkips": 31
+        }
+      },
+      "smooth": {
+        "emissions": 833,
+        "meta": {
+          "knots": 24,
+          "pressureDrops": 0,
+          "budgetForced": true,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": {
+            "catchSteps": 24,
+            "catchCeilBound": 14,
+            "catchCeilBelowRef": 0,
+            "catchEnvBound": 0,
+            "catchRampBound": 0,
+            "ceilShortfallSum": 18.55894735480608,
+            "hfBehindSteps": 24,
+            "hfCeilBound": 9,
+            "yieldSteps": 0,
+            "yieldOutrun": 0
+          }
+        },
+        "sums": {
+          "knots": 18832,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 33,
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 2,
+          "collisionViolations": 27,
+          "collisionMaxPenM": -5855.139999999999,
+          "collisionPenAt0M": -9020.59,
+          "collisionGapM": 646.41,
+          "infeasibleSkips": 40
+        }
+      }
+    },
+    "implemented60": {
+      "opinion": {
+        "emissions": 833,
+        "meta": {
+          "knots": 20,
+          "pressureDrops": 0,
+          "budgetForced": false,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": null
+        },
+        "sums": {
+          "knots": 17699,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 14,
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 3,
+          "collisionViolations": 55,
+          "collisionMaxPenM": -5861.3,
+          "collisionPenAt0M": -7867.329999999999,
+          "collisionGapM": 672.1,
+          "infeasibleSkips": 35
+        }
+      },
+      "smooth": {
+        "emissions": 833,
+        "meta": {
+          "knots": 24,
+          "pressureDrops": 0,
+          "budgetForced": true,
+          "curveViolations": 0,
+          "curveDetail": [],
+          "phantomDips": 0,
+          "dipDetail": [],
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 0,
+          "midSegmentDetail": [],
+          "collisionViolations": 0,
+          "collisionMaxPenM": 0,
+          "collisionPenAt0M": 0,
+          "collisionGapM": 0,
+          "collisionMeasured": false,
+          "collisionInherited": false,
+          "infeasibleSkips": 0,
+          "regime": {
+            "catchSteps": 24,
+            "catchCeilBound": 14,
+            "catchCeilBelowRef": 0,
+            "catchEnvBound": 0,
+            "catchRampBound": 0,
+            "ceilShortfallSum": 18.55894735480608,
+            "hfBehindSteps": 24,
+            "hfCeilBound": 9,
+            "yieldSteps": 0,
+            "yieldOutrun": 0
+          }
+        },
+        "sums": {
+          "knots": 18819,
+          "pressureDrops": 0,
+          "curveViolations": 0,
+          "phantomDips": 30,
+          "midSegmentStops": 0,
+          "jamHolds": 0,
+          "queueHolds": 2,
+          "collisionViolations": 27,
+          "collisionMaxPenM": -5855.139999999999,
+          "collisionPenAt0M": -9020.59,
+          "collisionGapM": 646.41,
+          "infeasibleSkips": 39
+        }
+      }
+    }
+  }
+}

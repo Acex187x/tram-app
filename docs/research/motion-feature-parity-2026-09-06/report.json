@@ -1,0 +1,47 @@
+{
+  "kind": "Real-input seven-column cross-language numerical parity, with real learned pace callbacks",
+  "passed": true,
+  "rows": 378,
+  "vehicles": 7,
+  "geometries": 14,
+  "learnedCells": 10797,
+  "horizonOffsetsMs": [
+    0,
+    30000,
+    120000,
+    180000,
+    360000
+  ],
+  "numericalComparisons": 13230,
+  "firstHorizonCoverage": {
+    "nonzeroPace": 129,
+    "positiveTrust": 164,
+    "inferredPlatform": 378,
+    "stationaryEvidence": 0
+  },
+  "paceCalls": 23,
+  "maxPaceError": 0.0,
+  "maxFeatureError": {
+    "lastLegPace": 0.0,
+    "motionTrust": 0.0,
+    "motionAgeS": 0.0,
+    "tripPaceRatio": 0.0,
+    "currentPlatformOffsetM": 0.0,
+    "platformKnown": 0.0,
+    "stationaryEvidenceS": 0.0
+  },
+  "mismatchCount": 0,
+  "mismatches": [],
+  "inputSha256": "9c461c2d82e2360ad050e5bf4ae080e927ca1da5e9c711cb858c49e651e57647",
+  "sourceSha256": {
+    "service.py": "a137e10774d5768abfe76dfd73be03df758de32a589167cd9e320c46f0dd6426",
+    "research_motion_features.py": "e359c12fb6db4f1f814d77ca8eaeea3aabffd6833ce0719c1c8cbed095d76a11"
+  },
+  "limitations": [
+    "Candidate archived fixes are post-FUSE_FIX_AXIS; raw originals are separate WS capture.",
+    "seenAtMs is producer batch epoch, not exact Lab receipt.",
+    "Slow feature cells frozen at export, not historical samples.",
+    "These are the appended seven columns only; existing thirteen require their independent parity gate.",
+    "Frozen export cells include values learned after earlier rows. This is numerical parity, not causal historical accuracy validation."
+  ]
+}

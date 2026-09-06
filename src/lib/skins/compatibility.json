@@ -1,0 +1,691 @@
+{
+  "map/t3": {
+    "bounds": [
+      -1.2950000762939453,
+      0,
+      -7.552000522613525,
+      1.3250000476837158,
+      4.725000381469727,
+      7.552000522613525
+    ],
+    "triangles": 6579,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/t3-open": {
+    "bounds": [
+      -1.2950000762939453,
+      0,
+      -7.552000522613525,
+      1.4642289595814881,
+      4.725000381469727,
+      7.552000522613525
+    ],
+    "triangles": 6579,
+    "mechanisms": "[{\"name\":\"t3-door-1--5.320-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.1625],\"doorOpenRotationY\":1.42}},{\"name\":\"t3-door-1--5.320-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.44999999999999996],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3-door-1--5.320-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.44999999999999996],\"doorOpenRotationY\":1.42}},{\"name\":\"t3-door-1--5.320-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.1625],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3-door-1-0.120-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"t3-door-1-0.120-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3-door-1-0.120-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"t3-door-1-0.120-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.169],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3-door-1-5.370-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.1625],\"doorOpenRotationY\":1.42}},{\"name\":\"t3-door-1-5.370-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.44999999999999996],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3-door-1-5.370-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.44999999999999996],\"doorOpenRotationY\":1.42}},{\"name\":\"t3-door-1-5.370-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.1625],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3-indicator--0.940--6.732\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"t3-indicator--0.940-6.732\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"t3-indicator-0.940--6.732\",\"extras\":{\"indicatorSide\":\"right\"}},{\"name\":\"t3-indicator-0.940-6.732\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "viewer/t3": {
+    "bounds": [
+      -1.2950000762939453,
+      0,
+      -7.552000522613525,
+      1.3250000476837158,
+      4.725000381469727,
+      7.552000522613525
+    ],
+    "triangles": 6579,
+    "mechanisms": "[{\"name\":\"t3-door-1--5.320-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.1625],\"doorOpenRotationY\":1.42}},{\"name\":\"t3-door-1--5.320-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.44999999999999996],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3-door-1--5.320-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.44999999999999996],\"doorOpenRotationY\":1.42}},{\"name\":\"t3-door-1--5.320-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.1625],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3-door-1-0.120-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"t3-door-1-0.120-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3-door-1-0.120-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"t3-door-1-0.120-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.169],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3-door-1-5.370-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.1625],\"doorOpenRotationY\":1.42}},{\"name\":\"t3-door-1-5.370-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.44999999999999996],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3-door-1-5.370-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.44999999999999996],\"doorOpenRotationY\":1.42}},{\"name\":\"t3-door-1-5.370-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.1625],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3-indicator--0.940--6.732\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"t3-indicator--0.940-6.732\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"t3-indicator-0.940--6.732\",\"extras\":{\"indicatorSide\":\"right\"}},{\"name\":\"t3-indicator-0.940-6.732\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "map/t3rp": {
+    "bounds": [
+      -1.4479999542236328,
+      0,
+      -7.552000522613525,
+      1.4479999542236328,
+      4.725000381469727,
+      7.552000522613525
+    ],
+    "triangles": 6241,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/t3rp-open": {
+    "bounds": [
+      -1.4479999542236328,
+      0,
+      -7.552000522613525,
+      1.4642289595814881,
+      4.725000381469727,
+      7.552000522613525
+    ],
+    "triangles": 6241,
+    "mechanisms": "[{\"name\":\"t3rp-door-1--5.320-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.1625],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rp-door-1--5.320-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.44999999999999996],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rp-door-1--5.320-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.44999999999999996],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rp-door-1--5.320-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.1625],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rp-door-1-0.120-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rp-door-1-0.120-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rp-door-1-0.120-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rp-door-1-0.120-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.169],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rp-door-1-5.370-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.1625],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rp-door-1-5.370-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.44999999999999996],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rp-door-1-5.370-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.44999999999999996],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rp-door-1-5.370-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.1625],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rp-indicator--0.940--6.732\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"t3rp-indicator--0.940-6.732\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"t3rp-indicator-0.940--6.732\",\"extras\":{\"indicatorSide\":\"right\"}},{\"name\":\"t3rp-indicator-0.940-6.732\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "viewer/t3rp": {
+    "bounds": [
+      -1.4479999542236328,
+      0,
+      -7.552000522613525,
+      1.4479999542236328,
+      4.725000381469727,
+      7.552000522613525
+    ],
+    "triangles": 6241,
+    "mechanisms": "[{\"name\":\"t3rp-door-1--5.320-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.1625],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rp-door-1--5.320-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.44999999999999996],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rp-door-1--5.320-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.44999999999999996],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rp-door-1--5.320-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.1625],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rp-door-1-0.120-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rp-door-1-0.120-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rp-door-1-0.120-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rp-door-1-0.120-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.169],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rp-door-1-5.370-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.1625],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rp-door-1-5.370-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.44999999999999996],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rp-door-1-5.370-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.44999999999999996],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rp-door-1-5.370-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.1625],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rp-indicator--0.940--6.732\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"t3rp-indicator--0.940-6.732\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"t3rp-indicator-0.940--6.732\",\"extras\":{\"indicatorSide\":\"right\"}},{\"name\":\"t3rp-indicator-0.940-6.732\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "map/t3rplf": {
+    "bounds": [
+      -1.437999963760376,
+      0,
+      -8.100000381469727,
+      1.437999963760376,
+      4.849999904632568,
+      8.100000381469727
+    ],
+    "triangles": 6758,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/t3rplf-open": {
+    "bounds": [
+      -1.437999963760376,
+      0,
+      -8.100000381469727,
+      1.4542289696778647,
+      4.849999904632568,
+      8.100000381469727
+    ],
+    "triangles": 6758,
+    "mechanisms": "[{\"name\":\"t3rplf-door-1--5.870-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.1625],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rplf-door-1--5.870-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.44999999999999996],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rplf-door-1--5.870-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.44999999999999996],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rplf-door-1--5.870-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.1625],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rplf-door-1-0.120-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rplf-door-1-0.120-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rplf-door-1-0.120-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rplf-door-1-0.120-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.169],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rplf-door-1-5.920-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.1625],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rplf-door-1-5.920-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.44999999999999996],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rplf-door-1-5.920-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.44999999999999996],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rplf-door-1-5.920-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.1625],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rplf-indicator--0.940--7.275\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"t3rplf-indicator--0.940-7.275\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"t3rplf-indicator-0.940--7.275\",\"extras\":{\"indicatorSide\":\"right\"}},{\"name\":\"t3rplf-indicator-0.940-7.275\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "viewer/t3rplf": {
+    "bounds": [
+      -1.437999963760376,
+      0,
+      -8.100000381469727,
+      1.437999963760376,
+      4.849999904632568,
+      8.100000381469727
+    ],
+    "triangles": 6758,
+    "mechanisms": "[{\"name\":\"t3rplf-door-1--5.870-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.1625],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rplf-door-1--5.870-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.44999999999999996],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rplf-door-1--5.870-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.44999999999999996],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rplf-door-1--5.870-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.1625],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rplf-door-1-0.120-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rplf-door-1-0.120-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rplf-door-1-0.120-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rplf-door-1-0.120-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.169],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rplf-door-1-5.920-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.1625],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rplf-door-1-5.920-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.44999999999999996],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rplf-door-1-5.920-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.44999999999999996],\"doorOpenRotationY\":1.42}},{\"name\":\"t3rplf-door-1-5.920-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.1625],\"doorOpenRotationY\":-1.42}},{\"name\":\"t3rplf-indicator--0.940--7.275\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"t3rplf-indicator--0.940-7.275\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"t3rplf-indicator-0.940--7.275\",\"extras\":{\"indicatorSide\":\"right\"}},{\"name\":\"t3rplf-indicator-0.940-7.275\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "map/kt8d5-a": {
+    "bounds": [
+      -1.437999963760376,
+      0,
+      -5.920000076293945,
+      1.437999963760376,
+      5.178000450134277,
+      5.949999809265137
+    ],
+    "triangles": 4623,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/kt8d5-a-open": {
+    "bounds": [
+      -1.6025267399984466,
+      0,
+      -5.920000076293945,
+      1.6025267399984466,
+      5.178000450134277,
+      5.949999809265137
+    ],
+    "triangles": 4623,
+    "mechanisms": "[{\"name\":\"kt8d5-a-door--1--4.300-0\",\"extras\":{\"doorOpenTranslation\":[0.1,0,-0.11399999999999999],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-a-door--1--4.300-1\",\"extras\":{\"doorOpenTranslation\":[0.1,0,0.11399999999999999],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-a-door--1-3.150-0\",\"extras\":{\"doorOpenTranslation\":[0.1,0,-0.169],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-a-door--1-3.150-1\",\"extras\":{\"doorOpenTranslation\":[0.1,0,-0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-a-door--1-3.150-2\",\"extras\":{\"doorOpenTranslation\":[0.1,0,0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-a-door--1-3.150-3\",\"extras\":{\"doorOpenTranslation\":[0.1,0,0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-a-door-1--4.300-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.11399999999999999],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-a-door-1--4.300-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.11399999999999999],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-a-door-1-3.150-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-a-door-1-3.150-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-a-door-1-3.150-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-a-door-1-3.150-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.169],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-a-indicator--1.100--5.329\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"kt8d5-a-indicator-1.100--5.334\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "viewer/kt8d5-a": {
+    "bounds": [
+      -1.437999963760376,
+      0,
+      -5.920000076293945,
+      1.437999963760376,
+      5.178000450134277,
+      5.949999809265137
+    ],
+    "triangles": 4623,
+    "mechanisms": "[{\"name\":\"kt8d5-a-door--1--4.300-0\",\"extras\":{\"doorOpenTranslation\":[0.1,0,-0.11399999999999999],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-a-door--1--4.300-1\",\"extras\":{\"doorOpenTranslation\":[0.1,0,0.11399999999999999],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-a-door--1-3.150-0\",\"extras\":{\"doorOpenTranslation\":[0.1,0,-0.169],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-a-door--1-3.150-1\",\"extras\":{\"doorOpenTranslation\":[0.1,0,-0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-a-door--1-3.150-2\",\"extras\":{\"doorOpenTranslation\":[0.1,0,0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-a-door--1-3.150-3\",\"extras\":{\"doorOpenTranslation\":[0.1,0,0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-a-door-1--4.300-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.11399999999999999],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-a-door-1--4.300-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.11399999999999999],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-a-door-1-3.150-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-a-door-1-3.150-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-a-door-1-3.150-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-a-door-1-3.150-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.169],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-a-indicator--1.100--5.329\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"kt8d5-a-indicator-1.100--5.334\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "map/kt8d5-b": {
+    "bounds": [
+      -1.315000057220459,
+      0,
+      -3.75,
+      1.315000057220459,
+      3.384999990463257,
+      3.75
+    ],
+    "triangles": 1910,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/kt8d5-b-open": {
+    "bounds": [
+      -1.4542289402137463,
+      0,
+      -3.75,
+      1.4542289402137463,
+      3.384999990463257,
+      3.75
+    ],
+    "triangles": 1910,
+    "mechanisms": "[{\"name\":\"kt8d5-b-door--1-0.000-0\",\"extras\":{\"doorOpenTranslation\":[0.1,0,-0.169],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-b-door--1-0.000-1\",\"extras\":{\"doorOpenTranslation\":[0.1,0,-0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-b-door--1-0.000-2\",\"extras\":{\"doorOpenTranslation\":[0.1,0,0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-b-door--1-0.000-3\",\"extras\":{\"doorOpenTranslation\":[0.1,0,0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-b-door-1-0.000-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-b-door-1-0.000-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-b-door-1-0.000-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-b-door-1-0.000-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.169],\"doorOpenRotationY\":-1.42}}]",
+    "textureBytes": 0
+  },
+  "viewer/kt8d5-b": {
+    "bounds": [
+      -1.315000057220459,
+      0,
+      -3.75,
+      1.315000057220459,
+      3.384999990463257,
+      3.75
+    ],
+    "triangles": 1910,
+    "mechanisms": "[{\"name\":\"kt8d5-b-door--1-0.000-0\",\"extras\":{\"doorOpenTranslation\":[0.1,0,-0.169],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-b-door--1-0.000-1\",\"extras\":{\"doorOpenTranslation\":[0.1,0,-0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-b-door--1-0.000-2\",\"extras\":{\"doorOpenTranslation\":[0.1,0,0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-b-door--1-0.000-3\",\"extras\":{\"doorOpenTranslation\":[0.1,0,0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-b-door-1-0.000-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-b-door-1-0.000-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-b-door-1-0.000-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-b-door-1-0.000-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.169],\"doorOpenRotationY\":-1.42}}]",
+    "textureBytes": 0
+  },
+  "map/kt8d5-c": {
+    "bounds": [
+      -1.437999963760376,
+      0,
+      -5.949999809265137,
+      1.437999963760376,
+      3.638000249862671,
+      5.920000076293945
+    ],
+    "triangles": 4623,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/kt8d5-c-open": {
+    "bounds": [
+      -1.6025267399984466,
+      0,
+      -5.949999809265137,
+      1.6025267399984466,
+      3.638000249862671,
+      5.920000076293945
+    ],
+    "triangles": 4623,
+    "mechanisms": "[{\"name\":\"kt8d5-c-door--1--3.150-0\",\"extras\":{\"doorOpenTranslation\":[0.1,0,-0.169],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-c-door--1--3.150-1\",\"extras\":{\"doorOpenTranslation\":[0.1,0,-0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-c-door--1--3.150-2\",\"extras\":{\"doorOpenTranslation\":[0.1,0,0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-c-door--1--3.150-3\",\"extras\":{\"doorOpenTranslation\":[0.1,0,0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-c-door--1-4.300-0\",\"extras\":{\"doorOpenTranslation\":[0.1,0,-0.11399999999999999],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-c-door--1-4.300-1\",\"extras\":{\"doorOpenTranslation\":[0.1,0,0.11399999999999999],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-c-door-1--3.150-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-c-door-1--3.150-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-c-door-1--3.150-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-c-door-1--3.150-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.169],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-c-door-1-4.300-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.11399999999999999],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-c-door-1-4.300-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.11399999999999999],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-c-indicator--1.100-5.329\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"kt8d5-c-indicator-1.100-5.334\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "viewer/kt8d5-c": {
+    "bounds": [
+      -1.437999963760376,
+      0,
+      -5.949999809265137,
+      1.437999963760376,
+      3.638000249862671,
+      5.920000076293945
+    ],
+    "triangles": 4623,
+    "mechanisms": "[{\"name\":\"kt8d5-c-door--1--3.150-0\",\"extras\":{\"doorOpenTranslation\":[0.1,0,-0.169],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-c-door--1--3.150-1\",\"extras\":{\"doorOpenTranslation\":[0.1,0,-0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-c-door--1--3.150-2\",\"extras\":{\"doorOpenTranslation\":[0.1,0,0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-c-door--1--3.150-3\",\"extras\":{\"doorOpenTranslation\":[0.1,0,0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-c-door--1-4.300-0\",\"extras\":{\"doorOpenTranslation\":[0.1,0,-0.11399999999999999],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-c-door--1-4.300-1\",\"extras\":{\"doorOpenTranslation\":[0.1,0,0.11399999999999999],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-c-door-1--3.150-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.169],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-c-door-1--3.150-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.46799999999999997],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-c-door-1--3.150-2\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.46799999999999997],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-c-door-1--3.150-3\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.169],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-c-door-1-4.300-0\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,-0.11399999999999999],\"doorOpenRotationY\":1.42}},{\"name\":\"kt8d5-c-door-1-4.300-1\",\"extras\":{\"doorOpenTranslation\":[-0.1,0,0.11399999999999999],\"doorOpenRotationY\":-1.42}},{\"name\":\"kt8d5-c-indicator--1.100-5.329\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"kt8d5-c-indicator-1.100-5.334\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "map/14t-a": {
+    "bounds": [
+      -1.4279999732971191,
+      0,
+      -3.1667394638061523,
+      1.4279999732971191,
+      5.034999847412109,
+      3.5550003051757812
+    ],
+    "triangles": 3601,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "viewer/14t-a": {
+    "bounds": [
+      -1.4279999732971191,
+      0,
+      -3.1667394638061523,
+      1.4279999732971191,
+      5.034999847412109,
+      3.5550003051757812
+    ],
+    "triangles": 3601,
+    "mechanisms": "[{\"name\":\"14t-a-indicator--1.130--2.539\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"14t-a-indicator-1.130--2.539\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "map/14t-b": {
+    "bounds": [
+      -1.2410000562667847,
+      0.30000001192092896,
+      -3.1624999046325684,
+      1.319000005722046,
+      3.369999885559082,
+      3.1624999046325684
+    ],
+    "triangles": 854,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/14t-b-open": {
+    "bounds": [
+      -1.2410000562667847,
+      0.30000001192092896,
+      -3.1624999046325684,
+      1.4389999908208848,
+      3.369999885559082,
+      3.1624999046325684
+    ],
+    "triangles": 854,
+    "mechanisms": "[{\"name\":\"14t-b-door-1--1.630-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"14t-b-door-1--1.630-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"14t-b-door-1-1.670-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"14t-b-door-1-1.670-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}}]",
+    "textureBytes": 0
+  },
+  "viewer/14t-b": {
+    "bounds": [
+      -1.2410000562667847,
+      0.30000001192092896,
+      -3.1624999046325684,
+      1.3189999908208847,
+      3.369999885559082,
+      3.1624999046325684
+    ],
+    "triangles": 854,
+    "mechanisms": "[{\"name\":\"14t-b-door-1--1.630-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"14t-b-door-1--1.630-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"14t-b-door-1-1.670-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"14t-b-door-1-1.670-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}}]",
+    "textureBytes": 0
+  },
+  "map/14t-c": {
+    "bounds": [
+      -1.2410000562667847,
+      0,
+      -2.112499952316284,
+      1.2410000562667847,
+      3.6100001335144043,
+      2.112499952316284
+    ],
+    "triangles": 1202,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "viewer/14t-c": {
+    "bounds": [
+      -1.2410000562667847,
+      0,
+      -2.112499952316284,
+      1.2410000562667847,
+      3.6100001335144043,
+      2.112499952316284
+    ],
+    "triangles": 1202,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/14t-d": {
+    "bounds": [
+      -1.2410000562667847,
+      0.30000001192092896,
+      -3.1624999046325684,
+      1.319000005722046,
+      3.369999885559082,
+      3.1624999046325684
+    ],
+    "triangles": 854,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/14t-d-open": {
+    "bounds": [
+      -1.2410000562667847,
+      0.30000001192092896,
+      -3.1624999046325684,
+      1.4389999908208848,
+      3.369999885559082,
+      3.1624999046325684
+    ],
+    "triangles": 854,
+    "mechanisms": "[{\"name\":\"14t-d-door-1--1.630-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"14t-d-door-1--1.630-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"14t-d-door-1-1.700-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"14t-d-door-1-1.700-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}}]",
+    "textureBytes": 0
+  },
+  "viewer/14t-d": {
+    "bounds": [
+      -1.2410000562667847,
+      0.30000001192092896,
+      -3.1624999046325684,
+      1.3189999908208847,
+      3.369999885559082,
+      3.1624999046325684
+    ],
+    "triangles": 854,
+    "mechanisms": "[{\"name\":\"14t-d-door-1--1.630-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"14t-d-door-1--1.630-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"14t-d-door-1-1.700-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"14t-d-door-1-1.700-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}}]",
+    "textureBytes": 0
+  },
+  "map/14t-e": {
+    "bounds": [
+      -1.2410000562667847,
+      0,
+      -3.5550003051757812,
+      1.319000005722046,
+      3.6100001335144043,
+      3.1667394638061523
+    ],
+    "triangles": 3007,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/14t-e-open": {
+    "bounds": [
+      -1.2410000562667847,
+      0,
+      -3.5550003051757812,
+      1.4389999908208848,
+      3.6100001335144043,
+      3.1667394638061523
+    ],
+    "triangles": 3007,
+    "mechanisms": "[{\"name\":\"14t-e-door-1-0.743-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.33599999999999997],\"doorOpenRotationY\":0}},{\"name\":\"14t-e-door-1-0.743-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.33599999999999997],\"doorOpenRotationY\":0}},{\"name\":\"14t-e-indicator--1.130-2.539\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"14t-e-indicator-1.130-2.539\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "viewer/14t-e": {
+    "bounds": [
+      -1.2410000562667847,
+      0,
+      -3.5550003051757812,
+      1.3189999908208847,
+      3.6100001335144043,
+      3.1667394638061523
+    ],
+    "triangles": 3007,
+    "mechanisms": "[{\"name\":\"14t-e-door-1-0.743-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.33599999999999997],\"doorOpenRotationY\":0}},{\"name\":\"14t-e-door-1-0.743-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.33599999999999997],\"doorOpenRotationY\":0}},{\"name\":\"14t-e-indicator--1.130-2.539\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"14t-e-indicator-1.130-2.539\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "map/15t-a": {
+    "bounds": [
+      -1.355743169784546,
+      0,
+      -5.224077224731445,
+      1.355743169784546,
+      5.114999771118164,
+      5.699999809265137
+    ],
+    "triangles": 4712,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/15t-a-open": {
+    "bounds": [
+      -1.355743169784546,
+      0,
+      -5.224077224731445,
+      1.433592091202736,
+      5.114999771118164,
+      5.699999809265137
+    ],
+    "triangles": 4712,
+    "mechanisms": "[{\"name\":\"15t-a-door-1--1.300-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-a-door-1--1.300-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-a-door-1-1.900-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-a-door-1-1.900-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-a-indicator--0.900--4.975\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"15t-a-indicator-0.900--4.974\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "viewer/15t-a": {
+    "bounds": [
+      -1.355743169784546,
+      0,
+      -5.224077224731445,
+      1.355743169784546,
+      5.114999771118164,
+      5.699999809265137
+    ],
+    "triangles": 4712,
+    "mechanisms": "[{\"name\":\"15t-a-door-1--1.300-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-a-door-1--1.300-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-a-door-1-1.900-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-a-door-1-1.900-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-a-indicator--0.900--4.975\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"15t-a-indicator-0.900--4.974\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "map/15t-b": {
+    "bounds": [
+      -1.2365000247955322,
+      0,
+      -4.800000190734863,
+      1.3135920763015747,
+      3.690000057220459,
+      4.800000190734863
+    ],
+    "triangles": 1734,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/15t-b-open": {
+    "bounds": [
+      -1.2365000247955322,
+      0,
+      -4.800000190734863,
+      1.433592091202736,
+      3.690000057220459,
+      4.800000190734863
+    ],
+    "triangles": 1734,
+    "mechanisms": "[{\"name\":\"15t-b-door-1--2.150-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-b-door-1--2.150-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-b-door-1-1.050-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-b-door-1-1.050-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}}]",
+    "textureBytes": 0
+  },
+  "viewer/15t-b": {
+    "bounds": [
+      -1.2365000247955322,
+      0,
+      -4.800000190734863,
+      1.313592091202736,
+      3.690000057220459,
+      4.800000190734863
+    ],
+    "triangles": 1734,
+    "mechanisms": "[{\"name\":\"15t-b-door-1--2.150-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-b-door-1--2.150-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-b-door-1-1.050-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-b-door-1-1.050-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}}]",
+    "textureBytes": 0
+  },
+  "map/15t-c": {
+    "bounds": [
+      -1.2365000247955322,
+      0,
+      -5.699999809265137,
+      1.3135920763015747,
+      3.690000057220459,
+      5.224077224731445
+    ],
+    "triangles": 3736,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/15t-c-open": {
+    "bounds": [
+      -1.2365000247955322,
+      0,
+      -5.699999809265137,
+      1.433592091202736,
+      3.690000057220459,
+      5.224077224731445
+    ],
+    "triangles": 3736,
+    "mechanisms": "[{\"name\":\"15t-c-door-1--2.550-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-c-door-1--2.550-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-c-door-1-0.750-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-c-door-1-0.750-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-c-indicator--0.900-4.975\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"15t-c-indicator-0.900-4.974\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "viewer/15t-c": {
+    "bounds": [
+      -1.2365000247955322,
+      0,
+      -5.699999809265137,
+      1.313592091202736,
+      3.690000057220459,
+      5.224077224731445
+    ],
+    "triangles": 3736,
+    "mechanisms": "[{\"name\":\"15t-c-door-1--2.550-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-c-door-1--2.550-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-c-door-1-0.750-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-c-door-1-0.750-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"15t-c-indicator--0.900-4.975\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"15t-c-indicator-0.900-4.974\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "map/52t-a": {
+    "bounds": [
+      -1.4479999542236328,
+      0,
+      -4.52407693862915,
+      1.4479999542236328,
+      5.014999866485596,
+      4.90000057220459
+    ],
+    "triangles": 3903,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/52t-a-open": {
+    "bounds": [
+      -1.4479999542236328,
+      0,
+      -4.52407693862915,
+      1.4589999493956567,
+      5.014999866485596,
+      4.90000057220459
+    ],
+    "triangles": 3903,
+    "mechanisms": "[{\"name\":\"52t-a-door-1-0.350-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-a-door-1-0.350-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-a-door-1-3.360-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-a-door-1-3.360-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-a-indicator--1.130--3.986\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"52t-a-indicator-1.130--3.987\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "viewer/52t-a": {
+    "bounds": [
+      -1.4479999542236328,
+      0,
+      -4.52407693862915,
+      1.4479999542236328,
+      5.014999866485596,
+      4.90000057220459
+    ],
+    "triangles": 3903,
+    "mechanisms": "[{\"name\":\"52t-a-door-1-0.350-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-a-door-1-0.350-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-a-door-1-3.360-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-a-door-1-3.360-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-a-indicator--1.130--3.986\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"52t-a-indicator-1.130--3.987\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "map/52t-b": {
+    "bounds": [
+      -1.2610000371932983,
+      0,
+      -2.1500000953674316,
+      1.2610000371932983,
+      3.5900001525878906,
+      2.1500000953674316
+    ],
+    "triangles": 1202,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "viewer/52t-b": {
+    "bounds": [
+      -1.2610000371932983,
+      0,
+      -2.1500000953674316,
+      1.2610000371932983,
+      3.5900001525878906,
+      2.1500000953674316
+    ],
+    "triangles": 1202,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/52t-c": {
+    "bounds": [
+      -1.277999997138977,
+      0.30000001192092896,
+      -2.2950000762939453,
+      1.3389999866485596,
+      3.5900001525878906,
+      2.2950000762939453
+    ],
+    "triangles": 764,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/52t-c-open": {
+    "bounds": [
+      -1.277999997138977,
+      0.30000001192092896,
+      -2.2950000762939453,
+      1.4589999493956567,
+      3.5900001525878906,
+      2.2950000762939453
+    ],
+    "triangles": 764,
+    "mechanisms": "[{\"name\":\"52t-c-door-1--0.715-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-c-door-1--0.715-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}}]",
+    "textureBytes": 0
+  },
+  "viewer/52t-c": {
+    "bounds": [
+      -1.277999997138977,
+      0.30000001192092896,
+      -2.2950000762939453,
+      1.3389999493956566,
+      3.5900001525878906,
+      2.2950000762939453
+    ],
+    "triangles": 764,
+    "mechanisms": "[{\"name\":\"52t-c-door-1--0.715-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-c-door-1--0.715-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}}]",
+    "textureBytes": 0
+  },
+  "map/52t-d": {
+    "bounds": [
+      -1.2610000371932983,
+      0,
+      -2.1500000953674316,
+      1.2610000371932983,
+      3.5900001525878906,
+      2.1500000953674316
+    ],
+    "triangles": 1202,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "viewer/52t-d": {
+    "bounds": [
+      -1.2610000371932983,
+      0,
+      -2.1500000953674316,
+      1.2610000371932983,
+      3.5900001525878906,
+      2.1500000953674316
+    ],
+    "triangles": 1202,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/52t-e": {
+    "bounds": [
+      -1.277999997138977,
+      0,
+      -4.90000057220459,
+      1.3389999866485596,
+      3.5900001525878906,
+      4.52407693862915
+    ],
+    "triangles": 3015,
+    "mechanisms": "[]",
+    "textureBytes": 0
+  },
+  "map/52t-e-open": {
+    "bounds": [
+      -1.277999997138977,
+      0,
+      -4.90000057220459,
+      1.4589999493956567,
+      3.5900001525878906,
+      4.52407693862915
+    ],
+    "triangles": 3015,
+    "mechanisms": "[{\"name\":\"52t-e-door-1--0.370-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-e-door-1--0.370-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-e-door-1--3.410-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-e-door-1--3.410-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-e-indicator--1.130-3.986\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"52t-e-indicator-1.130-3.987\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  },
+  "viewer/52t-e": {
+    "bounds": [
+      -1.277999997138977,
+      0,
+      -4.90000057220459,
+      1.3389999493956566,
+      3.5900001525878906,
+      4.52407693862915
+    ],
+    "triangles": 3015,
+    "mechanisms": "[{\"name\":\"52t-e-door-1--0.370-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-e-door-1--0.370-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-e-door-1--3.410-0\",\"extras\":{\"doorOpenTranslation\":[0.12,0,-0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-e-door-1--3.410-1\",\"extras\":{\"doorOpenTranslation\":[0.12,0,0.624],\"doorOpenRotationY\":0}},{\"name\":\"52t-e-indicator--1.130-3.986\",\"extras\":{\"indicatorSide\":\"left\"}},{\"name\":\"52t-e-indicator-1.130-3.987\",\"extras\":{\"indicatorSide\":\"right\"}}]",
+    "textureBytes": 0
+  }
+}

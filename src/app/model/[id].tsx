@@ -1,3 +1,6 @@
+import { skinAssetUri, useSkinsStore } from '@/stores/skins';
+import type { SkinRecord } from '@/lib/skins/registry';
+import { registerEmbeddedTextures } from '@/components/model/embeddedTextures';
 // Full-screen interactive 3D tram viewer (fullScreenModal, registered in
 // _layout as model/[id]). Renders ALL body sections of MODEL_SPECS[id] with
 // expo-gl + three.js, laid nose-to-tail like a real consist (front = −Z, same
@@ -15,6 +18,7 @@ import {
   ActivityIndicator,
   AppState,
   Button,
+  PixelRatio,
   Switch,
   StyleSheet,
   Text,
@@ -152,23 +156,26 @@ function addLights(scene: THREE.Scene) {
 }
 
 /** Load + parse every section GLB of a spec. Throws if none can be loaded. */
-async function loadSections(spec: TramModelSpec): Promise<THREE.Group[]> {
+async function loadSections(spec: TramModelSpec, skin?: SkinRecord): Promise<THREE.Group[]> {
   const loader = new GLTFLoader();
+  const cleanTextures = skin ? registerEmbeddedTextures(loader, skin.id) : undefined;
   const objects: THREE.Group[] = [];
   try {
     for (const section of spec.sections) {
       const moduleId = VIEWER_MODEL_ASSETS[section.modelKey];
       if (!moduleId) throw new Error(`Missing viewer section ${section.modelKey}`);
-      const asset = Asset.fromModule(moduleId);
-      await asset.downloadAsync();
-      const uri = asset.localUri ?? asset.uri;
+      let uri: string;
+      if (skin) uri = skinAssetUri(skin, 'viewer', section.modelKey);
+      else { const asset = Asset.fromModule(moduleId); await asset.downloadAsync(); uri = asset.localUri ?? asset.uri; }
       const res = await fetch(uri);
       const buffer = await res.arrayBuffer();
       const gltf = await loader.parseAsync(buffer, '');
+      if (cleanTextures) gltf.scene.userData.cleanupSkinTextures = cleanTextures;
       objects.push(gltf.scene);
     }
   } catch (error) {
     objects.forEach((object) => disposeObject(object));
+    cleanTextures?.();
     throw error;
   }
   if (objects.length === 0) throw new Error(`no GLB sections loaded for ${spec.id}`);
@@ -184,7 +191,10 @@ function disposeObject(root: THREE.Object3D, extras: THREE.Material[] = []) {
     if (Array.isArray(material)) material.forEach((m) => materials.add(m));
     else if (material) materials.add(material);
   });
-  materials.forEach((material) => material.dispose());
+  const textures = new Set<THREE.Texture>();
+  materials.forEach((material) => { for (const value of Object.values(material)) if (value instanceof THREE.Texture) textures.add(value); material.dispose(); });
+  textures.forEach(texture => texture.dispose());
+  root.traverse(object => object.userData.cleanupSkinTextures?.());
 }
 
 function disposeSession(session: GlSession) {
@@ -235,9 +245,10 @@ function SpecChip({
 // ── screen ───────────────────────────────────────────────────────────────────
 
 export default function ModelViewerScreen() {
-  const params = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{ id: string; skin?: string }>();
   const id = typeof params.id === 'string' ? params.id : '';
   const spec: TramModelSpec | undefined = MODEL_SPECS[id as TramModelId];
+  const skin = useSkinsStore(s => s.skins.find(item => item.id === params.skin && item.modelId === id));
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
@@ -274,6 +285,10 @@ export default function ModelViewerScreen() {
     AppState.currentState !== 'background' && AppState.currentState !== 'inactive',
   );
   const contextGenerationRef = useRef(0);
+  // Expo GL 57 exposes drawingBufferWidth/Height as creation-time values.
+  // Native layout resizes the actual framebuffer without updating those JS
+  // properties. Use the GLView's measured pixel size after card/rotation changes.
+  const surfaceSizeRef = useRef({ width: 0, height: 0 });
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
@@ -343,8 +358,8 @@ export default function ModelViewerScreen() {
       setMechanismsAvailable({ doors: false, indicators: false });
       let renderer: THREE.WebGLRenderer | null = null;
       try {
-        const width = gl.drawingBufferWidth;
-        const height = gl.drawingBufferHeight;
+        const width = surfaceSizeRef.current.width || gl.drawingBufferWidth;
+        const height = surfaceSizeRef.current.height || gl.drawingBufferHeight;
         // expo-gl returns undefined for VERSION/SHADING_LANGUAGE_VERSION string
         // params; three r162 calls .indexOf on them. Shim them to WebGL 1 ids.
         const rawGetParameter = gl.getParameter.bind(gl);
@@ -371,7 +386,7 @@ export default function ModelViewerScreen() {
         addLights(scene);
 
         // ── consist: all sections nose-to-tail, front toward −Z end ─────────
-        const sections = await loadSections(spec);
+        const sections = await loadSections(spec, skin);
         if (!mountedRef.current || generation !== contextGenerationRef.current) {
           sections.forEach((section) => disposeObject(section));
           renderer.dispose();
@@ -456,20 +471,25 @@ export default function ModelViewerScreen() {
             return;
           }
           session.raf = 0;
-          // expo-gl reallocates the drawing buffer on every native layout pass
-          // (GLView.layoutSubviews), but three keeps the viewport and camera
-          // aspect it was built with — an iPad rotation or Stage Manager resize
-          // would stretch and clip the consist. Re-fit from expo-gl's own
-          // numbers, before the idle-throttle return so a resize is picked up
-          // even on a skipped frame.
-          const bw = session.gl.drawingBufferWidth;
-          const bh = session.gl.drawingBufferHeight;
+          // Native framebuffer dimensions follow layout; Expo's initial JS
+          // drawingBuffer properties stay stale. Using them crops the roof
+          // after the ready-state controls increase the bottom card's height.
+          const bw = surfaceSizeRef.current.width || session.bufW;
+          const bh = surfaceSizeRef.current.height || session.bufH;
           if (bw > 0 && bh > 0 && (bw !== session.bufW || bh !== session.bufH)) {
+            const oldAspect = session.camera.aspect;
+            const nextAspect = bw / bh;
+            const size = session.bounds.getSize(new THREE.Vector3());
+            const fitRatio = fitRadius(size, CAMERA_FOV_DEG, nextAspect) /
+              fitRadius(size, CAMERA_FOV_DEG, oldAspect);
+            orbitRef.current.radiusM *= fitRatio;
+            zoomClampRef.current.min *= fitRatio;
+            zoomClampRef.current.max *= fitRatio;
             session.bufW = bw;
             session.bufH = bh;
             session.renderer.setSize(bw, bh, false);
             session.renderSurface.resize(bw, bh);
-            session.camera.aspect = bw / Math.max(1, bh);
+            session.camera.aspect = nextAspect;
             session.camera.updateProjectionMatrix();
           }
           const now = Date.now();
@@ -553,7 +573,7 @@ export default function ModelViewerScreen() {
         if (mountedRef.current && generation === contextGenerationRef.current) setStatus('error');
       }
     },
-    [spec],
+    [spec, skin],
   );
 
   // ── gestures: pan = orbit, pinch = dolly (simultaneous, JS thread). Each
@@ -706,10 +726,17 @@ export default function ModelViewerScreen() {
         >
           <GestureDetector gesture={gesture}>
             <GLView
-              key={spec.id}
+              key={`${spec.id}-${skin?.directory ?? 'standard'}`}
               style={styles.gl}
               msaaSamples={isDevice ? 4 : 0}
               onContextCreate={onContextCreate}
+              onLayout={({ nativeEvent: { layout } }) => {
+                const scale = PixelRatio.get();
+                surfaceSizeRef.current = {
+                  width: Math.max(1, Math.round(layout.width * scale)),
+                  height: Math.max(1, Math.round(layout.height * scale)),
+                };
+              }}
             />
           </GestureDetector>
         </View>
@@ -751,7 +778,7 @@ export default function ModelViewerScreen() {
           onLayout={(event) => setCardHeight(Math.ceil(event.nativeEvent.layout.height))}
         >
           <Text style={[styles.infoName, { color: c.text }]} numberOfLines={1}>
-            {spec.name}
+            {skin ? `${spec.name} · ${skin.title}` : spec.name}
           </Text>
           <Text style={[styles.infoSub, { color: c.textSecondary }]} numberOfLines={1}>
             {spec.manufacturer} · {spec.yearsBuilt}

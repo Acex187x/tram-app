@@ -5,6 +5,7 @@
 // corrupt/half-written lines are skipped — so interrupted (orphaned) files
 // render exactly like completed ones.
 import type { LngLat } from '@/lib/geo/polyline';
+import { predictionTimingEligibility, type PredictionTimingReason } from '@/lib/physics/predictionTiming';
 
 export interface ParsedRidePoint {
   t: number;
@@ -41,6 +42,12 @@ export interface ParsedRide {
   rejectedPoints: number;
   /** v4: mean of the available fLagM values (filtered-lag, m), null when none. */
   meanFLagM: number | null;
+  /** Historic means above are descriptive only. These counts require matching
+   * clocks and inputs available by GPS time; legacy recordings are excluded. */
+  predictionTimingCounts: Record<PredictionTimingReason, number>;
+  timingEligibleLagPoints: number;
+  timingEligibleMeanLagM: number | null;
+  timingEligibleMaeM: number | null;
 }
 
 function num(v: unknown): number | null {
@@ -68,6 +75,10 @@ export function parseRideFile(text: string): ParsedRide {
     motionSamples: 0,
     rejectedPoints: 0,
     meanFLagM: null,
+    predictionTimingCounts: { eligible: 0, 'unknown-availability': 0, 'timestamp-mismatch': 0, 'future-input': 0 },
+    timingEligibleLagPoints: 0,
+    timingEligibleMeanLagM: null,
+    timingEligibleMaeM: null,
   };
   let firstPointMs: number | null = null;
   let lastPointMs: number | null = null;
@@ -75,6 +86,8 @@ export function parseRideFile(text: string): ParsedRide {
   let lagN = 0;
   let fLagSum = 0;
   let fLagN = 0;
+  let eligibleLagSum = 0;
+  let eligibleAbsLagSum = 0;
 
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
@@ -131,6 +144,18 @@ export function parseRideFile(text: string): ParsedRide {
       lagSum += lagM;
       lagN += 1;
     }
+    const timingReason = predictionTimingEligibility({
+      predictionEvaluatedAtMs: num(rec.predictionEvaluatedAtMs) ?? undefined,
+      predictionInputsAvailableAtMs: num(rec.predictionInputsAvailableAtMs),
+    }, t ?? NaN);
+    ride.predictionTimingCounts[timingReason] += 1;
+    // Timing alone does not validate GPS quality. Keep raw-GPS errors separate
+    // from filtered/coasted positions and exclude explicit filter rejections.
+    if (timingReason === 'eligible' && lagM != null && str(rec.rej) == null) {
+      eligibleLagSum += lagM;
+      eligibleAbsLagSum += Math.abs(lagM);
+      ride.timingEligibleLagPoints += 1;
+    }
     // v4 extras.
     if (str(rec.rej) != null) ride.rejectedPoints += 1;
     const fLagM = num(rec.fLagM);
@@ -144,5 +169,9 @@ export function parseRideFile(text: string): ParsedRide {
   ride.endedMs = ride.endedMs ?? lastPointMs;
   ride.meanLagM = lagN > 0 ? lagSum / lagN : null;
   ride.meanFLagM = fLagN > 0 ? fLagSum / fLagN : null;
+  if (ride.timingEligibleLagPoints > 0) {
+    ride.timingEligibleMeanLagM = eligibleLagSum / ride.timingEligibleLagPoints;
+    ride.timingEligibleMaeM = eligibleAbsLagSum / ride.timingEligibleLagPoints;
+  }
   return ride;
 }

@@ -123,7 +123,7 @@ describe('points FC props consumed by the icon expressions', () => {
     expect(props.geometryless).toBe(0); // has geometry → drawn on-shape, not a dot
     // Payload guard: no unexpected prop creep on the 60 Hz push path.
     expect(Object.keys(props).sort()).toEqual(
-      ['bearing', 'favorite', 'geometryless', 'key', 'line', 'modelId', 'selected', 'stale'].sort(),
+      ['bearing', 'favorite', 'geometryless', 'key', 'line', 'modelId', 'presentationOpacity', 'selected', 'sourceOpacity', 'stale'].sort(),
     );
   });
 });

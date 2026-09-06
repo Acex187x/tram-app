@@ -36,12 +36,14 @@ import {
   TRAJ_OVERRUN_DISC_M,
 } from './config';
 import { round2 } from './db';
+import type {MotionPhase} from './motionPolicy';
 import {consumedPlatform, type ServedPlatformEvidence} from './servedPlatform';
 import {
   accelAt,
   clientProjectionM,
   clientSmoothProjectionM,
   evalTrack,
+  evalContinuousTrack,
   seamJustifiedM,
   speedAt,
   withKnotVelocities,
@@ -61,9 +63,9 @@ export const A_LAT = 0.98;
 export const CURVE_SLOW_FACTOR = 0.85;
 /** Lower clamp for curve caps, m/s (port). */
 export const V_CURVE_MIN_MS = 1.4;
-/** Profile clamp: 50 km/h network cap (port: speedProfile V_MAX_MS). The 16.7
- *  wire bound is never approached — this is the drive's own ceiling. */
-export const V_LIMIT_MAX = 13.9;
+/** Upper profile ceiling; curvature, learned pace and stop braking remain stricter.
+ * Matches the 16.7 m/s wire envelope; Prague has sections above 50 km/h. */
+export const V_LIMIT_MAX = 16.7;
 /** Braking-envelope lookahead, m (port). */
 export const DEFAULT_LOOKAHEAD_M = 400;
 /** Vertex limits stay active this far BEHIND the head, m (port: the body is
@@ -499,6 +501,9 @@ export function dwellQuantiles(stats: { mean: number; sd: number }): {
 }
 
 export interface DriveArgs {
+  motionPolicy?: 'continuous-v1';
+  motionPhase?: MotionPhase;
+  axisChanged?: boolean;
   /** Offline counterfactual only until paired future-fix replay is accepted. */
   kinematicLegTiming?: boolean;
   key: string;
@@ -669,7 +674,8 @@ export interface DriveBuilt {
   opinion: KinTrack;
   smooth: KinTrack;
   meta: {
-    discKind: 'none' | 'trip' | 'gap' | 'break';
+    discKind: 'none' | 'trip' | 'gap' | 'break' | 'axis';
+    motionPhase?: MotionPhase;
     /** The T_disc threshold applied at this emission, m (null: first emission). */
     tDiscM: number | null;
     /** |prev smooth(t_E) − new opinion(t_E)| before the decision, m. */
@@ -680,6 +686,7 @@ export interface DriveBuilt {
     seamFloorApplied: boolean;
     /** §14.2: request stops excluded from this emission's plan (telemetry). */
     requestSkips: { stopId: string; distM: number }[];
+    ordinarySkipPrevented: {stopId:string;distM:number;metadataKnown:boolean}[];
     /** Modal dwell already accounts for this platform occurrence. */
     consumedPlatform: {stopId: string; sequence: number; distM: number} | null;
     /** §14.3: the emission holds at an evidence-backed jam position. */
@@ -1811,7 +1818,28 @@ function measureTrack(
 
 /** Build both v3 tracks for one vehicle. Null ⇒ the caller drops the vehicle
  *  rather than serving a broken curve (same contract as buildV2Vehicle). */
+interface OpinionPrefix {grid:number[];fine:FineRun;plan:PlanStop[]}
+interface DriveContext {prefix?:OpinionPrefix;initialSpeedMs?:number;capture?:(prefix:OpinionPrefix)=>void}
+/** Crop the one-second physical integration onto this emission's grid. Absolute
+ * platform departure gates survive the crop; they are never restarted atemit. */
+function cropOpinion(prefix:OpinionPrefix,grid:number[]):FineRun {
+ const old=prefix.grid,f=prefix.fine;
+ const indices=grid.map(t=>Math.max(0,Math.min(old.length-1,(t-old[0])/TRAJ_SIM_STEP_MS)));
+ const interpolate=(xs:number[],i:number)=>{const a=Math.floor(i),b=Math.min(xs.length-1,a+1);return xs[a]+(xs[b]-xs[a])*(i-a);};
+ return {...f,s:indices.map(i=>interpolate(f.s,i)),v:indices.map(i=>interpolate(f.v,i)),holdPos:indices.map(i=>f.holdPos[Math.round(i)]),binding:indices.map(i=>f.binding[Math.round(i)]),standKind:indices.map(i=>f.standKind[Math.round(i)]),protectedSteps:new Set([...f.protectedSteps].map(i=>Math.round((old[i]-grid[0])/TRAJ_SIM_STEP_MS)).filter(i=>i>=0&&i<grid.length))};
+}
 export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
+ const approach=args.motionPolicy==='continuous-v1'?args.motionPhase?.approach:null;
+ if(approach&&approach.atMs===args.anchorMs&&args.emittedAtMs>approach.atMs&&args.emittedAtMs-approach.atMs<120000){
+   const raw=[{t:approach.atMs,s:approach.sM},...args.raw.filter(p=>p.t>approach.atMs)];
+   for(let i=1;i<raw.length;i++)raw[i]={...raw[i],s:Math.max(raw[i-1].s,raw[i].s)};
+   let prefix:OpinionPrefix|undefined;
+   buildDrive({...args,raw,emittedAtMs:approach.atMs,modal:null,servedPlatform:null,prev:null,ageFloorS:0,prevFixS:undefined,anchorFixS:approach.sM,clientFixS:approach.sM},{initialSpeedMs:approach.speedMs,capture:value=>{prefix=value;}});
+   if(prefix)return buildDrive({...args,modal:null,servedPlatform:null},{prefix});
+ }
+ return buildDrive(args,{});
+}
+function buildDrive(args:DriveArgs,context:DriveContext):DriveBuilt|null {
   const { raw, modal, prev, geom, surfaces, emittedAtMs: t0 } = args;
   if (raw.length < 2) return null;
   const tEnd = raw[raw.length - 1].t;
@@ -1926,7 +1954,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
   const vInherit = samePrevTrip
     ? speedAt(prev.opinion, t0)
     : Math.max(0, Math.min(TRAJ_V_MAX_MS, (evalTrack(raw, t0 + TRAJ_SIM_STEP_MS) - raw[0].s) / DT_S));
-  const v0 = standingStart ? 0 : Math.min(vSeamCap, vInherit);
+  const v0 = context.initialSpeedMs!==undefined ? Math.min(vSeamCap,Math.max(0,context.initialSpeedMs)) : standingStart ? 0 : Math.min(vSeamCap, vInherit);
   const a0 = standingStart ? 0 : vInherit > vSeamCap ? Math.min(a0Raw, 0) : a0Raw;
   const modalS = modal !== null ? clamp(modal.stopS, 0, geom.totalM) : null;
 
@@ -1939,6 +1967,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
   const planFrom = s0;
   const plan: PlanStop[] = [];
   const requestSkips: { stopId: string; distM: number }[] = [];
+  const ordinarySkipPrevented: {stopId:string;distM:number;metadataKnown:boolean}[] = [];
   const skipTauMs: number[] = [];
   const lastStop = geom.stops.length > 0 ? geom.stops[geom.stops.length - 1] : null;
   for (const st of geom.stops) {
@@ -1952,7 +1981,9 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
       if (tauSkip !== null) skipTauMs.push(tauSkip);
       continue;
     }
-    if (!isTerminal && requestStopSkippable(raw, surfaces, st.stopId, distM)) {
+    const skipEvidence = !isTerminal && requestStopSkippable(raw, surfaces, st.stopId, distM);
+    if (skipEvidence && st.requestOnly !== true) ordinarySkipPrevented.push({stopId:st.stopId,distM,metadataKnown:typeof st.requestOnly==='boolean'});
+    if (skipEvidence && st.requestOnly === true) {
       requestSkips.push({ stopId: st.stopId, distM });
       const tauSkip = mlCrossingMs(raw, distM);
       if (tauSkip !== null) skipTauMs.push(tauSkip);
@@ -1996,10 +2027,11 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
       t0Ms: t0,
     };
   };
+  if(context.prefix){const crop=cropOpinion(context.prefix,grid);s0=crop.s[0];plan.splice(0,plan.length,...context.prefix.plan);}
   const leaderO = args.leader ? effLeader(args.leader.opinion, s0) : null;
 
   // ── opinion: the drive ───────────────────────────────────────────────────
-  const oFine = runDrive({
+  const oFine = context.prefix ? cropOpinion(context.prefix,grid) : runDrive({
     kinematicLegTiming: args.kinematicLegTiming,
     grid,
     geom,
@@ -2018,6 +2050,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     mode: 'ladder',
   });
   if (oFine === null) return null;
+  context.capture?.({fine:oFine,grid,plan:[...plan]});
   const oEmit = emitCompressed(grid, oFine.v, oFine.s, oFine.protectedSteps, oFine.binding, profile, geom);
   if (oEmit === null) return null;
   const oMeasure = measureTrack(oEmit, oFine, profile, geom);
@@ -2034,7 +2067,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
   };
 
   // ── smooth: same drive re-run from the C¹⁺ seam under the regime table ───
-  let discKind: 'none' | 'trip' | 'gap' | 'break' = 'none';
+  let discKind: 'none' | 'trip' | 'gap' | 'break' | 'axis' = 'none';
   let tDiscM: number | null = null;
   let seamGapM: number | null = null;
   let sEmit = oEmit;
@@ -2047,7 +2080,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     // over the previous curve), not from the unshifted curve — same reasoning
     // as the opinion seam floor above. Fix-driven re-anchors only; on an age
     // re-emission the phone's shim is idle and the raw evaluation IS the marker.
-    const sStart =
+    const sStart = args.motionPolicy==='continuous-v1' ? evalContinuousTrack(prev.smooth.points,t0) :
       args.prevFixS !== undefined && args.anchorFixS !== undefined
         ? clientSmoothProjectionM(prev.smooth.points, args.clientFixS ?? args.anchorFixS, args.anchorMs, t0)
         : evalTrack(prev.smooth.points, t0);
@@ -2079,6 +2112,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
       }
       if (seamGapM > tDiscM) discKind = 'gap';
     }
+    if(args.motionPolicy==='continuous-v1'&&prev.tripId===args.tripId)discKind=args.axisChanged?'axis':'none';
     if (discKind === 'none') {
       // Per-stop gates: the instant the OPINION departs each planned stop
       // (Infinity = it never gets there within the horizon — an early smooth
@@ -2144,6 +2178,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
       line: args.line,
       anchorMs: args.anchorMs,
       emittedAtMs: t0,
+      ...(args.motionPolicy ? {motionPolicy:args.motionPolicy} : {}),
       discontinuity: discKind !== 'none',
       opinion: oEmit.track.points,
       smooth: sEmit.track.points,
@@ -2152,11 +2187,13 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     smooth: sEmit.track,
     meta: {
       discKind,
+      ...(args.motionPhase ? {motionPhase:args.motionPhase} : {}),
       tDiscM,
       seamGapM,
       ageFloorApplied,
       seamFloorApplied,
       requestSkips,
+      ordinarySkipPrevented,
       consumedPlatform: consumed ? {stopId: consumed.stopId, sequence: consumed.sequence, distM: consumed.distM} : null,
       jamHolding,
       standingStart,

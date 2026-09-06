@@ -1,0 +1,273 @@
+{
+  "build": 31,
+  "device": "5DFE23AA-CEC0-4B07-A093-28D5C2C73AE0",
+  "harvesterStartMs": 1788688975716,
+  "harvesterEndMs": 1788692875630,
+  "harvesterDurationS": 3899.914,
+  "freshRows": 116906,
+  "excludedPreexistingOrOutsideRows": 51787,
+  "firstFreshMs": 1788688977553,
+  "lastFreshMs": 1788692873397,
+  "freshSpanS": 3895.844,
+  "uniqueVehicles": 265,
+  "containerUnavailableSamples": 0,
+  "limitations": [
+    "Unmatched live build31; candidate backend evolved during this hour.",
+    "Public-state sample logs are not native GPU frame observations or independent GPS ground truth.",
+    "Raw obsDist vs simDist difference includes real fix age; it is not current geographic error."
+  ],
+  "groups": [
+    {
+      "pragueHour": 12,
+      "zone": "center",
+      "model": "14t",
+      "rows": 2537,
+      "vehicles": 20,
+      "rawFixAgeMedianS": 32.52,
+      "rawFixAgeP95S": 70.351
+    },
+    {
+      "pragueHour": 12,
+      "zone": "center",
+      "model": "15t",
+      "rows": 22152,
+      "vehicles": 144,
+      "rawFixAgeMedianS": 40.188500000000005,
+      "rawFixAgeP95S": 114.894
+    },
+    {
+      "pragueHour": 12,
+      "zone": "center",
+      "model": "52t",
+      "rows": 1908,
+      "vehicles": 15,
+      "rawFixAgeMedianS": 34.9075,
+      "rawFixAgeP95S": 73.221
+    },
+    {
+      "pragueHour": 12,
+      "zone": "center",
+      "model": "kt8d5",
+      "rows": 1009,
+      "vehicles": 10,
+      "rawFixAgeMedianS": 33.512,
+      "rawFixAgeP95S": 78.261
+    },
+    {
+      "pragueHour": 12,
+      "zone": "center",
+      "model": "t3",
+      "rows": 1061,
+      "vehicles": 4,
+      "rawFixAgeMedianS": 45.263,
+      "rawFixAgeP95S": 130.233
+    },
+    {
+      "pragueHour": 12,
+      "zone": "center",
+      "model": "t3rp",
+      "rows": 2843,
+      "vehicles": 10,
+      "rawFixAgeMedianS": 40.734,
+      "rawFixAgeP95S": 122.193
+    },
+    {
+      "pragueHour": 12,
+      "zone": "center",
+      "model": "t3rplf",
+      "rows": 5861,
+      "vehicles": 33,
+      "rawFixAgeMedianS": 35.066,
+      "rawFixAgeP95S": 75.211
+    },
+    {
+      "pragueHour": 12,
+      "zone": "outer",
+      "model": "14t",
+      "rows": 5462,
+      "vehicles": 21,
+      "rawFixAgeMedianS": 33.567,
+      "rawFixAgeP95S": 76.625
+    },
+    {
+      "pragueHour": 12,
+      "zone": "outer",
+      "model": "15t",
+      "rows": 37685,
+      "vehicles": 153,
+      "rawFixAgeMedianS": 36.689,
+      "rawFixAgeP95S": 108.853
+    },
+    {
+      "pragueHour": 12,
+      "zone": "outer",
+      "model": "52t",
+      "rows": 4926,
+      "vehicles": 16,
+      "rawFixAgeMedianS": 31.914,
+      "rawFixAgeP95S": 74.155
+    },
+    {
+      "pragueHour": 12,
+      "zone": "outer",
+      "model": "kt8d5",
+      "rows": 7785,
+      "vehicles": 25,
+      "rawFixAgeMedianS": 33.23,
+      "rawFixAgeP95S": 76.832
+    },
+    {
+      "pragueHour": 12,
+      "zone": "outer",
+      "model": "t3",
+      "rows": 364,
+      "vehicles": 4,
+      "rawFixAgeMedianS": 44.4405,
+      "rawFixAgeP95S": 137.532
+    },
+    {
+      "pragueHour": 12,
+      "zone": "outer",
+      "model": "t3rp",
+      "rows": 972,
+      "vehicles": 10,
+      "rawFixAgeMedianS": 35.237,
+      "rawFixAgeP95S": 115.985
+    },
+    {
+      "pragueHour": 12,
+      "zone": "outer",
+      "model": "t3rplf",
+      "rows": 7665,
+      "vehicles": 36,
+      "rawFixAgeMedianS": 31.208,
+      "rawFixAgeP95S": 75.394
+    },
+    {
+      "pragueHour": 13,
+      "zone": "center",
+      "model": "14t",
+      "rows": 230,
+      "vehicles": 6,
+      "rawFixAgeMedianS": 33.1075,
+      "rawFixAgeP95S": 69.078
+    },
+    {
+      "pragueHour": 13,
+      "zone": "center",
+      "model": "15t",
+      "rows": 3217,
+      "vehicles": 64,
+      "rawFixAgeMedianS": 39.055,
+      "rawFixAgeP95S": 103.045
+    },
+    {
+      "pragueHour": 13,
+      "zone": "center",
+      "model": "52t",
+      "rows": 176,
+      "vehicles": 4,
+      "rawFixAgeMedianS": 34.028999999999996,
+      "rawFixAgeP95S": 70.091
+    },
+    {
+      "pragueHour": 13,
+      "zone": "center",
+      "model": "kt8d5",
+      "rows": 143,
+      "vehicles": 2,
+      "rawFixAgeMedianS": 29.55,
+      "rawFixAgeP95S": 64.089
+    },
+    {
+      "pragueHour": 13,
+      "zone": "center",
+      "model": "t3",
+      "rows": 299,
+      "vehicles": 4,
+      "rawFixAgeMedianS": 42.994,
+      "rawFixAgeP95S": 121.811
+    },
+    {
+      "pragueHour": 13,
+      "zone": "center",
+      "model": "t3rp",
+      "rows": 326,
+      "vehicles": 6,
+      "rawFixAgeMedianS": 35.0055,
+      "rawFixAgeP95S": 73.646
+    },
+    {
+      "pragueHour": 13,
+      "zone": "center",
+      "model": "t3rplf",
+      "rows": 792,
+      "vehicles": 14,
+      "rawFixAgeMedianS": 33.763,
+      "rawFixAgeP95S": 73.577
+    },
+    {
+      "pragueHour": 13,
+      "zone": "outer",
+      "model": "14t",
+      "rows": 936,
+      "vehicles": 15,
+      "rawFixAgeMedianS": 30.398,
+      "rawFixAgeP95S": 69.646
+    },
+    {
+      "pragueHour": 13,
+      "zone": "outer",
+      "model": "15t",
+      "rows": 5365,
+      "vehicles": 96,
+      "rawFixAgeMedianS": 35.577,
+      "rawFixAgeP95S": 108.884
+    },
+    {
+      "pragueHour": 13,
+      "zone": "outer",
+      "model": "52t",
+      "rows": 664,
+      "vehicles": 10,
+      "rawFixAgeMedianS": 31.5465,
+      "rawFixAgeP95S": 76.102
+    },
+    {
+      "pragueHour": 13,
+      "zone": "outer",
+      "model": "kt8d5",
+      "rows": 1076,
+      "vehicles": 16,
+      "rawFixAgeMedianS": 32.218500000000006,
+      "rawFixAgeP95S": 71.975
+    },
+    {
+      "pragueHour": 13,
+      "zone": "outer",
+      "model": "t3",
+      "rows": 13,
+      "vehicles": 2,
+      "rawFixAgeMedianS": 29.936,
+      "rawFixAgeP95S": 141.562
+    },
+    {
+      "pragueHour": 13,
+      "zone": "outer",
+      "model": "t3rp",
+      "rows": 206,
+      "vehicles": 6,
+      "rawFixAgeMedianS": 35.9835,
+      "rawFixAgeP95S": 109.341
+    },
+    {
+      "pragueHour": 13,
+      "zone": "outer",
+      "model": "t3rplf",
+      "rows": 1233,
+      "vehicles": 24,
+      "rawFixAgeMedianS": 29.862,
+      "rawFixAgeP95S": 69.516
+    }
+  ]
+}

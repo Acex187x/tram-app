@@ -25,6 +25,9 @@
 //   ml-drive-smooth — curvegen-v3 SHADOW smooth (regime-based continuity)
 
 import zlib from 'zlib';
+import {MotionFeatureHistory} from './motionFeatures';
+import {assessMotionPhase,legacyDwellSuccessor} from './motionPolicy';
+import {sameGeometryAxis} from '@/lib/physics/observationProjection';
 import { ObservationHistory } from './observationScore';
 
 import type { RouteGeometry, TramSnapshot } from '@/lib/types';
@@ -46,6 +49,7 @@ import {
   TRAJ_STEP_MS,
   TRAJ_STAND_ASSERT_MS,
   TRAJ_V3_PUBLISH,
+  TRAJ_CONTINUOUS_V1,
   NAIVE_LATENCY_CAP_S,
   FUSE_FIX_AXIS,
   FUSE_COORD_DISAGREE_M,
@@ -109,6 +113,7 @@ const DAY_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' });
 
 interface LastFix {
   snap: TramSnapshot;
+  previousSnap?: TramSnapshot;
   /** Ленточная (сырая) ось фикса — то, что видит ТЕЛЕФОН. Fused-ось живёт в
    *  snap.shapeDistM; клиент-модель швов обязана считать от сырой. */
   rawShapeDistM: number;
@@ -149,12 +154,15 @@ export interface TrajectoryVehicle {
 }
 
 interface TrajectoryEntry {
+  geometry: RouteGeometry;
   fixObsAtMs: number;
   /** shapeDistM of the anchor fix (seam telemetry: how far the NEXT fix moves). */
   anchorFixS: number;
   /** What produced the target keyframes: ml-gbdt samples, or the learned-walker
    *  naive substitute (ML unavailable AND the old curve provably overrun). */
   source: 'ml' | 'naive';
+  /** Current emission only: exact sent rows, retained for causal parity audit. */
+  inferenceFeatures?: {version:number;modelRevision:string|null;issueAtMs:number;rows:number[][]};
   /** v1 payload — the shape build-12 phones consume; NEVER change it. */
   vehicle: TrajectoryVehicle;
   /** v2 payload — physics-v3 opinion + smooth tracks over the same ML samples. */
@@ -175,6 +183,7 @@ interface TrajectoryEntry {
  *  ML samples + modal inputs as the published entry, chained on its own seam
  *  state, never published while TRAJ_V3_PUBLISH is off. */
 interface ShadowEntry {
+  geometry: RouteGeometry;
   fixObsAtMs: number;
   /** shapeDistM of the anchor fix (seam telemetry). */
   anchorFixS: number;
@@ -214,6 +223,7 @@ export function start(): void {
 
   const fleet = new Map<string, TramSnapshot>();
   const lastFix = new Map<string, LastFix>();
+  const motionHistory = new MotionFeatureHistory();
   /** key → keyframe trajectory computed for that vehicle's CURRENT fix. */
   const trajectories = new Map<string, TrajectoryEntry>();
   /** key → curvegen-v3 shadow emission, chained on its own seam state. */
@@ -418,6 +428,7 @@ export function start(): void {
   function withdrawInvalidAxis(key: string): void {
     publisher.requestRemoval(key);
     lastFix.delete(key);
+    motionHistory.forget(key);
     learned.forget(key);
     observationHistory.forget(key);
     if (trajectories.delete(key)) publishedChainBroken.add(key);
@@ -577,12 +588,13 @@ export function start(): void {
         s0: prev.snap.shapeDistM,
         totalM: geom.totalM,
         preds,
-        mlFeatures: buildMlFeatures(prev.snap, geom, learned, nowMs),
+        mlFeatures: buildMlFeatures(prev.snap, geom, learned, nowMs,motionHistory),
       });
       }
     }
 
     // ── learning + reseed (after prediction capture — never peek the answer)
+    motionHistory.observe(snap,geom,learned.paceAt.bind(learned),nowMs);
     if (prev && sameTrip) learned.update(prev.snap, snap, geom);
     learned.reseed(snap);
 
@@ -628,7 +640,7 @@ export function start(): void {
         })) stuckAtM = snap.shapeDistM;
       }
     }
-    lastFix.set(snap.key, { snap, cycle, fixGapS: gapS > 0 ? round2(gapS) : 0, stuckAtM, rawShapeDistM: rawSnap.shapeDistM });
+    lastFix.set(snap.key, { snap, previousSnap:sameTrip?prev?.snap:undefined, cycle, fixGapS: gapS > 0 ? round2(gapS) : 0, stuckAtM, rawShapeDistM: rawSnap.shapeDistM });
   }
 
   async function resolveEvents(events: ScoringEvent[]): Promise<void> {
@@ -979,6 +991,8 @@ export function start(): void {
       points: TrajectoryPoint[],
       source: 'ml' | 'naive',
       includeShadow: boolean,
+      inferenceRows?: number[][],
+      inferenceRevision?: string | null,
     ): void => {
       if (!isCurrentTrajectoryFix(lastFix.get(v.key)?.snap, v.snap)) {
         supersededInferenceSkips++;
@@ -1035,9 +1049,14 @@ export function start(): void {
         const surfaces = {
           paceAt: (sM: number, atMs: number) =>
             learned.paceAt(v.geom.shapeId, v.geom.routeId, sM, atMs),
-          dwellStats: (stopId: string, atMs: number) => learned.dwellStats(stopId, atMs),
+          dwellStats: (stopId: string, atMs: number) => {
+            if(!TRAJ_CONTINUOUS_V1)return learned.dwellStats(stopId,atMs);
+            const successor=legacyDwellSuccessor(v.geom,stopId);
+            return successor ? learned.dwellStats(successor,atMs) : {mean:18,sd:8,trusted:false};
+          },
         };
 
+        const motionPhase=TRAJ_CONTINUOUS_V1?assessMotionPhase(v.snap,lastFix.get(v.key)?.previousSnap,v.geom,tEmit,surfaces.paceAt):undefined;
         // Anchor-floor hotfix, age-refresh clause: on a SAME-ANCHOR (age)
         // re-emission the fresh ML nowcast may jitter backward with no new
         // evidence; the opinion is floored at the previously rendered opinion
@@ -1093,6 +1112,7 @@ export function start(): void {
         // while TRAJ_V3_PUBLISH is off.
         const shadowBuilt: DriveBuilt | null = buildDriveVehicle({
           ...baseArgs,
+          ...(TRAJ_CONTINUOUS_V1?{motionPolicy:'continuous-v1' as const,motionPhase,axisChanged:prevShadow!==undefined&&!sameGeometryAxis(prevShadow.geometry,v.geom)}:{}),
           modal: modal ? { stopS: modal.stopS, releaseAtMs: modal.releaseAtMs } : null,
           geom: v.geom,
           surfaces,
@@ -1168,6 +1188,7 @@ export function start(): void {
             });
           }
           shadowTrajectories.set(v.key, {
+            geometry:v.geom,
             fixObsAtMs: v.snap.observedAtMs,
             anchorFixS: v.snap.shapeDistM,
             v2: shadowBuilt.vehicle,
@@ -1192,6 +1213,7 @@ export function start(): void {
           : null;
         const driveInputs: Omit<DriveArgs, 'geom' | 'surfaces'> = {
               ...baseArgs,
+              ...(TRAJ_CONTINUOUS_V1?{motionPolicy:'continuous-v1' as const,motionPhase,axisChanged:prevEntry!==undefined&&!sameGeometryAxis(prevEntry.geometry,v.geom)}:{}),
               servedPlatform: v.snap.statePosition === 'at_stop' ? {
                 stopId: v.snap.lastStopId, sequence: v.snap.lastStopSequence,
                 nextStopId: v.snap.nextStopId, nextSequence: v.snap.nextStopSequence,
@@ -1237,6 +1259,7 @@ export function start(): void {
         // клиентский предохранитель (который телепортируется только по
         // флагу) навсегда заблокирует возврат маркера (hunt2, Δ+225…+340).
         if (
+          !TRAJ_CONTINUOUS_V1 &&
           source === 'ml' &&
           prevEntry?.source === 'naive' &&
           prevEntry.v2.discontinuity &&
@@ -1275,9 +1298,11 @@ export function start(): void {
         }
 
         trajectories.set(v.key, {
+          geometry:v.geom,
           fixObsAtMs: v.snap.observedAtMs,
           anchorFixS: v.snap.shapeDistM,
           source,
+          inferenceFeatures: inferenceRows ? {version:process.env.ML_FEATURE_VERSION==='4'?4:3,modelRevision:inferenceRevision ?? null,issueAtMs:tCompute,rows:inferenceRows} : undefined,
           vehicle: {
             key: v.key,
             tripId: v.snap.tripId,
@@ -1305,14 +1330,14 @@ export function start(): void {
       const rows: number[][] = [];
       for (const v of group) {
         for (let k = 0; k < TRAJ_POINTS; k++) {
-          rows.push(buildMlFeatures(v.snap, v.geom, learned, tCompute + k * TRAJ_STEP_MS));
+          rows.push(buildMlFeatures(v.snap, v.geom, learned, tCompute + k * TRAJ_STEP_MS,motionHistory));
         }
       }
       const pred = await ml.predictBatch(rows);
       group.forEach((v, gi) => {
         const points = pred ? mlPointsFor(v, gi, pred.gbdt) : null;
         if (points !== null) {
-          buildAndStore(v, points, 'ml', true);
+          buildAndStore(v, points, 'ml', true, rows.slice(gi * TRAJ_POINTS, (gi + 1) * TRAJ_POINTS), pred?.modelRevision);
           return;
         }
         // ML недоступен. Доктрина владельца: старую кривую ДЕРЖИМ, пока она
@@ -1545,6 +1570,7 @@ export function start(): void {
       for (const key of lastFix.keys()) {
         if (!activeKeys.has(key)) {
           lastFix.delete(key);
+          motionHistory.forget(key);
           learned.forget(key);
           sourceValidity.drop(key);
         }
@@ -1562,6 +1588,7 @@ export function start(): void {
         }
         const v = fuseSnap(raw);
         fleet.set(v.key, v);
+        motionHistory.observe(v,geometry.resolve(v.tripId),learned.paceAt.bind(learned),Date.now());
         learned.reseed(v);
         lastFix.set(v.key, { snap: v, cycle, fixGapS: 0, stuckAtM: null, rawShapeDistM: raw.shapeDistM });
       }
@@ -1587,6 +1614,7 @@ export function start(): void {
         for (const key of batch.removed ?? []) {
           fleet.delete(key);
           lastFix.delete(key);
+          motionHistory.forget(key);
           learned.forget(key);
           sourceValidity.drop(key);
         }
@@ -1604,6 +1632,7 @@ export function start(): void {
     // Production RemoteFeed semantics: the engine always ingests the MERGED
     // full array (keeps lastSeenMs fresh; the 90 s stale sweep stays sane).
     engine.ingest([...fleet.values()].filter(v => !sourceValidity.get(v.key)), geometry.resolve, Date.now());
+    motionHistory.prune(new Set(fleet.keys()));
     geometry.ensure(new Set([...fleet.values()].map((v) => v.tripId)));
 
     // Prague service-day rollover → re-anchor cached stop epochs.
@@ -1753,11 +1782,13 @@ export function start(): void {
       atMs: Date.now(),
       fleet: fleet.size,
       geometries: geometry.size(),
+      stopService: geometry.stopService.diagnostics(),
       cursor,
       lastBatchAtMs,
       poller: pollerHealth,
       lastHour: store.summarySince(Date.now() - 3_600_000),
       learning: learned.gauges(),
+      motionFeatures: {version:process.env.ML_FEATURE_VERSION==='4'?4:3,activeHistories:motionHistory.size},
       ml: {
         ready: ml.modelsReady, lastOkMs: ml.lastOkMs, lastError: ml.lastError,
         lastRequestMs: ml.lastRequestMs, lastLatencyMs: ml.lastLatencyMs, inFlight: ml.inFlight,
@@ -1882,6 +1913,8 @@ export function start(): void {
             stuckAtM: lf.stuckAtM,
           }
         : null,
+      motionEvidence: motionHistory.evidence(key),
+      inferenceFeatures: source === 'published' ? (entry as TrajectoryEntry).inferenceFeatures ?? null : null,
       /** ML service health as this engine sees it. */
       ml: {
         ready: ml.modelsReady, lastOkMs: ml.lastOkMs, lastError: ml.lastError,

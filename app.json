@@ -18,7 +18,9 @@
         "UIBackgroundModes": [
           "location"
         ],
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Tram Spotter keeps recording your ride (GPS vs simulation) while the app is in the background — only during an active ride recording."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Tram Spotter keeps recording your ride (GPS vs simulation) while the app is in the background — only during an active ride recording.",
+        "UIFileSharingEnabled": true,
+        "LSSupportsOpeningDocumentsInPlace": true
       }
     },
     "android": {

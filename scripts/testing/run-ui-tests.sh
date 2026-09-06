@@ -5,6 +5,25 @@ test_root="$(cd "$(dirname "$0")" && pwd)"
 test_stamp="$(date +%Y%m%d-%H%M%S)"
 test_output="${TRAM_UI_TEST_OUTPUT:-/tmp/tram-ui-tests-$test_stamp}"
 mkdir -p "$test_output"
+fixture_staged=0
+skin_fixture_staged=0
+cleanup_fixture() {
+  if [[ "$skin_fixture_staged" == 1 ]]; then
+    python3 "$test_root/skin-ui-fixture.py" remove "$IOS_SIMULATOR_UDID" "$TRAM_SKIN_FIXTURE" || true
+  fi
+  if [[ "$fixture_staged" == 1 ]]; then
+    python3 "$test_root/ride-timing-fixture.py" remove "$IOS_SIMULATOR_UDID" || true
+  fi
+}
+trap cleanup_fixture EXIT
+if [[ -z "${TRAM_UI_ONLY_TEST:-}" || "${TRAM_UI_ONLY_TEST:-}" == *test06RideTimingMetadata* ]]; then
+  python3 "$test_root/ride-timing-fixture.py" stage "$IOS_SIMULATOR_UDID"
+  fixture_staged=1
+fi
+if [[ -n "${TRAM_SKIN_FIXTURE:-}" ]]; then
+  python3 "$test_root/skin-ui-fixture.py" stage "$IOS_SIMULATOR_UDID" "$TRAM_SKIN_FIXTURE"
+  skin_fixture_staged=1
+fi
 # Requires an already-installed app and an active caller-owned simulator lease.
 # The wrapper acquires/releases the single build slot; it never reserves or
 # boots an additional simulator and disables Xcode's parallel test clones.
@@ -16,6 +35,7 @@ args=(test -project "$test_root/TramSpotterUITests.xcodeproj"
   -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1
   -collect-test-diagnostics never
   CODE_SIGNING_ALLOWED=NO)
+if [[ -z "${TRAM_SKIN_FIXTURE:-}" ]]; then args+=("-skip-testing:TramSpotterUITests/TramSpotterUITests/test07SkinImportAndPreview" "-skip-testing:TramSpotterUITests/TramSpotterUITests/test08SkinMapAssignment"); fi
 if [[ -n "${TRAM_UI_ONLY_TEST:-}" ]]; then args+=("-only-testing:$TRAM_UI_ONLY_TEST"); fi
 if [[ -n "${TRAM_UI_SKIP_TEST:-}" ]]; then args+=("-skip-testing:$TRAM_UI_SKIP_TEST"); fi
 set +e

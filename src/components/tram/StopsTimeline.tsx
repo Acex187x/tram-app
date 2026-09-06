@@ -60,6 +60,7 @@ import { Colors, TextScale, Tram } from '@/constants/theme';
 import { useEtaCountdown } from '@/hooks/uiClock';
 import { formatPragueClock } from '@/lib/format/pragueTime';
 import type { RouteGeometry, RouteStop, TramPublicState } from '@/lib/types';
+import { sameStopOccurrence, timelineStops } from './timelineStops';
 
 export interface StopsTimelineProps {
   /** Trip geometry, or undefined while it is still loading. */
@@ -68,8 +69,7 @@ export interface StopsTimelineProps {
   simDistM: number;
   /** Current reported delay, seconds (shifts scheduled times). */
   delaySeconds: number;
-  /** Current sim phase — during 'dwell' the first upcoming stop is the one the
-   *  tram is stopped AT, so NEXT shifts to the following stop (matches header). */
+  /** Predicted phase; only a nearby matching platform receives a stop label. */
   phase?: TramPublicState['phase'];
   /** Engine's ETA to the next stop, seconds — shown as a live countdown on the
    *  NEXT row. Ticks locally each second between runtime updates. */
@@ -247,7 +247,7 @@ interface StopRowProps {
   stop: RouteStop;
   delaySeconds: number;
   isNext: boolean;
-  /** The tram is currently dwelling AT this stop. */
+  /** Displayed position predicts dwell at this exact stop occurrence. */
   isAtStop: boolean;
   /** Live countdown seconds — only set on the NEXT row. */
   etaS?: number | null;
@@ -258,8 +258,7 @@ function StopRow({ stop, delaySeconds, isNext, isAtStop, etaS, rowH }: StopRowPr
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const c = Colors[scheme];
   const delayed = delaySeconds > 60;
-  // While dwelling, the arrival is already in the past — show the scheduled
-  // departure instead so the row reads as "leaving at".
+  // A predicted dwell row shows scheduled departure rather than arrival.
   const baseMs = isAtStop ? stop.departureMs : stop.arrivalMs;
   const expectedMs = baseMs + delaySeconds * 1000;
   const dotColor = scheme === 'dark' ? Tram.liveryRed : Tram.pidRed;
@@ -269,7 +268,7 @@ function StopRow({ stop, delaySeconds, isNext, isAtStop, etaS, rowH }: StopRowPr
   // label that churns at 1 Hz makes VoiceOver re-announce the focused row.
   const a11yLabel = [
     stop.name,
-    isAtStop ? 'at stop now' : isNext ? 'next stop' : null,
+    isAtStop ? 'estimated at this stop, based on the displayed position' : isNext ? 'next stop' : null,
     stop.isTerminal ? 'terminus' : null,
     fmtClock(expectedMs),
     isNext && !isAtStop && etaS != null
@@ -315,7 +314,7 @@ function StopRow({ stop, delaySeconds, isNext, isAtStop, etaS, rowH }: StopRowPr
           {isAtStop ? (
             <View style={styles.atStopChip}>
               <Text style={styles.atStopChipText} maxFontSizeMultiplier={TextScale.compact}>
-                AT STOP NOW
+                EST. AT STOP
               </Text>
             </View>
           ) : (
@@ -402,29 +401,11 @@ export function StopsTimeline({
     setExpanded(false);
   }
 
-  // ONE backwards-compatible slice: the stops at or ahead of the tram (±2 m, so
-  // the stop it is dwelling AT stays in the list) plus the single stop behind it.
-  const { upcoming, departed } = useMemo(() => {
-    if (!geometry) return { upcoming: [] as RouteStop[], departed: undefined };
-    const stops = geometry.stops;
-    const cut = simDistM - 2;
-    let firstAhead = stops.length;
-    for (let i = 0; i < stops.length; i += 1) {
-      if (stops[i].distM >= cut) {
-        firstAhead = i;
-        break;
-      }
-    }
-    return {
-      upcoming: stops.slice(firstAhead),
-      departed: firstAhead > 0 ? stops[firstAhead - 1] : undefined,
-    };
-  }, [geometry, simDistM]);
-
-  // While dwelling, upcoming[0] is the stop the tram is stopped AT; NEXT is the
-  // following stop, matching the engine's next-stop (shown in the sheet header).
-  const dwelling = phase === 'dwell' && upcoming.length > 0;
-  const nextIndex = dwelling ? 1 : 0;
+  const { upcoming, departed, estimatedAtStop, nextIndex, etaMatchesNext } = useMemo(
+    () => timelineStops(geometry?.stops ?? [], simDistM, phase),
+    [geometry, simDistM, phase],
+  );
+  const dwelling = estimatedAtStop !== undefined;
 
   const collapsed = collapsible === true && !expanded && upcoming.length > COLLAPSE_THRESHOLD;
   const visible = collapsed ? upcoming.slice(0, COLLAPSED_COUNT) : upcoming;
@@ -443,7 +424,7 @@ export function StopsTimeline({
   // Identity of the SEGMENT the glyph is on. When it changes, the rows underneath
   // have been re-sliced, so animating would glide the token across a list that
   // already moved — snap instead (see the teleport table in the effect).
-  const segKey = `${tripId ?? '-'}|${departed?.stopId ?? 'head'}>${head?.stopId ?? '-'}`;
+  const segKey = `${tripId ?? '-'}|${departed?.stopId ?? 'head'}:${departed?.sequence ?? '-'}>${head?.stopId ?? '-'}:${head?.sequence ?? '-'}`;
 
   const progressSV = useSharedValue(progress);
   const lastSegRef = useRef(segKey);
@@ -565,9 +546,9 @@ export function StopsTimeline({
           key={`${stop.stopId}-${stop.sequence}`}
           stop={stop}
           delaySeconds={delaySeconds}
-          isAtStop={dwelling && i === 0}
+          isAtStop={sameStopOccurrence(stop, estimatedAtStop)}
           isNext={i === nextIndex}
-          etaS={i === nextIndex ? etaS : null}
+          etaS={i === nextIndex && etaMatchesNext ? etaS : null}
           rowH={rowH}
         />
       ))}
@@ -591,8 +572,8 @@ export function StopsTimeline({
         </Pressable>
       )}
 
-      {/* THE TRAM. Above the rail and the dots, hidden from VoiceOver (AT STOP
-          NOW / NEXT / the countdown already say everything it shows) and
+      {/* THE TRAM. Above the rail and the dots, hidden from VoiceOver (the
+          estimated-stop label / NEXT / countdown already describe it) and
           non-interactive, so it can never eat a row's tap. */}
       {/* Mounted ONLY while the tram is standing at a stop — at rest the halo is
           a visible ring, so leaving it mounted would put a permanent pink collar

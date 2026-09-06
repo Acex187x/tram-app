@@ -1,5 +1,15 @@
 # Review build 31 — 6 September 2026
 
+**Follow-up correction after the user's device review:** the earlier replay's
+zero-jump/zero-reverse counts excluded server-discontinuity frames. Replaying
+the same capture with those frames included found 208 over-budget visible
+jumps, including about 744 m of world displacement. The counts below describe
+that incomplete original metric, not a teleport-free application. The original
+native tests also exercised controls without establishing visual fidelity of
+every mesh. The subsequent defect investigation starts in
+[the visible-continuity amendment](../research/physics-v3-protocol.md) and
+[model audit](../research/model-audit-2026-09-06/README.md).
+
 The signed Release build was installed over the network on `pipka` (iPhone 17
 Pro) at 08:11 CEST. CoreDevice independently reported bundle version **31** at
 08:12:49. The launch request was denied because the iPhone was locked; installation

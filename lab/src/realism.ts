@@ -646,7 +646,7 @@ export interface PerceptualEmission {
    *  'age' = same anchor re-emitted on the 60 s age trigger. */
   kind: 'first' | 'fix' | 'age';
   discontinuity: boolean;
-  discKind: 'none' | 'trip' | 'gap' | 'break';
+  discKind: 'none' | 'trip' | 'gap' | 'break' | 'axis';
   opinion: TrackPoint[];
   smooth: TrackPoint[];
   /** Previous emission's smooth track (same chain), for the G9 seam. */
@@ -709,7 +709,7 @@ export class PerceptualCounters {
   ageReemissions = 0;
   discFix = 0;
   discAge = 0;
-  discByKind = { trip: 0, gap: 0, break: 0 };
+  discByKind = { trip: 0, gap: 0, break: 0, axis: 0 };
   /** G4 / G7 / plan feasibility, straight sums of the generator's own counts. */
   curveViolations = 0;
   phantomDips = 0;

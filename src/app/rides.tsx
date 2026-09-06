@@ -95,6 +95,10 @@ function fmtDuration(ride: ParsedRide): string {
 function RideRow({ entry }: { entry: RideEntry }) {
   const c = appleScheme(useColorScheme() === 'dark' ? 'dark' : 'light');
   const { file, ride } = entry;
+  const timing = ride.predictionTimingCounts;
+  const timingExcluded = timing['unknown-availability'] + timing['timestamp-mismatch'] + timing['future-input'];
+  const timingSummary = `Prediction timing · ${timing.eligible} eligible · ${timingExcluded} excluded`;
+  const timingDetails = `${timingSummary}. Excluded: ${timing['unknown-availability']} unknown input availability, ${timing['timestamp-mismatch']} clock mismatch, ${timing['future-input']} later input. Timing eligibility does not establish GPS accuracy.`;
 
   const onPreview = () => {
     void Haptics.selectionAsync();
@@ -132,6 +136,7 @@ function RideRow({ entry }: { entry: RideEntry }) {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Preview ride ${file.name} on the map`}
+      accessibilityValue={{ text: timingDetails }}
       accessibilityActions={ROW_ACTIONS}
       onAccessibilityAction={({ nativeEvent }) => {
         if (nativeEvent.actionName === 'more') onMore();
@@ -154,6 +159,9 @@ function RideRow({ entry }: { entry: RideEntry }) {
         </View>
         <Text style={[styles.subtitle, { color: c.secondary }]} numberOfLines={1}>
           {fmtWhen(ride.startedMs)} · {fmtDuration(ride)} · {ride.points} pts · {fmtBytes(file.size)}
+        </Text>
+        <Text style={[styles.subtitle, { color: c.secondary }]} numberOfLines={2}>
+          {timingSummary}
         </Text>
       </View>
       {/* Reachable in VoiceOver through the row's 'more' action, not directly. */}
@@ -234,7 +242,7 @@ export default function RidesScreen() {
             ))}
           </InsetGroup>
           <Text style={[styles.footnote, { color: c.secondary }]}>
-            Tap a ride to preview it on the map.
+            Tap a ride to preview it on the map. Timing checks input availability at the GPS sample time; GPS quality is assessed separately.
           </Text>
         </View>
       )}

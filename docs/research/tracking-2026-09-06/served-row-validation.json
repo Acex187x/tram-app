@@ -1,0 +1,63 @@
+{
+  "actualEmissions": 7,
+  "actualRows": 91,
+  "featureCount": 20,
+  "allHorizonClocksMatch": true,
+  "actualPublishedTargetParity": [
+    {
+      "key": "9069",
+      "tripId": "17_35485_260418",
+      "rows": 13,
+      "maxPublishedTargetReconstructionErrorM": 0.0,
+      "newVsOldPredictionMeanAbsM": 4.680549800025612
+    },
+    {
+      "key": "9275",
+      "tripId": "10_15021_260829",
+      "rows": 13,
+      "maxPublishedTargetReconstructionErrorM": 0.0,
+      "newVsOldPredictionMeanAbsM": 5.7297919921812275
+    },
+    {
+      "key": "9308",
+      "tripId": "26_22842_260829",
+      "rows": 13,
+      "maxPublishedTargetReconstructionErrorM": 0.0,
+      "newVsOldPredictionMeanAbsM": 14.451981993466099
+    },
+    {
+      "key": "9365",
+      "tripId": "12_19962_260905",
+      "rows": 13,
+      "maxPublishedTargetReconstructionErrorM": 0.0,
+      "newVsOldPredictionMeanAbsM": 8.590265842375336
+    },
+    {
+      "key": "9324",
+      "tripId": "26_22779_260829",
+      "rows": 13,
+      "maxPublishedTargetReconstructionErrorM": 0.0,
+      "newVsOldPredictionMeanAbsM": 19.933574210444764
+    },
+    {
+      "key": "9502",
+      "tripId": "7_18481_260711",
+      "rows": 13,
+      "maxPublishedTargetReconstructionErrorM": 0.0,
+      "newVsOldPredictionMeanAbsM": 14.61776139951841
+    },
+    {
+      "key": "9128",
+      "tripId": "1_14281_260501",
+      "rows": 13,
+      "maxPublishedTargetReconstructionErrorM": 0.0,
+      "newVsOldPredictionMeanAbsM": 11.198129232728592
+    }
+  ],
+  "correctedModelHttpVsNativeMaxRoundingErrorM": 0.049153798642237234,
+  "correctedModelRevision": "5e7c59877064aac605723e8ea040b3fb4db0f83d812931e8b77273606b35e39e",
+  "limitations": [
+    "Tests exactservedrows and predictiontransport, not historical learned-state reconstruction or GPSaccuracy.",
+    "Oldv4publishedtargets clampnegativeincrements andmonotonize before rounding; parity uses that documented transform."
+  ]
+}

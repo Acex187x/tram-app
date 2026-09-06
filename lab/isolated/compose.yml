@@ -15,7 +15,8 @@ services:
       DOCUMENT_RETENTION_DELAY: '3600'
     volumes:
       - convex-data:/convex/data
-    mem_limit: 2g
+    mem_limit: 3g
+    memswap_limit: 4g
     cpus: 1.0
     restart: unless-stopped
   ml:
@@ -43,6 +44,8 @@ services:
     environment:
       CONVEX_URL: https://tram-api.acex.sh
       SITE_URL: https://tram-site.acex.sh
+      STOP_SERVICE_METADATA_FILE: /data/stop-service.json
+      STOP_SERVICE_REFRESH_SCRIPT: /artifact/gtfs_stop_service.py
       PUBLISH_CONVEX_URL: http://convex:3210
       ENGINE_PUSH_TOKEN: ${ENGINE_PUSH_TOKEN:?Generate a new candidate-only token}
       ML_URL: http://ml:8092

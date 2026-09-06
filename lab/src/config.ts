@@ -174,6 +174,7 @@ export const TRAJ_STAND_ASSERT_MS = 5_000;
  * ml-drive-smooth). ON: the published bundle is built by the v3 drive (the
  * shadow chain keeps running for the overlap week). Flip = set the env var
  * (or this default) and restart tram-lab — one line either way. */
+export const TRAJ_CONTINUOUS_V1 = process.env.TRAJ_CONTINUOUS_V1 === '1';
 export const TRAJ_V3_PUBLISH = (process.env.TRAJ_V3_PUBLISH ?? '0') === '1';
 
 /** Fine grid the kinematic profile is simulated on before being compressed

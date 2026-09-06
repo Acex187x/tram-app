@@ -1,0 +1,30 @@
+{
+  "recordedAt": "2026-09-06T11:42:20.893936+00:00",
+  "unitTests": {
+    "suites": 5,
+    "passed": 48,
+    "log": "/tmp/tram-r2-transport-audited.log"
+  },
+  "scenarios": [
+    "cold private timeout",
+    "cached heartbeat versus advancing publication",
+    "metadata head ahead of actual rows",
+    "recovering probe cannot promote before rows catch up",
+    "foreign metadata/clock withheld until replacement seed",
+    "lower publisher epoch cannot freshen retained rows",
+    "same revision first-receipt retention and source epoch reset",
+    "stop closes active/probe and ignores late callbacks"
+  ],
+  "liveSmoke": {
+    "primary": "http://127.0.0.1:1",
+    "fallback": "https://tram-api.acex.sh",
+    "elapsedMs": 17064,
+    "vehicles": 188,
+    "bundleAgeS": 13.703,
+    "lastSeq": 573864,
+    "source": "fallback",
+    "status": "accepted fresh public seed after unreachable primary",
+    "log": "/tmp/tram-r2-failover-smoke.log"
+  },
+  "limits": "Read-only public endpoint smoke and deterministic failure injection; neither proves iPhone reachability to the private candidate outside the home network."
+}

@@ -5,7 +5,8 @@ export const GEOMETRY_AXIS_CONTRADICTION_M = 500;
 export type GeometryCoherence = {
   status: 'valid' | 'invalid' | 'unknown';
   reason?:
-    'missing-geometry' | 'missing-stop-ids' | 'nonfinite-position' | 'axis-and-stop-ids-disagree';
+    'missing-geometry' | 'malformed-geometry' | 'missing-stop-ids' | 'nonfinite-position' | 'axis-and-stop-ids-disagree' |
+    'provisional-stop-order-disagrees';
   axisCoordinateErrorM: number | null;
 };
 type Fix = Pick<TramSnapshot, 'coordinates' | 'shapeDistM' | 'lastStopId' | 'nextStopId'>;
@@ -17,12 +18,14 @@ export function assessGeometryCoherence(
   fix: Fix,
   geometry: RouteGeometry | undefined,
 ): GeometryCoherence {
+  if (!geometry) return { status: 'unknown', reason: 'missing-geometry', axisCoordinateErrorM: null };
   if (
-    !geometry ||
+    !Array.isArray(geometry.coordinates) ||
+    !Array.isArray(geometry.cumDistM) ||
     geometry.coordinates.length < 2 ||
     geometry.cumDistM.length !== geometry.coordinates.length
   )
-    return { status: 'unknown', reason: 'missing-geometry', axisCoordinateErrorM: null };
+    return { status: 'invalid', reason: 'malformed-geometry', axisCoordinateErrorM: null };
   if (
     !Number.isFinite(fix.shapeDistM) ||
     !Array.isArray(fix.coordinates) ||
@@ -38,6 +41,16 @@ export function assessGeometryCoherence(
     return { status: 'unknown', reason: 'nonfinite-position', axisCoordinateErrorM: null };
   if (!fix.lastStopId || !fix.nextStopId || geometry.stops.length === 0)
     return { status: 'unknown', reason: 'missing-stop-ids', axisCoordinateErrorM };
+  if (geometry.provisional) {
+    let lastSeen = false;
+    const ordered = geometry.stops.some(stop => {
+      if (stop.stopId === fix.lastStopId) lastSeen = true;
+      return lastSeen && stop.stopId === fix.nextStopId;
+    });
+    if (!ordered) return {
+      status: 'invalid', reason: 'provisional-stop-order-disagrees', axisCoordinateErrorM,
+    };
+  }
   const eitherStopPresent = geometry.stops.some(
     (stop) => stop.stopId === fix.lastStopId || stop.stopId === fix.nextStopId,
   );

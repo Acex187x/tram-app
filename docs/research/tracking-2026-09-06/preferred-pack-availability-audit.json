@@ -1,0 +1,4835 @@
+{
+  "capture": {
+    "startedAtMs": 1788701036388,
+    "pid": 84994,
+    "boundedDurationS": 180,
+    "production": "https://tram-api.acex.sh",
+    "candidate": "http://10.10.10.1:13210",
+    "commonFixes": "Identical production fix messages copied to both files with identical receivedAtMs",
+    "geometry": "Actual public-only versus Lab-preferred then sequential public-supplement helper calls. Same WS inputs, no pertrip refinements. Supplemental public event explicitly marked; all response receipts causal."
+  },
+  "measurementSeconds": 170,
+  "fps": 30,
+  "note": "Actual public-only vs preferred Lab + sequential public supplement using the transport helper, exact receipt events, same AVL and trajectories. Per-trip refinement intentionally omitted; geometry availability gate, not full native cold-start performance. Confidence dimming does not remove markers or exempt motion audits.",
+  "pairedGps": {
+    "commonPairs": 464,
+    "publicOnly": 0,
+    "preferredOnly": 30,
+    "public": {
+      "maeM": 80.548116806755,
+      "p50M": 54.65229974954127,
+      "p90M": 196.41864002002785,
+      "p99M": 400.7521895244049,
+      "maxM": 506.4126248460161,
+      "ahead30": 80
+    },
+    "preferredSupplement": {
+      "maeM": 80.54821475198428,
+      "p50M": 54.65229974954127,
+      "p90M": 196.41864002002785,
+      "p99M": 400.7521895244049,
+      "maxM": 506.4126248460161,
+      "ahead30": 80
+    },
+    "largestChanges": [
+      {
+        "key": [
+          "9114",
+          "24_9041_260905",
+          1788701110000
+        ],
+        "publicM": -140.99705966591227,
+        "preferredM": -141.04250625229452,
+        "absoluteErrorChangeM": 0.04544658638224064
+      },
+      {
+        "key": [
+          "6004",
+          "23_9286_260905",
+          1788701079000
+        ],
+        "publicM": -103.20603503792336,
+        "preferredM": -103.20603503792336,
+        "absoluteErrorChangeM": 0.0
+      },
+      {
+        "key": [
+          "6004",
+          "23_9286_260905",
+          1788701160000
+        ],
+        "publicM": -43.63337682891961,
+        "preferredM": -43.63337682891961,
+        "absoluteErrorChangeM": 0.0
+      },
+      {
+        "key": [
+          "6312",
+          "23_2657_260905",
+          1788701100000
+        ],
+        "publicM": -55.51788409893015,
+        "preferredM": -55.51788409893015,
+        "absoluteErrorChangeM": 0.0
+      },
+      {
+        "key": [
+          "6312",
+          "23_2657_260905",
+          1788701106000
+        ],
+        "publicM": -50.98667508134258,
+        "preferredM": -50.98667508134258,
+        "absoluteErrorChangeM": 0.0
+      },
+      {
+        "key": [
+          "6312",
+          "23_2657_260905",
+          1788701175000
+        ],
+        "publicM": 30.939413191728818,
+        "preferredM": 30.939413191728818,
+        "absoluteErrorChangeM": 0.0
+      },
+      {
+        "key": [
+          "8015",
+          "23_9261_260905",
+          1788701067000
+        ],
+        "publicM": -162.25121656659644,
+        "preferredM": -162.25121656659644,
+        "absoluteErrorChangeM": 0.0
+      },
+      {
+        "key": [
+          "8015",
+          "23_9261_260905",
+          1788701092000
+        ],
+        "publicM": -33.719839712936846,
+        "preferredM": -33.719839712936846,
+        "absoluteErrorChangeM": 0.0
+      },
+      {
+        "key": [
+          "8015",
+          "23_9261_260905",
+          1788701105000
+        ],
+        "publicM": -103.10169221191427,
+        "preferredM": -103.10169221191427,
+        "absoluteErrorChangeM": 0.0
+      },
+      {
+        "key": [
+          "8015",
+          "23_9261_260905",
+          1788701155000
+        ],
+        "publicM": -132.0752222860076,
+        "preferredM": -132.0752222860076,
+        "absoluteErrorChangeM": 0.0
+      }
+    ]
+  },
+  "arms": {
+    "public": {
+      "wirePath": "/tmp/tram-tracking-r3-pack-supplement-20260906/public-wire.jsonl",
+      "geometryArrivalReplay": true,
+      "geometryEventCounts": {
+        "packs": 1,
+        "trips": 0,
+        "applied": 186
+      },
+      "geometryCaveat": "Actual captured geometry receipts; provisional seeds and pertrip refinement. Harness loader concurrency differs from native scheduler.",
+      "researchNoSmoothShim": false,
+      "legacyMetricCaveat": "Legacy top-level slew/hold counters retain the historical discontinuity filter for comparison only. Use completeDisplayAudit for every actual frame, correction, both acceleration signs and visibility.",
+      "fps": 30,
+      "warmupSeconds": 0,
+      "segmentWindows": null,
+      "completeDisplayAudit": {
+        "note": "Every submitted replay state counted, including server-sanctioned resets. Displacement-derived speed around a reset describes visible teleport, not physical tram speed. Crossings are descriptive, not proof that a source-designated served/express/terminal stop should have held.",
+        "intervals": 947449,
+        "fullyVisibleWorldSpeedMs": {
+          "1": 25,
+          "0.5": 5,
+          "0.9": 9.68,
+          "0.99": 17.59
+        },
+        "fullyVisibleWorldAccelerationMs2": {
+          "1": 45.18,
+          "0.5": 0.03,
+          "0.9": 1.03,
+          "0.99": 2.5
+        },
+        "fullyVisibleWorldJerkMs3": {
+          "1": 1350.9,
+          "0.5": 0.01,
+          "0.9": 0.67,
+          "0.99": 44.4
+        },
+        "missingGeometryVehicleSeconds": 3470.9581926232268,
+        "rawGpsTargetDistanceM": {
+          "1": 681.17,
+          "0.5": 0.51,
+          "0.9": 242.46,
+          "0.99": 522.89
+        },
+        "rawGpsTargetLagOver100Seconds": 653.1650720214482,
+        "rawGpsTargetNote": "Receipt-time separation from the latest GPS target while no route axis is available, not timestamp-matched position accuracy. Includes stale input and fade stages.",
+        "endpointClampedMovingSeconds": 0,
+        "endpointExamples": [],
+        "worstWorldAcceleration": [
+          {
+            "key": "9395",
+            "atMs": 1788701205020.9216,
+            "magnitude": 45.17945785805211,
+            "worldV": [
+              -4.054814330488015,
+              -2.227948738957918
+            ],
+            "worldA": [
+              15.944584391839614,
+              -42.27237444146012
+            ],
+            "position": [
+              14.414573235881575,
+              50.077408347517846
+            ],
+            "previousPosition": [
+              14.41457512782516,
+              50.07740901464663
+            ],
+            "geometryChanged": false,
+            "geometry": "L5V1",
+            "totalM": 15476.035,
+            "s": 5955.228841845119,
+            "reportedSpeedMs": 4.640957341668281,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9206",
+            "atMs": 1788701177887.6545,
+            "magnitude": 43.55232666372631,
+            "worldV": [
+              8.32389619436569,
+              -1.734586057202357
+            ],
+            "worldA": [
+              11.687419191095483,
+              41.954849427396816
+            ],
+            "position": [
+              14.471180657354319,
+              50.11412653871207
+            ],
+            "previousPosition": [
+              14.471176770514168,
+              50.11412705811015
+            ],
+            "geometryChanged": false,
+            "geometry": "L24V3",
+            "totalM": 16641.62,
+            "s": 2809.937575000973,
+            "reportedSpeedMs": 8.513950049459071,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "8088",
+            "atMs": 1788701146954.3967,
+            "magnitude": 41.82646644873777,
+            "worldV": [
+              -4.252887585300567,
+              -1.8926230316333346
+            ],
+            "worldA": [
+              12.144515831199373,
+              -40.02454285576706
+            ],
+            "position": [
+              14.406411081076135,
+              50.09312343836375
+            ],
+            "previousPosition": [
+              14.406413066089804,
+              50.09312400508384
+            ],
+            "geometryChanged": false,
+            "geometry": "L23V2",
+            "totalM": 8211.466,
+            "s": 3072.0834779778993,
+            "reportedSpeedMs": 4.678316044950835,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "8757",
+            "atMs": 1788701162521.0254,
+            "magnitude": 41.557115247956965,
+            "worldV": [
+              1.8242154504936932,
+              -9.045134548572989
+            ],
+            "worldA": [
+              -40.21530971214814,
+              -10.47486002235735
+            ],
+            "position": [
+              14.451651798948996,
+              50.07086838344203
+            ],
+            "previousPosition": [
+              14.451650947900879,
+              50.0708710918839
+            ],
+            "geometryChanged": false,
+            "geometry": "L21V1",
+            "totalM": 14049.155,
+            "s": 11965.804469998775,
+            "reportedSpeedMs": 9.216624521564194,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9356",
+            "atMs": 1788701147287.7292,
+            "magnitude": 39.872096721073255,
+            "worldV": [
+              -9.189673739538637,
+              1.1744393697476223
+            ],
+            "worldA": [
+              1.9718747807496806,
+              39.82330733105507
+            ],
+            "position": [
+              14.380909063684093,
+              50.034309405219965
+            ],
+            "previousPosition": [
+              14.380913347661767,
+              50.03430905355015
+            ],
+            "geometryChanged": false,
+            "geometry": "L12V1",
+            "totalM": 22859.724,
+            "s": 21758.80321981608,
+            "reportedSpeedMs": 9.300443509673329,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "8757",
+            "atMs": 1788701048321.3042,
+            "magnitude": 38.052290670391336,
+            "worldV": [
+              8.948000976337077,
+              -3.2846727222829037
+            ],
+            "worldA": [
+              16.099880135788496,
+              34.47855398471918
+            ],
+            "position": [
+              14.443587511415924,
+              50.07235293710096
+            ],
+            "previousPosition": [
+              14.443583336791159,
+              50.072353920651295
+            ],
+            "geometryChanged": false,
+            "geometry": "L21V1",
+            "totalM": 14049.155,
+            "s": 11307.69412742994,
+            "reportedSpeedMs": 9.523248961433767,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9419",
+            "atMs": 1788701061421.2722,
+            "magnitude": 37.83560264474535,
+            "worldV": [
+              3.513570010621228,
+              0.9279298649081641
+            ],
+            "worldA": [
+              14.718136347511326,
+              -34.85554891186089
+            ],
+            "position": [
+              14.419332651022412,
+              50.07584427983431
+            ],
+            "previousPosition": [
+              14.419331011672545,
+              50.075844001978396
+            ],
+            "geometryChanged": false,
+            "geometry": "L4V2",
+            "totalM": 7013.59,
+            "s": 3774.3550011696398,
+            "reportedSpeedMs": 3.664007465806412,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9429",
+            "atMs": 1788701073854.5752,
+            "magnitude": 37.73460749442708,
+            "worldV": [
+              2.312772967995611,
+              3.2036592024078927
+            ],
+            "worldA": [
+              33.530871583626315,
+              -17.308415687197765
+            ],
+            "position": [
+              14.404564088803461,
+              50.0810639678253
+            ],
+            "previousPosition": [
+              14.404563009600023,
+              50.081063008533356
+            ],
+            "geometryChanged": false,
+            "geometry": "L9V2",
+            "totalM": 16821.835,
+            "s": 8861.670773533246,
+            "reportedSpeedMs": 3.947608382883781,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "8762",
+            "atMs": 1788701185187.6367,
+            "magnitude": 37.73283694644362,
+            "worldV": [
+              -8.63618243888766,
+              -3.066754774176536
+            ],
+            "worldA": [
+              10.453401846018657,
+              -36.255942600800694
+            ],
+            "position": [
+              14.433974743233378,
+              50.086140030103806
+            ],
+            "previousPosition": [
+              14.433978773540334,
+              50.08614094840159
+            ],
+            "geometryChanged": false,
+            "geometry": "L26V2",
+            "totalM": 22724.900999999998,
+            "s": 9856.062972269832,
+            "reportedSpeedMs": 9.210720375411988,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9230",
+            "atMs": 1788701115087.8079,
+            "magnitude": 37.32553534130303,
+            "worldV": [
+              -8.368179479679776,
+              4.392190788351964
+            ],
+            "worldA": [
+              15.854295202524519,
+              33.79107740433959
+            ],
+            "position": [
+              14.443579481613419,
+              50.072355224303436
+            ],
+            "previousPosition": [
+              14.443583385726775,
+              50.07235390912196
+            ],
+            "geometryChanged": false,
+            "geometry": "L21V2",
+            "totalM": 14161.831,
+            "s": 2813.6234037995578,
+            "reportedSpeedMs": 9.47279620093408,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9355",
+            "atMs": 1788701053321.292,
+            "magnitude": 36.73868845382753,
+            "worldV": [
+              -3.509081799106984,
+              -0.06535920101989114
+            ],
+            "worldA": [
+              -5.001222058148943,
+              -36.396689509246364
+            ],
+            "position": [
+              14.432199457660586,
+              50.089552959412124
+            ],
+            "previousPosition": [
+              14.432201095384649,
+              50.08955297898304
+            ],
+            "geometryChanged": false,
+            "geometry": "L6V2",
+            "totalM": 10486.421999999999,
+            "s": 7241.077500501388,
+            "reportedSpeedMs": 3.5308023907745483,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9356",
+            "atMs": 1788701151554.3855,
+            "magnitude": 36.53014768959954,
+            "worldV": [
+              -9.404235345009294,
+              3.616035225904873
+            ],
+            "worldA": [
+              10.866504481919339,
+              34.87650743076751
+            ],
+            "position": [
+              14.380341082555402,
+              50.03437721452207
+            ],
+            "previousPosition": [
+              14.380345466562058,
+              50.03437613174976
+            ],
+            "geometryChanged": false,
+            "geometry": "L12V1",
+            "totalM": 22859.724,
+            "s": 21800.272437843738,
+            "reportedSpeedMs": 10.095667477820754,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "6312",
+            "atMs": 1788701051554.6296,
+            "magnitude": 36.39046870766242,
+            "worldV": [
+              -6.188835472694849,
+              -2.482618527608557
+            ],
+            "worldA": [
+              11.016632227290021,
+              -34.682849178405064
+            ],
+            "position": [
+              14.389546738072664,
+              50.0927711605334
+            ],
+            "previousPosition": [
+              14.389549626658942,
+              50.09277190391958
+            ],
+            "geometryChanged": false,
+            "geometry": "L23V3",
+            "totalM": 8361.651,
+            "s": 6928.646271703814,
+            "reportedSpeedMs": 6.688276255601927,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9146",
+            "atMs": 1788701128987.774,
+            "magnitude": 35.88281414327777,
+            "worldV": [
+              5.175128361353354,
+              2.657091963773773
+            ],
+            "worldA": [
+              19.758509213824873,
+              -29.95292413919237
+            ],
+            "position": [
+              14.479057585443755,
+              50.052323852344095
+            ],
+            "previousPosition": [
+              14.479055172033183,
+              50.052323056714236
+            ],
+            "geometryChanged": false,
+            "geometry": "L24V3",
+            "totalM": 16641.62,
+            "s": 16326.387176437906,
+            "reportedSpeedMs": 5.7900246357817275,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9430",
+            "atMs": 1788701191120.9556,
+            "magnitude": 35.59154212277143,
+            "worldV": [
+              2.9459353886546027,
+              3.251646127588274
+            ],
+            "worldA": [
+              -22.558288111551565,
+              27.529647802927744
+            ],
+            "position": [
+              14.47285153011016,
+              50.07847508382803
+            ],
+            "previousPosition": [
+              14.472850155529965,
+              50.07847411016706
+            ],
+            "geometryChanged": false,
+            "geometry": "L9V2",
+            "totalM": 16821.835,
+            "s": 14974.937721787232,
+            "reportedSpeedMs": 4.408563652682404,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "6312",
+            "atMs": 1788701053221.2922,
+            "magnitude": 35.53563913641419,
+            "worldV": [
+              -4.983176375762515,
+              -3.268630167644729
+            ],
+            "worldA": [
+              16.51457302148793,
+              -31.465068357646945
+            ],
+            "position": [
+              14.389411725852765,
+              50.09273603456013
+            ],
+            "previousPosition": [
+              14.389414051706224,
+              50.092737013306746
+            ],
+            "geometryChanged": false,
+            "geometry": "L23V3",
+            "totalM": 8361.651,
+            "s": 6939.107383574176,
+            "reportedSpeedMs": 5.976008193197637,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9077",
+            "atMs": 1788701187320.9648,
+            "magnitude": 35.372481151152655,
+            "worldV": [
+              3.014172625348414,
+              3.727069805602199
+            ],
+            "worldA": [
+              -23.952249675724506,
+              26.028871628643554
+            ],
+            "position": [
+              14.479386511913173,
+              50.10354419910355
+            ],
+            "previousPosition": [
+              14.479385104757405,
+              50.10354308308346
+            ],
+            "geometryChanged": false,
+            "geometry": "L31V4",
+            "totalM": 4488.592,
+            "s": 4089.848706415038,
+            "reportedSpeedMs": 4.790451277837232,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9427",
+            "atMs": 1788701093721.1934,
+            "magnitude": 35.2776373202193,
+            "worldV": [
+              -3.8580223006124332,
+              -0.9338137928322686
+            ],
+            "worldA": [
+              3.813933738455953,
+              -35.07086546316753
+            ],
+            "position": [
+              14.419447322797465,
+              50.07586371572839
+            ],
+            "previousPosition": [
+              14.419449122861481,
+              50.07586399534616
+            ],
+            "geometryChanged": false,
+            "geometry": "L4V3",
+            "totalM": 6998.736,
+            "s": 3183.08093737525,
+            "reportedSpeedMs": 4.01346369167583,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9426",
+            "atMs": 1788701048154.638,
+            "magnitude": 35.24972960889983,
+            "worldV": [
+              3.8553442874812482,
+              0.8879189889188519
+            ],
+            "worldA": [
+              11.821157121541848,
+              -33.208488098803436
+            ],
+            "position": [
+              14.414576564798274,
+              50.077409179299806
+            ],
+            "previousPosition": [
+              14.414574765925785,
+              50.077408913424605
+            ],
+            "geometryChanged": false,
+            "geometry": "L5V2",
+            "totalM": 15497.872,
+            "s": 9479.923148774165,
+            "reportedSpeedMs": 4.004779558179892,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "8776",
+            "atMs": 1788701128654.4414,
+            "magnitude": 35.13229784589649,
+            "worldV": [
+              2.6990149163960933,
+              -3.3441455512563474
+            ],
+            "worldA": [
+              -23.547944550367998,
+              -26.072450199119704
+            ],
+            "position": [
+              14.435391365992023,
+              50.07534591378948
+            ],
+            "previousPosition": [
+              14.435390106707649,
+              50.07534691514814
+            ],
+            "geometryChanged": false,
+            "geometry": "L22V3",
+            "totalM": 20993.690000000002,
+            "s": 12198.528114154524,
+            "reportedSpeedMs": 4.289390072569096,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          }
+        ],
+        "worldVectorNote": "Finite differences of actual longitude/latitude positions, including raw GPS retargets, lateral alignment and route curvature. Route vertices can exceed correction-only acceleration/jerk bounds; no geometry-change exemption.",
+        "fullyVisibleAbsoluteAccelerationMs2": {
+          "1": 2.5,
+          "0.5": 0.03,
+          "0.9": 0.98,
+          "0.99": 2.22
+        },
+        "fullyVisibleAbsoluteJerkMs3": {
+          "1": 6.98,
+          "0.5": 0.01,
+          "0.9": 0.61,
+          "0.99": 4
+        },
+        "fullyVisibleAccelerationOver2_5": 28,
+        "fullyVisibleBrakingOver2_5": 0,
+        "fullyVisibleJerkOver4": 181,
+        "fullyVisibleJerkExamples": [
+          {
+            "key": "9336",
+            "atMs": 1788701081387.8901,
+            "jerkMs3": 4.099889692515856,
+            "accelerationMs2": 1.1344485718205808,
+            "previousAccelerationMs2": 0.9977859157199296,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 1.073358662827261,
+            "previousSpeedMs": 1.0355438027549027
+          },
+          {
+            "key": "9336",
+            "atMs": 1788701081421.2234,
+            "jerkMs3": 4.2005020267505655,
+            "accelerationMs2": 1.2744649642078696,
+            "previousAccelerationMs2": 1.1344485718205808,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 1.1158407245846322,
+            "previousSpeedMs": 1.073358662827261
+          },
+          {
+            "key": "9336",
+            "atMs": 1788701081454.5566,
+            "jerkMs3": 4.282531628428285,
+            "accelerationMs2": 1.4172156699754963,
+            "previousAccelerationMs2": 1.2744649642078696,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 1.1630811315838423,
+            "previousSpeedMs": 1.1158407245846322
+          },
+          {
+            "key": "9336",
+            "atMs": 1788701081487.89,
+            "jerkMs3": 4.345978151841248,
+            "accelerationMs2": 1.5620812546935972,
+            "previousAccelerationMs2": 1.4172156699754963,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 1.2151503796177976,
+            "previousSpeedMs": 1.1630811315838423
+          },
+          {
+            "key": "9336",
+            "atMs": 1788701081521.2231,
+            "jerkMs3": 4.3919748361206254,
+            "accelerationMs2": 1.7084800584777908,
+            "previousAccelerationMs2": 1.5620812546935972,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 1.2720995758639275,
+            "previousSpeedMs": 1.2151503796177976
+          },
+          {
+            "key": "9336",
+            "atMs": 1788701081554.5564,
+            "jerkMs3": 4.422242006595521,
+            "accelerationMs2": 1.8558877654813324,
+            "previousAccelerationMs2": 1.7084800584777908,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 1.333962350347439,
+            "previousSpeedMs": 1.2720995758639275
+          },
+          {
+            "key": "9336",
+            "atMs": 1788701081587.8896,
+            "jerkMs3": 4.394667060638869,
+            "accelerationMs2": 2.002376309863707,
+            "previousAccelerationMs2": 1.8558877654813324,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 1.4007080643890946,
+            "previousSpeedMs": 1.333962350347439
+          },
+          {
+            "key": "9336",
+            "atMs": 1788701081621.223,
+            "jerkMs3": 4.060838410683239,
+            "accelerationMs2": 2.137737259747939,
+            "previousAccelerationMs2": 2.002376309863707,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 1.4719657990778556,
+            "previousSpeedMs": 1.4007080643890946
+          },
+          {
+            "key": "9354",
+            "atMs": 1788701093087.8616,
+            "jerkMs3": 4.001311220683938,
+            "accelerationMs2": 0.9940621781460188,
+            "previousAccelerationMs2": 0.860685463084095,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.43856740690076207,
+            "previousSpeedMs": 0.4054320818595486
+          },
+          {
+            "key": "9354",
+            "atMs": 1788701093121.1948,
+            "jerkMs3": 4.002109590940595,
+            "accelerationMs2": 1.1274655054848597,
+            "previousAccelerationMs2": 0.9940621781460188,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.47614949866354633,
+            "previousSpeedMs": 0.43856740690076207
+          },
+          {
+            "key": "9354",
+            "atMs": 1788701093154.528,
+            "jerkMs3": 4.0024976724457755,
+            "accelerationMs2": 1.260881768842291,
+            "previousAccelerationMs2": 1.1274655054848597,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.5181787883474683,
+            "previousSpeedMs": 0.47614949866354633
+          },
+          {
+            "key": "9354",
+            "atMs": 1788701093187.8613,
+            "jerkMs3": 4.002758596154871,
+            "accelerationMs2": 1.3943067296354583,
+            "previousAccelerationMs2": 1.260881768842291,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.5646555658663448,
+            "previousSpeedMs": 0.5181787883474683
+          },
+          {
+            "key": "9354",
+            "atMs": 1788701093221.1946,
+            "jerkMs3": 4.002715866604816,
+            "accelerationMs2": 1.5277302661137677,
+            "previousAccelerationMs2": 1.3943067296354583,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.6155797837431297,
+            "previousSpeedMs": 0.5646555658663448
+          },
+          {
+            "key": "9354",
+            "atMs": 1788701093254.5278,
+            "jerkMs3": 4.002652500782674,
+            "accelerationMs2": 1.6611516904031625,
+            "previousAccelerationMs2": 1.5277302661137677,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.6709513715716978,
+            "previousSpeedMs": 0.6155797837431297
+          },
+          {
+            "key": "9354",
+            "atMs": 1788701093287.861,
+            "jerkMs3": 4.002473277917014,
+            "accelerationMs2": 1.7945671406116204,
+            "previousAccelerationMs2": 1.6611516904031625,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.730770130216504,
+            "previousSpeedMs": 0.6709513715716978
+          },
+          {
+            "key": "9354",
+            "atMs": 1788701093321.1943,
+            "jerkMs3": 4.002302082322035,
+            "accelerationMs2": 1.9279768843141776,
+            "previousAccelerationMs2": 1.7945671406116204,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.7950358694611495,
+            "previousSpeedMs": 0.730770130216504
+          },
+          {
+            "key": "9354",
+            "atMs": 1788701093354.5276,
+            "jerkMs3": 4.002038968645028,
+            "accelerationMs2": 2.061377857582247,
+            "previousAccelerationMs2": 1.9279768843141776,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.8637482969585315,
+            "previousSpeedMs": 0.7950358694611495
+          },
+          {
+            "key": "9354",
+            "atMs": 1788701093387.8608,
+            "jerkMs3": 4.001880680940171,
+            "accelerationMs2": 2.194773554606369,
+            "previousAccelerationMs2": 2.061377857582247,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.9369072368342813,
+            "previousSpeedMs": 0.8637482969585315
+          },
+          {
+            "key": "9354",
+            "atMs": 1788701093421.194,
+            "jerkMs3": 4.001641431567219,
+            "accelerationMs2": 2.328161276670863,
+            "previousAccelerationMs2": 2.194773554606369,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 1.0145124232570604,
+            "previousSpeedMs": 0.9369072368342813
+          },
+          {
+            "key": "9340",
+            "atMs": 1788701102054.5063,
+            "jerkMs3": 4.094056928630471,
+            "accelerationMs2": 0.24286746857988029,
+            "previousAccelerationMs2": 0.1063992374674037,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.022054048664131642,
+            "previousSpeedMs": 0.013958486142740823
+          },
+          {
+            "key": "9237",
+            "atMs": 1788701102054.5063,
+            "jerkMs3": 4.001869533736192,
+            "accelerationMs2": 0.26651559168658406,
+            "previousAccelerationMs2": 0.1331202662350207,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.014615104932469454,
+            "previousSpeedMs": 0.005731273565344363
+          },
+          {
+            "key": "9340",
+            "atMs": 1788701102087.8396,
+            "jerkMs3": 4.281957739548046,
+            "accelerationMs2": 0.3855990447648689,
+            "previousAccelerationMs2": 0.24286746857988029,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.03490731877616334,
+            "previousSpeedMs": 0.022054048664131642
+          },
+          {
+            "key": "9340",
+            "atMs": 1788701102121.1729,
+            "jerkMs3": 4.171241969241573,
+            "accelerationMs2": 0.5246401042830475,
+            "previousAccelerationMs2": 0.3855990447648689,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.05239527955694394,
+            "previousSpeedMs": 0.03490731877616334
+          },
+          {
+            "key": "9340",
+            "atMs": 1788701102154.506,
+            "jerkMs3": 4.0879905553451605,
+            "accelerationMs2": 0.6609061234463631,
+            "previousAccelerationMs2": 0.5246401042830475,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.07442542988714469,
+            "previousSpeedMs": 0.05239527955694394
+          },
+          {
+            "key": "9340",
+            "atMs": 1788701102187.8394,
+            "jerkMs3": 4.04626828331126,
+            "accelerationMs2": 0.7957814036039159,
+            "previousAccelerationMs2": 0.6609061234463631,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.10095141191308547,
+            "previousSpeedMs": 0.07442542988714469
+          },
+          {
+            "key": "9340",
+            "atMs": 1788701102221.1726,
+            "jerkMs3": 4.0259194563203335,
+            "accelerationMs2": 0.9299783911844296,
+            "previousAccelerationMs2": 0.7957814036039159,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.1319506159373979,
+            "previousSpeedMs": 0.10095141191308547
+          },
+          {
+            "key": "9340",
+            "atMs": 1788701102254.5059,
+            "jerkMs3": 4.015362283736553,
+            "accelerationMs2": 1.0638234738712955,
+            "previousAccelerationMs2": 0.9299783911844296,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.16741131182559849,
+            "previousSpeedMs": 0.1319506159373979
+          },
+          {
+            "key": "9340",
+            "atMs": 1788701102287.839,
+            "jerkMs3": 4.009583629582515,
+            "accelerationMs2": 1.1974759352232949,
+            "previousAccelerationMs2": 1.0638234738712955,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.20732707888220056,
+            "previousSpeedMs": 0.16741131182559849
+          },
+          {
+            "key": "9340",
+            "atMs": 1788701102321.1724,
+            "jerkMs3": 4.006295299632802,
+            "accelerationMs2": 1.3310187858445754,
+            "previousAccelerationMs2": 1.1974759352232949,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.2516942634251003,
+            "previousSpeedMs": 0.20732707888220056
+          },
+          {
+            "key": "9340",
+            "atMs": 1788701102354.5056,
+            "jerkMs3": 4.004256258335063,
+            "accelerationMs2": 1.4644936685885357,
+            "previousAccelerationMs2": 1.3310187858445754,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.3005105998639183,
+            "previousSpeedMs": 0.2516942634251003
+          }
+        ],
+        "activeVehicleSeconds": 31581.556230525115,
+        "opacityWeightedVisibleSeconds": 31581.556230525115,
+        "visibleCoverage": 1,
+        "maxHiddenRunSeconds": 0,
+        "unrevealedTransitionsAtEnd": [],
+        "hiddenVehicleSeconds": 0,
+        "fadingVehicleSeconds": 0,
+        "counts": {
+          "curve-restored": 11
+        },
+        "maxWorldStepM": 0.8333557477559329,
+        "maxFullyVisibleWorldStepM": 0.8333557477559329,
+        "maxUnbrokenNegativeSpeedStepMs": 0.0833331299651654,
+        "physicalBrakingExamples": [],
+        "maxBackwardStepM": 0,
+        "maxPositiveSpeedStepMs": 0.08333674487874987,
+        "maxNegativeSpeedStepMs": 0.0833331299651654,
+        "stationCrossings": 288,
+        "crossingsAbove5Ms": 70,
+        "worst": [],
+        "stopCrossingExamples": [
+          {
+            "key": "9419",
+            "atMs": 1788701044787.9795,
+            "stopId": "U237Z1P",
+            "stopSequence": 9,
+            "stopName": "Karlovo n\u00e1m\u011bst\u00ed",
+            "stopDistM": 3709.511,
+            "intervalSpeedMs": 5.579804782109396,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U237Z1P",
+            "fixAgeS": 4.7879794921875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9519",
+            "atMs": 1788701045087.9788,
+            "stopId": "U775Z1P",
+            "stopSequence": 6,
+            "stopName": "U Elektry",
+            "stopDistM": 2105.264,
+            "intervalSpeedMs": 7.51654822376213,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U775Z1P",
+            "fixAgeS": 11.087978759765624,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9307",
+            "atMs": 1788701048987.9692,
+            "stopId": "U163Z1P",
+            "stopSequence": 10,
+            "stopName": "Hrad\u010dansk\u00e1",
+            "stopDistM": 4894.505999999999,
+            "intervalSpeedMs": 6.252397470135893,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U163Z1P",
+            "fixAgeS": 53.98796923828125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9339",
+            "atMs": 1788701049154.6355,
+            "stopId": "U81Z1P",
+            "stopSequence": 5,
+            "stopName": "D\u011blnick\u00e1",
+            "stopDistM": 1949.568,
+            "intervalSpeedMs": 5.248928185389387,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U81Z1P",
+            "fixAgeS": 24.154635498046876,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9255",
+            "atMs": 1788701049921.3003,
+            "stopId": "U100Z2P",
+            "stopSequence": 28,
+            "stopName": "Vltavsk\u00e1",
+            "stopDistM": 12998.039999999999,
+            "intervalSpeedMs": 10.53783256895159,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U100Z2P",
+            "fixAgeS": 14.92130029296875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9270",
+            "atMs": 1788701050754.6316,
+            "stopId": "U118Z1P",
+            "stopSequence": 8,
+            "stopName": "Flora",
+            "stopDistM": 2721.181,
+            "intervalSpeedMs": 6.786792463924302,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U118Z1P",
+            "fixAgeS": 30.754631591796876,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9123",
+            "atMs": 1788701057387.9487,
+            "stopId": "U816Z1P",
+            "stopSequence": 13,
+            "stopName": "Urxova",
+            "stopDistM": 5295.099999999999,
+            "intervalSpeedMs": 7.938553131344905,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U816Z1P",
+            "fixAgeS": 30.38794873046875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8764",
+            "atMs": 1788701058254.6133,
+            "stopId": "U391Z2P",
+            "stopSequence": 25,
+            "stopName": "Vr\u0161ovick\u00e9 n\u00e1m\u011bst\u00ed",
+            "stopDistM": 12064.096,
+            "intervalSpeedMs": 8.944135259362401,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U391Z2P",
+            "fixAgeS": 17.25461328125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9158",
+            "atMs": 1788701058821.2786,
+            "stopId": "U592Z2P",
+            "stopSequence": 15,
+            "stopName": "Pra\u0161n\u00fd most",
+            "stopDistM": 6672.914,
+            "intervalSpeedMs": 6.910785417347459,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U592Z2P",
+            "fixAgeS": 68.82127856445312,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9254",
+            "atMs": 1788701061187.9395,
+            "stopId": "U539Z1P",
+            "stopSequence": 11,
+            "stopName": "N\u00e1rodn\u00ed t\u0159\u00edda",
+            "stopDistM": 5719.934,
+            "intervalSpeedMs": 10.293929309005836,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U539Z1P",
+            "fixAgeS": 45.187939453125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9342",
+            "atMs": 1788701063987.9326,
+            "stopId": "U190Z2P",
+            "stopSequence": 15,
+            "stopName": "I. P. Pavlova",
+            "stopDistM": 6063.436000000001,
+            "intervalSpeedMs": 8.618375459378026,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U190Z2P",
+            "fixAgeS": 38.9879326171875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9136",
+            "atMs": 1788701065487.929,
+            "stopId": "U614Z1P",
+            "stopSequence": 13,
+            "stopName": "P\u0159\u00edstavi\u0161t\u011b",
+            "stopDistM": 6883.860000000001,
+            "intervalSpeedMs": 12.834474347036794,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U614Z1P",
+            "fixAgeS": 15.487928955078125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9322",
+            "atMs": 1788701065921.2612,
+            "stopId": "U507Z2P",
+            "stopSequence": 22,
+            "stopName": "Pet\u0159iny",
+            "stopDistM": 10359.049,
+            "intervalSpeedMs": 5.32085252390492,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U507Z2P",
+            "fixAgeS": 29.92126123046875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9075",
+            "atMs": 1788701066454.5933,
+            "stopId": "U690Z2P",
+            "stopSequence": 16,
+            "stopName": "Solidarita",
+            "stopDistM": 6736.792,
+            "intervalSpeedMs": 10.09000240317979,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U690Z2P",
+            "fixAgeS": 35.45459326171875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9430",
+            "atMs": 1788701067554.5906,
+            "stopId": "U515Z2P",
+            "stopSequence": 30,
+            "stopName": "Ol\u0161ansk\u00e9 h\u0159bitovy",
+            "stopDistM": 14577.883,
+            "intervalSpeedMs": 6.169614299899222,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U515Z2P",
+            "fixAgeS": 29.554590576171876,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9356",
+            "atMs": 1788701072887.911,
+            "stopId": "U49Z4P",
+            "stopSequence": 43,
+            "stopName": "Geologick\u00e1",
+            "stopDistM": 21145.636,
+            "intervalSpeedMs": 12.517553333301631,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U49Z4P",
+            "fixAgeS": 47.887910888671875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9146",
+            "atMs": 1788701075854.5703,
+            "stopId": "U751Z2P",
+            "stopSequence": 39,
+            "stopName": "Tepl\u00e1rna Michle",
+            "stopDistM": 15924.832,
+            "intervalSpeedMs": 10.32095838284631,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U751Z2P",
+            "fixAgeS": 49.8545703125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8256",
+            "atMs": 1788701076021.2366,
+            "stopId": "U209Z2P",
+            "stopSequence": 7,
+            "stopName": "Ji\u0159\u00edho z Pod\u011bbrad",
+            "stopDistM": 2181.319,
+            "intervalSpeedMs": 5.529725518625957,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U209Z2P",
+            "fixAgeS": 58.02123657226562,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9448",
+            "atMs": 1788701076087.903,
+            "stopId": "U560Z2P",
+            "stopSequence": 16,
+            "stopName": "Pod Karlovem",
+            "stopDistM": 6077.239,
+            "intervalSpeedMs": 5.844838932616805,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U560Z2P",
+            "fixAgeS": 34.08790307617188,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9450",
+            "atMs": 1788701076754.568,
+            "stopId": "U25Z2P",
+            "stopSequence": 23,
+            "stopName": "Bertramka",
+            "stopDistM": 9875.203000000001,
+            "intervalSpeedMs": 9.342567556271954,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U25Z2P",
+            "fixAgeS": 14.754568115234376,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9105",
+            "atMs": 1788701080487.8923,
+            "stopId": "U464Z2P",
+            "stopSequence": 11,
+            "stopName": "Poliklinika Vyso\u010dany",
+            "stopDistM": 5626.581,
+            "intervalSpeedMs": 7.231483133568623,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U464Z2P",
+            "fixAgeS": 26.487892333984377,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9440",
+            "atMs": 1788701080621.2253,
+            "stopId": "U240Z2P",
+            "stopSequence": 26,
+            "stopName": "Kaval\u00edrka",
+            "stopDistM": 11451.88,
+            "intervalSpeedMs": 10.054433786085777,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U240Z2P",
+            "fixAgeS": 33.62122534179687,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8297",
+            "atMs": 1788701081687.8894,
+            "stopId": "U531Z1P",
+            "stopSequence": 8,
+            "stopName": "Poho\u0159elec",
+            "stopDistM": 3122.071,
+            "intervalSpeedMs": 6.45440340437036,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U531Z1P",
+            "fixAgeS": 21.687889404296875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9505",
+            "atMs": 1788701082187.8882,
+            "stopId": "U655Z1P",
+            "stopSequence": 16,
+            "stopName": "Invalidovna",
+            "stopDistM": 7200.8279999999995,
+            "intervalSpeedMs": 12.313061085716685,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U655Z1P",
+            "fixAgeS": 24.18788818359375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9383",
+            "atMs": 1788701084887.8816,
+            "stopId": "U34Z2P",
+            "stopSequence": 34,
+            "stopName": "Biskupcova",
+            "stopDistM": 16197.652000000002,
+            "intervalSpeedMs": 5.5371927755810955,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U34Z2P",
+            "fixAgeS": 20.887881591796877,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9086",
+            "atMs": 1788701086687.8772,
+            "stopId": "U463Z1P",
+            "stopSequence": 14,
+            "stopName": "N\u00e1dra\u017e\u00ed Vr\u0161ovice",
+            "stopDistM": 5911.768999999999,
+            "intervalSpeedMs": 14.05583182977013,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U463Z1P",
+            "fixAgeS": 32.68787719726563,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9248",
+            "atMs": 1788701087154.5427,
+            "stopId": "U929Z2P",
+            "stopSequence": 40,
+            "stopName": "Poliklinika Mod\u0159any",
+            "stopDistM": 21864.521,
+            "intervalSpeedMs": 5.099189326603775,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U929Z2P",
+            "fixAgeS": 16.154542724609374,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9285",
+            "atMs": 1788701090021.2024,
+            "stopId": "U157Z2P",
+            "stopSequence": 34,
+            "stopName": "Bo\u0159islavka",
+            "stopDistM": 18347.552,
+            "intervalSpeedMs": 6.90120925906062,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U157Z2P",
+            "fixAgeS": 25.021202392578125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8015",
+            "atMs": 1788701094754.5242,
+            "stopId": "U739Z1P",
+            "stopSequence": 4,
+            "stopName": "\u0160t\u011bp\u00e1nsk\u00e1",
+            "stopDistM": 1241.333,
+            "intervalSpeedMs": 5.695613298892596,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U739Z1P",
+            "fixAgeS": 27.754524169921876,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9508",
+            "atMs": 1788701099221.18,
+            "stopId": "U269Z1P",
+            "stopSequence": 27,
+            "stopName": "Koh-i-noor",
+            "stopDistM": 12498.08,
+            "intervalSpeedMs": 9.660727940226115,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U269Z1P",
+            "fixAgeS": 24.221179931640624,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9446",
+            "atMs": 1788701099521.1792,
+            "stopId": "U567Z1P",
+            "stopSequence": 8,
+            "stopName": "Hotel Golf",
+            "stopDistM": 3674.052,
+            "intervalSpeedMs": 7.657932319080412,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U865Z1P",
+            "fixAgeS": 49.52117919921875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9514",
+            "atMs": 1788701101121.1753,
+            "stopId": "U1053Z2P",
+            "stopSequence": 42,
+            "stopName": "Vozovna Hloub\u011bt\u00edn",
+            "stopDistM": 21140.630999999998,
+            "intervalSpeedMs": 5.578589270072867,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U499Z2P",
+            "fixAgeS": 66.12117529296874,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9217",
+            "atMs": 1788701104421.1672,
+            "stopId": "U337Z2P",
+            "stopSequence": 29,
+            "stopName": "Lihovar",
+            "stopDistM": 14533.095,
+            "intervalSpeedMs": 9.357830278508464,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U337Z2P",
+            "fixAgeS": 28.421167236328124,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8268",
+            "atMs": 1788701105754.4973,
+            "stopId": "U539Z2P",
+            "stopSequence": 9,
+            "stopName": "N\u00e1rodn\u00ed t\u0159\u00edda",
+            "stopDistM": 3236.867,
+            "intervalSpeedMs": 6.983001400728111,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U539Z2P",
+            "fixAgeS": 67.75449731445312,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9506",
+            "atMs": 1788701106021.1633,
+            "stopId": "U34Z1P",
+            "stopSequence": 16,
+            "stopName": "Biskupcova",
+            "stopDistM": 7479.345,
+            "intervalSpeedMs": 8.723356992734919,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U34Z1P",
+            "fixAgeS": 18.021163330078124,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9255",
+            "atMs": 1788701114121.1436,
+            "stopId": "U595Z2P",
+            "stopSequence": 29,
+            "stopName": "Hole\u0161ovick\u00e1 tr\u017enice",
+            "stopDistM": 13466.752,
+            "intervalSpeedMs": 6.195765981585888,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U595Z2P",
+            "fixAgeS": 28.1211435546875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9519",
+            "atMs": 1788701120587.7944,
+            "stopId": "U691Z1P",
+            "stopSequence": 7,
+            "stopName": "Podkov\u00e1\u0159sk\u00e1",
+            "stopDistM": 2475.304,
+            "intervalSpeedMs": 15.930200528333836,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U691Z1P",
+            "fixAgeS": 35.58779443359375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9075",
+            "atMs": 1788701126987.7788,
+            "stopId": "U900Z2P",
+            "stopSequence": 17,
+            "stopName": "Zborov - Stra\u0161nick\u00e9 divadlo",
+            "stopDistM": 7194.63,
+            "intervalSpeedMs": 6.861004412010953,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U900Z2P",
+            "fixAgeS": 28.98777880859375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9326",
+            "atMs": 1788701127754.4436,
+            "stopId": "U337Z1P",
+            "stopSequence": 16,
+            "stopName": "Lihovar",
+            "stopDistM": 8621.816,
+            "intervalSpeedMs": 12.389887724376978,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U337Z1P",
+            "fixAgeS": 16.754443603515625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9285",
+            "atMs": 1788701127921.1099,
+            "stopId": "U943Z2P",
+            "stopSequence": 35,
+            "stopName": "S\u00eddli\u0161t\u011b \u010cerven\u00fd Vrch",
+            "stopDistM": 18645.973,
+            "intervalSpeedMs": 11.803780466663667,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U943Z2P",
+            "fixAgeS": 13.92110986328125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9217",
+            "atMs": 1788701133454.4297,
+            "stopId": "U337Z12P",
+            "stopSequence": 30,
+            "stopName": "Lihovar",
+            "stopDistM": 14719.301,
+            "intervalSpeedMs": 5.453238446194055,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U337Z2P",
+            "fixAgeS": 57.4544296875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8775",
+            "atMs": 1788701135821.0906,
+            "stopId": "U778Z1P",
+            "stopSequence": 7,
+            "stopName": "U Ka\u0161tanu",
+            "stopDistM": 3085.175,
+            "intervalSpeedMs": 11.019123274012426,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U778Z1P",
+            "fixAgeS": 16.821090576171876,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9248",
+            "atMs": 1788701143487.7385,
+            "stopId": "U948Z2P",
+            "stopSequence": 41,
+            "stopName": "U Libu\u0161sk\u00e9ho potoka",
+            "stopDistM": 22190.82,
+            "intervalSpeedMs": 12.590911179495233,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U948Z2P",
+            "fixAgeS": 22.487738525390625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9225",
+            "atMs": 1788701144787.7354,
+            "stopId": "U447Z2P",
+            "stopSequence": 30,
+            "stopName": "Nad Trojou",
+            "stopDistM": 17581.734,
+            "intervalSpeedMs": 11.364016582237795,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U447Z2P",
+            "fixAgeS": 21.7877353515625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9206",
+            "atMs": 1788701146954.3967,
+            "stopId": "U54Z1P",
+            "stopSequence": 9,
+            "stopName": "Bulovka",
+            "stopDistM": 2499.88,
+            "intervalSpeedMs": 10.318884525417825,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U54Z1P",
+            "fixAgeS": 43.954396728515626,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9128",
+            "atMs": 1788701154354.3787,
+            "stopId": "U692Z2P",
+            "stopSequence": 13,
+            "stopName": "Sparta",
+            "stopDistM": 4996.458,
+            "intervalSpeedMs": 6.130459338852671,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U692Z2P",
+            "fixAgeS": 29.354378662109376,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8565",
+            "atMs": 1788701155254.3765,
+            "stopId": "U519Z2P",
+            "stopSequence": 19,
+            "stopName": "O\u0159echovka",
+            "stopDistM": 8423.631000000001,
+            "intervalSpeedMs": 7.77399061774046,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U519Z2P",
+            "fixAgeS": 13.25437646484375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8757",
+            "atMs": 1788701157654.3706,
+            "stopId": "U627Z2P",
+            "stopSequence": 23,
+            "stopName": "Rusk\u00e1",
+            "stopDistM": 11913.923999999999,
+            "intervalSpeedMs": 11.776548404242396,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U627Z2P",
+            "fixAgeS": 39.65437060546875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9361",
+            "atMs": 1788701159987.6982,
+            "stopId": "U508Z2P",
+            "stopSequence": 17,
+            "stopName": "Bohemians",
+            "stopDistM": 7682.5,
+            "intervalSpeedMs": 9.08522949070831,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U508Z2P",
+            "fixAgeS": 7.9876982421875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9275",
+            "atMs": 1788701160287.6975,
+            "stopId": "U78Z2P",
+            "stopSequence": 44,
+            "stopName": "L\u00e1dv\u00ed",
+            "stopDistM": 21112.099000000002,
+            "intervalSpeedMs": 5.8166879538228695,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U78Z2P",
+            "fixAgeS": 26.287697509765625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9312",
+            "atMs": 1788701163521.023,
+            "stopId": "U237Z1P",
+            "stopSequence": 13,
+            "stopName": "Karlovo n\u00e1m\u011bst\u00ed",
+            "stopDistM": 4930.779,
+            "intervalSpeedMs": 5.44747844191406,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U237Z1P",
+            "fixAgeS": 47.52102294921875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9440",
+            "atMs": 1788701163887.6887,
+            "stopId": "U289Z2P",
+            "stopSequence": 27,
+            "stopName": "Kotl\u00e1\u0159ka",
+            "stopDistM": 12087.623000000001,
+            "intervalSpeedMs": 12.48274995756835,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U289Z2P",
+            "fixAgeS": 29.887688720703125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9505",
+            "atMs": 1788701165621.0178,
+            "stopId": "U816Z1P",
+            "stopSequence": 17,
+            "stopName": "Urxova",
+            "stopDistM": 7822.139,
+            "intervalSpeedMs": 12.730629024192307,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U816Z1P",
+            "fixAgeS": 22.621017822265625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9506",
+            "atMs": 1788701170187.6733,
+            "stopId": "U469Z1P",
+            "stopSequence": 17,
+            "stopName": "N\u00e1kladov\u00e9 n\u00e1dra\u017e\u00ed \u017di\u017ekov",
+            "stopDistM": 7893.878,
+            "intervalSpeedMs": 8.761239626941046,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U469Z1P",
+            "fixAgeS": 33.18767333984375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9446",
+            "atMs": 1788701170187.6733,
+            "stopId": "U580Z1P",
+            "stopSequence": 9,
+            "stopName": "Po\u0161tovka",
+            "stopDistM": 4237.625,
+            "intervalSpeedMs": 7.693585619892149,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U580Z1P",
+            "fixAgeS": 20.18767333984375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9378",
+            "atMs": 1788701176820.9905,
+            "stopId": "U739Z1P",
+            "stopSequence": 23,
+            "stopName": "\u0160t\u011bp\u00e1nsk\u00e1",
+            "stopDistM": 8919.273000000001,
+            "intervalSpeedMs": 5.685748469154379,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U739Z1P",
+            "fixAgeS": 31.820990478515625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9254",
+            "atMs": 1788701177854.3213,
+            "stopId": "U237Z2P",
+            "stopSequence": 12,
+            "stopName": "Karlovo n\u00e1m\u011bst\u00ed",
+            "stopDistM": 6247.821,
+            "intervalSpeedMs": 5.308993520503433,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U237Z2P",
+            "fixAgeS": 52.8543212890625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9345",
+            "atMs": 1788701179320.9844,
+            "stopId": "U163Z1P",
+            "stopSequence": 5,
+            "stopName": "Hrad\u010dansk\u00e1",
+            "stopDistM": 2443.228,
+            "intervalSpeedMs": 6.459378901566388,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U163Z1P",
+            "fixAgeS": 14.320984375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9287",
+            "atMs": 1788701179787.65,
+            "stopId": "U605Z1P",
+            "stopSequence": 12,
+            "stopName": "Pr\u016fb\u011b\u017en\u00e1",
+            "stopDistM": 4675.529,
+            "intervalSpeedMs": 8.991293890613411,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U605Z1P",
+            "fixAgeS": 32.78764990234375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8256",
+            "atMs": 1788701182687.6428,
+            "stopId": "U616Z2P",
+            "stopSequence": 8,
+            "stopName": "Radho\u0161\u0165sk\u00e1",
+            "stopDistM": 2828.536,
+            "intervalSpeedMs": 6.9949494091627855,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U118Z2P",
+            "fixAgeS": 10.687642822265625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9381",
+            "atMs": 1788701184620.9714,
+            "stopId": "U190Z1P",
+            "stopSequence": 10,
+            "stopName": "I. P. Pavlova",
+            "stopDistM": 4439.053999999999,
+            "intervalSpeedMs": 7.014755814836244,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U45Z1P",
+            "fixAgeS": 143.62097143554686,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8763",
+            "atMs": 1788701185654.3022,
+            "stopId": "U775Z2P",
+            "stopSequence": 39,
+            "stopName": "U Elektry",
+            "stopDistM": 18517.67,
+            "intervalSpeedMs": 10.543280163603582,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U775Z2P",
+            "fixAgeS": 25.65430224609375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9109",
+            "atMs": 1788701189754.2922,
+            "stopId": "U71Z2P",
+            "stopSequence": 29,
+            "stopName": "\u010cern\u00fd k\u016f\u0148",
+            "stopDistM": 15290.443,
+            "intervalSpeedMs": 14.633807691687624,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U71Z2P",
+            "fixAgeS": 53.754292236328126,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9347",
+            "atMs": 1788701196987.608,
+            "stopId": "U118Z2P",
+            "stopSequence": 26,
+            "stopName": "Flora",
+            "stopDistM": 12651.199999999999,
+            "intervalSpeedMs": 12.645880549832437,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U118Z2P",
+            "fixAgeS": 62.98760791015625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9206",
+            "atMs": 1788701197554.2732,
+            "stopId": "U861Z1P",
+            "stopSequence": 10,
+            "stopName": "Vosm\u00edkov\u00fdch",
+            "stopDistM": 2986.879,
+            "intervalSpeedMs": 9.724145596264474,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U861Z1P",
+            "fixAgeS": 19.554273193359375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9510",
+            "atMs": 1788701201254.2642,
+            "stopId": "U529Z5P",
+            "stopSequence": 10,
+            "stopName": "Palmovka",
+            "stopDistM": 4068.4060000000004,
+            "intervalSpeedMs": 6.256298694596745,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U529Z5P",
+            "fixAgeS": 46.25426416015625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9141",
+            "atMs": 1788701203087.593,
+            "stopId": "U387Z2P",
+            "stopSequence": 24,
+            "stopName": "Pob\u0159e\u017en\u00ed cesta",
+            "stopDistM": 13166.992,
+            "intervalSpeedMs": 7.082077499678263,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U387Z2P",
+            "fixAgeS": 34.08759301757812,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8786",
+            "atMs": 1788701204354.2566,
+            "stopId": "U303Z2P",
+            "stopSequence": 18,
+            "stopName": "Kublov",
+            "stopDistM": 7411.822,
+            "intervalSpeedMs": 7.066938664701438,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U303Z2P",
+            "fixAgeS": 28.354256591796876,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9444",
+            "atMs": 1788701204654.2559,
+            "stopId": "U914Z1P",
+            "stopSequence": 10,
+            "stopName": "Zl\u00edchov",
+            "stopDistM": 5346.568,
+            "intervalSpeedMs": 12.512546254193326,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U914Z1P",
+            "fixAgeS": 15.654255859375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9270",
+            "atMs": 1788701205454.254,
+            "stopId": "U209Z1P",
+            "stopSequence": 10,
+            "stopName": "Ji\u0159\u00edho z Pod\u011bbrad",
+            "stopDistM": 3516.326,
+            "intervalSpeedMs": 7.970617096618617,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U209Z1P",
+            "fixAgeS": 33.45425390625,
+            "precedingHeldS": 0
+          }
+        ]
+      },
+      "presentationTransitions": [],
+      "durationS": 170,
+      "frames": 5101,
+      "samples": 947651,
+      "visibleSamples": 843496,
+      "lastFixAgeS": 4.282,
+      "sanctionedJumps": 0,
+      "backward": 0,
+      "speedOver25": 0,
+      "maxBackwardM": 0,
+      "maxForwardM": 0.5503383680820662,
+      "guardedHolds": 94690,
+      "holdSeconds": 3156.325627438092,
+      "materialGuardHoldSeconds": 47.56655053710857,
+      "movingTargetBehindHoldSeconds": 14.03329907226574,
+      "guardHoldSecondsByAbsoluteGap": {
+        "under0.5m": 3108.759076901045,
+        "0.5to10m": 47.56655053710857
+      },
+      "projectionCoverage": {
+        "eligibleHistory": 464,
+        "projected": 464,
+        "rejected": 0
+      },
+      "observationCoverage": {
+        "uniqueReceived": 782,
+        "withinMeasurement": 545,
+        "missingSameTripHistory": 73,
+        "unbracketedHistory": 8,
+        "scored": 464
+      },
+      "projectedGpsByMotionEvidence": {
+        "moving": {
+          "count": 452,
+          "maeM": 78.80978456437069,
+          "biasM": -50.22384632992975,
+          "ahead30": 74,
+          "absErrorM": {
+            "1": 506.4126248460161,
+            "0.5": 53.919045332022506,
+            "0.9": 194.23571392491976,
+            "0.99": 400.7521895244049
+          }
+        },
+        "near-platform-stationary-pair": {
+          "count": 1,
+          "maeM": 27.202751903729677,
+          "biasM": 27.202751903729677,
+          "ahead30": 0,
+          "absErrorM": {
+            "1": 27.202751903729677,
+            "0.5": 27.202751903729677,
+            "0.9": 27.202751903729677,
+            "0.99": 27.202751903729677
+          }
+        },
+        "unknown": {
+          "count": 11,
+          "maeM": 156.82734757591132,
+          "biasM": -10.417122620083195,
+          "ahead30": 6,
+          "absErrorM": {
+            "1": 316.46365686952413,
+            "0.5": 147.94922560349187,
+            "0.9": 302.32480429049656,
+            "0.99": 316.46365686952413
+          }
+        }
+      },
+      "projectedGpsMaeM": 80.54811680675493,
+      "projectedGpsAbsErrorM": {
+        "1": 506.4126248460161,
+        "0.5": 54.65229974954127,
+        "0.9": 196.41864002002785,
+        "0.99": 400.7521895244049
+      },
+      "guardHeldSecondsByReason": {
+        "on_track/flat-target": 187.19954296877015,
+        "on_track/old-avl-over45s": 383.1657312012695,
+        "at_stop/old-avl-over45s": 703.0649501952109,
+        "at_stop/flat-target": 1800.1956049789303,
+        "at_stop/low-speed-catchup": 60.866518066405035,
+        "on_track/low-speed-catchup": 9.966642333984398,
+        "at_stop/moving-target-behind-rendered-floor": 11.233305908203176,
+        "on_track/moving-target-behind-rendered-floor": 0.6333317871093748
+      },
+      "byReportedFixState": {
+        "on_track": {
+          "vehicleSeconds": 10535.907610826865,
+          "aheadTarget10Seconds": 0,
+          "aheadTarget30Seconds": 0,
+          "targetMinusDisplayM": {
+            "1": 7.317449920879881,
+            "0.5": -0.12376870885418612,
+            "0.9": 0.40223491176720927,
+            "0.99": 3.385356157935348
+          },
+          "aheadOfRecentReportedStopFixM": {
+            "1": 0,
+            "0.5": 0,
+            "0.9": 0,
+            "0.99": 0
+          },
+          "guardHoldEpisodes": 70,
+          "guardHoldDurationS": {
+            "1": 78.933140625,
+            "0.5": 2.299994384765625,
+            "0.9": 23.0666103515625,
+            "0.99": 78.933140625
+          },
+          "accelerationOver1_3": 8230,
+          "brakingOver1_4": 2814,
+          "historicalAvlCount": 198,
+          "historicalAvlBiasM": -5.159500671044389,
+          "historicalAvlMaeM": 58.234571235219306,
+          "historicalAvlAbsErrorM": {
+            "1": 416.1204508400515,
+            "0.5": 30.65226784812785,
+            "0.9": 179.52925369299828,
+            "0.99": 336.6544208644709
+          }
+        },
+        "at_stop": {
+          "vehicleSeconds": 17574.69042631231,
+          "aheadTarget10Seconds": 0,
+          "aheadTarget30Seconds": 0,
+          "targetMinusDisplayM": {
+            "1": 6.359566867684407,
+            "0.5": -0.06849574587067764,
+            "0.9": 0.42609381742931873,
+            "0.99": 1.8374846632013941
+          },
+          "aheadOfRecentReportedStopFixM": {
+            "1": 465.20005238466547,
+            "0.5": 56.08338669487421,
+            "0.9": 149.15006962048392,
+            "0.99": 267.13611890408174
+          },
+          "guardHoldEpisodes": 234,
+          "guardHoldDurationS": {
+            "1": 59.033189208984375,
+            "0.5": 6.233318115234375,
+            "0.9": 27.8665986328125,
+            "0.99": 39.79990283203125
+          },
+          "accelerationOver1_3": 7587,
+          "brakingOver1_4": 5818,
+          "historicalAvlCount": 266,
+          "historicalAvlBiasM": -79.73149641212983,
+          "historicalAvlMaeM": 102.47813841282326,
+          "historicalAvlAbsErrorM": {
+            "1": 525.5019599183383,
+            "0.5": 81.0059003860888,
+            "0.9": 225.02606871005264,
+            "0.99": 477.67165762311197
+          }
+        }
+      },
+      "positiveSpeedStepMs": {
+        "1": 0.0833331299651654,
+        "0.5": 0,
+        "0.9": 0.015228264399466729,
+        "0.99": 0.049506560365590424
+      },
+      "brakingSpeedStepMs": {
+        "1": 0.0833331299651654,
+        "0.5": 8.752512708198878e-05,
+        "0.9": 0.015266852407552989,
+        "0.99": 0.0470026361760949
+      },
+      "launchesOver1": 0,
+      "positiveStepsOver1": 0,
+      "actualSpeedMs": {
+        "1": 16.51019135054634,
+        "0.5": 5.276827459416248,
+        "0.9": 9.509157525595008,
+        "0.99": 12.828307094773344
+      },
+      "speedStepMs": {
+        "1": 0.0833331299651654,
+        "0.5": 0.0010372166655159276,
+        "0.9": 0.030734224248185615,
+        "0.99": 0.06307092487506916
+      },
+      "fullFleetFrameCpuMs": {
+        "1": 11.257250000000113,
+        "0.5": 0.24862500000017462,
+        "0.9": 0.8945410000001175,
+        "0.99": 1.937832999999955
+      },
+      "clockOffsetMs": -8,
+      "clockSynced": true,
+      "caveat": "Sampled captured inputs, known geometry-pack trips only. No rider ground truth; source timestamps and delivery timing preserved. CPU is Node on host, not Hermes/native rendering."
+    },
+    "private": {
+      "wirePath": "/tmp/tram-tracking-r3-pack-supplement-20260906/private-wire.jsonl",
+      "geometryArrivalReplay": true,
+      "geometryEventCounts": {
+        "packs": 2,
+        "trips": 0,
+        "applied": 192
+      },
+      "geometryCaveat": "Actual captured geometry receipts; provisional seeds and pertrip refinement. Harness loader concurrency differs from native scheduler.",
+      "researchNoSmoothShim": false,
+      "legacyMetricCaveat": "Legacy top-level slew/hold counters retain the historical discontinuity filter for comparison only. Use completeDisplayAudit for every actual frame, correction, both acceleration signs and visibility.",
+      "fps": 30,
+      "warmupSeconds": 0,
+      "segmentWindows": null,
+      "completeDisplayAudit": {
+        "note": "Every submitted replay state counted, including server-sanctioned resets. Displacement-derived speed around a reset describes visible teleport, not physical tram speed. Crossings are descriptive, not proof that a source-designated served/express/terminal stop should have held.",
+        "intervals": 947449,
+        "fullyVisibleWorldSpeedMs": {
+          "1": 21.77,
+          "0.5": 5.14,
+          "0.9": 9.58,
+          "0.99": 13.22
+        },
+        "fullyVisibleWorldAccelerationMs2": {
+          "1": 45.18,
+          "0.5": 0.03,
+          "0.9": 0.98,
+          "0.99": 2.49
+        },
+        "fullyVisibleWorldJerkMs3": {
+          "1": 1350.9,
+          "0.5": 0.01,
+          "0.9": 0.68,
+          "0.99": 57.62
+        },
+        "missingGeometryVehicleSeconds": 1799.295607176197,
+        "rawGpsTargetDistanceM": {
+          "1": 424.47,
+          "0.5": 0.02,
+          "0.9": 116.36,
+          "0.99": 362.32
+        },
+        "rawGpsTargetLagOver100Seconds": 199.13284716799362,
+        "rawGpsTargetNote": "Receipt-time separation from the latest GPS target while no route axis is available, not timestamp-matched position accuracy. Includes stale input and fade stages.",
+        "endpointClampedMovingSeconds": 0,
+        "endpointExamples": [],
+        "worstWorldAcceleration": [
+          {
+            "key": "9395",
+            "atMs": 1788701205020.9216,
+            "magnitude": 45.17945785805211,
+            "worldV": [
+              -4.054814330488015,
+              -2.227948738957918
+            ],
+            "worldA": [
+              15.944584391839614,
+              -42.27237444146012
+            ],
+            "position": [
+              14.414573235881575,
+              50.077408347517846
+            ],
+            "previousPosition": [
+              14.41457512782516,
+              50.07740901464663
+            ],
+            "geometryChanged": false,
+            "geometry": "L5V1",
+            "totalM": 15476.035,
+            "s": 5955.228841845119,
+            "reportedSpeedMs": 4.640957341668281,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9206",
+            "atMs": 1788701177887.6545,
+            "magnitude": 43.55232666372631,
+            "worldV": [
+              8.32389619436569,
+              -1.734586057202357
+            ],
+            "worldA": [
+              11.687419191095483,
+              41.954849427396816
+            ],
+            "position": [
+              14.471180657354319,
+              50.11412653871207
+            ],
+            "previousPosition": [
+              14.471176770514168,
+              50.11412705811015
+            ],
+            "geometryChanged": false,
+            "geometry": "L24V3",
+            "totalM": 16641.62,
+            "s": 2809.937575000973,
+            "reportedSpeedMs": 8.513950049459071,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "8088",
+            "atMs": 1788701146954.3967,
+            "magnitude": 41.82646644873777,
+            "worldV": [
+              -4.252887585300567,
+              -1.8926230316333346
+            ],
+            "worldA": [
+              12.144515831199373,
+              -40.02454285576706
+            ],
+            "position": [
+              14.406411081076135,
+              50.09312343836375
+            ],
+            "previousPosition": [
+              14.406413066089804,
+              50.09312400508384
+            ],
+            "geometryChanged": false,
+            "geometry": "L23V2",
+            "totalM": 8211.466,
+            "s": 3072.0834779778993,
+            "reportedSpeedMs": 4.678316044950835,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "8757",
+            "atMs": 1788701162521.0254,
+            "magnitude": 41.557115247956965,
+            "worldV": [
+              1.8242154504936932,
+              -9.045134548572989
+            ],
+            "worldA": [
+              -40.21530971214814,
+              -10.47486002235735
+            ],
+            "position": [
+              14.451651798948996,
+              50.07086838344203
+            ],
+            "previousPosition": [
+              14.451650947900879,
+              50.0708710918839
+            ],
+            "geometryChanged": false,
+            "geometry": "L21V1",
+            "totalM": 14049.155,
+            "s": 11965.804469998775,
+            "reportedSpeedMs": 9.216624521564194,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9356",
+            "atMs": 1788701147287.7292,
+            "magnitude": 39.872096721073255,
+            "worldV": [
+              -9.189673739538637,
+              1.1744393697476223
+            ],
+            "worldA": [
+              1.9718747807496806,
+              39.82330733105507
+            ],
+            "position": [
+              14.380909063684093,
+              50.034309405219965
+            ],
+            "previousPosition": [
+              14.380913347661767,
+              50.03430905355015
+            ],
+            "geometryChanged": false,
+            "geometry": "L12V1",
+            "totalM": 22859.724,
+            "s": 21758.80321981608,
+            "reportedSpeedMs": 9.300443509673329,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "8757",
+            "atMs": 1788701048321.3042,
+            "magnitude": 38.052290670391336,
+            "worldV": [
+              8.948000976337077,
+              -3.2846727222829037
+            ],
+            "worldA": [
+              16.099880135788496,
+              34.47855398471918
+            ],
+            "position": [
+              14.443587511415924,
+              50.07235293710096
+            ],
+            "previousPosition": [
+              14.443583336791159,
+              50.072353920651295
+            ],
+            "geometryChanged": false,
+            "geometry": "L21V1",
+            "totalM": 14049.155,
+            "s": 11307.69412742994,
+            "reportedSpeedMs": 9.523248961433767,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9419",
+            "atMs": 1788701061421.2722,
+            "magnitude": 37.83560264474535,
+            "worldV": [
+              3.513570010621228,
+              0.9279298649081641
+            ],
+            "worldA": [
+              14.718136347511326,
+              -34.85554891186089
+            ],
+            "position": [
+              14.419332651022412,
+              50.07584427983431
+            ],
+            "previousPosition": [
+              14.419331011672545,
+              50.075844001978396
+            ],
+            "geometryChanged": false,
+            "geometry": "L4V2",
+            "totalM": 7013.59,
+            "s": 3774.3550011696398,
+            "reportedSpeedMs": 3.664007465806412,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9429",
+            "atMs": 1788701073854.5752,
+            "magnitude": 37.73460749442708,
+            "worldV": [
+              2.312772967995611,
+              3.2036592024078927
+            ],
+            "worldA": [
+              33.530871583626315,
+              -17.308415687197765
+            ],
+            "position": [
+              14.404564088803461,
+              50.0810639678253
+            ],
+            "previousPosition": [
+              14.404563009600023,
+              50.081063008533356
+            ],
+            "geometryChanged": false,
+            "geometry": "L9V2",
+            "totalM": 16821.835,
+            "s": 8861.670773533246,
+            "reportedSpeedMs": 3.947608382883781,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "8762",
+            "atMs": 1788701185187.6367,
+            "magnitude": 37.73283694644362,
+            "worldV": [
+              -8.63618243888766,
+              -3.066754774176536
+            ],
+            "worldA": [
+              10.453401846018657,
+              -36.255942600800694
+            ],
+            "position": [
+              14.433974743233378,
+              50.086140030103806
+            ],
+            "previousPosition": [
+              14.433978773540334,
+              50.08614094840159
+            ],
+            "geometryChanged": false,
+            "geometry": "L26V2",
+            "totalM": 22724.900999999998,
+            "s": 9856.062972269832,
+            "reportedSpeedMs": 9.210720375411988,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9230",
+            "atMs": 1788701115087.8079,
+            "magnitude": 37.32553534130303,
+            "worldV": [
+              -8.368179479679776,
+              4.392190788351964
+            ],
+            "worldA": [
+              15.854295202524519,
+              33.79107740433959
+            ],
+            "position": [
+              14.443579481613419,
+              50.072355224303436
+            ],
+            "previousPosition": [
+              14.443583385726775,
+              50.07235390912196
+            ],
+            "geometryChanged": false,
+            "geometry": "L21V2",
+            "totalM": 14161.831,
+            "s": 2813.6234037995578,
+            "reportedSpeedMs": 9.47279620093408,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9354",
+            "atMs": 1788701152421.05,
+            "magnitude": 36.89625658710189,
+            "worldV": [
+              7.929257786785545,
+              3.563935198761285
+            ],
+            "worldA": [
+              -14.342761164281093,
+              33.99439589587745
+            ],
+            "position": [
+              14.381641857972475,
+              50.03438891146149
+            ],
+            "previousPosition": [
+              14.38163816156058,
+              50.034387844289824
+            ],
+            "geometryChanged": false,
+            "geometry": "L12V2",
+            "totalM": 22831.347999999998,
+            "s": 1084.710163047054,
+            "reportedSpeedMs": 8.744930123827448,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9355",
+            "atMs": 1788701053321.292,
+            "magnitude": 36.73868845382753,
+            "worldV": [
+              -3.509081799106984,
+              -0.06535920101989114
+            ],
+            "worldA": [
+              -5.001222058148943,
+              -36.396689509246364
+            ],
+            "position": [
+              14.432199457660586,
+              50.089552959412124
+            ],
+            "previousPosition": [
+              14.432201095384649,
+              50.08955297898304
+            ],
+            "geometryChanged": false,
+            "geometry": "L6V2",
+            "totalM": 10486.421999999999,
+            "s": 7241.077500501388,
+            "reportedSpeedMs": 3.5308023907745483,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9356",
+            "atMs": 1788701151554.3855,
+            "magnitude": 36.53014768959954,
+            "worldV": [
+              -9.404235345009294,
+              3.616035225904873
+            ],
+            "worldA": [
+              10.866504481919339,
+              34.87650743076751
+            ],
+            "position": [
+              14.380341082555402,
+              50.03437721452207
+            ],
+            "previousPosition": [
+              14.380345466562058,
+              50.03437613174976
+            ],
+            "geometryChanged": false,
+            "geometry": "L12V1",
+            "totalM": 22859.724,
+            "s": 21800.272437843738,
+            "reportedSpeedMs": 10.095667477820754,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "6312",
+            "atMs": 1788701051554.6296,
+            "magnitude": 36.39046870766242,
+            "worldV": [
+              -6.188835472694849,
+              -2.482618527608557
+            ],
+            "worldA": [
+              11.016632227290021,
+              -34.682849178405064
+            ],
+            "position": [
+              14.389546738072664,
+              50.0927711605334
+            ],
+            "previousPosition": [
+              14.389549626658942,
+              50.09277190391958
+            ],
+            "geometryChanged": false,
+            "geometry": "L23V3",
+            "totalM": 8361.651,
+            "s": 6928.646271703814,
+            "reportedSpeedMs": 6.688276255601927,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9146",
+            "atMs": 1788701128987.774,
+            "magnitude": 35.88281414327777,
+            "worldV": [
+              5.175128361353354,
+              2.657091963773773
+            ],
+            "worldA": [
+              19.758509213824873,
+              -29.95292413919237
+            ],
+            "position": [
+              14.479057585443755,
+              50.052323852344095
+            ],
+            "previousPosition": [
+              14.479055172033183,
+              50.052323056714236
+            ],
+            "geometryChanged": false,
+            "geometry": "L24V3",
+            "totalM": 16641.62,
+            "s": 16326.387176437906,
+            "reportedSpeedMs": 5.7900246357817275,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9430",
+            "atMs": 1788701191120.9556,
+            "magnitude": 35.59154212277143,
+            "worldV": [
+              2.9459353886546027,
+              3.251646127588274
+            ],
+            "worldA": [
+              -22.558288111551565,
+              27.529647802927744
+            ],
+            "position": [
+              14.47285153011016,
+              50.07847508382803
+            ],
+            "previousPosition": [
+              14.472850155529965,
+              50.07847411016706
+            ],
+            "geometryChanged": false,
+            "geometry": "L9V2",
+            "totalM": 16821.835,
+            "s": 14974.937721787232,
+            "reportedSpeedMs": 4.408563652682404,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "6312",
+            "atMs": 1788701053221.2922,
+            "magnitude": 35.53563913641419,
+            "worldV": [
+              -4.983176375762515,
+              -3.268630167644729
+            ],
+            "worldA": [
+              16.51457302148793,
+              -31.465068357646945
+            ],
+            "position": [
+              14.389411725852765,
+              50.09273603456013
+            ],
+            "previousPosition": [
+              14.389414051706224,
+              50.092737013306746
+            ],
+            "geometryChanged": false,
+            "geometry": "L23V3",
+            "totalM": 8361.651,
+            "s": 6939.107383574176,
+            "reportedSpeedMs": 5.976008193197637,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9077",
+            "atMs": 1788701187320.9648,
+            "magnitude": 35.372481151152655,
+            "worldV": [
+              3.014172625348414,
+              3.727069805602199
+            ],
+            "worldA": [
+              -23.952249675724506,
+              26.028871628643554
+            ],
+            "position": [
+              14.479386511913173,
+              50.10354419910355
+            ],
+            "previousPosition": [
+              14.479385104757405,
+              50.10354308308346
+            ],
+            "geometryChanged": false,
+            "geometry": "L31V2",
+            "totalM": 4488.592,
+            "s": 4089.848706415038,
+            "reportedSpeedMs": 4.790451277837232,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9427",
+            "atMs": 1788701093721.1934,
+            "magnitude": 35.2776373202193,
+            "worldV": [
+              -3.8580223006124332,
+              -0.9338137928322686
+            ],
+            "worldA": [
+              3.813933738455953,
+              -35.07086546316753
+            ],
+            "position": [
+              14.419447322797465,
+              50.07586371572839
+            ],
+            "previousPosition": [
+              14.419449122861481,
+              50.07586399534616
+            ],
+            "geometryChanged": false,
+            "geometry": "L4V3",
+            "totalM": 6998.736,
+            "s": 3183.08093737525,
+            "reportedSpeedMs": 4.01346369167583,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          },
+          {
+            "key": "9426",
+            "atMs": 1788701048154.638,
+            "magnitude": 35.24972960889983,
+            "worldV": [
+              3.8553442874812482,
+              0.8879189889188519
+            ],
+            "worldA": [
+              11.821157121541848,
+              -33.208488098803436
+            ],
+            "position": [
+              14.414576564798274,
+              50.077409179299806
+            ],
+            "previousPosition": [
+              14.414574765925785,
+              50.077408913424605
+            ],
+            "geometryChanged": false,
+            "geometry": "L5V2",
+            "totalM": 15497.872,
+            "s": 9479.923148774165,
+            "reportedSpeedMs": 4.004779558179892,
+            "offset": [
+              0,
+              0
+            ],
+            "reason": null
+          }
+        ],
+        "worldVectorNote": "Finite differences of actual longitude/latitude positions, including raw GPS retargets, lateral alignment and route curvature. Route vertices can exceed correction-only acceleration/jerk bounds; no geometry-change exemption.",
+        "fullyVisibleAbsoluteAccelerationMs2": {
+          "1": 2.5,
+          "0.5": 0.03,
+          "0.9": 0.94,
+          "0.99": 2.03
+        },
+        "fullyVisibleAbsoluteJerkMs3": {
+          "1": 6.98,
+          "0.5": 0.01,
+          "0.9": 0.62,
+          "0.99": 4
+        },
+        "fullyVisibleAccelerationOver2_5": 28,
+        "fullyVisibleBrakingOver2_5": 0,
+        "fullyVisibleJerkOver4": 80,
+        "fullyVisibleJerkExamples": [
+          {
+            "key": "9073",
+            "atMs": 1788701108054.4917,
+            "jerkMs3": 4.001217840896682,
+            "accelerationMs2": 0.2666457452735902,
+            "previousAccelerationMs2": 0.1332721428636423,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.014130536620610866,
+            "previousSpeedMs": 0.005242366811177495
+          },
+          {
+            "key": "9073",
+            "atMs": 1788701140454.4126,
+            "jerkMs3": 4.118105583313156,
+            "accelerationMs2": 0.5632391922077977,
+            "previousAccelerationMs2": 0.4259693412296495,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.15964678676748376,
+            "previousSpeedMs": 0.14087219286374664
+          },
+          {
+            "key": "9073",
+            "atMs": 1788701140487.7458,
+            "jerkMs3": 4.265118137465355,
+            "accelerationMs2": 0.7054094496937736,
+            "previousAccelerationMs2": 0.5632391922077977,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.18316037768424157,
+            "previousSpeedMs": 0.15964678676748376
+          },
+          {
+            "key": "9073",
+            "atMs": 1788701140521.079,
+            "jerkMs3": 4.318714751485555,
+            "accelerationMs2": 0.8493662566187192,
+            "previousAccelerationMs2": 0.7054094496937736,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.21147251711659595,
+            "previousSpeedMs": 0.18316037768424157
+          },
+          {
+            "key": "9073",
+            "atMs": 1788701140554.4124,
+            "jerkMs3": 4.313413627187152,
+            "accelerationMs2": 0.9931463598317913,
+            "previousAccelerationMs2": 0.8493662566187192,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.244577314955198,
+            "previousSpeedMs": 0.21147251711659595
+          },
+          {
+            "key": "9073",
+            "atMs": 1788701140587.7456,
+            "jerkMs3": 4.279709707542327,
+            "accelerationMs2": 1.1358030017995346,
+            "previousAccelerationMs2": 0.9931463598317913,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.28243732258329757,
+            "previousSpeedMs": 0.244577314955198
+          },
+          {
+            "key": "9073",
+            "atMs": 1788701140621.0789,
+            "jerkMs3": 4.2369688675497095,
+            "accelerationMs2": 1.2770349525791158,
+            "previousAccelerationMs2": 1.1358030017995346,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.32500505041056427,
+            "previousSpeedMs": 0.28243732258329757
+          },
+          {
+            "key": "9073",
+            "atMs": 1788701140654.412,
+            "jerkMs3": 4.195161790628862,
+            "accelerationMs2": 1.4168733375302707,
+            "previousAccelerationMs2": 1.2770349525791158,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.3722340463561259,
+            "previousSpeedMs": 0.32500505041056427
+          },
+          {
+            "key": "9073",
+            "atMs": 1788701140687.7454,
+            "jerkMs3": 4.158537262238332,
+            "accelerationMs2": 1.5554909078489196,
+            "previousAccelerationMs2": 1.4168733375302707,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.42408361669824907,
+            "previousSpeedMs": 0.3722340463561259
+          },
+          {
+            "key": "9073",
+            "atMs": 1788701140721.0786,
+            "jerkMs3": 4.128019183826245,
+            "accelerationMs2": 1.6930912113707333,
+            "previousAccelerationMs2": 1.5554909078489196,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.48051985262649133,
+            "previousSpeedMs": 0.42408361669824907
+          },
+          {
+            "key": "9073",
+            "atMs": 1788701140754.4119,
+            "jerkMs3": 4.10330061970292,
+            "accelerationMs2": 1.8298675647667046,
+            "previousAccelerationMs2": 1.6930912113707333,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.5415152892037112,
+            "previousSpeedMs": 0.48051985262649133
+          },
+          {
+            "key": "9124",
+            "atMs": 1788701140754.4119,
+            "jerkMs3": 4.049836341759589,
+            "accelerationMs2": 1.3533777672234157,
+            "previousAccelerationMs2": 1.2183835520746213,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 1.5808995067525107,
+            "previousSpeedMs": 1.5357870246498948
+          },
+          {
+            "key": "9073",
+            "atMs": 1788701140787.745,
+            "jerkMs3": 4.083528797971714,
+            "accelerationMs2": 1.9659848590473374,
+            "previousAccelerationMs2": 1.8298675647667046,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.607047957846365,
+            "previousSpeedMs": 0.5415152892037112
+          },
+          {
+            "key": "9124",
+            "atMs": 1788701140787.745,
+            "jerkMs3": 4.112067591064114,
+            "accelerationMs2": 1.4904463522846356,
+            "previousAccelerationMs2": 1.3533777672234157,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 1.6305809305358305,
+            "previousSpeedMs": 1.5808995067525107
+          },
+          {
+            "key": "9073",
+            "atMs": 1788701140821.0784,
+            "jerkMs3": 4.067842459340767,
+            "accelerationMs2": 2.101579276650163,
+            "previousAccelerationMs2": 1.9659848590473374,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.6771004293744111,
+            "previousSpeedMs": 0.607047957846365
+          },
+          {
+            "key": "9124",
+            "atMs": 1788701140821.0784,
+            "jerkMs3": 4.1654719377818505,
+            "accelerationMs2": 1.6292950778903899,
+            "previousAccelerationMs2": 1.4904463522846356,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 1.6848906338731373,
+            "previousSpeedMs": 1.6305809305358305
+          },
+          {
+            "key": "9073",
+            "atMs": 1788701140854.4116,
+            "jerkMs3": 4.055396934958297,
+            "accelerationMs2": 2.2367588444530586,
+            "previousAccelerationMs2": 2.101579276650163,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.7516588754949456,
+            "previousSpeedMs": 0.6771004293744111
+          },
+          {
+            "key": "9124",
+            "atMs": 1788701140854.4116,
+            "jerkMs3": 4.209963784983569,
+            "accelerationMs2": 1.769626861448779,
+            "previousAccelerationMs2": 1.6292950778903899,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 1.7438780519088273,
+            "previousSpeedMs": 1.6848906338731373
+          },
+          {
+            "key": "9124",
+            "atMs": 1788701140887.7449,
+            "jerkMs3": 4.245680085593109,
+            "accelerationMs2": 1.9111491854542193,
+            "previousAccelerationMs2": 1.769626861448779,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 1.8075828692275824,
+            "previousSpeedMs": 1.7438780519088273
+          },
+          {
+            "key": "9124",
+            "atMs": 1788701140921.0781,
+            "jerkMs3": 4.121122428082279,
+            "accelerationMs2": 2.04851959767916,
+            "previousAccelerationMs2": 1.9111491854542193,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 1.875866689107936,
+            "previousSpeedMs": 1.8075828692275824
+          },
+          {
+            "key": "9357",
+            "atMs": 1788701153487.714,
+            "jerkMs3": 4.905874936827792,
+            "accelerationMs2": 0.15242228332819088,
+            "previousAccelerationMs2": -0.0111064819916111,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.029879272630475313,
+            "previousSpeedMs": 0.024798542257026122
+          },
+          {
+            "key": "9357",
+            "atMs": 1788701153521.0474,
+            "jerkMs3": 6.980532576510808,
+            "accelerationMs2": 0.38510613446802244,
+            "previousAccelerationMs2": 0.15242228332819088,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.04271611243939194,
+            "previousSpeedMs": 0.029879272630475313
+          },
+          {
+            "key": "9357",
+            "atMs": 1788701153554.3806,
+            "jerkMs3": 6.1133082747743375,
+            "accelerationMs2": 0.5888825794581993,
+            "previousAccelerationMs2": 0.38510613446802244,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.06234548383127825,
+            "previousSpeedMs": 0.04271611243939194
+          },
+          {
+            "key": "9357",
+            "atMs": 1788701153587.7139,
+            "jerkMs3": 5.066301660741564,
+            "accelerationMs2": 0.7577588891862335,
+            "previousAccelerationMs2": 0.5888825794581993,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.08760405180424309,
+            "previousSpeedMs": 0.06234548383127825
+          },
+          {
+            "key": "9357",
+            "atMs": 1788701153621.047,
+            "jerkMs3": 4.534170896499407,
+            "accelerationMs2": 0.9088975500777748,
+            "previousAccelerationMs2": 0.7577588891862335,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.1179005628405636,
+            "previousSpeedMs": 0.08760405180424309
+          },
+          {
+            "key": "9357",
+            "atMs": 1788701153654.3804,
+            "jerkMs3": 4.287423839706363,
+            "accelerationMs2": 1.0518113291565416,
+            "previousAccelerationMs2": 0.9088975500777748,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.1529608548824899,
+            "previousSpeedMs": 0.1179005628405636
+          },
+          {
+            "key": "9357",
+            "atMs": 1788701153687.7136,
+            "jerkMs3": 4.166627839113257,
+            "accelerationMs2": 1.1906985847126086,
+            "previousAccelerationMs2": 1.0518113291565416,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.19265071080694463,
+            "previousSpeedMs": 0.1529608548824899
+          },
+          {
+            "key": "9357",
+            "atMs": 1788701153721.0469,
+            "jerkMs3": 4.102795072649088,
+            "accelerationMs2": 1.3274580865812604,
+            "previousAccelerationMs2": 1.1906985847126086,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.236899205664171,
+            "previousSpeedMs": 0.19265071080694463
+          },
+          {
+            "key": "9357",
+            "atMs": 1788701153754.3801,
+            "jerkMs3": 4.066804620391067,
+            "accelerationMs2": 1.4630179096368887,
+            "previousAccelerationMs2": 1.3274580865812604,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.28566635025803166,
+            "previousSpeedMs": 0.236899205664171
+          },
+          {
+            "key": "9357",
+            "atMs": 1788701153787.7134,
+            "jerkMs3": 4.045222655624441,
+            "accelerationMs2": 1.5978583356233076,
+            "previousAccelerationMs2": 1.4630179096368887,
+            "reason": "ordinary",
+            "opacity": 1,
+            "previousOpacity": 1,
+            "axisStepM": null,
+            "speedMs": 0.33892816474476434,
+            "previousSpeedMs": 0.28566635025803166
+          }
+        ],
+        "activeVehicleSeconds": 31581.556230525115,
+        "opacityWeightedVisibleSeconds": 31581.556230525115,
+        "visibleCoverage": 1,
+        "maxHiddenRunSeconds": 0,
+        "unrevealedTransitionsAtEnd": [],
+        "hiddenVehicleSeconds": 0,
+        "fadingVehicleSeconds": 0,
+        "counts": {
+          "curve-restored": 11
+        },
+        "maxWorldStepM": 0.7255824837957251,
+        "maxFullyVisibleWorldStepM": 0.7255824837957251,
+        "maxUnbrokenNegativeSpeedStepMs": 0.0833331299651654,
+        "physicalBrakingExamples": [],
+        "maxBackwardStepM": 0,
+        "maxPositiveSpeedStepMs": 0.08333674487874987,
+        "maxNegativeSpeedStepMs": 0.0833331299651654,
+        "stationCrossings": 310,
+        "crossingsAbove5Ms": 81,
+        "worst": [],
+        "stopCrossingExamples": [
+          {
+            "key": "9237",
+            "atMs": 1788701040554.6565,
+            "stopId": "U2701Z1P",
+            "stopSequence": 3,
+            "stopName": "N\u00e1m\u011bst\u00ed Olgy Scheinpflugov\u00e9",
+            "stopDistM": 1091.748,
+            "intervalSpeedMs": 12.382810295301427,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U2701Z1P",
+            "fixAgeS": 18.554656494140627,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9419",
+            "atMs": 1788701044787.9795,
+            "stopId": "U237Z1P",
+            "stopSequence": 9,
+            "stopName": "Karlovo n\u00e1m\u011bst\u00ed",
+            "stopDistM": 3709.511,
+            "intervalSpeedMs": 5.579804782109396,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U237Z1P",
+            "fixAgeS": 4.7879794921875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9519",
+            "atMs": 1788701045087.9788,
+            "stopId": "U775Z1P",
+            "stopSequence": 6,
+            "stopName": "U Elektry",
+            "stopDistM": 2105.264,
+            "intervalSpeedMs": 7.51654822376213,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U775Z1P",
+            "fixAgeS": 11.087978759765624,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9307",
+            "atMs": 1788701048987.9692,
+            "stopId": "U163Z1P",
+            "stopSequence": 10,
+            "stopName": "Hrad\u010dansk\u00e1",
+            "stopDistM": 4894.505999999999,
+            "intervalSpeedMs": 6.252397470135893,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U163Z1P",
+            "fixAgeS": 53.98796923828125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9339",
+            "atMs": 1788701049154.6355,
+            "stopId": "U81Z1P",
+            "stopSequence": 5,
+            "stopName": "D\u011blnick\u00e1",
+            "stopDistM": 1949.568,
+            "intervalSpeedMs": 5.248928185389387,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U81Z1P",
+            "fixAgeS": 24.154635498046876,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9354",
+            "atMs": 1788701049521.3013,
+            "stopId": "U1030Z1P",
+            "stopSequence": 2,
+            "stopName": "Poliklinika Barrandov",
+            "stopDistM": 508.554,
+            "intervalSpeedMs": 11.592696657749581,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U1030Z1P",
+            "fixAgeS": 26.52130126953125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9255",
+            "atMs": 1788701049921.3003,
+            "stopId": "U100Z2P",
+            "stopSequence": 28,
+            "stopName": "Vltavsk\u00e1",
+            "stopDistM": 12998.039999999999,
+            "intervalSpeedMs": 10.53783256895159,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U100Z2P",
+            "fixAgeS": 14.92130029296875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9270",
+            "atMs": 1788701050754.6316,
+            "stopId": "U118Z1P",
+            "stopSequence": 8,
+            "stopName": "Flora",
+            "stopDistM": 2721.181,
+            "intervalSpeedMs": 6.786792463924302,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U118Z1P",
+            "fixAgeS": 30.754631591796876,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9123",
+            "atMs": 1788701057387.9487,
+            "stopId": "U816Z1P",
+            "stopSequence": 13,
+            "stopName": "Urxova",
+            "stopDistM": 5295.099999999999,
+            "intervalSpeedMs": 7.938553131344905,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U816Z1P",
+            "fixAgeS": 30.38794873046875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8764",
+            "atMs": 1788701058254.6133,
+            "stopId": "U391Z2P",
+            "stopSequence": 25,
+            "stopName": "Vr\u0161ovick\u00e9 n\u00e1m\u011bst\u00ed",
+            "stopDistM": 12064.096,
+            "intervalSpeedMs": 8.944135259362401,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U391Z2P",
+            "fixAgeS": 17.25461328125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9158",
+            "atMs": 1788701058821.2786,
+            "stopId": "U592Z2P",
+            "stopSequence": 15,
+            "stopName": "Pra\u0161n\u00fd most",
+            "stopDistM": 6672.914,
+            "intervalSpeedMs": 6.910785417347459,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U592Z2P",
+            "fixAgeS": 68.82127856445312,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9254",
+            "atMs": 1788701061187.9395,
+            "stopId": "U539Z1P",
+            "stopSequence": 11,
+            "stopName": "N\u00e1rodn\u00ed t\u0159\u00edda",
+            "stopDistM": 5719.934,
+            "intervalSpeedMs": 10.293929309005836,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U539Z1P",
+            "fixAgeS": 45.187939453125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9340",
+            "atMs": 1788701061787.938,
+            "stopId": "U403Z1P",
+            "stopSequence": 3,
+            "stopName": "Na Gro\u0161i",
+            "stopDistM": 923.582,
+            "intervalSpeedMs": 14.40915356799527,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U403Z1P",
+            "fixAgeS": 20.78793798828125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9342",
+            "atMs": 1788701063987.9326,
+            "stopId": "U190Z2P",
+            "stopSequence": 15,
+            "stopName": "I. P. Pavlova",
+            "stopDistM": 6063.436000000001,
+            "intervalSpeedMs": 8.618375459378026,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U190Z2P",
+            "fixAgeS": 38.9879326171875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9136",
+            "atMs": 1788701065487.929,
+            "stopId": "U614Z1P",
+            "stopSequence": 13,
+            "stopName": "P\u0159\u00edstavi\u0161t\u011b",
+            "stopDistM": 6883.860000000001,
+            "intervalSpeedMs": 12.834474347036794,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U614Z1P",
+            "fixAgeS": 15.487928955078125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9322",
+            "atMs": 1788701065921.2612,
+            "stopId": "U507Z2P",
+            "stopSequence": 22,
+            "stopName": "Pet\u0159iny",
+            "stopDistM": 10359.049,
+            "intervalSpeedMs": 5.32085252390492,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U507Z2P",
+            "fixAgeS": 29.92126123046875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9075",
+            "atMs": 1788701066454.5933,
+            "stopId": "U690Z2P",
+            "stopSequence": 16,
+            "stopName": "Solidarita",
+            "stopDistM": 6736.792,
+            "intervalSpeedMs": 10.09000240317979,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U690Z2P",
+            "fixAgeS": 35.45459326171875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9430",
+            "atMs": 1788701067554.5906,
+            "stopId": "U515Z2P",
+            "stopSequence": 30,
+            "stopName": "Ol\u0161ansk\u00e9 h\u0159bitovy",
+            "stopDistM": 14577.883,
+            "intervalSpeedMs": 6.169614299899222,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U515Z2P",
+            "fixAgeS": 29.554590576171876,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9336",
+            "atMs": 1788701068154.589,
+            "stopId": "U948Z1P",
+            "stopSequence": 4,
+            "stopName": "U Libu\u0161sk\u00e9ho potoka",
+            "stopDistM": 1002.448,
+            "intervalSpeedMs": 12.404341401103606,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U948Z1P",
+            "fixAgeS": 28.154589111328125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9356",
+            "atMs": 1788701072887.911,
+            "stopId": "U49Z4P",
+            "stopSequence": 43,
+            "stopName": "Geologick\u00e1",
+            "stopDistM": 21145.636,
+            "intervalSpeedMs": 12.517553333301631,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U49Z4P",
+            "fixAgeS": 47.887910888671875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9146",
+            "atMs": 1788701075854.5703,
+            "stopId": "U751Z2P",
+            "stopSequence": 39,
+            "stopName": "Tepl\u00e1rna Michle",
+            "stopDistM": 15924.832,
+            "intervalSpeedMs": 10.32095838284631,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U751Z2P",
+            "fixAgeS": 49.8545703125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8256",
+            "atMs": 1788701076021.2366,
+            "stopId": "U209Z2P",
+            "stopSequence": 7,
+            "stopName": "Ji\u0159\u00edho z Pod\u011bbrad",
+            "stopDistM": 2181.319,
+            "intervalSpeedMs": 5.529725518625957,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U209Z2P",
+            "fixAgeS": 58.02123657226562,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9448",
+            "atMs": 1788701076087.903,
+            "stopId": "U560Z2P",
+            "stopSequence": 16,
+            "stopName": "Pod Karlovem",
+            "stopDistM": 6077.239,
+            "intervalSpeedMs": 5.844838932616805,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U560Z2P",
+            "fixAgeS": 34.08790307617188,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9450",
+            "atMs": 1788701076754.568,
+            "stopId": "U25Z2P",
+            "stopSequence": 23,
+            "stopName": "Bertramka",
+            "stopDistM": 9875.203000000001,
+            "intervalSpeedMs": 9.342567556271954,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U25Z2P",
+            "fixAgeS": 14.754568115234376,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9105",
+            "atMs": 1788701080487.8923,
+            "stopId": "U464Z2P",
+            "stopSequence": 11,
+            "stopName": "Poliklinika Vyso\u010dany",
+            "stopDistM": 5626.581,
+            "intervalSpeedMs": 7.231483133568623,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U464Z2P",
+            "fixAgeS": 26.487892333984377,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9440",
+            "atMs": 1788701080621.2253,
+            "stopId": "U240Z2P",
+            "stopSequence": 26,
+            "stopName": "Kaval\u00edrka",
+            "stopDistM": 11451.88,
+            "intervalSpeedMs": 10.054433786085777,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U240Z2P",
+            "fixAgeS": 33.62122534179687,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8297",
+            "atMs": 1788701081687.8894,
+            "stopId": "U531Z1P",
+            "stopSequence": 8,
+            "stopName": "Poho\u0159elec",
+            "stopDistM": 3122.071,
+            "intervalSpeedMs": 6.45440340437036,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U531Z1P",
+            "fixAgeS": 21.687889404296875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9505",
+            "atMs": 1788701082187.8882,
+            "stopId": "U655Z1P",
+            "stopSequence": 16,
+            "stopName": "Invalidovna",
+            "stopDistM": 7200.8279999999995,
+            "intervalSpeedMs": 12.313061085716685,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U655Z1P",
+            "fixAgeS": 24.18788818359375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9383",
+            "atMs": 1788701084887.8816,
+            "stopId": "U34Z2P",
+            "stopSequence": 34,
+            "stopName": "Biskupcova",
+            "stopDistM": 16197.652000000002,
+            "intervalSpeedMs": 5.5371927755810955,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U34Z2P",
+            "fixAgeS": 20.887881591796877,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9086",
+            "atMs": 1788701086687.8772,
+            "stopId": "U463Z1P",
+            "stopSequence": 14,
+            "stopName": "N\u00e1dra\u017e\u00ed Vr\u0161ovice",
+            "stopDistM": 5911.768999999999,
+            "intervalSpeedMs": 14.05583182977013,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U463Z1P",
+            "fixAgeS": 32.68787719726563,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9248",
+            "atMs": 1788701087154.5427,
+            "stopId": "U929Z2P",
+            "stopSequence": 40,
+            "stopName": "Poliklinika Mod\u0159any",
+            "stopDistM": 21864.521,
+            "intervalSpeedMs": 5.099189326603775,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U929Z2P",
+            "fixAgeS": 16.154542724609374,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9285",
+            "atMs": 1788701090021.2024,
+            "stopId": "U157Z2P",
+            "stopSequence": 34,
+            "stopName": "Bo\u0159islavka",
+            "stopDistM": 18347.552,
+            "intervalSpeedMs": 6.90120925906062,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U157Z2P",
+            "fixAgeS": 25.021202392578125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8015",
+            "atMs": 1788701094754.5242,
+            "stopId": "U739Z1P",
+            "stopSequence": 4,
+            "stopName": "\u0160t\u011bp\u00e1nsk\u00e1",
+            "stopDistM": 1241.333,
+            "intervalSpeedMs": 5.695613298892596,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U739Z1P",
+            "fixAgeS": 27.754524169921876,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9336",
+            "atMs": 1788701097421.1843,
+            "stopId": "U929Z1P",
+            "stopSequence": 5,
+            "stopName": "Poliklinika Mod\u0159any",
+            "stopDistM": 1328.019,
+            "intervalSpeedMs": 6.435774454405878,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U929Z1P",
+            "fixAgeS": 24.421184326171876,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9508",
+            "atMs": 1788701099221.18,
+            "stopId": "U269Z1P",
+            "stopSequence": 27,
+            "stopName": "Koh-i-noor",
+            "stopDistM": 12498.08,
+            "intervalSpeedMs": 9.660727940226115,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U269Z1P",
+            "fixAgeS": 24.221179931640624,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9446",
+            "atMs": 1788701099521.1792,
+            "stopId": "U567Z1P",
+            "stopSequence": 8,
+            "stopName": "Hotel Golf",
+            "stopDistM": 3674.052,
+            "intervalSpeedMs": 7.657932319080412,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U865Z1P",
+            "fixAgeS": 49.52117919921875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9514",
+            "atMs": 1788701101121.1753,
+            "stopId": "U1053Z2P",
+            "stopSequence": 42,
+            "stopName": "Vozovna Hloub\u011bt\u00edn",
+            "stopDistM": 21140.630999999998,
+            "intervalSpeedMs": 5.578589270072867,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U499Z2P",
+            "fixAgeS": 66.12117529296874,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9217",
+            "atMs": 1788701104421.1672,
+            "stopId": "U337Z2P",
+            "stopSequence": 29,
+            "stopName": "Lihovar",
+            "stopDistM": 14533.095,
+            "intervalSpeedMs": 9.357830278508464,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U337Z2P",
+            "fixAgeS": 28.421167236328124,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8268",
+            "atMs": 1788701105754.4973,
+            "stopId": "U539Z2P",
+            "stopSequence": 9,
+            "stopName": "N\u00e1rodn\u00ed t\u0159\u00edda",
+            "stopDistM": 3236.867,
+            "intervalSpeedMs": 6.983001400728111,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U539Z2P",
+            "fixAgeS": 67.75449731445312,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9506",
+            "atMs": 1788701106021.1633,
+            "stopId": "U34Z1P",
+            "stopSequence": 16,
+            "stopName": "Biskupcova",
+            "stopDistM": 7479.345,
+            "intervalSpeedMs": 8.723356992734919,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U34Z1P",
+            "fixAgeS": 18.021163330078124,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9435",
+            "atMs": 1788701107587.8262,
+            "stopId": "U751Z1P",
+            "stopSequence": 2,
+            "stopName": "Tepl\u00e1rna Michle",
+            "stopDistM": 751.127,
+            "intervalSpeedMs": 10.484845923625896,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U751Z1P",
+            "fixAgeS": 42.587826171875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9255",
+            "atMs": 1788701114121.1436,
+            "stopId": "U595Z2P",
+            "stopSequence": 29,
+            "stopName": "Hole\u0161ovick\u00e1 tr\u017enice",
+            "stopDistM": 13466.752,
+            "intervalSpeedMs": 6.195765981585888,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U595Z2P",
+            "fixAgeS": 28.1211435546875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9059",
+            "atMs": 1788701115254.474,
+            "stopId": "U76Z1P",
+            "stopSequence": 12,
+            "stopName": "Mod\u0159ansk\u00e1 \u0161kola",
+            "stopDistM": 4963.94,
+            "intervalSpeedMs": 12.79288109297222,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U76Z1P",
+            "fixAgeS": 28.25447412109375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9519",
+            "atMs": 1788701120587.7944,
+            "stopId": "U691Z1P",
+            "stopSequence": 7,
+            "stopName": "Podkov\u00e1\u0159sk\u00e1",
+            "stopDistM": 2475.304,
+            "intervalSpeedMs": 15.930200528333836,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U691Z1P",
+            "fixAgeS": 35.58779443359375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9075",
+            "atMs": 1788701126987.7788,
+            "stopId": "U900Z2P",
+            "stopSequence": 17,
+            "stopName": "Zborov - Stra\u0161nick\u00e9 divadlo",
+            "stopDistM": 7194.63,
+            "intervalSpeedMs": 6.861004412010953,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U900Z2P",
+            "fixAgeS": 28.98777880859375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9326",
+            "atMs": 1788701127754.4436,
+            "stopId": "U337Z1P",
+            "stopSequence": 16,
+            "stopName": "Lihovar",
+            "stopDistM": 8621.816,
+            "intervalSpeedMs": 12.389887724376978,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U337Z1P",
+            "fixAgeS": 16.754443603515625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9285",
+            "atMs": 1788701127921.1099,
+            "stopId": "U943Z2P",
+            "stopSequence": 35,
+            "stopName": "S\u00eddli\u0161t\u011b \u010cerven\u00fd Vrch",
+            "stopDistM": 18645.973,
+            "intervalSpeedMs": 11.803780466663667,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U943Z2P",
+            "fixAgeS": 13.92110986328125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9217",
+            "atMs": 1788701133454.4297,
+            "stopId": "U337Z12P",
+            "stopSequence": 30,
+            "stopName": "Lihovar",
+            "stopDistM": 14719.301,
+            "intervalSpeedMs": 5.453238446194055,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U337Z2P",
+            "fixAgeS": 57.4544296875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8775",
+            "atMs": 1788701135821.0906,
+            "stopId": "U778Z1P",
+            "stopSequence": 7,
+            "stopName": "U Ka\u0161tanu",
+            "stopDistM": 3085.175,
+            "intervalSpeedMs": 11.019123274012426,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U778Z1P",
+            "fixAgeS": 16.821090576171876,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9248",
+            "atMs": 1788701143487.7385,
+            "stopId": "U948Z2P",
+            "stopSequence": 41,
+            "stopName": "U Libu\u0161sk\u00e9ho potoka",
+            "stopDistM": 22190.82,
+            "intervalSpeedMs": 12.590911179495233,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U948Z2P",
+            "fixAgeS": 22.487738525390625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9225",
+            "atMs": 1788701144787.7354,
+            "stopId": "U447Z2P",
+            "stopSequence": 30,
+            "stopName": "Nad Trojou",
+            "stopDistM": 17581.734,
+            "intervalSpeedMs": 11.364016582237795,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U447Z2P",
+            "fixAgeS": 21.7877353515625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9206",
+            "atMs": 1788701146954.3967,
+            "stopId": "U54Z1P",
+            "stopSequence": 9,
+            "stopName": "Bulovka",
+            "stopDistM": 2499.88,
+            "intervalSpeedMs": 10.318884525417825,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U54Z1P",
+            "fixAgeS": 43.954396728515626,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9128",
+            "atMs": 1788701154354.3787,
+            "stopId": "U692Z2P",
+            "stopSequence": 13,
+            "stopName": "Sparta",
+            "stopDistM": 4996.458,
+            "intervalSpeedMs": 6.130459338852671,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U692Z2P",
+            "fixAgeS": 29.354378662109376,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8565",
+            "atMs": 1788701155254.3765,
+            "stopId": "U519Z2P",
+            "stopSequence": 19,
+            "stopName": "O\u0159echovka",
+            "stopDistM": 8423.631000000001,
+            "intervalSpeedMs": 7.77399061774046,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U519Z2P",
+            "fixAgeS": 13.25437646484375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8757",
+            "atMs": 1788701157654.3706,
+            "stopId": "U627Z2P",
+            "stopSequence": 23,
+            "stopName": "Rusk\u00e1",
+            "stopDistM": 11913.923999999999,
+            "intervalSpeedMs": 11.776548404242396,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U627Z2P",
+            "fixAgeS": 39.65437060546875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9361",
+            "atMs": 1788701159987.6982,
+            "stopId": "U508Z2P",
+            "stopSequence": 17,
+            "stopName": "Bohemians",
+            "stopDistM": 7682.5,
+            "intervalSpeedMs": 9.08522949070831,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U508Z2P",
+            "fixAgeS": 7.9876982421875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9275",
+            "atMs": 1788701160287.6975,
+            "stopId": "U78Z2P",
+            "stopSequence": 44,
+            "stopName": "L\u00e1dv\u00ed",
+            "stopDistM": 21112.099000000002,
+            "intervalSpeedMs": 5.8166879538228695,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U78Z2P",
+            "fixAgeS": 26.287697509765625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9312",
+            "atMs": 1788701163521.023,
+            "stopId": "U237Z1P",
+            "stopSequence": 13,
+            "stopName": "Karlovo n\u00e1m\u011bst\u00ed",
+            "stopDistM": 4930.779,
+            "intervalSpeedMs": 5.44747844191406,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U237Z1P",
+            "fixAgeS": 47.52102294921875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9440",
+            "atMs": 1788701163887.6887,
+            "stopId": "U289Z2P",
+            "stopSequence": 27,
+            "stopName": "Kotl\u00e1\u0159ka",
+            "stopDistM": 12087.623000000001,
+            "intervalSpeedMs": 12.48274995756835,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U289Z2P",
+            "fixAgeS": 29.887688720703125,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9505",
+            "atMs": 1788701165621.0178,
+            "stopId": "U816Z1P",
+            "stopSequence": 17,
+            "stopName": "Urxova",
+            "stopDistM": 7822.139,
+            "intervalSpeedMs": 12.730629024192307,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U816Z1P",
+            "fixAgeS": 22.621017822265625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9354",
+            "atMs": 1788701169421.0085,
+            "stopId": "U1049Z3P",
+            "stopSequence": 4,
+            "stopName": "K Barrandovu",
+            "stopDistM": 1275.425,
+            "intervalSpeedMs": 10.985668563373114,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U1049Z3P",
+            "fixAgeS": 27.421008544921875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9506",
+            "atMs": 1788701170187.6733,
+            "stopId": "U469Z1P",
+            "stopSequence": 17,
+            "stopName": "N\u00e1kladov\u00e9 n\u00e1dra\u017e\u00ed \u017di\u017ekov",
+            "stopDistM": 7893.878,
+            "intervalSpeedMs": 8.761239626941046,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U469Z1P",
+            "fixAgeS": 33.18767333984375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9446",
+            "atMs": 1788701170187.6733,
+            "stopId": "U580Z1P",
+            "stopSequence": 9,
+            "stopName": "Po\u0161tovka",
+            "stopDistM": 4237.625,
+            "intervalSpeedMs": 7.693585619892149,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U580Z1P",
+            "fixAgeS": 20.18767333984375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9059",
+            "atMs": 1788701176187.6587,
+            "stopId": "U19Z1P",
+            "stopSequence": 13,
+            "stopName": "Bel\u00e1rie",
+            "stopDistM": 5461.984,
+            "intervalSpeedMs": 5.9151532398560205,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U19Z1P",
+            "fixAgeS": 33.18765869140625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9378",
+            "atMs": 1788701176820.9905,
+            "stopId": "U739Z1P",
+            "stopSequence": 23,
+            "stopName": "\u0160t\u011bp\u00e1nsk\u00e1",
+            "stopDistM": 8919.273000000001,
+            "intervalSpeedMs": 5.685748469154379,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U739Z1P",
+            "fixAgeS": 31.820990478515625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9336",
+            "atMs": 1788701176920.9902,
+            "stopId": "U1006Z1P",
+            "stopSequence": 6,
+            "stopName": "\u010cechova \u010dtvr\u0165",
+            "stopDistM": 2045.772,
+            "intervalSpeedMs": 12.413991597018097,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U1006Z1P",
+            "fixAgeS": 23.920990234375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9254",
+            "atMs": 1788701177854.3213,
+            "stopId": "U237Z2P",
+            "stopSequence": 12,
+            "stopName": "Karlovo n\u00e1m\u011bst\u00ed",
+            "stopDistM": 6247.821,
+            "intervalSpeedMs": 5.308993520503433,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U237Z2P",
+            "fixAgeS": 52.8543212890625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9345",
+            "atMs": 1788701179320.9844,
+            "stopId": "U163Z1P",
+            "stopSequence": 5,
+            "stopName": "Hrad\u010dansk\u00e1",
+            "stopDistM": 2443.228,
+            "intervalSpeedMs": 6.459378901566388,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U163Z1P",
+            "fixAgeS": 14.320984375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9287",
+            "atMs": 1788701179787.65,
+            "stopId": "U605Z1P",
+            "stopSequence": 12,
+            "stopName": "Pr\u016fb\u011b\u017en\u00e1",
+            "stopDistM": 4675.529,
+            "intervalSpeedMs": 8.991293890613411,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U605Z1P",
+            "fixAgeS": 32.78764990234375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8256",
+            "atMs": 1788701182687.6428,
+            "stopId": "U616Z2P",
+            "stopSequence": 8,
+            "stopName": "Radho\u0161\u0165sk\u00e1",
+            "stopDistM": 2828.536,
+            "intervalSpeedMs": 6.9949494091627855,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U118Z2P",
+            "fixAgeS": 10.687642822265625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9381",
+            "atMs": 1788701184620.9714,
+            "stopId": "U190Z1P",
+            "stopSequence": 10,
+            "stopName": "I. P. Pavlova",
+            "stopDistM": 4439.053999999999,
+            "intervalSpeedMs": 7.014755814836244,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U45Z1P",
+            "fixAgeS": 143.62097143554686,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8763",
+            "atMs": 1788701185654.3022,
+            "stopId": "U775Z2P",
+            "stopSequence": 39,
+            "stopName": "U Elektry",
+            "stopDistM": 18517.67,
+            "intervalSpeedMs": 10.543280163603582,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U775Z2P",
+            "fixAgeS": 25.65430224609375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9109",
+            "atMs": 1788701189754.2922,
+            "stopId": "U71Z2P",
+            "stopSequence": 29,
+            "stopName": "\u010cern\u00fd k\u016f\u0148",
+            "stopDistM": 15290.443,
+            "intervalSpeedMs": 14.633807691687624,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U71Z2P",
+            "fixAgeS": 53.754292236328126,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9340",
+            "atMs": 1788701196054.2769,
+            "stopId": "U670Z1P",
+            "stopSequence": 5,
+            "stopName": "S\u00eddli\u0161t\u011b Zahradn\u00ed M\u011bsto",
+            "stopDistM": 1903.472,
+            "intervalSpeedMs": 6.119533755184731,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U670Z1P",
+            "fixAgeS": 29.05427685546875,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9347",
+            "atMs": 1788701196987.608,
+            "stopId": "U118Z2P",
+            "stopSequence": 26,
+            "stopName": "Flora",
+            "stopDistM": 12651.199999999999,
+            "intervalSpeedMs": 12.645880549832437,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U118Z2P",
+            "fixAgeS": 62.98760791015625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9206",
+            "atMs": 1788701197554.2732,
+            "stopId": "U861Z1P",
+            "stopSequence": 10,
+            "stopName": "Vosm\u00edkov\u00fdch",
+            "stopDistM": 2986.879,
+            "intervalSpeedMs": 9.724145596264474,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U861Z1P",
+            "fixAgeS": 19.554273193359375,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9510",
+            "atMs": 1788701201254.2642,
+            "stopId": "U529Z5P",
+            "stopSequence": 10,
+            "stopName": "Palmovka",
+            "stopDistM": 4068.4060000000004,
+            "intervalSpeedMs": 6.256298694596745,
+            "reason": "ordinary",
+            "fixState": "on_track",
+            "lastStopId": "U529Z5P",
+            "fixAgeS": 46.25426416015625,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9141",
+            "atMs": 1788701203087.593,
+            "stopId": "U387Z2P",
+            "stopSequence": 24,
+            "stopName": "Pob\u0159e\u017en\u00ed cesta",
+            "stopDistM": 13166.992,
+            "intervalSpeedMs": 7.082077499678263,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U387Z2P",
+            "fixAgeS": 34.08759301757812,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "8786",
+            "atMs": 1788701204354.2566,
+            "stopId": "U303Z2P",
+            "stopSequence": 18,
+            "stopName": "Kublov",
+            "stopDistM": 7411.822,
+            "intervalSpeedMs": 7.066938664701438,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U303Z2P",
+            "fixAgeS": 28.354256591796876,
+            "precedingHeldS": 0
+          },
+          {
+            "key": "9444",
+            "atMs": 1788701204654.2559,
+            "stopId": "U914Z1P",
+            "stopSequence": 10,
+            "stopName": "Zl\u00edchov",
+            "stopDistM": 5346.568,
+            "intervalSpeedMs": 12.512546254193326,
+            "reason": "ordinary",
+            "fixState": "at_stop",
+            "lastStopId": "U914Z1P",
+            "fixAgeS": 15.654255859375,
+            "precedingHeldS": 0
+          }
+        ]
+      },
+      "presentationTransitions": [],
+      "durationS": 170,
+      "frames": 5101,
+      "samples": 947651,
+      "visibleSamples": 893656,
+      "lastFixAgeS": 4.282,
+      "sanctionedJumps": 0,
+      "backward": 0,
+      "speedOver25": 0,
+      "maxBackwardM": 0,
+      "maxForwardM": 0.5503383680820662,
+      "guardedHolds": 101591,
+      "holdSeconds": 3386.3583991663063,
+      "materialGuardHoldSeconds": 49.89987817382725,
+      "movingTargetBehindHoldSeconds": 14.633297607422003,
+      "guardHoldSecondsByAbsoluteGap": {
+        "under0.5m": 3336.4585209925435,
+        "0.5to10m": 49.89987817382725
+      },
+      "projectionCoverage": {
+        "eligibleHistory": 494,
+        "projected": 494,
+        "rejected": 0
+      },
+      "observationCoverage": {
+        "uniqueReceived": 782,
+        "withinMeasurement": 545,
+        "missingSameTripHistory": 43,
+        "unbracketedHistory": 8,
+        "scored": 494
+      },
+      "projectedGpsByMotionEvidence": {
+        "moving": {
+          "count": 482,
+          "maeM": 79.57119033259958,
+          "biasM": -50.83900913532371,
+          "ahead30": 81,
+          "absErrorM": {
+            "1": 506.4126248460161,
+            "0.5": 54.56290480177813,
+            "0.9": 196.41864002002785,
+            "0.99": 400.7521895244049
+          }
+        },
+        "near-platform-stationary-pair": {
+          "count": 1,
+          "maeM": 27.202751903729677,
+          "biasM": 27.202751903729677,
+          "ahead30": 0,
+          "absErrorM": {
+            "1": 27.202751903729677,
+            "0.5": 27.202751903729677,
+            "0.9": 27.202751903729677,
+            "0.99": 27.202751903729677
+          }
+        },
+        "unknown": {
+          "count": 11,
+          "maeM": 156.82734757591132,
+          "biasM": -10.417122620083195,
+          "ahead30": 6,
+          "absErrorM": {
+            "1": 316.46365686952413,
+            "0.5": 147.94922560349187,
+            "0.9": 302.32480429049656,
+            "0.99": 316.46365686952413
+          }
+        }
+      },
+      "projectedGpsMaeM": 81.18546015293883,
+      "projectedGpsAbsErrorM": {
+        "1": 506.4126248460161,
+        "0.5": 54.78575778947561,
+        "0.9": 200.36615067730781,
+        "0.99": 400.7521895244049
+      },
+      "guardHeldSecondsByReason": {
+        "on_track/flat-target": 192.9995288086162,
+        "on_track/old-avl-over45s": 402.7656833497148,
+        "at_stop/old-avl-over45s": 743.9981835935948,
+        "on_track/low-speed-catchup": 11.466638671875057,
+        "at_stop/flat-target": 1958.1618859845828,
+        "at_stop/low-speed-catchup": 64.49984252929555,
+        "at_stop/moving-target-behind-rendered-floor": 11.83330444335944,
+        "on_track/moving-target-behind-rendered-floor": 0.6333317871093748
+      },
+      "byReportedFixState": {
+        "on_track": {
+          "vehicleSeconds": 11028.70640770122,
+          "aheadTarget10Seconds": 0,
+          "aheadTarget30Seconds": 0,
+          "targetMinusDisplayM": {
+            "1": 8.645810804106304,
+            "0.5": -0.12388644345264765,
+            "0.9": 0.4091856878521867,
+            "0.99": 3.5041502098783894
+          },
+          "aheadOfRecentReportedStopFixM": {
+            "1": 0,
+            "0.5": 0,
+            "0.9": 0,
+            "0.99": 0
+          },
+          "guardHoldEpisodes": 75,
+          "guardHoldDurationS": {
+            "1": 78.933140625,
+            "0.5": 2.299994384765625,
+            "0.9": 22.99994384765625,
+            "0.99": 78.933140625
+          },
+          "accelerationOver1_3": 8934,
+          "brakingOver1_4": 2965,
+          "historicalAvlCount": 209,
+          "historicalAvlBiasM": -4.135303111140473,
+          "historicalAvlMaeM": 57.384220363005035,
+          "historicalAvlAbsErrorM": {
+            "1": 416.1204508400515,
+            "0.5": 30.3813091254533,
+            "0.9": 161.73343323125027,
+            "0.99": 336.5500519694251
+          }
+        },
+        "at_stop": {
+          "vehicleSeconds": 18753.554214949316,
+          "aheadTarget10Seconds": 0,
+          "aheadTarget30Seconds": 0,
+          "targetMinusDisplayM": {
+            "1": 6.359566867684407,
+            "0.5": -0.06986604676421848,
+            "0.9": 0.4267744024600688,
+            "0.99": 1.8580428941004357
+          },
+          "aheadOfRecentReportedStopFixM": {
+            "1": 465.20005238466547,
+            "0.5": 59.5561402426174,
+            "0.9": 152.65380417362803,
+            "0.99": 268.9025960476047
+          },
+          "guardHoldEpisodes": 248,
+          "guardHoldDurationS": {
+            "1": 59.033189208984375,
+            "0.5": 6.19998486328125,
+            "0.9": 28.233264404296875,
+            "0.99": 44.9332236328125
+          },
+          "accelerationOver1_3": 8267,
+          "brakingOver1_4": 6428,
+          "historicalAvlCount": 285,
+          "historicalAvlBiasM": -80.49483928917,
+          "historicalAvlMaeM": 103.55376085585354,
+          "historicalAvlAbsErrorM": {
+            "1": 525.5019599183383,
+            "0.5": 83.79268575209426,
+            "0.9": 221.90801448635466,
+            "0.99": 477.67165762311197
+          }
+        }
+      },
+      "positiveSpeedStepMs": {
+        "1": 0.0833331299651654,
+        "0.5": 0,
+        "0.9": 0.015196970356607109,
+        "0.99": 0.04999222473712184
+      },
+      "brakingSpeedStepMs": {
+        "1": 0.0833331299651654,
+        "0.5": 9.188895243150697e-05,
+        "0.9": 0.015281291253272045,
+        "0.99": 0.04752118295410046
+      },
+      "launchesOver1": 0,
+      "positiveStepsOver1": 0,
+      "actualSpeedMs": {
+        "1": 16.51019135054634,
+        "0.5": 5.325893583337099,
+        "0.9": 9.602209342387537,
+        "0.99": 12.852934878241605
+      },
+      "speedStepMs": {
+        "1": 0.0833331299651654,
+        "0.5": 0.0010429774781393064,
+        "0.9": 0.03076975932066839,
+        "0.99": 0.06362967708320255
+      },
+      "fullFleetFrameCpuMs": {
+        "1": 17.67554199999998,
+        "0.5": 0.25662499999998545,
+        "0.9": 0.9277079999999387,
+        "0.99": 2.0162920000000213
+      },
+      "clockOffsetMs": -8,
+      "clockSynced": true,
+      "caveat": "Sampled captured inputs, known geometry-pack trips only. No rider ground truth; source timestamps and delivery timing preserved. CPU is Node on host, not Hermes/native rendering."
+    }
+  },
+  "currentCheckoutHashesAtReport": {
+    "src/lib/golemio/geometryPackFetch.ts": "8b5f8841014034930532cbd9198759e0e6fd82c2e2658b7ccba7bb6f751c2676",
+    "src/lib/golemio/geometryPack.ts": "90945a48f6fc7cc01aa6f6e15ce3dd04179435a71162217f946bd764fb065d5a",
+    "src/hooks/tramData.ts": "821bdcc3018b0e49147f3daaa396c497df65b690554d28695acae4323251ce67",
+    "src/lib/physics/fleet.ts": "9aab371af241ec71696007cfcfe82c454a92ee78312e4f208a70c8d84770299e",
+    "bench/src/replay-wire.ts": "250271f660d9dddb92c5117425be481050fa3263a5c51f06512a14f8b0daa944",
+    "bench/src/displayAudit.ts": "b95eeb29e782e275ec24c626df490396efca23eaf3f73d5dfaf35308be63e769"
+  },
+  "executedReplayBundleSha256": "a0b3016feb8faae1fa5a04fe0fda443c8bd502e673d0aa3db8a45b5287b5c98b",
+  "provenanceNote": "Executed replay bundle hash is authoritative for these measurements; checkout hashes include subsequent visibility-only freshness fields, which do not alter distance/motion or geometry admission."
+}

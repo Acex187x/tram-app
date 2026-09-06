@@ -13,7 +13,7 @@ from pathlib import Path
 root = Path(sys.argv[1])
 destination = root / "named"
 destination.mkdir(exist_ok=True)
-prefixes = ("inspector-", "map-", "t3-", "t3rp-", "t3rplf-", "kt8d5-", "14t-", "15t-", "52t-")
+prefixes = ("skin-", "ride-timing-", "inspector-", "map-", "assembly-", "t3-", "t3rp-", "t3rplf-", "kt8d5-", "14t-", "15t-", "52t-")
 for group in json.loads((root / "manifest.json").read_text()):
     for attachment in group["attachments"]:
         suggested = Path(attachment["suggestedHumanReadableName"]).name

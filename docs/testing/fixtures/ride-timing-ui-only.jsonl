@@ -1,0 +1,7 @@
+{"type":"ride-start","t":1788694200000,"tramKey":"ui-only-timing-fixture","line":"QA","model":"t3","schema":"ride-v4"}
+{"t":1788694201000,"gpsLat":50.082,"gpsLng":14.42,"lagM":4,"predictionEvaluatedAtMs":1788694201000,"predictionInputsAvailableAtMs":1788694200000}
+{"t":1788694202000,"gpsLat":50.082,"gpsLng":14.42,"lagM":400,"rej":"gps-spike","predictionEvaluatedAtMs":1788694202000,"predictionInputsAvailableAtMs":1788694201000}
+{"t":1788694203000,"gpsLat":50.082,"gpsLng":14.42,"lagM":12}
+{"t":1788694204000,"gpsLat":50.082,"gpsLng":14.42,"lagM":15,"predictionEvaluatedAtMs":1788694205000,"predictionInputsAvailableAtMs":1788694203000}
+{"t":1788694205000,"gpsLat":50.082,"gpsLng":14.42,"lagM":18,"predictionEvaluatedAtMs":1788694205000,"predictionInputsAvailableAtMs":1788694206000}
+{"type":"ride-end","t":1788694206000}

@@ -3,16 +3,16 @@ import { useServerDebug, type ServerDebugState } from '../src/components/debug/s
 const { act, create } = require('react-test-renderer');
 const mockStateListeners = new Set<(state: string) => void>();
 const mockAppState = { currentState: 'active', addEventListener: (_: string, listener: (state: string) => void) => { mockStateListeners.add(listener); return { remove: () => mockStateListeners.delete(listener) }; } };
-jest.mock('react-native', () => ({ AppState: { get currentState() { return mockAppState.currentState; }, addEventListener: (...args: [string, (state: string) => void]) => mockAppState.addEventListener(...args) } }));
+jest.mock('react-native', () => ({ TurboModuleRegistry: {get: () => null}, AppState: { get currentState() { return mockAppState.currentState; }, addEventListener: (...args: [string, (state: string) => void]) => mockAppState.addEventListener(...args) } }));
 let values: Record<string, ServerDebugState> = {};
 function Consumer({ id, tramKey }: { id: string; tramKey: string }) { values[id] = useServerDebug(tramKey); return null; }
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 
 describe('shared server diagnostics lifecycle', () => {
   let root: ReturnType<typeof create> | null;
-  const originalFetch = global.fetch;
-  beforeEach(() => { jest.useFakeTimers(); mockAppState.currentState = 'active'; values = {}; root = null; (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
-  afterEach(async () => { if (root) await act(async () => root.unmount()); global.fetch = originalFetch; jest.useRealTimers(); });
+  const originalFetch = Object.getOwnPropertyDescriptor(global, 'fetch');
+  beforeEach(() => { Object.defineProperty(global, 'fetch', {value:undefined,writable:true,configurable:true}); jest.useFakeTimers(); mockAppState.currentState = 'active'; values = {}; root = null; (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
+  afterEach(async () => { if (root) await act(async () => root.unmount()); if (originalFetch) Object.defineProperty(global, 'fetch', originalFetch); else delete (global as any).fetch; jest.useRealTimers(); });
   it('coalesces overlay/map requests, preserves unknown metadata, stops on unmount', async () => {
     global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({ found: true }) })) as any;
     await act(async () => { root = create(React.createElement(React.Fragment, null, React.createElement(Consumer, { id: 'map', tramKey: '1' }), React.createElement(Consumer, { id: 'panel', tramKey: '1' }))); await flush(); });

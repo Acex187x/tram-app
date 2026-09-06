@@ -72,6 +72,17 @@ for an unattended always-available build target.
 
 ## Repeatable checks
 
+### Afternoon recheck — 2026-09-06, 15:31–15:34 CEST
+
+`iPodnos` again advertised `_companion-link._tcp` on Ethernet, resolved to
+192.168.1.180 (and IPv6), and accepted TCP 62078. CoreDevice still listed only
+the paired iPhone. Neither the historical candidate UDID nor
+`devicectl manage pair --device iPodnos.local` resolved a CoreDevice device;
+the latter failed before pairing. Both libimobiledevice network discovery and
+its remembered-pair list were empty. The iPad is reachable on the LAN now;
+the outstanding problem is development discovery/pairing, not basic reachability.
+No trust records or network settings were modified.
+
 1. `xcrun devicectl list devices` and `xcrun xcdevice list --timeout 15`.
 2. Browse Bonjour for 10–15 s each (`dns-sd -B _companion-link._tcp local.`,
    `dns-sd -B _apple-mobdev2._tcp local.`, and

@@ -1,0 +1,27 @@
+{
+  "passed": 3,
+  "results": [
+    "Removed/reappearing key cannot accept an old hidden-frame acknowledgement.",
+    "Explicit mode round-trip cannot revive a previous transition or consume its stale acknowledgement.",
+    "Future diagnostic reads do not consume transition state; geometry during old-zero waits and rebases only after the old acknowledgement."
+  ],
+  "result": "No additional blocker found in this bounded review. Application source remains frozen for build 36.",
+  "scope": [
+    "Stale native acknowledgement after removal/reappearance.",
+    "Explicit mode round-trip with an outstanding acknowledgement.",
+    "Future/fixed diagnostic reads during old-zero.",
+    "Latest geometry arriving while old-zero awaits acknowledgement."
+  ],
+  "remainingKnownLimits": [
+    "Piecewise route corners can exceed world-vector acceleration/jerk despite bounded scalar correction.",
+    "Incompatible-axis and long-resume relocations still use visible fades; they remain counted.",
+    "Real native delivery/congestion and device rendering are covered by separate parent QA."
+  ],
+  "scriptSha256": "32b6c422518a263cba8320f270521050dbc69d0c1b2d29d0262050d8b120a81b",
+  "sourceSha256": {
+    "src/lib/physics/fleet.ts": "9aab371af241ec71696007cfcfe82c454a92ee78312e4f208a70c8d84770299e",
+    "src/lib/physics/presentation.ts": "1f1da0afff16a25fc018e053a514fa1606ee4deab4ce436e2729d975af7b4b11",
+    "src/lib/physics/worldPresentation.ts": "be855fdd22b1543943beb2e9494ae08739687b8c7112ad0ed515820772d81044",
+    "src/lib/golemio/geometryPackFetch.ts": "8b5f8841014034930532cbd9198759e0e6fd82c2e2658b7ccba7bb6f751c2676"
+  }
+}

@@ -358,6 +358,18 @@ describe('buildRouteGeometry', () => {
     );
   });
 
+  it.each([
+    ['0', '0', false], ['3', '3', true], ['3', '0', false],
+    ['0', '3', false], ['1', '1', false], [undefined, undefined, false],
+  ])('preserves stop service flags %s/%s without inventing request eligibility', (pickup, dropoff, expected) => {
+    const input = { ...detail, stop_times: detail.stop_times!.map(row => ({
+      ...row, pickup_type: pickup, drop_off_type: dropoff,
+    })) } as GtfsTripDetail;
+    const result = buildRouteGeometry(input, now);
+    expect(result.stops.every(stop => stop.requestOnly === expected)).toBe(true);
+    expect(result.stops.at(-1)?.isTerminal).toBe(true);
+  });
+
   it('carries dwell seconds', () => {
     expect(geo.stops[0].dwellSeconds).toBe(20);
     expect(geo.stops[2].dwellSeconds).toBe(0);

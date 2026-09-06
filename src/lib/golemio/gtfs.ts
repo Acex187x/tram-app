@@ -348,6 +348,7 @@ function routeIdToLine(routeId: string): string {
 export interface ServedGeometry {
   tripId: string;
   shapeId: string;
+  geometryKey?: string;
   routeId: string;
   line: string;
   headsign: string;
@@ -489,6 +490,7 @@ export function buildRouteGeometry(
       arrivalMs,
       departureMs,
       dwellSeconds: st.computed_dwell_time_seconds ?? 0,
+      requestOnly: st.pickup_type === '3' && st.drop_off_type === '3',
       isTerminal: st.stop_sequence === lastSequence,
     };
   });

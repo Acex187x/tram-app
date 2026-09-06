@@ -308,7 +308,8 @@
     "Future duplicate holds in served profiles are distinct from realized renderer guard-held time. Later revisions can replace future holds.",
     "No ordinary reverse or positive velocity step violation was observed; truth-driven braking remains allowed to stop abruptly, with measured braking jumps reported below. Do not claim globally bounded physical acceleration from these results.",
     "Node full-fleet CPU timing excludes Hermes, native Mapbox, GPU, and physical-device rendering.",
-    "Sample is one5-minute morning window with continuously chained real server emissions, after120s actualclientwarmup."
+    "Sample is one5-minute morning window with continuously chained real server emissions, after120s actualclientwarmup.",
+    "Follow-up all-frame audit after user device review: original kinematic counters excluded server-discontinuity/reset frames. The same capture contains 208 over-budget visible jumps, including approximately 744m world displacement. Original zero backward/speed-step counts do not establish a teleport-free application; see physics-v3-protocol.md visible-continuity amendment."
   ],
   "artifacts": [
     {

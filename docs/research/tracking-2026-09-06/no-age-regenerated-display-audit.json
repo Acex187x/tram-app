@@ -1,0 +1,317 @@
+{
+  "decision": "Do not activate same-anchor suppression on this evidence.",
+  "method": "True regenerated producer predecessors within the original 96 frozen emission segments; same current client, 30 Hz and 60-second per-segment warmup. Original measurement windows retained even when an age-only emission was omitted.",
+  "limitations": [
+    "Frozen later learned cells and recorded leader/modal context, not a full-fleet live counterfactual.",
+    "Static frozen per-trip geometry; this study does not evaluate native pack/refinement lifecycle.",
+    "Virtual native delivery accepts each submission immediately; not a congestion benchmark.",
+    "AT_STOP alone does not prove stationary dwell; geometric platform crossings are not missed-stop labels.",
+    "Visibility coverage is transition-opacity coverage: source uncertainty dimming never hides a vehicle and never exempts motion measurements."
+  ],
+  "commonGpsPairs": 484,
+  "windows": 96,
+  "arms": {
+    "baseline": {
+      "frames": 85999,
+      "samples": 808130,
+      "projectedGpsMaeM": 82.32442317333656,
+      "projectedGpsAbsErrorM": {
+        "1": 536.4838921226783,
+        "0.5": 54.36882290140056,
+        "0.9": 202.58555194921428,
+        "0.99": 366.1841844224191
+      },
+      "materialGuardHoldSeconds": 84.96645922851367,
+      "movingTargetBehindHoldSeconds": 10.333308105468781,
+      "guardHeldSecondsByReason": {
+        "at_stop/flat-target": 1593.529442869826,
+        "at_stop/old-avl-over45s": 845.5646022946337,
+        "at_stop/low-speed-catchup": 53.666535644530256,
+        "on_track/old-avl-over45s": 1061.9640739740378,
+        "on_track/flat-target": 78.83314086913886,
+        "on_track/low-speed-catchup": 7.866647460937479,
+        "at_stop/moving-target-behind-rendered-floor": 8.333312988281236,
+        "at_stop/target-revised-backward": 0.06666650390625,
+        "on_track/moving-target-behind-rendered-floor": 0.233332763671875
+      },
+      "projectedGpsByMotionEvidence": {
+        "moving": {
+          "count": 474,
+          "maeM": 81.10919893852986,
+          "biasM": -46.00679382464333,
+          "ahead30": 86,
+          "absErrorM": {
+            "1": 536.4838921226783,
+            "0.5": 53.38720550839571,
+            "0.9": 201.10640058253193,
+            "0.99": 366.1841844224191
+          }
+        },
+        "near-platform-stationary-pair": {
+          "count": 1,
+          "maeM": 91.4187057529889,
+          "biasM": -91.4187057529889,
+          "ahead30": 0,
+          "absErrorM": {
+            "1": 91.4187057529889,
+            "0.5": 91.4187057529889,
+            "0.9": 91.4187057529889,
+            "0.99": 91.4187057529889
+          }
+        },
+        "unknown": {
+          "count": 9,
+          "maeM": 145.31575703097283,
+          "biasM": 31.752905093426104,
+          "ahead30": 5,
+          "absErrorM": {
+            "1": 339.40330049299155,
+            "0.5": 147.94705548037746,
+            "0.9": 339.40330049299155,
+            "0.99": 339.40330049299155
+          }
+        }
+      },
+      "display": {
+        "activeVehicleSeconds": 26937.600901420356,
+        "counts": {},
+        "hiddenVehicleSeconds": 0,
+        "maxHiddenRunSeconds": 0,
+        "unrevealedTransitionsAtEnd": [],
+        "visibleCoverage": 1,
+        "maxFullyVisibleWorldStepM": 0.5619140232882376,
+        "fullyVisibleWorldSpeedMs": {
+          "1": 16.86,
+          "0.5": 5.44,
+          "0.9": 10.16,
+          "0.99": 14.24
+        },
+        "fullyVisibleWorldAccelerationMs2": {
+          "1": 45.85,
+          "0.5": 0.03,
+          "0.9": 0.99,
+          "0.99": 2.49
+        },
+        "fullyVisibleWorldJerkMs3": {
+          "1": 1373.99,
+          "0.5": 0.01,
+          "0.9": 0.7,
+          "0.99": 54.3
+        },
+        "fullyVisibleAccelerationOver2_5": 0,
+        "fullyVisibleBrakingOver2_5": 0,
+        "fullyVisibleJerkOver4": 0,
+        "endpointClampedMovingSeconds": 0,
+        "stationCrossings": 272,
+        "crossingsAbove5Ms": 64
+      }
+    },
+    "noAge": {
+      "frames": 85999,
+      "samples": 808130,
+      "projectedGpsMaeM": 86.09732679281531,
+      "projectedGpsAbsErrorM": {
+        "1": 512.9690185863783,
+        "0.5": 58.473305295638056,
+        "0.9": 206.7060754350532,
+        "0.99": 395.36420793005345
+      },
+      "materialGuardHoldSeconds": 70.09982885742038,
+      "movingTargetBehindHoldSeconds": 23.599942382812426,
+      "guardHeldSecondsByReason": {
+        "at_stop/flat-target": 1614.462725096361,
+        "at_stop/old-avl-over45s": 835.6312932126154,
+        "at_stop/low-speed-catchup": 65.63317309570176,
+        "on_track/old-avl-over45s": 1170.9304746086607,
+        "on_track/flat-target": 95.39976708984148,
+        "on_track/low-speed-catchup": 7.9333139648437285,
+        "at_stop/moving-target-behind-rendered-floor": 14.599964355468877,
+        "at_stop/past-effective-horizon": 5.699986083984363,
+        "at_stop/target-revised-backward": 0.06666650390625,
+        "on_track/past-effective-horizon": 0.1333330078125,
+        "on_track/target-revised-backward": 0.033333251953125,
+        "on_track/moving-target-behind-rendered-floor": 7.366648681640606
+      },
+      "projectedGpsByMotionEvidence": {
+        "moving": {
+          "count": 474,
+          "maeM": 83.79883685757052,
+          "biasM": -49.964559919641516,
+          "ahead30": 84,
+          "absErrorM": {
+            "1": 512.9690185863783,
+            "0.5": 57.616056386712444,
+            "0.9": 200.54509625485753,
+            "0.99": 394.2961885514542
+          }
+        },
+        "near-platform-stationary-pair": {
+          "count": 1,
+          "maeM": 119.96443840876418,
+          "biasM": -119.96443840876418,
+          "ahead30": 0,
+          "absErrorM": {
+            "1": 119.96443840876418,
+            "0.5": 119.96443840876418,
+            "0.9": 119.96443840876418,
+            "0.99": 119.96443840876418
+          }
+        },
+        "unknown": {
+          "count": 9,
+          "maeM": 203.3881176472691,
+          "biasM": -59.618391936151866,
+          "ahead30": 3,
+          "absErrorM": {
+            "1": 438.32444884660435,
+            "0.5": 212.19061147190314,
+            "0.9": 438.32444884660435,
+            "0.99": 438.32444884660435
+          }
+        }
+      },
+      "display": {
+        "activeVehicleSeconds": 26937.600901420356,
+        "counts": {},
+        "hiddenVehicleSeconds": 0,
+        "maxHiddenRunSeconds": 0,
+        "unrevealedTransitionsAtEnd": [],
+        "visibleCoverage": 1,
+        "maxFullyVisibleWorldStepM": 0.5598404128541374,
+        "fullyVisibleWorldSpeedMs": {
+          "1": 16.8,
+          "0.5": 5.43,
+          "0.9": 10.09,
+          "0.99": 14.51
+        },
+        "fullyVisibleWorldAccelerationMs2": {
+          "1": 45.85,
+          "0.5": 0.03,
+          "0.9": 0.94,
+          "0.99": 2.48
+        },
+        "fullyVisibleWorldJerkMs3": {
+          "1": 1373.99,
+          "0.5": 0.01,
+          "0.9": 0.67,
+          "0.99": 50.87
+        },
+        "fullyVisibleAccelerationOver2_5": 0,
+        "fullyVisibleBrakingOver2_5": 0,
+        "fullyVisibleJerkOver4": 0,
+        "endpointClampedMovingSeconds": 0,
+        "stationCrossings": 269,
+        "crossingsAbove5Ms": 67
+      }
+    },
+    "noAgeLeader": {
+      "frames": 85999,
+      "samples": 808130,
+      "projectedGpsMaeM": 86.91051739451946,
+      "projectedGpsAbsErrorM": {
+        "1": 512.9690185863783,
+        "0.5": 58.473305295638056,
+        "0.9": 212.19061147190314,
+        "0.99": 395.36420793005345
+      },
+      "materialGuardHoldSeconds": 68.93316503906104,
+      "movingTargetBehindHoldSeconds": 22.433278564453087,
+      "guardHeldSecondsByReason": {
+        "at_stop/flat-target": 1608.262740233088,
+        "at_stop/old-avl-over45s": 835.6312932126154,
+        "at_stop/low-speed-catchup": 63.966510498045565,
+        "on_track/old-avl-over45s": 1171.6971394035816,
+        "on_track/flat-target": 99.16642456054448,
+        "on_track/low-speed-catchup": 8.866645019531248,
+        "at_stop/moving-target-behind-rendered-floor": 13.233301025390722,
+        "at_stop/past-effective-horizon": 5.699986083984363,
+        "at_stop/target-revised-backward": 0.06666650390625,
+        "on_track/past-effective-horizon": 0.1333330078125,
+        "on_track/target-revised-backward": 0.033333251953125,
+        "on_track/moving-target-behind-rendered-floor": 7.566648193359355
+      },
+      "projectedGpsByMotionEvidence": {
+        "moving": {
+          "count": 474,
+          "maeM": 84.62918337914182,
+          "biasM": -50.79040619748044,
+          "ahead30": 84,
+          "absErrorM": {
+            "1": 512.9690185863783,
+            "0.5": 57.616056386712444,
+            "0.9": 203.39861346406178,
+            "0.99": 394.2961885514542
+          }
+        },
+        "near-platform-stationary-pair": {
+          "count": 1,
+          "maeM": 119.96443840876418,
+          "biasM": -119.96443840876418,
+          "ahead30": 0,
+          "absErrorM": {
+            "1": 119.96443840876418,
+            "0.5": 119.96443840876418,
+            "0.9": 119.96443840876418,
+            "0.99": 119.96443840876418
+          }
+        },
+        "unknown": {
+          "count": 9,
+          "maeM": 203.3881176472691,
+          "biasM": -59.618391936151866,
+          "ahead30": 3,
+          "absErrorM": {
+            "1": 438.32444884660435,
+            "0.5": 212.19061147190314,
+            "0.9": 438.32444884660435,
+            "0.99": 438.32444884660435
+          }
+        }
+      },
+      "display": {
+        "activeVehicleSeconds": 26937.600901420356,
+        "counts": {},
+        "hiddenVehicleSeconds": 0,
+        "maxHiddenRunSeconds": 0,
+        "unrevealedTransitionsAtEnd": [],
+        "visibleCoverage": 1,
+        "maxFullyVisibleWorldStepM": 0.5598404128541374,
+        "fullyVisibleWorldSpeedMs": {
+          "1": 16.8,
+          "0.5": 5.43,
+          "0.9": 10.13,
+          "0.99": 14.51
+        },
+        "fullyVisibleWorldAccelerationMs2": {
+          "1": 45.85,
+          "0.5": 0.03,
+          "0.9": 0.94,
+          "0.99": 2.48
+        },
+        "fullyVisibleWorldJerkMs3": {
+          "1": 1373.99,
+          "0.5": 0.01,
+          "0.9": 0.67,
+          "0.99": 50.82
+        },
+        "fullyVisibleAccelerationOver2_5": 0,
+        "fullyVisibleBrakingOver2_5": 0,
+        "fullyVisibleJerkOver4": 0,
+        "endpointClampedMovingSeconds": 0,
+        "stationCrossings": 269,
+        "crossingsAbove5Ms": 67
+      }
+    }
+  },
+  "sha256": {
+    "/tmp/tram-r3-no-age-segmented/segments.json": "60359a08ecbf886f98836d1ba910796e67839344d15b3313d40f55c748271728",
+    "/tmp/tram-r3-current-replay.cjs": "5c14dc328876a6030b6e2c12644bebf7ecf5e572813f35486b37ac190e7f4e6e",
+    "/tmp/tram-materialize-no-age.py": "24264c913a52a076199cd662bfc8611d1e8f49dcbe2bc2d501d3cf938b2d1262",
+    "/tmp/tram-r3-no-age-segmented/baseline-wire.jsonl": "ed480ae53722f8be0db621bbff63f2fac1f87b787287f824622f030ed22b2c9a",
+    "/tmp/tram-r3-no-age-segmented/noAge-wire.jsonl": "e0f02add1ea4d9e53371ace026355ee062dbaffb456cf967520a89b31065f5e2",
+    "/tmp/tram-r3-no-age-segmented/noAgeLeader-wire.jsonl": "4611ca96ff80efc8eaee9bb902d4be4c09caf4e45a18a7007cf13e681740ffa3",
+    "/tmp/tram-r3-chain-baseline.json": "921793e10ffd0c8e126050ef40a9ee3549e6719487a7766cc971e40539db0acc",
+    "/tmp/tram-r3-chain-noAge.json": "86f43984fa6126b6f542c436975966308fd530c014e888d9b73641c71e7eb6b5",
+    "/tmp/tram-r3-chain-noAgeLeader.json": "aad60fcd5cbe4d7c3afef098d2f5557e5b119eef510de1a01225018a768ee57c"
+  }
+}

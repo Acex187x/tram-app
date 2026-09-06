@@ -179,6 +179,7 @@ export function renderTram(
   fixS: number = Number.NaN,
   fixAtMs: number = Number.NaN,
 ): RenderedTram {
+  if (mode === 'smooth' && v.motionPolicy === 'continuous-v1') fixS = Number.NaN;
   const track = trackFor(v, mode);
   // Winding the curve forward consumes its horizon τ earlier, so the honest
   // "the server has told us nothing about now" instant moves with it. τ = ∞
@@ -207,6 +208,7 @@ export function renderDistM(
   fixAtMs: number = Number.NaN,
 ): number {
   if (v === undefined) return Number.NaN;
+  if (mode === 'smooth' && v.motionPolicy === 'continuous-v1') fixS = Number.NaN;
   return renderedDistM(
     trackFor(v, mode),
     serverNowMs,
@@ -239,6 +241,7 @@ export function renderSpeedMs(
 ): number {
   const track = trackFor(v, mode);
   if (track.length === 0) return 0;
+  if (mode === 'smooth' && v.motionPolicy === 'continuous-v1') fixS = Number.NaN;
   const catchup = catchupVMsFor(mode);
   const a = v.anchorMs;
   const before = renderedDistM(track, serverNowMs - halfWindowMs, catchup, fixS, fixAtMs, a);

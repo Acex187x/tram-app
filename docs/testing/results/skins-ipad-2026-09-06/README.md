@@ -1,0 +1,7 @@
+# Native skin QA
+
+Build35 iPad test07 passed69seconds: native Files import, synthetic777777 assignment/reset, embedded-PNG preview, front/rear/whole presets, opened doors, and same-ID package replacement. The blue middle-section paint in these inspected screenshots matches the authored diagnostic reference; outer sections retain base paint and protected glass/doors remain distinct. This is deliberately labelled UV TEST, not a real advertising campaign.
+
+Build35 test08 initially passed control assertions but its assigned-state screenshot was obscured by a remaining sheet. That run is not Mapbox texture evidence. A follow-up revealed a selector targeting an inactive Close; the harness now chooses visible exact modal controls and asserts that the sheet has gone. Failed native-test aborts can skip Swift defer, so the companion cleanup terminates the test app and writes one immutable index generation removing only synthetic campaign assignments. It preserves other library entries and documents.
+
+Build36 iPad tests07/08 now pass. Inspected actual Mapbox images show the middle-section edge turn blue on assignment and red after reset; the overhead view is limited to a narrow body edge. Fresh originals and the comparison are in [build36 evidence](../ipad-2026-09-06-build36/README.md). The full iPad suite has a separate unresolved rotation failure; phone build36 also passed all seven applicable tests (rotation is intentionally iPad-only). Its summary is retained alongside this document.

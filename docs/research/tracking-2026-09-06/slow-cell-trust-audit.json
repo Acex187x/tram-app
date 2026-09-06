@@ -1,0 +1,703 @@
+{
+  "comparisons": 1770,
+  "mismatchCount": 87,
+  "cases": [
+    {
+      "key": "9139",
+      "obsAtMs": 1788689185000,
+      "horizonS": 0,
+      "kind": "release",
+      "python": 41.584713369378406,
+      "typescript": 20
+    },
+    {
+      "key": "9139",
+      "obsAtMs": 1788689185000,
+      "horizonS": 30,
+      "kind": "release",
+      "python": 41.584713369378406,
+      "typescript": 20
+    },
+    {
+      "key": "9139",
+      "obsAtMs": 1788689185000,
+      "horizonS": 120,
+      "kind": "release",
+      "python": 41.584713369378406,
+      "typescript": 20
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788689244000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 6.582347829539679,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788689244000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 6.582347829539679,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788689244000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 6.582347829539679,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788689263000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 6.290060154315956,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788689263000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 6.290060154315956,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788689263000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 6.290060154315956,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9139",
+      "obsAtMs": 1788689435000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 6.938518436096021,
+      "typescript": 5.556945014312592
+    },
+    {
+      "key": "9139",
+      "obsAtMs": 1788689435000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 6.938518436096021,
+      "typescript": 5.556945014312592
+    },
+    {
+      "key": "9139",
+      "obsAtMs": 1788689435000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 6.938518436096021,
+      "typescript": 5.556945014312592
+    },
+    {
+      "key": "9343",
+      "obsAtMs": 1788689649000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 2.8521779759119377,
+      "typescript": 5.544640175098175
+    },
+    {
+      "key": "9343",
+      "obsAtMs": 1788689649000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 2.8521779759119377,
+      "typescript": 5.544640175098175
+    },
+    {
+      "key": "9343",
+      "obsAtMs": 1788689649000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 2.8521779759119377,
+      "typescript": 5.544640175098175
+    },
+    {
+      "key": "9343",
+      "obsAtMs": 1788689687000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 2.8521779759119377,
+      "typescript": 5.544640175098175
+    },
+    {
+      "key": "9343",
+      "obsAtMs": 1788689687000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 2.8521779759119377,
+      "typescript": 5.544640175098175
+    },
+    {
+      "key": "9343",
+      "obsAtMs": 1788689687000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 2.8521779759119377,
+      "typescript": 5.544640175098175
+    },
+    {
+      "key": "9096",
+      "obsAtMs": 1788690206000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 5.5969764937422495,
+      "typescript": 7.0718328126963295
+    },
+    {
+      "key": "9096",
+      "obsAtMs": 1788690206000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 5.5969764937422495,
+      "typescript": 7.0718328126963295
+    },
+    {
+      "key": "9096",
+      "obsAtMs": 1788690206000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 5.5969764937422495,
+      "typescript": 7.0718328126963295
+    },
+    {
+      "key": "9343",
+      "obsAtMs": 1788690680000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 3.1681340012411514,
+      "typescript": 5.544640175098175
+    },
+    {
+      "key": "9343",
+      "obsAtMs": 1788690680000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 3.1681340012411514,
+      "typescript": 5.544640175098175
+    },
+    {
+      "key": "9343",
+      "obsAtMs": 1788690680000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 3.1681340012411514,
+      "typescript": 5.544640175098175
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788690850000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 6.8184167256868315,
+      "typescript": 6.463690137654904
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788690850000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 6.8184167256868315,
+      "typescript": 6.463690137654904
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788690850000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 6.8184167256868315,
+      "typescript": 6.463690137654904
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788690863000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 6.8184167256868315,
+      "typescript": 6.463690137654904
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788690863000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 6.8184167256868315,
+      "typescript": 6.463690137654904
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788690863000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 6.8184167256868315,
+      "typescript": 6.463690137654904
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788691044000,
+      "horizonS": 0,
+      "kind": "release",
+      "python": 41.584713369378406,
+      "typescript": 20
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788691044000,
+      "horizonS": 30,
+      "kind": "release",
+      "python": 41.584713369378406,
+      "typescript": 20
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788691044000,
+      "horizonS": 120,
+      "kind": "release",
+      "python": 41.584713369378406,
+      "typescript": 20
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788691778000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 4.374589190288225,
+      "typescript": 4.203243482973962
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788691778000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 4.374589190288225,
+      "typescript": 4.203243482973962
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788691778000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 4.374589190288225,
+      "typescript": 4.203243482973962
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788691816000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 4.374589190288225,
+      "typescript": 4.203243482973962
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788691816000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 4.374589190288225,
+      "typescript": 4.203243482973962
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788691816000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 4.374589190288225,
+      "typescript": 4.203243482973962
+    },
+    {
+      "key": "9365",
+      "obsAtMs": 1788691857000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 5.134967946735492,
+      "typescript": 6.596326064302559
+    },
+    {
+      "key": "9365",
+      "obsAtMs": 1788691857000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 5.134967946735492,
+      "typescript": 6.596326064302559
+    },
+    {
+      "key": "9365",
+      "obsAtMs": 1788691857000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 5.134967946735492,
+      "typescript": 6.596326064302559
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788691914000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 4.094350085538221,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788691914000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 4.094350085538221,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788691914000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 4.094350085538221,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788691921000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 4.094350085538221,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788691921000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 4.094350085538221,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788691921000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 4.094350085538221,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788691964000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 4.094350085538221,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788691964000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 4.094350085538221,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788691964000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 4.094350085538221,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9324",
+      "obsAtMs": 1788691982000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 5.689606860676455,
+      "typescript": 5.626027555450179
+    },
+    {
+      "key": "9324",
+      "obsAtMs": 1788691982000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 5.689606860676455,
+      "typescript": 5.626027555450179
+    },
+    {
+      "key": "9324",
+      "obsAtMs": 1788691982000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 5.689606860676455,
+      "typescript": 5.626027555450179
+    },
+    {
+      "key": "9324",
+      "obsAtMs": 1788692019000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 5.689606860676455,
+      "typescript": 5.626027555450179
+    },
+    {
+      "key": "9324",
+      "obsAtMs": 1788692019000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 5.689606860676455,
+      "typescript": 5.626027555450179
+    },
+    {
+      "key": "9324",
+      "obsAtMs": 1788692019000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 5.689606860676455,
+      "typescript": 5.626027555450179
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788692046000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 4.91363158185063,
+      "typescript": 5.539302821701134
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788692046000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 4.91363158185063,
+      "typescript": 5.539302821701134
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788692046000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 4.91363158185063,
+      "typescript": 5.539302821701134
+    },
+    {
+      "key": "9139",
+      "obsAtMs": 1788692253000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 4.028032043740643,
+      "typescript": 3.5487422837810514
+    },
+    {
+      "key": "9139",
+      "obsAtMs": 1788692253000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 4.028032043740643,
+      "typescript": 3.5487422837810514
+    },
+    {
+      "key": "9139",
+      "obsAtMs": 1788692253000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 4.028032043740643,
+      "typescript": 3.5487422837810514
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788692364000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 6.010392709326652,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788692364000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 6.010392709326652,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9511",
+      "obsAtMs": 1788692364000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 6.010392709326652,
+      "typescript": 6.270518308836864
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788692421000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 3.062413315422906,
+      "typescript": 5.539302821701134
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788692421000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 3.062413315422906,
+      "typescript": 5.539302821701134
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788692421000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 3.062413315422906,
+      "typescript": 5.539302821701134
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788692507000,
+      "horizonS": 0,
+      "kind": "release",
+      "python": 41.584713369378406,
+      "typescript": 20
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788692507000,
+      "horizonS": 30,
+      "kind": "release",
+      "python": 41.584713369378406,
+      "typescript": 20
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788692507000,
+      "horizonS": 120,
+      "kind": "release",
+      "python": 41.584713369378406,
+      "typescript": 20
+    },
+    {
+      "key": "9139",
+      "obsAtMs": 1788692506000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 8.270400045871629,
+      "typescript": 5.556945014312592
+    },
+    {
+      "key": "9139",
+      "obsAtMs": 1788692506000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 8.270400045871629,
+      "typescript": 5.556945014312592
+    },
+    {
+      "key": "9139",
+      "obsAtMs": 1788692506000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 8.270400045871629,
+      "typescript": 5.556945014312592
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788692759000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 3.0578766205291146,
+      "typescript": 5.539302821701134
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788692759000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 3.0578766205291146,
+      "typescript": 5.539302821701134
+    },
+    {
+      "key": "9128",
+      "obsAtMs": 1788692759000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 3.0578766205291146,
+      "typescript": 5.539302821701134
+    },
+    {
+      "key": "9365",
+      "obsAtMs": 1788693079000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 6.837121311222101,
+      "typescript": 4.438724671404631
+    },
+    {
+      "key": "9365",
+      "obsAtMs": 1788693079000,
+      "horizonS": 0,
+      "kind": "release",
+      "python": 41.584713369378406,
+      "typescript": 20
+    },
+    {
+      "key": "9365",
+      "obsAtMs": 1788693079000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 6.837121311222101,
+      "typescript": 4.438724671404631
+    },
+    {
+      "key": "9365",
+      "obsAtMs": 1788693079000,
+      "horizonS": 30,
+      "kind": "release",
+      "python": 41.584713369378406,
+      "typescript": 20
+    },
+    {
+      "key": "9365",
+      "obsAtMs": 1788693079000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 6.837121311222101,
+      "typescript": 4.438724671404631
+    },
+    {
+      "key": "9365",
+      "obsAtMs": 1788693079000,
+      "horizonS": 120,
+      "kind": "release",
+      "python": 41.584713369378406,
+      "typescript": 20
+    },
+    {
+      "key": "9096",
+      "obsAtMs": 1788693084000,
+      "horizonS": 0,
+      "kind": "pace",
+      "python": 8.455863143394378,
+      "typescript": 7.0718328126963295
+    },
+    {
+      "key": "9096",
+      "obsAtMs": 1788693084000,
+      "horizonS": 30,
+      "kind": "pace",
+      "python": 8.455863143394378,
+      "typescript": 7.0718328126963295
+    },
+    {
+      "key": "9096",
+      "obsAtMs": 1788693084000,
+      "horizonS": 120,
+      "kind": "pace",
+      "python": 8.455863143394378,
+      "typescript": 7.0718328126963295
+    }
+  ],
+  "note": "Existing slow cells: Python frozen weight vs TS14day decayed trust. Same latest frozen snapshot and real fusedfix anchors."
+}

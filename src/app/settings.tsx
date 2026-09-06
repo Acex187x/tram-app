@@ -535,6 +535,8 @@ export default function SettingsScreen() {
       <LightPresetSection />
       <MapSection />
       <IconPackSection />
+      <SectionLabel>Vehicle appearance</SectionLabel>
+      <InsetGroup><InsetRow icon="paintpalette" title="Tram skins" subtitle="Import wraps and assign vehicle numbers" chevron onPress={() => router.push('/skins' as Href)} /></InsetGroup>
       <MotionDataSection />
       <DeveloperSection />
       <AboutSection />

@@ -18,15 +18,17 @@
 
 import { CircleLayer, LineLayer, ShapeSource, SymbolLayer } from '@rnmapbox/maps';
 import { usePathname } from 'expo-router';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 
 import { getRuntime } from '@/hooks/tramData';
+import { SourceWriter } from '@/lib/render/sourceWriter';
 import { useServerDebug, type ServerVehicleDebug } from './serverDebug';
 import { haversineM, pointAt, type LngLat } from '@/lib/geo/polyline';
 import { useSelectionStore } from '@/stores/selection';
 import { useSettingsStore } from '@/stores/settings';
 
 const SAMPLE_MS = 100;
+const noSubscription = () => () => {};
 const TRACE_MS = 20_000;
 const MOVE_EPSILON_M = 0.25;
 
@@ -118,7 +120,7 @@ function makeFrame(
     // «коорд» в подписи — это СЫРЫЕ координаты фикса; его представление на
     // ОСИ маршрута рисует кольцо ОПОРЫ. Разъезд между ними = противоречие
     // самого фида (строка «коорд−ось» в оверлее), не баг рендера.
-    pointFeature('debug-fix', positions.fix, 'fix', `ФИКС·коорд ${fixAgeS.toFixed(1)}с`, false),
+    pointFeature('debug-fix', positions.fix, 'fix', `GPS · ${fixAgeS.toFixed(0)}с`, false),
     pointFeature(
       'debug-fixed',
       positions.fixed,
@@ -140,7 +142,10 @@ export function DebugMapTraces() {
   const sourceRef = useRef<ShapeSource>(null);
   // ДАННЫЕ С БД для карты: сырые ML-таргеты + опорный фикс + архивные фиксы
   // движка (3 с поллинг, только пока смонтированы дебаг-трассы).
-  const { data: serverData } = useServerDebug(mapVisible ? key : null);
+  const runtime = getRuntime();
+  const sourceRole = useSyncExternalStore(mapVisible ? runtime.subscribeUi : noSubscription,
+    () => mapVisible ? runtime.physicsHealth.source?.active ?? 'primary' : 'hidden');
+  const { data: serverData } = useServerDebug(mapVisible && sourceRole !== 'fallback' ? key : null);
   const serverRef = useRef<ServerVehicleDebug | null>(null);
   serverRef.current = serverData;
   const historyRef = useRef<TraceHistory>({
@@ -157,10 +162,11 @@ export function DebugMapTraces() {
     // but never push native map frames behind it.
     if (!mapVisible) return;
     const runtime = getRuntime();
+    const writer = new SourceWriter();
     if (!key) {
       historyRef.current = { key: null, tripId: null, fixAtMs: 0, fix: [], fixed: [], smooth: [] };
-      void sourceRef.current?.updateShape({ type: 'FeatureCollection', features: [] });
-      return;
+      writer.send('debug-traces', sourceRef.current, JSON.stringify({ type: 'FeatureCollection', features: [] }), Date.now());
+      return () => writer.dispose();
     }
     let lastSampleMs = 0;
 
@@ -172,7 +178,7 @@ export function DebugMapTraces() {
       // These read-only getters cannot advance the live presentation guard.
       const state = runtime.fleet.getState(key, nowMs, 'smooth');
       if (!state) {
-        void sourceRef.current?.updateShape({ type: 'FeatureCollection', features: [] });
+        writer.send('debug-traces', sourceRef.current, JSON.stringify({ type: 'FeatureCollection', features: [] }), nowMs);
         return;
       }
       const history = historyRef.current;
@@ -217,7 +223,7 @@ export function DebugMapTraces() {
       // фиксы движка — визуальная оценка «насколько модель адекватна и
       // обновляется ли профиль». Рисуем только для ТЕКУЩЕГО рейса — таргеты
       // чужого trip лежали бы на чужой оси.
-      const sd = serverRef.current;
+      const sd = runtime.trajectories.health(nowMs).source?.active === 'fallback' ? null : serverRef.current;
       const serverNowMs = runtime.trajectories.nowMs(nowMs);
       if (sd?.found && geometry && sd.tripId === state.snapshot.tripId) {
         const at = (sVal: number): LngLat =>
@@ -282,11 +288,12 @@ export function DebugMapTraces() {
           });
         });
       }
-      void sourceRef.current?.updateShape(frame);
+      writer.send('debug-traces', sourceRef.current, JSON.stringify(frame), nowMs);
     };
 
     push(Date.now());
-    return runtime.subscribeFrame(push);
+    const unsubscribe = runtime.subscribeFrame(push);
+    return () => { unsubscribe(); writer.dispose(); };
   }, [key, positionMode, mapVisible]);
 
   return (
@@ -421,23 +428,31 @@ export function DebugMapTraces() {
           textField: ['get', 'label'] as unknown as string,
           textFont: ['DIN Pro Bold', 'Arial Unicode MS Regular'],
           textSize: 11,
-          textColor: '#FFFFFF',
+          textColor: ['match', ['get', 'role'], 'fix', FIX, 'fixed', FIXED,
+            'smooth', SMOOTH, 'mltarget', ML_TARGET, '#FFFFFF'] as unknown as string,
           textHaloColor: '#071015',
           textHaloWidth: 2,
-          // Каждой роли — свой угол: совпадающие точки (FIXED==ОПОРА==SMOOTH
-          // у стоящего трамвая) больше не печатают подписи друг на друге.
-          textOffset: [
-            'match',
-            ['get', 'role'],
-            'fix', ['literal', [0, -2.1]],
-            'fixed', ['literal', [0, 2.4]],
-            'smooth', ['literal', [2.6, -1.6]],
-            'mlanchor', ['literal', [-2.6, 1.8]],
-            'mltarget', ['literal', [0, -1.6]],
-            ['literal', [0, -2.1]],
+          // Offsets alone leave centered strings crossing each other. Attach
+          // the text's near corner to a distinct quadrant, so labels extend
+          // away from coincident markers; collision placement handles nearby
+          // but noncoincident points. Exact values remain in the inspector.
+          textAnchor: ['match', ['get', 'role'],
+            'fix', 'bottom-right', 'fixed', 'top-right',
+            'smooth', 'bottom-left', 'mlanchor', 'top-left', 'bottom-left'] as never,
+          textJustify: 'auto',
+          textOffset: ['match', ['get', 'role'],
+            'fix', ['literal', [-1.4, -1.4]],
+            'fixed', ['literal', [-1.4, 1.4]],
+            'smooth', ['literal', [1.4, -1.4]],
+            'mlanchor', ['literal', [1.4, 1.4]],
+            ['literal', [0.8, -0.8]],
           ] as unknown as [number, number],
-          textAllowOverlap: true,
-          textIgnorePlacement: true,
+          textPadding: 4,
+          textMaxWidth: 13,
+          symbolSortKey: ['match', ['get', 'role'],
+            'smooth', 0, 'fixed', 1, 'fix', 2, 'mlanchor', 3, 4] as unknown as number,
+          textAllowOverlap: false,
+          textIgnorePlacement: false,
         }}
       />
     </ShapeSource>

@@ -1,3 +1,6 @@
+import type { TramModelResources } from './useTramModels';
+import { useSkinsStore } from '@/stores/skins';
+import { assignedSkin, skinModelKey } from '@/lib/skins/registry';
 // Live fleet rendering: ShapeSources fed directly on the native side per engine frame
 // (no React state per frame), zoom-banded layers per architecture.md:
 //   <13.2 direction teardrops (bearing-rotated SymbolLayer) ·
@@ -30,21 +33,11 @@
 // changes on a settings-store pack change (single re-render, no per-frame
 // React).
 //
-// Cadence (zoom-adaptive, thermal-aware): the engine ticks at TICK_MS (~33 ms)
-// while the map is in the glide band (zoom ≥ 14, hysteresis down to 13.7 —
-// aligned with the fast points cadence so 15 Hz pushes never sample 10 Hz
-// motion); at far zooms the runtime drops to ~10 Hz (see
-// tramData.setDetailZoom). Each tick pushes the sections
-// FC (small — viewport-culled) when the band is on screen; the points FC is
-// viewport-culled before state allocation at close zoom and whole-fleet only
-// at the much slower city-scale cadence
-// (pointsPushIntervalMs: 15 Hz close, 1 s mid, 5 s far — far-zoom badges are
-// near-static and re-pushing burns GPU). The follow camera is retargeted at
-// ~12.5 Hz (CAMERA_RETARGET_MS) with overlapping linear glides, and a
-// stationary-target deadband keeps a dwelling tram from restarting native
-// camera animations at all — see ./followCamera.ts. Stringify is skipped
-// entirely while a FC stays empty, and frames that push nothing skip
-// buildFrame altogether.
+// Cadence: ~30 Hz detail frames (z14, hysteresis13.7), ~10 Hz farther out.
+// Models use detail frames; moving dots/badges use ~15 Hz detail or10 Hz far.
+// Every band culls before state allocation. SourceWriter suppresses identical
+// stationary/empty payloads and tracks native acknowledgements; no live React.
+// The follow camera retargets ~12.5 Hz with a stationary-target deadband.
 
 import {
   Camera,
@@ -70,7 +63,7 @@ import {
 } from 'react';
 
 import { Tram } from '@/constants/theme';
-import { DETAIL_ENTER_ZOOM, getRuntime, pointsPushWanted } from '@/hooks/tramData';
+import { getRuntime, pointsPushWanted } from '@/hooks/tramData';
 import {
   FACE_SPRITE_SCALE,
   ICON_PACKS,
@@ -90,7 +83,8 @@ import {
   FACE_TEXT_OFFSET_Y_EM,
   type BadgeAnchorMemory,
 } from '@/lib/render/featureBuilder';
-import { dimIfStale } from '@/lib/render/styleExpr';
+import { HiddenFrameAcks, SourceWriter } from '@/lib/render/sourceWriter';
+import { fadePresentationWithSource, tramOpacity } from '@/lib/render/styleExpr';
 import type { PlannerItinerary, Viewport } from '@/lib/types';
 import { useFavoritesStore } from '@/stores/favorites';
 import { usePlannerStore } from '@/stores/planner';
@@ -116,14 +110,9 @@ import {
   SECTIONS_FEED_MIN_ZOOM,
 } from './mapStyle';
 
-/**
- * Comic-scale curve: models only reach real-world 1× at this zoom (deeper than
- * the old MODEL_REAL_SCALE_ZOOM=16.6 — mid zooms stay comically oversized).
- */
-const MODEL_COMIC_REAL_SCALE_ZOOM = 17.0;
-
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 const EMPTY_FC_STRING = JSON.stringify(EMPTY_FC);
+const PRESENTATION_SOURCES = ['trams-points', 'trams-sections', 'trams-badges'] as const;
 
 /**
  * Follow-camera FALLBACK orientation, used ONLY if the captured orientation is
@@ -271,7 +260,7 @@ function faceBadgeStyle(pack: IconPackId, dataDrivenOffsets: boolean): BadgeSymb
       BAND_BADGES_TO_MODELS,
       FACE_MAX_ICON_SIZE,
     ] as unknown as number,
-    iconOpacity: dimIfStale(BADGE_BAND_OPACITY),
+    iconOpacity: tramOpacity(BADGE_BAND_OPACITY),
     textField: ['get', 'line'] as unknown as string,
     textFont: ['DIN Pro Bold', 'Arial Unicode MS Regular'],
     textSize: [
@@ -292,7 +281,7 @@ function faceBadgeStyle(pack: IconPackId, dataDrivenOffsets: boolean): BadgeSymb
     textOffset: dataDrivenOffsets
       ? (['get', 'toff'] as unknown as number[])
       : [FACE_TEXT_OFFSET_X_EM, FACE_TEXT_OFFSET_Y_EM],
-    textOpacity: dimIfStale(BADGE_BAND_OPACITY),
+    textOpacity: tramOpacity(BADGE_BAND_OPACITY),
     iconAllowOverlap: true,
     iconIgnorePlacement: true,
     textAllowOverlap: true,
@@ -356,15 +345,16 @@ export interface TramLayersProps {
   /** Gesture/override state for the follow camera (owned by the map screen). */
   followGestureRef: RefObject<FollowGestureState>;
   /** modelKey → local GLB URI; null while still downloading (gates <Models>). */
-  modelUris: Record<string, string> | null;
+  modelUris: TramModelResources | null;
 }
 
 export function TramLayers({
   cameraRef,
   viewportRef,
   followGestureRef,
-  modelUris,
+  modelUris: resources,
 }: TramLayersProps) {
+  const modelUris = resources?.all ?? null;
   const coveredByModel = usePathname().startsWith('/model/');
   const iconImages = useMapIcons();
   // Selected icon pack: a SETTING (changes rarely, from the settings sheet).
@@ -376,16 +366,17 @@ export function TramLayers({
   const sectionsRef = useRef<ShapeSource>(null);
   const badgesRef = useRef<ShapeSource>(null);
   const fixOverlayRef = useRef<ShapeSource>(null);
-  const sectionsFedRef = useRef(false);
-  const pointsEmptyRef = useRef(true);
-  const sectionsEmptyRef = useRef(true);
-  const badgesEmptyRef = useRef(true);
   /** Push-to-push badge anchor-slot memory — keeps stacks from re-shuffling. */
   const badgeMemoryRef = useRef<BadgeAnchorMemory>(new Map());
-  const fixEmptyRef = useRef(true);
+  // One retained payload per source; unchanged stationary fleets do not wake
+  // Mapbox even though presentation/physics continue sampling every frame.
+  const sourceWriterRef = useRef(new SourceWriter());
+  const hiddenAcksRef = useRef(new HiddenFrameAcks());
   const lastPointsPushMsRef = useRef(0);
+  // Scope fast transition delivery to the current map, not dormant offscreen fades.
+  const lastVisibleKeysRef = useRef(new Set<string>());
   /** Position mode of the last points push — a switch forces an immediate
-   *  re-anchor push in every mode (even at the 5 s city-scale cadence). */
+   *  re-anchor push in every mode. */
   const lastPushedModeRef = useRef<PositionMode | null>(null);
   /** Selection/follow keys of the last points push. Raw mode gates pushes on
    *  fix ingests, but the selected halo + pinned badge ride the points FC — a
@@ -432,16 +423,13 @@ export function TramLayers({
       // changes rarely; no subscription bookkeeping needed.
       const positionMode = useSettingsStore.getState().positionMode;
 
-      // Zoom-adaptive push cadences (thermal): sections every frame but ONLY
-      // inside the model band; points at pointsPushIntervalMs(zoom). Physics v3
-      // removed the old raw-mode dirty-flag gate — BOTH published curves move
-      // continuously between bundles, so every frame genuinely differs and the
-      // plain interval is the whole rule. Forced pushes still bypass it: a
-      // render-mode switch (the fleet re-anchors onto the other curve), and a
-      // selection/follow change at the 5 s city-scale cadence (the halo, pinned
-      // badge and fix overlay ride the points FC — a tap must not wait for it).
+      // Moving points update at2.5/5 Hz in city/badge views and ~15 Hz in
+      // detail; models use every 30 Hz detail frame. A pending hidden rebase
+      // forces both sources so its zero-opacity frame cannot be skipped.
+      // Identical payloads are suppressed by SourceWriter, including holds.
       const lastSel = lastPushedSelectionRef.current;
       const forcePush =
+        rt.fleet.hasPresentationTransitions(lastVisibleKeysRef.current) ||
         lastPushedModeRef.current !== positionMode ||
         lastSel.sel !== selection.selectedTramKey ||
         lastSel.fol !== selection.followTramKey;
@@ -449,19 +437,23 @@ export function TramLayers({
         nowMs - lastPointsPushMsRef.current,
         viewport.zoom,
         forcePush,
+        selection.selectedTramKey !== null || selection.followTramKey !== null,
       );
       const inSectionsBand = viewport.zoom >= SECTIONS_FEED_MIN_ZOOM;
       const wantSections = inSectionsBand;
 
       // On leaving the band the sections source is cleared once so stale
       // models never linger — no frame build needed for that.
-      if (!inSectionsBand && sectionsFedRef.current) {
-        sectionsFedRef.current = false;
-        sectionsEmptyRef.current = true;
-        void sectionsRef.current?.updateShape(EMPTY_FC_STRING);
+      const deliveries: (Promise<boolean> | null)[] = [];
+      if (!inSectionsBand) {
+        deliveries.push(sourceWriterRef.current.send('trams-sections', sectionsRef.current, EMPTY_FC_STRING, nowMs));
       }
 
-      if (wantPoints || wantSections) {
+      // Never advance the presentation controller through unsent frames.
+      // Native congestion keeps its last submitted state; recovery from a long
+      // gap is handled by the controller's explicit resume transition.
+      const sourcesBusy = sourceWriterRef.current.isBusy(PRESENTATION_SOURCES);
+      if ((wantPoints || wantSections) && !sourcesBusy) {
         const favTrams = useFavoritesStore.getState().favoriteTrams;
         if (!favSetRef.current || favSetRef.current.source !== favTrams) {
           favSetRef.current = { source: favTrams, set: new Set(favTrams) };
@@ -477,20 +469,24 @@ export function TramLayers({
           };
         }
 
-        // Above z14 Mapbox can only reveal the viewport plus the badge prefetch
-        // margin. Cull BEFORE public-state allocation/feature construction;
-        // city-scale frames stay whole-fleet but run only every 1–5 seconds.
-        const states =
-          viewport.zoom >= DETAIL_ENTER_ZOOM
-            ? rt.fleet.getStatesInBounds(
-                nowMs,
-                expandBbox(viewport.bbox, BADGE_CULL_MARGIN_M),
-                selection.selectedTramKey,
-                selection.followTramKey,
-                positionMode,
-              )
-            : rt.fleet.getStates(nowMs, positionMode, true);
+        // Cull before public-state allocation at every zoom. The 600 m
+        // margin covers badges and the largest (5x) whole tram assembly;
+        // selected/followed trams remain included outside the viewport.
+        const states = rt.fleet.getStatesInBounds(
+          nowMs,
+          expandBbox(viewport.bbox, BADGE_CULL_MARGIN_M),
+          selection.selectedTramKey,
+          selection.followTramKey,
+          positionMode,
+        );
+
         const frame = buildFrame(states, viewport, {
+          resolveModelKey: (key, model, baseKey) => {
+            const registry = useSkinsStore.getState();
+            const skin = assignedSkin(key, model, registry.skins, registry.assignments);
+            const candidate = skin ? skinModelKey(skin.directory, baseKey) : baseKey;
+            return modelUris?.[candidate] ? candidate : baseKey;
+          },
           selectedKey: selection.selectedTramKey,
           // The follow target gets selected:1 too — the declutter solve pins
           // it in place (never hidden, never displaced), and it keeps its
@@ -504,6 +500,16 @@ export function TramLayers({
           badgeMemory: badgeMemoryRef.current,
           nowMs,
         });
+        const visibleKeys = lastVisibleKeysRef.current;
+        visibleKeys.clear();
+        for (const f of frame.points.features) visibleKeys.add(f.properties.key);
+        if (frame.badges) for (const f of frame.badges.features) {
+          const key = f.properties?.key;
+          if (typeof key === 'string') visibleKeys.add(key);
+        }
+        for (const f of frame.sections.features) visibleKeys.add(f.properties.key);
+        if (selection.selectedTramKey) visibleKeys.add(selection.selectedTramKey);
+        if (selection.followTramKey) visibleKeys.add(selection.followTramKey);
 
         if (wantPoints) {
           lastPointsPushMsRef.current = nowMs;
@@ -519,37 +525,36 @@ export function TramLayers({
           // empty FC once when the last visible tram leaves, then stay silent
           // until a tram enters the viewport again.
           const pointsEmpty = frame.points.features.length === 0;
-          if (!pointsEmpty || !pointsEmptyRef.current) {
-            void pointsRef.current?.updateShape(
-              pointsEmpty ? EMPTY_FC_STRING : JSON.stringify(frame.points),
-            );
-          }
-          pointsEmptyRef.current = pointsEmpty;
+          deliveries.push(sourceWriterRef.current.send('trams-points', pointsRef.current,
+            pointsEmpty ? EMPTY_FC_STRING : JSON.stringify(frame.points), nowMs,
+          ));
           // Decluttered badge anchors + leaders, same cadence as the points.
           // Empty outside the badge band (stringify+push skipped while it
           // STAYS empty; the one clearing push stops stale badges — the badge
           // layers' zoom gates hide them anyway until then).
           const badgesFC = (frame.badges ?? EMPTY_FC) as GeoJSON.FeatureCollection;
           const badgesEmpty = badgesFC.features.length === 0;
-          if (!badgesEmpty || !badgesEmptyRef.current) {
-            void badgesRef.current?.updateShape(
-              badgesEmpty ? EMPTY_FC_STRING : JSON.stringify(badgesFC),
-            );
-          }
-          badgesEmptyRef.current = badgesEmpty;
+          deliveries.push(sourceWriterRef.current.send('trams-badges', badgesRef.current,
+            badgesEmpty ? EMPTY_FC_STRING : JSON.stringify(badgesFC), nowMs,
+          ));
         }
 
         // While the FC stays empty (no visible trams) the stringify+push is
         // skipped.
         if (wantSections) {
           const isEmpty = frame.sections.features.length === 0;
-          if (!isEmpty || !sectionsEmptyRef.current) {
-            void sectionsRef.current?.updateShape(
-              isEmpty ? EMPTY_FC_STRING : JSON.stringify(frame.sections),
-            );
-          }
-          sectionsEmptyRef.current = isEmpty;
-          sectionsFedRef.current = true;
+          deliveries.push(sourceWriterRef.current.send('trams-sections', sectionsRef.current,
+            isEmpty ? EMPTY_FC_STRING : JSON.stringify(frame.sections), nowMs,
+          ));
+        }
+
+        // A hidden rebase advances only after every visible geometry source
+        // accepted the zero-opacity frame. UI reads cannot acknowledge it.
+        for (const state of states) {
+          const token = state.presentationHiddenFrameId;
+          if (state.presentationOpacity !== 0 || token == null) continue;
+          hiddenAcksRef.current.wait(state.key, token, deliveries,
+            (key, hiddenFrameId) => rt.fleet.acknowledgePresentationHidden(key, hiddenFrameId));
         }
 
         // Last-real-fix overlay for the selected/followed tram (dashed
@@ -557,13 +562,14 @@ export function TramLayers({
         // `??` until the featureBuilder workstream populates fixOverlay.
         const fixFC = (frame.fixOverlay ?? EMPTY_FC) as GeoJSON.FeatureCollection;
         const fixEmpty = fixFC.features.length === 0;
-        if (!fixEmpty || !fixEmptyRef.current) {
-          void fixOverlayRef.current?.updateShape(
-            fixEmpty ? EMPTY_FC_STRING : JSON.stringify(fixFC),
-          );
-        }
-        fixEmptyRef.current = fixEmpty;
+        sourceWriterRef.current.send('tram-fix-overlay', fixOverlayRef.current,
+          fixEmpty ? EMPTY_FC_STRING : JSON.stringify(fixFC), nowMs,
+        );
       }
+
+      // A congested source still displays the previous frame. Keep the camera
+      // with that marker until a fresh geometry submission can resume.
+      if (sourcesBusy) return;
 
       // Follow camera: runs ONLY while following AND not paused. Retarget every
       // CAMERA_RETARGET_MS (NOT every tick — see followCamera.ts) with a longer
@@ -670,8 +676,10 @@ export function TramLayers({
     return () => {
       rt.setViewportProvider(null);
       unsubscribe();
+      sourceWriterRef.current.dispose();
+      hiddenAcksRef.current.dispose();
     };
-  }, [cameraRef, viewportRef, followGestureRef, coveredByModel]);
+  }, [cameraRef, viewportRef, followGestureRef, coveredByModel, modelUris]);
 
   // Tap ANY tram feature (badge/dot or any 3D body section): light haptic, then
   // present the tram card. `openTram` is ONE store write that selects (gold
@@ -703,7 +711,7 @@ export function TramLayers({
       style={{
         circleRadius: 22,
         circleColor: '#000000',
-        circleOpacity: 0.011,
+        circleOpacity: fadePresentationWithSource(0.011),
         circleStrokeWidth: 0,
       }}
     />,
@@ -724,20 +732,9 @@ export function TramLayers({
           // SPIKE-VERIFIED orientation: trams authored front-toward −Z, so
           // z = bearing faces the model correctly (no heading offset).
           modelRotation: [0, 0, ['get', 'bearing']] as unknown as number[],
-          modelScale: [
-            'interpolate',
-            ['exponential', 1.6],
-            ['zoom'],
-            BAND_BADGES_TO_MODELS,
-            ['literal', [5, 5, 5]],
-            15.6,
-            ['literal', [3.2, 3.2, 3.2]],
-            16.4,
-            ['literal', [1.6, 1.6, 1.6]],
-            MODEL_COMIC_REAL_SCALE_ZOOM,
-            ['literal', [1, 1, 1]],
-          ],
-          modelOpacity: dimIfStale([
+          // Center spacing and mesh dimensions come from one sampled frame.
+          modelScale: ['get', 'displayScale'] as unknown as number[],
+          modelOpacity: tramOpacity([
             'interpolate',
             ['linear'],
             ['zoom'],
@@ -772,10 +769,10 @@ export function TramLayers({
       style={{
         circleRadius: ['interpolate', ['linear'], ['zoom'], 12, 12, 16, 26],
         circleColor: Tram.gold,
-        circleOpacity: 0.28,
+        circleOpacity: fadePresentationWithSource(0.28),
         circleStrokeColor: Tram.gold,
         circleStrokeWidth: 2,
-        circleStrokeOpacity: 0.9,
+        circleStrokeOpacity: fadePresentationWithSource(0.9),
         circlePitchAlignment: 'map',
       }}
     />,
@@ -800,10 +797,10 @@ export function TramLayers({
       style={{
         circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 8, 16, 14],
         circleColor: LINE_COLOR,
-        circleOpacity: 0.14,
+        circleOpacity: fadePresentationWithSource(0.14),
         circleStrokeColor: LINE_COLOR,
         circleStrokeWidth: 1,
-        circleStrokeOpacity: 0.3,
+        circleStrokeOpacity: fadePresentationWithSource(0.3),
         circlePitchAlignment: 'map',
       }}
     />,
@@ -815,6 +812,8 @@ export function TramLayers({
       style={{
         circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 4, 16, 7],
         circleColor: '#FFFFFF',
+        circleOpacity: fadePresentationWithSource(1),
+        circleStrokeOpacity: fadePresentationWithSource(1),
         circleStrokeWidth: 2,
         circleStrokeColor: LINE_COLOR,
         circlePitchAlignment: 'map',
@@ -830,6 +829,7 @@ export function TramLayers({
       filter={['==', ['get', 'geometryless'], 1]}
       style={{
         textField: ['get', 'line'] as unknown as string,
+        textOpacity: fadePresentationWithSource(1),
         textFont: ['DIN Pro Bold', 'Arial Unicode MS Regular'],
         textSize: ['interpolate', ['linear'], ['zoom'], 10, 9, 16, 12] as unknown as number,
         textColor: LINE_COLOR,
@@ -864,7 +864,7 @@ export function TramLayers({
           iconAllowOverlap: true,
           iconIgnorePlacement: true,
           iconSize: ['interpolate', ['linear'], ['zoom'], 10, 0.55, BAND_DOTS_TO_BADGES, 0.8],
-          iconOpacity: dimIfStale([
+          iconOpacity: tramOpacity([
             'interpolate',
             ['linear'],
             ['zoom'],
@@ -895,7 +895,7 @@ export function TramLayers({
           iconIgnorePlacement: true,
           // MARKER_OBSTACLE_HALF_PX models this size — change both together.
           iconSize: 0.6,
-          iconOpacity: dimIfStale(BADGE_BAND_OPACITY),
+          iconOpacity: tramOpacity(BADGE_BAND_OPACITY),
         }}
       />,
       // Band 2: PINNED face badges — selected/followed/favorite trams. Drawn
@@ -933,7 +933,7 @@ export function TramLayers({
           // plate top ≈ (FACE_GAP_PX + FACE_NATURAL_PT) × iconSize 0.5 = 48 pt
           // above the marker at band top).
           iconOffset: [25, -71],
-          iconOpacity: BADGE_BAND_OPACITY,
+          iconOpacity: fadePresentationWithSource(BADGE_BAND_OPACITY),
         }}
       />,
     );
@@ -950,7 +950,8 @@ export function TramLayers({
         style={{
           circleRadius: ['interpolate', ['linear'], ['zoom'], 10, 3, 14.8, 6],
           circleColor: LINE_COLOR,
-          circleOpacity: dimIfStale(1),
+          circleOpacity: tramOpacity(1),
+          circleStrokeOpacity: tramOpacity(1),
           circleStrokeWidth: 1.5,
           circleStrokeColor: '#FFFFFF',
         }}
@@ -968,7 +969,7 @@ export function TramLayers({
       style={{
         circleRadius: 26,
         circleColor: '#000000',
-        circleOpacity: 0.011,
+        circleOpacity: fadePresentationWithSource(0.011),
         circleStrokeWidth: 0,
       }}
     />,
@@ -999,7 +1000,8 @@ export function TramLayers({
 
   return (
     <>
-      {modelUris != null && <Models models={modelUris} />}
+      {resources != null && <Models key="base-models" models={resources.base} />}
+      {resources?.skins.map(group => <Models key={group.version} models={group.models} />)}
       {iconImages != null && <Images images={iconImages} />}
 
       {/* Every live source deliberately omits the React `shape` prop and is fed

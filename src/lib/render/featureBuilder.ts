@@ -43,6 +43,7 @@ import type {
   Viewport,
 } from '@/lib/types';
 import { bearingAt, destinationPoint, pointAt, segmentIndexAt } from '../geo/polyline';
+import { assemblyScale } from './assemblyScale';
 
 /** Sections render only at/above this zoom (mode 3+). */
 export const SECTION_MIN_ZOOM = 14.8;
@@ -211,6 +212,8 @@ export interface BuildFrameOptions {
   getGeometry: (key: string) => RouteGeometry | undefined;
   /** Model spec override; defaults to state.model. */
   getSpec?: (key: string) => TramModelSpec | undefined;
+  /** Authored livery applies only to the known leading registration. */
+  resolveModelKey?: (key: string, model: TramModelSpec['id'], baseKey: string) => string;
   /**
    * Planner route-only mode: when set, ONLY trams whose line is in this set are
    * rendered (points and sections); everything else is hidden entirely.
@@ -270,12 +273,16 @@ function sectionFeature(
   position: [number, number],
   bearing: number,
   stale: boolean,
+  scale: number,
+  presentationOpacity: number,
+  sourceOpacity: number,
 ): SectionFeature {
   return {
     type: 'Feature',
     id,
     geometry: { type: 'Point', coordinates: offsetRight(position, bearing) },
-    properties: { key, modelKey, bearing, stale: stale ? 1 : 0 },
+    properties: { key, modelKey, bearing, stale: stale ? 1 : 0,
+      displayScale: [scale, scale, scale], presentationOpacity, sourceOpacity },
   };
 }
 
@@ -324,14 +331,23 @@ function sectionsAlongShape(
   sHead: number,
   coupled: boolean,
   dwelling: boolean,
+  scale: number,
   out: SectionFeature[],
+  resolveModelKey?: BuildFrameOptions['resolveModelKey'],
 ): void {
   const { coordinates, cumDistM } = geometry;
+  const offset = state.presentationOffsetM;
+  const shift = (p: [number, number]): [number, number] => {
+    if (!offset || !offset.every(Number.isFinite)) return p;
+    return [p[0] + offset[0] / (M_PER_DEG_LAT * Math.max(Math.cos(p[1] * DEG2RAD), 0.01)), p[1] + offset[1] / M_PER_DEG_LAT];
+  };
   let precedingLengths = 0;
   for (let i = 0; i < spec.sections.length; i++) {
     const section = spec.sections[i];
     const modelKey = sectionModelKey(section, dwelling);
-    const centerDist = sHead - (precedingLengths + i * spec.jointGapM) - section.lengthM / 2;
+    // The whole oversized train stays anchored at its front. Scaling only
+    // meshes while leaving centers at real-world spacing made sections overlap.
+    const centerDist = sHead - (precedingLengths + i * spec.jointGapM + section.lengthM / 2) * scale;
     const placed = placeAt(coordinates, cumDistM, centerDist);
     // Render safety: a poisoned shape vertex must not sink the sections push.
     if (isFinitePos(placed.position) && Number.isFinite(placed.bearing)) {
@@ -339,25 +355,31 @@ function sectionsAlongShape(
         sectionFeature(
           `${state.key}#${i}`,
           state.key,
-          modelKey,
-          placed.position,
+          resolveModelKey?.(state.key, spec.id, modelKey) ?? modelKey,
+          shift(placed.position),
           placed.bearing,
           state.pastHorizon,
+          scale,
+          opacityOf(state.presentationOpacity),
+          opacityOf(state.sourceOpacity),
         ),
       );
     }
     if (coupled) {
       const coupledOffsetM = spec.id === 't3rplf' ? 16.2 : COUPLED_OFFSET_M;
-      const trailed = placeAt(coordinates, cumDistM, centerDist - coupledOffsetM);
+      const trailed = placeAt(coordinates, cumDistM, centerDist - coupledOffsetM * scale);
       if (isFinitePos(trailed.position) && Number.isFinite(trailed.bearing)) {
         out.push(
           sectionFeature(
             `${state.key}#c${i}`,
             state.key,
             modelKey,
-            trailed.position,
+            shift(trailed.position),
             trailed.bearing,
             state.pastHorizon,
+            scale,
+            opacityOf(state.presentationOpacity),
+          opacityOf(state.sourceOpacity),
           ),
         );
       }
@@ -469,8 +491,10 @@ export interface BadgeCandidate {
    * map draws them from the points FC on the always-visible pinned layer).
    */
   pinned: boolean;
-  /** Rendered position is frozen (past horizon) — the badge dims with its tram. */
+  /** Future trajectory exhausted — the badge dims with its tram. */
   stale: boolean;
+  presentationOpacity?: number;
+  sourceOpacity?: number;
 }
 
 /** Style-px per meter conversion for Mapbox's 512-px tiles at a latitude/zoom. */
@@ -705,9 +729,11 @@ export function declutterBadges(
         line: c.line,
         modelId: c.modelId,
         displaced: pick === 0 ? 0 : 1,
-        // Carried so the bulk badge layer dims a frozen tram exactly like the
+        // Carried so the bulk badge layer dims an expired trajectory like the
         // points layers do — a stale plate must not look livelier than its dot.
         stale: c.stale ? 1 : 0,
+        presentationOpacity: opacityOf(c.presentationOpacity),
+        sourceOpacity: opacityOf(c.sourceOpacity),
         off: [r2(dxPx / s), r2(-FACE_GAP_PX + dyPx / s)],
         toff: [
           r2(FACE_TEXT_OFFSET_X_EM + dxPx / textSize),
@@ -724,6 +750,10 @@ export function declutterBadges(
 }
 
 /** Build one render frame from engine states. */
+export function opacityOf(value: number | undefined): number {
+  return value === undefined || !Number.isFinite(value) ? 1 : Math.max(0, Math.min(1, value));
+}
+
 export function buildFrame(
   states: TramPublicState[],
   viewport: Viewport,
@@ -732,6 +762,7 @@ export function buildFrame(
   const points: PointFeature[] = [];
   const sections: SectionFeature[] = [];
   const sectionsEnabled = viewport.zoom >= SECTION_MIN_ZOOM;
+  const scale = assemblyScale(viewport.zoom);
   const cullBbox = sectionsEnabled ? expandBbox(viewport.bbox, CULL_MARGIN_M) : viewport.bbox;
   const lineFilter = opts.lineFilter ?? null;
   const nowMs = opts.nowMs ?? Date.now();
@@ -773,7 +804,7 @@ export function buildFrame(
       if (!isFinitePos(anchor)) continue; // beyond saving — drop for this frame
     }
 
-    // A tram without a loaded shape renders as a plain dot at its RAW GPS
+    // A tram without a loaded shape renders at its world-smoothed observation
     // position: no perpendicular track offset (there is no reliable bearing to
     // offset by) and no 3D body below. Offsetting/rotating a geometry-less tram
     // is what stood it at an angle beside the network while its shape loaded.
@@ -801,10 +832,12 @@ export function buildFrame(
           selected,
           favorite,
           geometryless: geometryless ? 1 : 0,
-          // Connection honesty, per tram: a tram whose curve ran out (or which
-          // never got one) is FROZEN on screen, so the layers dim it. The rest
-          // of the fleet keeps moving — the difference has to be visible.
+          // Trajectory availability, per tram: a tram whose curve ran out (or which
+          // never got one) may still coast or brake through its display
+          // controller. Dimming expresses missing future trajectory evidence.
           stale: state.pastHorizon ? 1 : 0,
+          presentationOpacity: opacityOf(state.presentationOpacity),
+          sourceOpacity: opacityOf(state.sourceOpacity),
         },
       });
       // Badge declutter candidate: visible band-2 badges only. Pinned
@@ -817,6 +850,8 @@ export function buildFrame(
           pos: rendered,
           pinned: selected === 1 || favorite === 1,
           stale: state.pastHorizon,
+          presentationOpacity: opacityOf(state.presentationOpacity),
+          sourceOpacity: opacityOf(state.sourceOpacity),
         });
       }
     }
@@ -855,7 +890,7 @@ export function buildFrame(
     // check keys off the RENDERED head, so live mode (projected observation)
     // can't show open doors mid-segment while the smooth sim dwells.
     const dwelling = doorsOpen(state, geometry, sHead);
-    sectionsAlongShape(state, spec, geometry, sHead, coupled, dwelling, sections);
+    sectionsAlongShape(state, spec, geometry, sHead, coupled, dwelling, scale, sections, opts.resolveModelKey);
   }
 
   const midLat = (viewport.bbox[1] + viewport.bbox[3]) / 2;

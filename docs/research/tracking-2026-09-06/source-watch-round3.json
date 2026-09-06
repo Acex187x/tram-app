@@ -1,0 +1,13 @@
+{
+  "recordedAt": "2026-09-06T12:40:39.956284+00:00",
+  "durationMs": 600019,
+  "samples": 599,
+  "sourceSwitches": 0,
+  "maxConsecutiveFailures": 0,
+  "bundleAgeS": {
+    "median": 1.42178564453125,
+    "max": 4.585
+  },
+  "limits": "Read-only real client trajectory WebSocket and clock on Mac home network. Does not exercise geometry or reproduce physical iPhone path. Source silence gate measures time since advancing receipt, not bundle age.",
+  "rawLog": "/tmp/tram-r3-source-watch.jsonl"
+}

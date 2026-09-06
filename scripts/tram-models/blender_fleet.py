@@ -51,20 +51,22 @@ def materials():
 class Mesh:
     def __init__(self):
         self.v, self.f, self.mat, self.smooth = [], [], [], []
+        self.n = []
         self.parts=[]
 
     def part(self,mesh,name,pivot=(0,0,0),**extras):
         self.parts.append((mesh,name,pivot,extras))
 
     def merged(self):
-        mesh=Mesh();mesh.v=list(self.v);mesh.f=list(self.f);mesh.mat=list(self.mat);mesh.smooth=list(self.smooth)
+        mesh=Mesh();mesh.v=list(self.v);mesh.n=list(self.n);mesh.f=list(self.f);mesh.mat=list(self.mat);mesh.smooth=list(self.smooth)
         for child,_,_,_ in self.parts:
             sub=child.merged();offset=len(mesh.v)
             mesh.v.extend(sub.v);mesh.f.extend(tuple(i+offset for i in f) for f in sub.f)
+            mesh.n.extend(sub.n)
             mesh.mat.extend(sub.mat);mesh.smooth.extend(sub.smooth)
         return mesh
 
-    def face(self, mat, points, normal=None, smooth=False):
+    def face(self, mat, points, normal=None, smooth=False, shading=None):
         pts=[]
         for p in points:
             v=Vector(p)
@@ -79,6 +81,7 @@ class Mesh:
             if area.dot(Vector(normal)) < 0:pts.reverse()
         i = len(self.v)
         self.v.extend(tuple(p) for p in pts)
+        self.n.extend(tuple(shading(p)) if shading else None for p in pts)
         self.f.append(tuple(range(i, i+len(pts))))
         self.mat.append(mat)
         self.smooth.append(smooth)
@@ -121,6 +124,23 @@ class Mesh:
         bpy.context.view_layer.objects.active=obj;obj.select_set(True)
         mod=obj.modifiers.new('Weld authored seams','WELD');mod.merge_threshold=.00005
         bpy.ops.object.modifier_apply(modifier=mod.name)
+        # Glass/paint patches have clipped topology. Recomputing their normals
+        # independently made strips and triangular dents on an otherwise smooth
+        # cab. Transfer the parent surface's shading, including patch boundaries.
+        authored={tuple(round(q,6) for q in (x-px,-z+pz,y-py)):(n[0],-n[2],n[1])
+                  for (x,y,z),n in zip(self.v,self.n) if n is not None}
+        if authored:
+            corner_normals=[(0,0,0)]*len(obj.data.loops)
+            for polygon in obj.data.polygons:
+                if not polygon.use_smooth:continue
+                for j in polygon.loop_indices:
+                    v=obj.data.vertices[obj.data.loops[j].vertex_index]
+                    corner_normals[j]=authored.get(tuple(round(q,6) for q in v.co),(0,0,0))
+            obj.data.normals_split_custom_set(corner_normals)
+            for polygon in obj.data.polygons:
+                if polygon.use_smooth and any(polygon.normal.dot(obj.data.corner_normals[j].vector)<-.05
+                                              for j in polygon.loop_indices):
+                    raise ValueError(f'{name}: shading normal faces inside surface at {tuple(polygon.center)}')
         obj.select_set(False)
         obj.location=(px,-pz,py)
         if movable:
@@ -204,7 +224,7 @@ def mirrors(m,id,tip,w,sign=-1):
         y=2.53 if id=='14t' else 2.61 if id in ['15t','52t'] else 2.58 if id=='kt8d5' else 2.05
         if id=='14t' and side==1:
             arm=[(side*(w/2-.06),3.18,tip-sign*.82),
-                 (x,3.15,z+sign*.08),(x,2.78,z)]
+                 (x,3.15,z+sign*.08),(x,y+.16,z)]
         else:
             arm=[(side*(w/2-.035),y+.24,z-sign*.18),
                  (x,y+.23,z),(x,y+.12,z)]
@@ -219,13 +239,22 @@ def mirrors(m,id,tip,w,sign=-1):
         for j in range(8):m.face('black',[front[j],back[j],back[(j+1)%8],front[(j+1)%8]],smooth=True)
         m.face('chrome',[(x+a*.79,y+b*.89,z-sign*.057) for a,b in ring],(0,0,-sign))
 
-def window(m,side,z0,z1,y0,y1,w,frame='rubber',split=False):
+def window(m,side,z0,z1,y0,y1,w,frame='rubber',split=False,lower_radius=None):
     # Octagonal recessed rubber seal and inset blue-grey opaque glazing.
     x=side*(w/2+.008);b=.065
-    def poly(a,c,d,e,r):return [(a+r,d),(c-r,d),(c,d+r),(c,e-r),(c-r,e),(a+r,e),(a,e-r),(a,d+r)]
-    outer=poly(z0,z1,y0,y1,b);inner=poly(z0+.032,z1-.032,y0+.032,y1-.032,b*.6)
-    for i in range(8):
-        j=(i+1)%8
+    def poly(a,c,d,e,r,inset=0):
+        if lower_radius is None:return [(a+r,d),(c-r,d),(c,d+r),(c,e-r),(c-r,e),(a+r,e),(a,e-r),(a,d+r)]
+        # PLF's three dropped center lights have broad rounded lower corners,
+        # unlike the narrow chamfers of its conventional upper side windows.
+        low=min(lower_radius-inset,(c-a)/2,(e-d)/2);points=[]
+        for cx,cy,rr,angle,steps in [(c-low,d+low,low,-math.pi/2,3),(c-r,e-r,r,0,1),
+                                   (a+r,e-r,r,math.pi/2,1),(a+low,d+low,low,math.pi,3)]:
+            for k in range(steps+1):
+                t=angle+k*math.pi/(2*steps);points.append((cx+rr*math.cos(t),cy+rr*math.sin(t)))
+        return points
+    outer=poly(z0,z1,y0,y1,b);inner=poly(z0+.032,z1-.032,y0+.032,y1-.032,b*.6,.032)
+    for i in range(len(outer)):
+        j=(i+1)%len(outer)
         m.face(frame,[(x,y,z) for z,y in [outer[i],outer[j],inner[j],inner[i]]],(side,0,0))
     m.face('glass',[(x+side*.002,y,z) for z,y in inner],(side,0,0))
     # restrained sky reflection, clipped within the glazing
@@ -279,12 +308,62 @@ def roofbox(m,z,y,length,width=1.75):
             x=s*(width/2+.003)
             m.face('black',[(x,y+.07,zz-.018),(x,y+.15,zz-.018),(x,y+.15,zz+.018),(x,y+.07,zz+.018)],(s,0,0))
 
+def kt8_collector(m,z,y,direction,raised):
+    # DPP RN2P photographs: single-arm collector, mirrored on the other cab.
+    # Only the leading collector is raised in this representative running state.
+    def p(x,height,distance):return (x,y+height,z+direction*distance)
+    m.box('roof',0,y+.04,z,1.28,.08,1.48)
+    for x in [-.45,.45]:
+        for dz in [-.52,.52]:m.cylinder('cream',x,y+.14,z+dz,.075,.18,'y',8)
+    base=.25;elbow=.98 if raised else .32;head=1.94 if raised else .40
+    for x in [-.13,.13]:m.beam('yellow',p(x,base,-.53),p(x,elbow,.70),.038,8)
+    m.beam('roof',p(-.21,elbow,.70),p(.21,elbow,.70),.055,8)
+    for x in [-.39,.39]:
+        m.beam('yellow',p(x*.28,elbow,.70),p(x,head,-.63),.024,8)
+        m.beam('roof',p(x*.24,base,-.48),p(x,head-.05,-.58),.010,6)
+    for dz in [-.13,.13]:
+        m.beam('black',p(-.76,head+.07,-.63+dz),p(.76,head+.07,-.63+dz),.023,8)
+        for side in [-1,1]:
+            m.beam('chrome',p(side*.76,head+.07,-.63+dz),p(side*.94,head-.06,-.63+dz),.016,6)
+    for x in [-.42,.42]:m.beam('roof',p(x,head,-.83),p(x,head,-.43),.022,6)
+
+def kt8_low_window(m,side,start,end,w):
+    # ML8LF replacement section has dropped, diagonal-bottom glazing. The
+    # white waist follows that glass; it is not a stripe laid across a flat wall.
+    for direction in [-1,1]:
+        lo=.77;hi=(end if direction>0 else -start)-.14
+        def face(mat,points,depth):
+            m.face(mat,[(side*(w/2+depth),yy,direction*zz) for zz,yy in points],(side,0,0))
+        contour=[(lo,1.03),(lo+.34,1.03),(hi,1.72)]
+        face('white',contour+[(hi,2.93),(lo,2.93)],.002)
+        face('white',[(.65,1.03),(lo,1.03),(lo,2.93),(.65,2.93)],.002)
+        face('white',[(hi,1.72),(hi+.14,1.75),(hi+.14,2.93),(hi,2.93)],.002)
+        outer=[(lo,1.21),(lo+.34,1.21),(hi-.05,1.89),(hi,1.94),
+               (hi,2.71),(hi-.06,2.77),(lo+.06,2.77),(lo,2.71)]
+        inner=[(lo+.035,1.25),(lo+.33,1.25),(hi-.08,1.92),(hi-.035,1.96),
+               (hi-.035,2.69),(hi-.08,2.735),(lo+.08,2.735),(lo+.035,2.69)]
+        for j in range(len(outer)):
+            face('rubber',[outer[j],outer[(j+1)%8],inner[(j+1)%8],inner[j]],.010)
+        face('glass',inner,.012)
+        face('glint',[(lo+.08,2.65),(hi-.08,2.65),(hi-.08,2.57),(lo+.08,2.60)],.013)
+        m.box('chrome',side*(w/2+.015),2.40,direction*(lo+hi)/2,.012,.022,hi-lo-.07)
+
 def bellows(m,z,w,h,length=.20):
-    m.box('rubber',0,(h+.4)/2,z,w-.10,h-.4,length)
-    for k in range(5):
-        zz=z-length/2+(k+.5)*length/5
-        for side in [-1,1]:m.box('roof',side*(w/2-.065),(h+.4)/2,zz,.025,h-.43,.014)
-        m.box('roof',0,h-.015,zz,w-.12,.026,.014)
+    # Corrugated membrane with a rounded upper cross-section. The former flat
+    # box buried its own ribs and read as a rigid spacer between tram sections.
+    rings=[]
+    for k in range(11):
+        inset=.09 if k%2==0 else .035
+        x=w/2-inset;top=h-inset+.035;bottom=.42+inset*.35
+        cross=[(-x,bottom),(x,bottom),(x,top-.15),(x-.12,top),
+               (-x+.12,top),(-x,top-.15)]
+        rings.append([(a,b,z-length/2+k*length/10) for a,b in cross])
+    for a,b in zip(rings,rings[1:]):
+        for j in range(6):
+            q=(j+1)%6
+            m.face('rubber',[a[j],a[q],b[q],b[j]],
+                   (a[j][0]+a[q][0],(a[j][1]+a[q][1])/2-(h+.42)/2,0))
+    for ring,direction in [(rings[0],-1),(rings[-1],1)]:m.face('rubber',ring,(0,0,direction))
 
 def door(m,side,z,width,w,base,top,opened,classic=False,color='black',animatable=True):
     x=side*(w/2+.012)
@@ -308,7 +387,13 @@ def door(m,side,z,width,w,base,top,opened,classic=False,color='black',animatable
             zz=z-width/2+(k+.5)*width/leaves;dw=width/leaves-.025
             leaf=Mesh()
             leaf.box(color,x+side*.025,(base+top)/2,zz,.025,top-base-.06,dw)
-            window(leaf,side,zz-dw/2+.028,zz+dw/2-.028,base+(.40 if classic else .20),top-.12,w+.095,split=False)
+            if classic:
+                # Each folding leaf has two separately sealed lights, not a
+                # floor-to-ceiling slit. The waist rail is conspicuous on Tatra.
+                for low,high in [(base+.24,1.43),(1.52,top-.12)]:
+                    window(leaf,side,zz-dw/2+.028,zz+dw/2-.028,low,high,w+.095)
+            else:
+                window(leaf,side,zz-dw/2+.028,zz+dw/2-.028,base+.20,top-.12,w+.095)
             if not classic:leaf.box('yellow',x+side*.07,base+.98,zz,.014,.055,.065)
             direction=-1 if k<leaves/2 else 1
             hinge=zz+direction*dw/2 if classic else zz
@@ -325,6 +410,13 @@ def sidewall(m,side,start,end,w,levels,doors,opened,classic=False,bogies=(),wind
     for z,dw,base in sorted(doors):
         intervals.append((cursor,z-dw/2));cursor=z+dw/2
         door(m,side,z,dw,w,base,window_top+.10,opened,classic or folding,'cream' if classic else 'black')
+        # An opening ends at its lintel. Previously the entire vertical strip
+        # up to the roof was removed, leaving daylight above modern tram doors.
+        for i,(y,mat) in enumerate(levels[:-1]):
+            low=max(y,window_top+.10);high=levels[i+1][0]
+            if high>low:
+                m.face(mat,[(side*w/2,low,z-dw/2),(side*w/2,low,z+dw/2),
+                            (side*w/2,high,z+dw/2),(side*w/2,high,z-dw/2)],(side,0,0))
     intervals.append((cursor,end))
     for interval,(lo,hi) in enumerate(intervals):
         if hi-lo<.03:continue
@@ -335,9 +427,29 @@ def sidewall(m,side,start,end,w,levels,doors,opened,classic=False,bogies=(),wind
         for j in range(count):
             a=lo+(hi-lo)*j/count+.07;b=lo+(hi-lo)*(j+1)/count-.07
             sill=window_sill((a+b)/2) if callable(window_sill) else window_sill
-            if b-a>.25:window(m,side,a,b,sill,window_top,w,split=classic)
+            if b-a>.25:window(m,side,a,b,sill,window_top,w,split=classic,
+                              lower_radius=.20 if classic and sill<1.3 else None)
         # lower equipment seams, kept subtle and in the existing material batch
         for z in [lo+.09,hi-.09]:m.box('roof',side*(w/2+.002),.73,z,.009,.28,.008)
+    if classic:
+        # Deep rolled apron, with local bogie apertures and door cutouts. The
+        # previous thin straight strip made the whole car appear to stand on
+        # exposed toy wheels and omitted nearly half of the cream lower body.
+        for lo,hi in intervals:
+            if hi-lo<.03:continue
+            cuts=sorted(set([lo,hi]+[max(lo,min(hi,z+d)) for z in bogies
+                                    for d in [-1.45,-1.18,1.18,1.45]]))
+            def lower(z):
+                distance=min((abs(z-b) for b in bogies),default=10)
+                return .30+.34*max(0,min(1,(1.45-distance)/.27))
+            for a,b in zip(cuts,cuts[1:]):
+                if b-a<1e-6:continue
+                ya,yb=lower(a),lower(b)
+                m.face('cream',[(side*(w/2-.055),ya,a),(side*(w/2-.055),yb,b),
+                                (side*w/2,.78,b),(side*w/2,.78,a)],(side,0,0),True)
+                m.face('cream',[(side*(w/2-.12),ya+.025,a),(side*(w/2-.12),yb+.025,b),
+                                (side*(w/2-.055),yb,b),(side*(w/2-.055),ya,a)],(side,-1,0))
+        return
     # Visible bogie cut-outs interrupt the low skirt rather than burying wheels.
     cut=[start,end]
     for z,dw,_ in doors:cut.extend([z-dw/2,z+dw/2])
@@ -364,28 +476,46 @@ def rounded_end(m,end,depth,w,levels,mats,sign=-1,power=.45,flat=None):
     rings=[]
     for y,d,hw in levels:
         us=sorted(set([-1,-flat,0,flat,1])) if flat is not None else [math.sin(-math.pi/2+i*math.pi/16) for i in range(17)]
-        rings.append([(hw*u,y,join+sign*d*curve(u)) for u in us])
+        rings.append([tuple(Vector((hw*u,y,join+sign*d*curve(u)))) for u in us])
+    normals={}
+    for k,ring in enumerate(rings):
+        for j,p in enumerate(ring):
+            tx=Vector(ring[min(j+1,len(ring)-1)])-Vector(ring[max(0,j-1)])
+            ty=Vector(rings[min(k+1,len(rings)-1)][j])-Vector(rings[max(0,k-1)][j])
+            n=tx.cross(ty)
+            if k==len(rings)-1:n=Vector((0,1,0))
+            elif n.z*sign < -1e-8 or (abs(n.z)<1e-8 and n.y<0):n=-n
+            normals[p]=n.normalized() if n.length>1e-8 else Vector((0,1,0))
     triangles=[]
     for k in range(len(rings)-1):
         band=[]
         for j in range(len(rings[k])-1):
             a,b=rings[k][j],rings[k][j+1];c,d=rings[k+1][j+1],rings[k+1][j]
             for tri in [(a,b,c),(a,c,d)]:
-                m.face(mats[k],tri,(a[0]+b[0],0,sign),flat is None);band.append(tri)
+                m.face(mats[k],tri,(a[0]+b[0],0,sign),flat is None,
+                       (lambda p:normals[tuple(p)]) if flat is None else None);band.append(tri)
         triangles.append(band)
     for k,n in [(0,(0,-1,0)),(-1,(0,1,0))]:m.face(mats[0 if k==0 else -1],rings[k],n)
-    def surface(x,y):
+    def sample(x,y,normal=False):
         # Evaluate the actual authored triangles, not the ideal curved loft.
         # Attachments therefore share its exact depth even at profile breaks.
         for k,((y0,_,_),(y1,_,_)) in enumerate(zip(levels,levels[1:])):
-            if y0-1e-8<=y<=y1+1e-8:
+            if y0-1e-6<=y<=y1+1e-6:
                 for a,b,c in triangles[k]:
                     det=(b[1]-c[1])*(a[0]-c[0])+(c[0]-b[0])*(a[1]-c[1])
                     if abs(det)<1e-12:continue
                     u=((b[1]-c[1])*(x-c[0])+(c[0]-b[0])*(y-c[1]))/det
                     v=((c[1]-a[1])*(x-c[0])+(a[0]-c[0])*(y-c[1]))/det
-                    if min(u,v,1-u-v)>=-1e-7:return u*a[2]+v*b[2]+(1-u-v)*c[2]
-        return end
+                    if min(u,v,1-u-v)>=-1e-7:
+                        if normal:
+                            if flat is not None:
+                                n=(Vector(b)-Vector(a)).cross(Vector(c)-Vector(a))
+                                return (n if n.z*sign>=0 else -n).normalized()
+                            return (u*normals[a]+v*normals[b]+(1-u-v)*normals[c]).normalized()
+                        return u*a[2]+v*b[2]+(1-u-v)*c[2]
+        return Vector((0,0,sign)) if normal else end
+    def surface(x,y):return sample(x,y)
+    surface.normal=lambda x,y:sample(x,y,True)
     surface.rings=rings
     surface.triangles=[tri for band in triangles for tri in band]
     return surface
@@ -432,7 +562,8 @@ def surface_patch(m,surf,boundary,sign,offset,mat):
                 if dc>=0:clipped.append(point)
                 prev,dp=point,dc
             poly=clipped
-        if len(poly)>=3:m.face(mat,[(x,y,z+sign*offset) for x,y,z in poly],(0,0,sign),True)
+        if len(poly)>=3:m.face(mat,[(x,y,z+sign*offset) for x,y,z in poly],(0,0,sign),True,
+                              lambda p:surf.normal(p.x,p.y))
 
 def cab_window(m,surf,x0,x1,y0,y1,sign,frame='rubber',radius=.09,fill='glass',border=.035,taper=0,layer=0):
     """Rounded window panels tessellated onto the cab, with real body pillars.
@@ -460,14 +591,14 @@ def t3(id,opened):
     m=Mesh();lf=id=='t3rplf';historic=id=='t3';L=15.1 if lf else 14.0;w=2.48 if lf else 2.5
     depth=.92;front=-L/2;back=L/2;start=front+depth;end=back-depth;h=3.06 if not lf else 3.185
     bogies=[-3.75,3.75] if lf else [-3.2,3.2]
-    m.box('black',0,.48,0,2.12,.22,L-1.0);wheels(m,bogies,w)
+    m.box('black',0,.48,0,2.12,.22,end-start);wheels(m,bogies,w)
     doorzs=[(start+.76,1.25,.52),(.12,1.3,.35 if lf else .52),(end-.71,1.25,.52)]
-    levels=[(.62,'red'),(1.55,'cream'),(2.77,'cream')]
+    levels=[(.80,'red'),(1.55,'cream'),(2.77,'cream')]
     for side in [-1,1]:
         sill=(lambda z: 1.08 if abs(z)<2.1 else 1.61) if lf else 1.61
         sidewall(m,side,start,end,w,levels,doorzs if side==1 else [],opened,True,bogies,sill,2.65,
                  ([0,3,3,0] if lf else [0,3,2,0]) if side==1 else [9 if lf else 8])
-        m.box('chrome',side*(w/2+.015),.61,0,.028,.04,end-start)
+        m.box('chrome',side*(w/2+.015),.79,0,.028,.04,end-start)
         m.box('chrome',side*(w/2+.012),2.76,0,.025,.025,end-start)
         if side==-1:
             m.box('red',side*(w/2+.024),1.02,end-1.1,.025,.48,.90)
@@ -475,7 +606,7 @@ def t3(id,opened):
         text(m,'6102' if historic else '8284' if lf else '8442',0,1.33,0,.14,'yellow',(side*(w/2+.026),start+2.9))
     dome(m,start,end,w,2.77,h-2.77,'cream')
     for sign,tip in [(-1,front),(1,back)]:
-        lv=[(.29,.71,w*.47),(.58,.90,w/2),(.64,.92,w/2),(1.35,.92,w/2),
+        lv=[(.29,.71,w*.47),(.76,.90,w/2),(.82,.92,w/2),(1.35,.92,w/2),
             (1.53,.90,w/2),(2.57,.72,w/2),(2.61,.75,w/2),(2.77,.75,w/2),
             (2.88,.66,w*.48),(h-.08,.50,w*.39),(h-.015,.33,w*.23),(h,.20,.04)]
         colors=['cream','chrome','red','cream','cream','cream','cream','cream','cream','cream','cream']
@@ -484,10 +615,11 @@ def t3(id,opened):
             colors[3]='red';lv=[(y,.90 if 1.53<=y<=2.61 else d,hw) for y,d,hw in lv]
         surf=rounded_end(m,tip,depth,w,lv,colors,sign,.43)
         if lf and sign==-1:
-            # The PLF front has the documented shallow cream V, unlike RP.
-            for j in range(16):
-                a=-1.20+j*.15;b=a+.15
-                surface_patch(m,surf,[(a,1.20+.33*abs(a)/1.2),(b,1.20+.33*abs(b)/1.2),(b,1.56),(a,1.56)],sign,.019,'cream')
+            # PLF has a central cream point with curved rising shoulders, visible
+            # in DPP's 8284 front-assembly photograph; not a straight triangle.
+            for j in range(12):
+                a=-1.20+j*.20;b=a+.20
+                surface_patch(m,surf,[(a,1.20+.33*(abs(a)/1.2)**.55),(b,1.20+.33*(abs(b)/1.2)**.55),(b,1.56),(a,1.56)],sign,.019,'cream')
         if sign==-1:
             cab_window(m,surf,-1.215,1.215,1.53,2.60,sign,radius=.16)
             for x in [-.96,.96]:cab_beam(m,surf,(x,1.58),(x,2.56),sign,.009,'chrome')
@@ -497,25 +629,53 @@ def t3(id,opened):
         for x in [-.64,.64]:
             if sign==1 and lf:
                 cab_window(m,surf,x-.10,x+.10,.80,.96,sign,radius=.03,fill='tail',border=.025)
-            else:lamp(m,x,1.00 if sign==-1 else .88,surf(x,1.0 if sign==-1 else .88)+sign*.02,.12 if sign==-1 else .075,sign,'light' if sign==-1 else 'tail',surface=surf)
+            else:lamp(m,x,1.10 if sign==-1 else .98,surf(x,1.10 if sign==-1 else .98)+sign*.02,.12 if sign==-1 else .075,sign,'light' if sign==-1 else 'tail',surface=surf)
         for x in [-.94,.94]:lamp(m,x,1.35,surf(x,1.35)+sign*.015,.045,sign,'amber',surface=surf)
         if sign==-1:
-            mirrors(m,id,tip,w,sign)
-            cab_window(m,surf,-.67,.67,2.64,2.86,sign,frame='chrome' if historic else 'rubber',radius=.095,fill='black',border=.025)
-            if historic:label(m,'OKRUZNI JIZDA',0,2.75,0,.09,'cream',sign,surf)
-            else:text(m,'7 LEHOVEC',0,2.75,0,.11,surf=surf)
-            label(m,'6102' if historic else '8284' if lf else '8442',0,1.01,0,.18,'black' if historic else 'yellow',sign,surf)
-            for x in [-.44,.44]:
-                cab_beam(m,surf,(x,1.54),(x*1.82,2.36),sign)
+            if historic:
+                for x in [-1.09,1.09]:
+                    top=(x,1.93,surf(x,1.93)-.13)
+                    m.beam('cream',(x*.97,1.46,surf(x*.97,1.46)-.04),top,.013,6)
+                    m.cylinder('cream',*top,.083,.035,'z',16)
+            else:mirrors(m,id,tip,w,sign)
+            if historic:
+                cab_window(m,surf,-.67,.67,2.64,2.86,sign,frame='chrome',radius=.095,fill='black',border=.025)
+                label(m,'OKRUZNI JIZDA',0,2.75,0,.09,'cream',sign,surf)
+            else:
+                # Retrofitted rectangular LED housing, not 6102's curved pill.
+                # PLF 8284 has the wider case just beneath the roof edge.
+                half=.86 if lf else .70;cy=2.81 if lf else 2.76;dy=.14 if lf else .12
+                facez=min(surf(0,cy+v*dy) for v in [-1,0,1])-.026;case_depth=.24
+                m.box('chrome',0,cy,facez+case_depth/2,half*2,dy*2,case_depth)
+                a=half-.025;c=dy-.025;r=.012
+                ring=[(-a+r,-c),(a-r,-c),(a,-c+r),(a,c-r),(a-r,c),(-a+r,c),(-a,c-r),(-a,-c+r)]
+                m.face('black',[(xx,cy+yy,facez-.003) for xx,yy in ring],(0,0,-1))
+                text(m,'7 LEHOVEC',0,cy,facez-.007,.135 if lf else .115)
+            label(m,'6102' if historic else '8284' if lf else '8442',0,1.10,0,.18,'black' if historic else 'yellow',sign,surf)
+            if historic:
+                # 6102's linked central wiper assembly, visible in DPP t3-01.
+                cab_beam(m,surf,(0,1.59),(.10,2.57),sign,.012,'chrome')
+                for x in [-.43,.43]:cab_beam(m,surf,(x,1.58),(.06,1.98),sign,.013,'chrome')
+            else:
+                for x in [-.44,.44]:cab_beam(m,surf,(x,1.54),(x*1.82,2.36),sign)
         # Body dimensions exclude the actual exposed coupler. The paired-car
         # registry spaces standard T3 centers15.104m andPLF centers16.2m.
-        cab_window(m,surf,-.65,.65,.30,.59,sign,radius=.03,fill='black',border=.02)
+        if lf:
+            # PLF retains a closed cream front panel around the narrow shaft.
+            cab_window(m,surf,-.13,.13,.30,.61,sign,radius=.025,fill='black',border=.012)
+            for xx in [-.50,.50]:
+                surface_patch(m,surf,[(xx-.002,.31),(xx+.002,.31),(xx+.002,.74),(xx-.002,.74)],sign,.009,'roof')
+        else:cab_window(m,surf,-.55,.55,.30,.76,sign,radius=.035,fill='black',border=.02)
         extension=.55 if lf else .552
         m.box('roof',0,.40,tip+sign*(extension-.40),.10,.08,.80)
         m.cylinder('black',0,.40,tip+sign*(extension-.04),.115,.08,'z',16)
     pantograph(m,-3.55,h,True,historic)
     if lf:
-        roofbox(m,.9,h,4.3,1.85);roofbox(m,-5.65,h,.68,1.15)
+        roofbox(m,.9,h,4.3,1.85)
+        m.box('red',0,h+.035,front+.72,1.00,.07,.49)
+        m.box('cream',0,h+.155,front+.72,.93,.17,.42)
+        for yy in [h+.12,h+.18]:
+            for xx in [-.235,.235]:m.box('black',xx,yy,front+.505,.35,.024,.013)
     elif not historic:
         for z in [-.4,2.0,4.3]:m.box('cream',0,h+.025,z,.85,.05,.46)
     return m,L,w
@@ -540,7 +700,7 @@ def modern_end(m,id,tip,w,h,sign=-1,rear=False):
         colors=['silver','silver','silver','silver','silver','silver']
     elif id=='15t':
         depth=1.30
-        levels=[(.29,1.09,w*.46),(.60,1.28,w*.495),(.91,1.30,w/2),(1.10,1.28,w*.49),
+        levels=[(.29,1.20,w*.48),(.68,1.28,w*.495),(.94,1.30,w/2),(1.10,1.28,w*.49),
                 (2.97,.69,w*.45),(3.20,.48,w*.44),(h,.10,w*.41)]
         colors=['red','white','black','black','black','red']
     else:
@@ -567,39 +727,53 @@ def modern_end(m,id,tip,w,h,sign=-1,rear=False):
         cab_window(m,surf,-1.015,1.015,1.55,2.78,sign,radius=.035,layer=.008)
         for a,b in [(-1.20,-1.055),(1.055,1.20)]:cab_window(m,surf,a,b,1.61,2.83,sign,radius=.025,layer=.008)
     elif id=='14t':
-        cab_window(m,surf,-.94,.94,1.53,3.10,sign,radius=.10,taper=.16)
-        for a,b in [(-1.19,-1.02),(1.02,1.19)]:cab_window(m,surf,a,b,1.71,2.85,sign,radius=.045)
+        # The tall screen occupies almost the full front, with slender pillars.
+        # The old 1.88m /16% taper made a small trapezoid in a broad silver face.
+        cab_window(m,surf,-1.10,1.10,1.53,3.10,sign,radius=.12,taper=.065,border=.020)
+        for a,b in [(-1.222,-1.145),(1.145,1.222)]:cab_window(m,surf,a,b,1.71,2.88,sign,radius=.030,border=.012)
     else:
-        cab_window(m,surf,-1.10,1.10,1.27 if id=='15t' else 1.35,2.91 if not rear else 2.70,sign,radius=.13,border=.035)
+        cab_window(m,surf,-1.16,1.16,1.18 if id=='15t' else 1.35,
+                   3.14 if id=='15t' and not rear else 2.91 if not rear else 2.70,sign,radius=.13,border=.022)
     if id=='52t':
-        for yy0,yy1 in [(.29,.73),(.73,1.01)]:
-            for j in range(8):
-                xa=-.74+j*.06;xb=xa+.06
-                m.face('red',[(x,y,surf(x,y)+sign*.016) for x,y in [(xa,yy0),(xb,yy0),(xb,yy1),(xa,yy1)]],(0,0,sign))
+        surface_patch(m,surf,[(-.74,.29),(-.26,.29),(-.26,1.01),(-.74,1.01)],sign,.016,'red')
+    if id=='15t':
+        cab_window(m,surf,-1.18,1.18,.45,.57,sign,radius=.022,fill='black',border=.008)
     lampy={'kt8d5':1.02,'14t':1.03,'15t':.80,'52t':1.08}[id]
     for x in [-.84,.84]:
         if id=='14t':
             cab_window(m,surf,x-.10,x+.10,.77,1.29,sign,frame='roof',radius=.03,fill='silver',border=.009)
             for dy in [-.17,0,.17]:lamp(m,x,lampy+dy,surf(x,lampy+dy)+sign*.025,.057,sign,'tail' if rear else 'light',surface=surf)
-        elif id in ['15t','52t']:
+        elif id=='15t':
+            # DPP 9229 close frontal photograph resolves the original 15T:
+            # three similarly sized marker lenses in a shallow rising recess;
+            # driving lamps are below, in the continuous black bumper strip.
+            s=-1 if x<0 else 1
+            pocket=[(.65,.71),(.65,.865),(1.16,.925),(1.18,.705)]
+            surface_patch(m,surf,[(s*xx,yy) for xx,yy in pocket],sign,.012,'rubber')
+            for pos in [.76,.90,1.05]:
+                xx=s*pos;yy=.795+(pos-.76)*.10
+                material='amber' if pos==.90 else 'tail' if rear else 'chrome'
+                lamp(m,xx,yy,surf(xx,yy)+sign*.014,.034 if pos==.90 else .041,sign,material,surface=surf)
+            xx=s*.81
+            lamp(m,xx,.51,surf(xx,.51)+sign*.033,.045,sign,'tail' if rear else 'light',surface=surf)
+            cab_window(m,surf,min(s*.97,s*1.09),max(s*.97,s*1.09),.483,.535,sign,
+                       radius=.025,fill='tail' if rear else 'light',frame='chrome',border=.008,layer=.025)
+        elif id=='52t':
             s=-1 if x<0 else 1
             cab_window(m,surf,min(s*.66,s*1.16),max(s*.66,s*1.16),lampy-.115,lampy+.115,sign,radius=.065,fill='black',border=.025)
-            for pos,r in [(1.05,.065),(.90,.043),(.77,.031)] if id=='15t' else [(1.04,.052),(.82,.022)]:
+            for pos,r in [(1.04,.052),(.82,.022)]:
                 xx=s*pos;lamp(m,xx,lampy,surf(xx,lampy)+sign*.023,r,sign,'tail' if rear else 'light',surface=surf)
-            if id=='52t' and not rear:
+            if not rear:
                 for pos in [.83,.89,.95]:
                     xx=s*pos
                     m.box('light',xx,lampy,surf(xx,lampy)+sign*.058,.018,.07,.012)
-            if id=='15t':
-                cab_window(m,surf,min(s*.75,s*1.14),max(s*.75,s*1.14),.42,.52,sign,radius=.03,fill='black',border=.01)
-                for pos in [.82,1.03]:lamp(m,s*pos,.47,surf(s*pos,.47)+sign*.02,.022,sign,'tail' if rear else 'light',surface=surf)
         else:
             lamp(m,x,lampy,surf(x,lampy)+sign*.02,.095,sign,'light',surface=surf)
             xx=x*.68;lamp(m,xx,lampy,surf(xx,lampy)+sign*.02,.06,sign,'light',surface=surf)
         # The actual indicator lenses are independently switchable in viewer.
         xx=(-1 if x<0 else 1)*(1.10 if id=='kt8d5' else 1.13)
         iy=1.39 if id=='kt8d5' else .67 if id=='14t' else lampy+.10
-        lamp(m,xx,iy,surf(xx,iy)+sign*.02,.032,sign,'amber',surface=surf)
+        if id!='15t':lamp(m,xx,iy,surf(xx,iy)+sign*.02,.032,sign,'amber',surface=surf)
     # Equipment cover seams and the circular maker badge give close-up scale.
     badgey=.72 if id=='15t' else 1.13 if id=='52t' else 1.22
     m.cylinder('chrome',0,badgey,surf(0,badgey)+sign*.03,.046,.01,'z',16)
@@ -612,7 +786,7 @@ def modern_end(m,id,tip,w,h,sign=-1,rear=False):
         y=2.96 if id=='52t' else 3.04 if id=='15t' else 2.96
         # The board follows the same curved roof face as its LED lettering.
         # A flat box here intersected the upper digits on the 52T rear dome.
-        cab_window(m,surf,-.22,.22,y-.14,y+.14,sign,radius=.012,fill='black',border=.01)
+        cab_window(m,surf,-.22,.22,y-.14,y+.14,sign,radius=.012,fill='black',border=.01,layer=.016)
         text(m,'12' if id=='52t' else '20' if id=='15t' else '1',0,y,surf(0,y)+sign*.045,.18,sign=sign,surf=surf)
         label(m,{'14t':'9148','15t':'9286','52t':'9501'}[id],-.47 if id=='52t' else 0,.80 if id=='52t' else 1.01,0,.12,'white' if id in ['52t','15t'] else 'black',sign,surf)
         if id=='15t':
@@ -622,14 +796,28 @@ def modern_end(m,id,tip,w,h,sign=-1,rear=False):
         displayy={'kt8d5':2.91,'14t':2.99,'15t':3.06,'52t':3.05}[id]
         # The board overlays glass (and on KT8 a second mask layer). Give it
         # its own depth so native depth buffers cannot fight over coplanar faces.
-        cab_window(m,surf,-.71,.71,displayy-.10,displayy+.10,sign,radius=.04,fill='black',border=.01,layer=.016)
-        text(m,{'kt8d5':'16 KOTLARKA','14t':'1 PETRINY','15t':'20 DIVOKA','52t':'12 BARRANDOV'}[id],0,displayy,surf(0,displayy)+sign*.043,.115,sign=sign,surf=surf)
+        boardhalf=.82 if id=='14t' else .94 if id in ['15t','52t'] else .71
+        cab_window(m,surf,-boardhalf,boardhalf,displayy-.10,displayy+.10,sign,frame='glass' if id=='15t' else 'rubber',radius=.04,fill='black',border=.005 if id=='15t' else .01,layer=.016)
+        text(m,{'kt8d5':'16 KOTLARKA','14t':'1 PETRINY','15t':'20 DIVOKA SARKA','52t':'12 BARRANDOV'}[id],0,displayy,surf(0,displayy)+sign*.043,.14 if id=='15t' else .115,sign=sign,surf=surf)
         num={'kt8d5':'9102','14t':'9148','15t':'9286','52t':'9501'}[id]
         y=1.02 if id=='15t' else .64 if id=='52t' else 1.05
-        label(m,num,-.47 if id=='52t' else 0,y,0,.13,'white' if id in ['15t','52t'] else 'black',sign,surf)
+        label(m,num,-.47 if id=='52t' else 0,y,0,.13,'white' if id in ['15t','52t'] else 'yellow' if id=='kt8d5' else 'black',sign,surf)
         a=(-.64,1.43 if id=='14t' else 1.22);b=(.22,2.42)
-        cab_beam(m,surf,a,b,sign,.014)
+        if id=='15t':
+            # Parallel drive linkage and vertical blade, as on the original cab.
+            for d in [-.017,.017]:cab_beam(m,surf,(.20+d,1.12),(-.84+d,1.90),sign,.009)
+            cab_beam(m,surf,(-.84,1.44),(-.84,2.27),sign,.012)
+            cab_beam(m,surf,(-1.05,2.89),(1.05,2.89),sign,.007,'chrome')
+        else:cab_beam(m,surf,a,b,sign,.014)
     if id=='14t':cab_beam(m,surf,(-1.08,.73),(1.08,.73),sign,.008,'roof')
+    if id=='kt8d5':
+        # Original type drawing:525mm coupling axis,470mm projection at EACH
+        # end (30.300m body /31.240m overcouplers). Both cabs carry the gear.
+        cab_window(m,surf,-.28,.28,.35,.70,sign,radius=.025,fill='black',border=.015)
+        m.box('roof',0,.525,tip+sign*.17,.12,.13,.60)
+        m.box('black',0,.525,tip+sign*.40,.29,.22,.14)
+        m.cylinder('roof',0,.525,tip+sign*.438,.085,.064,'z',12)
+        m.beam('black',(-.39,.31,tip+sign*.22),(.39,.31,tip+sign*.22),.035,6)
     return depth
 
 def modern(id,i,opened):
@@ -638,14 +826,16 @@ def modern(id,i,opened):
     offset=sum(lens[:i])+gap*i
     def local(distance):return distance-offset-L/2
     start=-L/2+(cabdepth if front else 0);end=L/2-(cabdepth if back else 0)
-    m.box('black',0,.43,0,w-.2,.24,L-1.05)
+    # Keep the rectangular chassis behind the shaped cab. Extending it almost
+    # to the tip exposed square black wedges through both rounded lower corners.
+    m.box('black',0,.43,(start+end)/2,w-.2,.24,end-start)
     shared=[]
     if id=='kt8d5':
         bogies=[-L/2+3.9] if front else [L/2-3.9] if back else []
         if not front:shared.append((-L/2-gap/2,1))
         if not back:shared.append((L/2+gap/2,-1))
         doors=[(start+.72,.95,.54),(end-2.30,1.30,.54)] if front else [(start+2.30,1.30,.54),(end-.72,.95,.54)] if back else [(0,1.30,.35)]
-        levels=[(.60,'white'),(.89,'red'),(1.55,'white'),(2.93,'silver'),(3.02,'silver')]
+        levels=[(.60,'white'),(.89,'red'),(1.55,'white'),(2.93,'silver'),(3.02,'silver')] if i!=1 else [(.60,'white'),(.89,'red'),(2.80,'white'),(2.93,'silver'),(3.02,'silver')]
         sill,top=1.60,2.77
     elif id=='14t':
         bogies=[local([4.55,15.125,25.70][i//2])] if i%2==0 else []
@@ -678,7 +868,7 @@ def modern(id,i,opened):
         counts=None
         if id=='14t':counts=([3] if i==0 else [0,1,0] if i in [1,3] else [2] if i==2 else [2,0]) if side==1 else [3 if i%2==0 and i!=2 else 2]
         if id=='52t':counts=([2,1,0] if front else [0,1,2] if back else [1,0] if i==2 else [2]) if side==1 else [5 if i in [0,4] else 2]
-        if id=='kt8d5':counts=[0,2,1] if front else [1,2,0] if back else [1,1]
+        if id=='kt8d5':counts=[0,2,1] if front else [1,2,0] if back else [0,0]
         sidewall(m,side,start,end,w,levels,ds,opened if side==1 else False,False,bogies+[z for z,_ in shared],sill,top,counts,folding=id=='kt8d5')
         if id=='52t' and i%2==0:
             # PID lower panels follow the red roof bands. Clip them around
@@ -699,18 +889,14 @@ def modern(id,i,opened):
             if side==1:door(m,side,local(2.36),.70,w,.54,2.84,False,animatable=False)
         if id=='52t' and front and side==1:door(m,side,local(1.94),.65,w,.50,2.87,False,animatable=False)
         if id=='kt8d5' and i==1:
-            for sgn in [-1,1]:
-                m.face('white',[(side*(w/2+.014),1.5,start if sgn<0 else end),
-                               (side*(w/2+.014),1.0,sgn*.85),
-                               (side*(w/2+.014),1.26,sgn*.85),
-                               (side*(w/2+.014),1.75,start if sgn<0 else end)],(side,0,0))
+            kt8_low_window(m,side,start,end,w)
     dome(m,start,end,w,levels[-1][0],h-levels[-1][0], 'silver' if id!='52t' else 'white')
     if front:modern_end(m,id,-L/2,w,h)
     else:bellows(m,-L/2-gap/4,w,h-.06,gap/2)
     if back:modern_end(m,id,L/2,w,h,1,True)
     else:bellows(m,L/2+gap/4,w,h-.06,gap/2)
     if id=='kt8d5':
-        if i!=1:pantograph(m,-L/2+3.9 if front else L/2-3.9,h,True)
+        if i!=1:kt8_collector(m,-L/2+3.9 if front else L/2-3.9,h,1 if front else -1,front)
         roofbox(m,0,h,.7,1.1)
     elif id=='14t':
         if i==0:pantograph(m,.55,h)
@@ -724,9 +910,14 @@ def modern(id,i,opened):
         else:roofbox(m,0,h,2.0)
     if id=='15t':
         # The upper shell narrows towards the roof (Prague clearance profile).
-        m.v=[(x*(1-.08*max(0,min(1,(y-1.2)/2))),y,z) for x,y,z in m.v]
-        for child,_,_,_ in m.parts:
-            child.v=[(x*(1-.08*max(0,min(1,(y-1.2)/2))),y,z) for x,y,z in child.v]
+        def taper(mesh):
+            for j,(x,y,z) in enumerate(mesh.v):
+                f=1-.08*max(0,min(1,(y-1.2)/2));df=-.04 if 1.2<y<3.2 else 0
+                n=mesh.n[j]
+                if n is not None:mesh.n[j]=tuple(Vector((n[0]/f,n[1]-x*df*n[0]/f,n[2])).normalized())
+                mesh.v[j]=(x*f,y,z)
+            for child,_,_,_ in mesh.parts:taper(child)
+        taper(m)
     return m,L,w
 
 IDS=['t3','t3rp','t3rplf','kt8d5','14t','15t','52t']

@@ -6,32 +6,43 @@
 //   • the TramFeed (RemoteFeed over the Convex backend) supplies IDENTITY —
 //     which trams exist, on which trip, their line/headsign/delay and last raw
 //     AVL fix — plus trip-geometry resolution.
-//   • the TrajectoryStore supplies MOTION — one bundle of published curves for
-//     the whole fleet, every 5 s.
+//   • the TrajectoryStore supplies MOTION through Convex publications.
 //
-// `TramFleet` joins them and evaluates a pure function per tram per push. There
-// is no tick loop, no simulation, no clock to reset, and nothing to resync
-// after a suspension: a stateless evaluator is simply correct at whatever
-// instant you next ask it about (that IS the determinism guarantee).
+// TramFleet evaluates those curves and applies the map presentation controller.
+// Pure UI reads cannot commit display state; actual map submission owns that
+// clock and explicit hidden-rebase acknowledgements.
 //
 // What remains here: lifecycle (every timer created in resume(), cleared in
 // halt(), generation-guarded — perf invariant #3), geometry warm-up priority,
 // frame-listener fan-out for the map's imperative pushes, and the 1 Hz React
 // hooks for screens/lists (perf invariant #1).
-import { useEffect, useSyncExternalStore } from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
+import { useEffect, useSyncExternalStore } from "react";
+import { AppState, type AppStateStatus } from "react-native";
 
-import { getModelSpec, isLikelyCoupledPair, regNumberToModelId } from '@/lib/fleet/registry';
-import { toCalibrationRecords } from '@/lib/feed/calibration';
-import { NullFeed } from '@/lib/feed/nullFeed';
-import type { FeedStatus, TramFeed } from '@/lib/feed/types';
-import * as shapeCache from '@/lib/golemio/shapeCache';
-import { TramFleet } from '@/lib/physics/fleet';
-import { TrajectoryStore, type TrajectoryHealth } from '@/lib/physics/trajectoryStore';
-import type { ConnectionState } from '@/lib/physics/connection';
-import type { RenderMode } from '@/lib/physics/render';
-import type { RouteGeometry, TramPublicState, TramSnapshot, Viewport } from '@/lib/types';
-import { useSettingsStore } from '@/stores/settings';
+import {
+  getModelSpec,
+  isLikelyCoupledPair,
+  regNumberToModelId,
+} from "@/lib/fleet/registry";
+import { toCalibrationRecords } from "@/lib/feed/calibration";
+import { NullFeed } from "@/lib/feed/nullFeed";
+import type { FeedStatus, TramFeed } from "@/lib/feed/types";
+import * as shapeCache from "@/lib/golemio/shapeCache";
+import { TramFleet } from "@/lib/physics/fleet";
+import { assessGeometryCoherence } from "@/lib/physics/geometryCoherence";
+import {
+  TrajectoryStore,
+  type TrajectoryHealth,
+} from "@/lib/physics/trajectoryStore";
+import type { ConnectionState } from "@/lib/physics/connection";
+import type { RenderMode } from "@/lib/physics/render";
+import type {
+  RouteGeometry,
+  TramPublicState,
+  TramSnapshot,
+  Viewport,
+} from "@/lib/types";
+import { useSettingsStore } from "@/stores/settings";
 
 /**
  * Nominal snapshot-feed cadence, ms. Only a display fallback now (the poll
@@ -90,23 +101,26 @@ function expandBbox(
   const dLat = marginM / M_PER_DEG_LAT;
   const midLat = (s + n) / 2;
   const dLng =
-    marginM / (M_PER_DEG_LAT * Math.max(Math.cos(midLat * (Math.PI / 180)), 0.01));
+    marginM /
+    (M_PER_DEG_LAT * Math.max(Math.cos(midLat * (Math.PI / 180)), 0.01));
   return [w - dLng, s - dLat, e + dLng, n + dLat];
 }
 
-function inBbox(p: [number, number], bbox: [number, number, number, number]): boolean {
-  return p[0] >= bbox[0] && p[0] <= bbox[2] && p[1] >= bbox[1] && p[1] <= bbox[3];
+function inBbox(
+  p: [number, number],
+  bbox: [number, number, number, number],
+): boolean {
+  return (
+    p[0] >= bbox[0] && p[0] <= bbox[2] && p[1] >= bbox[1] && p[1] <= bbox[3]
+  );
 }
 
-/**
- * Points FC (badges/dots, whole fleet) push cadence by zoom — at far zooms the
- * badges are near-static and re-pushing GeoJSON 15×/s forces Mapbox to
- * re-render constantly (GPU heat for zero visible change).
- */
-export function pointsPushIntervalMs(zoom: number): number {
+/** Coarse map cadence follows visible pixel displacement and native cost.
+ * SourceWriter suppresses identical stationary payloads before native calls. */
+export function pointsPushIntervalMs(zoom: number, engaged = false): number {
   if (zoom >= DETAIL_ENTER_ZOOM) return 66; // ~15 Hz — badges visibly glide
-  if (zoom >= 12.5) return 1_000;
-  return 5_000; // dots at city scale: one push per poll
+  if (engaged) return TICK_IDLE_MS; // selected/followed coarse view: 10 Hz
+  return zoom < 12.5 ? 400 : 200; // whole multiples of the100 ms frame opportunity
 }
 
 /**
@@ -116,15 +130,16 @@ export function pointsPushIntervalMs(zoom: number): number {
  * step functions), so the old raw-mode dirty-flag special case is gone: a push
  * is due whenever the zoom-banded interval elapsed. `forced` covers the events
  * that must not wait for it — a render-mode switch, or a selection/follow
- * change at the 5 s city-scale cadence.
+ * change, or an explicit presentation transition.
  */
 export function pointsPushWanted(
   elapsedMs: number,
   zoom: number,
   forced: boolean,
+  engaged = false,
 ): boolean {
   if (forced) return true;
-  return elapsedMs >= pointsPushIntervalMs(zoom);
+  return elapsedMs >= pointsPushIntervalMs(zoom, engaged);
 }
 
 /**
@@ -147,7 +162,7 @@ export function detailModeForZoom(zoom: number, current: boolean): boolean {
 export type FrameListener = (nowMs: number) => void;
 
 export class TramRuntime {
-  /** MOTION: the server's published curves, refetched every 5 s. */
+  /** MOTION: the server's published curves, streamed over Convex. */
   // `convex: true`: the production ('current') generation rides the Convex
   // push stream — curves land the moment the predictor publishes them. The
   // research generations still poll the predictor's HTTP endpoint.
@@ -209,7 +224,7 @@ export class TramRuntime {
    * (backgrounded WITH a live ride recording — minimal keep-alive, no
    * rendering), 'paused' (backgrounded/released — nothing ticks; invariant #3).
    */
-  private runMode: 'paused' | 'active' | 'rideBackground' = 'paused';
+  private runMode: "paused" | "active" | "rideBackground" = "paused";
   /**
    * Injected by src/lib/motionlog (never imported from here — that would be a
    * module cycle): reports whether a GPS ride recording is active.
@@ -217,13 +232,15 @@ export class TramRuntime {
   private rideActivity: (() => boolean) | null = null;
   /** Unsubscribe from the settings store (render mode mirrors positionMode). */
   private settingsUnsub: (() => void) | null = null;
-  /** The cold-start geometry pack is fetched at most once per runtime. */
+  /** One completed pack attempt per runtime; cancelled attempts retry on resume. */
   private packAttempted = false;
+  private packController: AbortController | null = null;
 
   private frameListeners = new Set<FrameListener>();
   private uiListeners = new Set<() => void>();
   private uiVersion = 0;
-  private uiStatesCache: { version: number; states: TramPublicState[] } | null = null;
+  private uiStatesCache: { version: number; states: TramPublicState[] } | null =
+    null;
 
   constructor(feed: TramFeed = new NullFeed()) {
     this.feed = feed;
@@ -258,7 +275,10 @@ export class TramRuntime {
   readonly coupledPairFn = (key: string): boolean => {
     const snapshot = this.fleet.getSnapshot(key);
     if (!snapshot) return false;
-    return isLikelyCoupledPair(regNumberToModelId(snapshot.registrationNumber), snapshot.line);
+    return isLikelyCoupledPair(
+      regNumberToModelId(snapshot.registrationNumber),
+      snapshot.line,
+    );
   };
 
   retain(): void {
@@ -266,13 +286,14 @@ export class TramRuntime {
     if (this.refCount === 1) {
       // The AppState subscription lives for the whole retained lifetime, so the
       // later 'active' transition is always observed.
-      this.appStateSub = AppState.addEventListener('change', this.onAppState);
+      this.appStateSub = AppState.addEventListener("change", this.onAppState);
       // The feed subscription also spans the retained lifetime; pause/resume
       // only toggles feed.stop()/start() (a stopped feed emits nothing).
       this.feedUnsub = this.feed.subscribeSnapshots(this.onSnapshots);
       // Optional feed capability: geometry-landed events drive a debounced
       // re-ingest so freshly-shaped trams join their line without a tap.
-      this.geometryUnsub = this.feed.subscribeGeometry?.(this.onGeometryLoaded) ?? null;
+      this.geometryUnsub =
+        this.feed.subscribeGeometry?.(this.onGeometryLoaded) ?? null;
       // A fresh bundle changes every tram's position: refresh the 1 Hz hooks.
       this.trajectoryUnsub = this.trajectories.subscribe(this.onBundle);
       const settings = useSettingsStore.getState();
@@ -284,7 +305,7 @@ export class TramRuntime {
         this.applyRenderMode(s.positionMode);
       });
       const state = AppState.currentState;
-      if (state !== 'background' && state !== 'inactive') this.resume();
+      if (state !== "background" && state !== "inactive") this.resume();
     }
   }
 
@@ -322,11 +343,11 @@ export class TramRuntime {
 
   /** Start the timer loops + both data sources. Idempotent. */
   private resume(): void {
-    if (this.runMode === 'active') return;
+    if (this.runMode === "active") return;
     // Leaving rideBackground: clear its slow timers/feed first. From 'paused'
     // everything is already stopped — halting again would double feed.stop().
-    if (this.runMode === 'rideBackground') this.halt();
-    this.runMode = 'active';
+    if (this.runMode === "rideBackground") this.halt();
+    this.runMode = "active";
     this.startFrameTimer();
     this.uiNotifyTimer = setInterval(() => this.bumpUi(), UI_NOTIFY_MS);
     this.feed.start();
@@ -340,27 +361,38 @@ export class TramRuntime {
    * bare dots while ~180 per-trip fetches drain the rate-limit queue.
    *
    * Strictly additive: it runs alongside the per-trip warm-up (never instead of
-   * it), every failure — including the 404 the endpoint returns until the
-   * predictor service ships it — silently leaves today's behavior untouched,
+   * it), every failure leaves ordinary per-trip loading running,
    * and seeded trips stay PROVISIONAL so the authoritative per-trip geometry
    * still replaces them (see shapeCache.seedProvisional). Attempted once per
-   * runtime: a second cold start is a process restart anyway.
+   * runtime unless background cancellation interrupted the attempt.
    */
   private async warmGeometryPack(): Promise<void> {
     if (this.packAttempted) return;
     this.packAttempted = true;
     const gen = this.generation;
+    const controller = new AbortController();
+    this.packController = controller;
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { warmFromGeometryPack } = require('@/lib/golemio/geometryPack') as typeof import('@/lib/golemio/geometryPack');
-    const seeded = await warmFromGeometryPack();
-    // Teardown while the pack was in flight: the seeds are harmless (they only
-    // populate the cache) but the ingest below must not touch a dead runtime.
-    if (gen !== this.generation || seeded === 0) return;
-    if (__DEV__) console.log(`[tram-runtime] geometry pack seeded ${seeded} trips`);
+    const { warmFromGeometryPack } =
+      require("@/lib/golemio/geometryPack") as typeof import("@/lib/golemio/geometryPack");
+    let seeded = 0;
+    try {
+      seeded = await warmFromGeometryPack(controller.signal);
+    } catch {
+      // A malformed cache entry must not reject the fire-and-forget startup.
+    } finally {
+      if (this.packController === controller) this.packController = null;
+    }
+    if (controller.signal.aborted || gen !== this.generation || seeded === 0)
+      return;
+    if (__DEV__)
+      console.log(`[tram-runtime] geometry pack seeded ${seeded} trips`);
     // Adopt immediately rather than waiting for the next poll: seeding fires
     // the geometry-landed event too, but this makes the first paint certain.
     if (this.lastSnapshots.length > 0) {
-      this.fleet.ingest(this.lastSnapshots, (tripId) => this.feed.getGeometry(tripId));
+      this.fleet.ingest(this.lastSnapshots, (tripId) =>
+        this.feed.getGeometry(tripId),
+      );
     }
     this.bumpUi();
   }
@@ -372,9 +404,9 @@ export class TramRuntime {
    * and tram state is evaluated on demand when the recorder samples it.
    */
   private enterRideBackground(): void {
-    if (this.runMode === 'rideBackground') return;
-    if (this.runMode === 'active') this.halt();
-    this.runMode = 'rideBackground';
+    if (this.runMode === "rideBackground") return;
+    if (this.runMode === "active") this.halt();
+    this.runMode = "rideBackground";
     this.feed.start(RIDE_BG_POLL_MS);
     // The trajectory stream is push-driven; a ride-background session simply
     // keeps the subscription (the feed above throttles its own deliveries).
@@ -402,8 +434,11 @@ export class TramRuntime {
     const on = detailModeForZoom(zoom, this.detailMode);
     if (this.detailMode === on) return;
     this.detailMode = on;
-    if (__DEV__) console.log(`[tram-runtime] frames → ${on ? '30 Hz (glide band)' : '10 Hz (idle)'}`);
-    if (this.runMode !== 'active' || !this.frameTimer) return; // resume() picks up the new rate
+    if (__DEV__)
+      console.log(
+        `[tram-runtime] frames → ${on ? "30 Hz (glide band)" : "10 Hz (idle)"}`,
+      );
+    if (this.runMode !== "active" || !this.frameTimer) return; // resume() picks up the new rate
     clearInterval(this.frameTimer);
     this.startFrameTimer();
   }
@@ -415,7 +450,7 @@ export class TramRuntime {
    */
   private pause(): void {
     this.halt();
-    this.runMode = 'paused';
+    this.runMode = "paused";
   }
 
   /**
@@ -429,6 +464,13 @@ export class TramRuntime {
    */
   private halt(): void {
     this.generation += 1;
+    if (this.packController) {
+      this.packController.abort();
+      this.packController = null;
+      // Only cancelled attempts retry on resume. Completed failures remain the
+      // one-shot best effort while normal per-trip loading continues.
+      this.packAttempted = false;
+    }
     for (const t of [this.frameTimer, this.uiNotifyTimer]) {
       if (t) clearInterval(t);
     }
@@ -447,14 +489,14 @@ export class TramRuntime {
 
   private readonly onAppState = (status: AppStateStatus): void => {
     if (this.refCount === 0) return;
-    if (status === 'active') {
+    if (status === "active") {
       this.resume();
     } else if (this.rideActivity?.() === true) {
       // Backgrounded mid-recording: keep the ride log alive on the minimal
       // budget instead of freezing it. Also covers 'inactive' — the
       // location-permission dialog during startRide must not fully pause.
       this.enterRideBackground();
-    } else if (this.runMode !== 'paused') {
+    } else if (this.runMode !== "paused") {
       this.pause();
     }
   };
@@ -473,7 +515,7 @@ export class TramRuntime {
    * invariant #3 is gated strictly on an ACTIVE recording.
    */
   notifyRideActivity(): void {
-    if (this.runMode === 'rideBackground' && this.rideActivity?.() !== true) {
+    if (this.runMode === "rideBackground" && this.rideActivity?.() !== true) {
       this.pause();
     }
   }
@@ -483,7 +525,10 @@ export class TramRuntime {
    * + geometry warm-up. Ingest is pure bookkeeping now (identity, model, the
    * geometry currently resolvable per key) — no physics runs here.
    */
-  private readonly onSnapshots = (snapshots: TramSnapshot[], atMs: number): void => {
+  private readonly onSnapshots = (
+    snapshots: TramSnapshot[],
+    atMs: number,
+  ): void => {
     const gen = this.generation;
     // Detect trip changes (endpoint turns) BEFORE ingest. A tram whose tripId
     // changed needs its NEW shape urgently — until it lands the tram renders
@@ -495,7 +540,11 @@ export class TramRuntime {
       seen.add(s.key);
       const prevTrip = this.lastTripByKey.get(s.key);
       this.lastTripByKey.set(s.key, s.tripId);
-      if (prevTrip !== undefined && prevTrip !== s.tripId && !this.feed.getGeometry(s.tripId)) {
+      if (
+        prevTrip !== undefined &&
+        prevTrip !== s.tripId &&
+        !this.feed.getGeometry(s.tripId)
+      ) {
         changedTrips.push(s.tripId);
       }
     }
@@ -505,8 +554,14 @@ export class TramRuntime {
     if (changedTrips.length > 0) this.feed.requestGeometry(changedTrips, 1);
 
     this.lastSnapshots = snapshots;
-    this.fleet.ingest(snapshots, (tripId) => this.feed.getGeometry(tripId));
-    this.feed.reportCalibration(toCalibrationRecords(this.fleet.getStates(atMs), atMs));
+    this.fleet.ingest(
+      snapshots,
+      (tripId) => this.feed.getGeometry(tripId),
+      atMs,
+    );
+    this.feed.reportCalibration(
+      toCalibrationRecords(this.fleet.getPredictionStates(atMs), atMs),
+    );
     // Warm geometries for trips we don't have yet, split by visibility: a
     // missing shape whose tram is ON SCREEN (viewport + margin) loads at raised
     // priority (1) — a visible tram stuck as a bare dot is the user-facing
@@ -515,7 +570,9 @@ export class TramRuntime {
     // what is on screen NOW (shapeCache.requestPrefetch → promoteTag/demoteTag).
     const changedSet = changedTrips.length > 0 ? new Set(changedTrips) : null;
     const viewport = this.resolveViewport();
-    const bbox = viewport ? expandBbox(viewport.bbox, VIEWPORT_GEO_MARGIN_M) : null;
+    const bbox = viewport
+      ? expandBbox(viewport.bbox, VIEWPORT_GEO_MARGIN_M)
+      : null;
     const missingVisible: TramSnapshot[] = [];
     const missingBackground: string[] = [];
     for (const s of snapshots) {
@@ -524,30 +581,41 @@ export class TramRuntime {
       // still needs its OWN timetable — keep it in the warm-up queue until the
       // authoritative per-trip fetch replaces it, or arrivals/planner would sit
       // out the whole session (they read authoritative geometry only). It never
-      // competes for the visible lane: nothing about it is visibly broken, so
-      // refinement always warms at background priority behind trams that are
-      // genuinely still bare dots.
-      const resolved = this.feed.getGeometry(s.tripId) !== undefined;
+      // competes for the visible lane unless the seed contradicts this fix:
+      // provider shape IDs can refer to an older/opposite GTFS direction.
+      const geometry = this.feed.getGeometry(s.tripId);
+      const resolved = geometry !== undefined;
       const needsRefine = resolved && shapeCache.isProvisional(s.tripId);
       if (resolved && !needsRefine) continue;
-      if (!needsRefine && bbox && inBbox(s.coordinates, bbox)) missingVisible.push(s);
+      const rejectedSeed =
+        needsRefine &&
+        assessGeometryCoherence(s, geometry).status === "invalid";
+      if ((!needsRefine || rejectedSeed) && bbox && inBbox(s.coordinates, bbox))
+        missingVisible.push(s);
       else missingBackground.push(s.tripId);
     }
     const visibleIds = this.orderByViewportProximity(missingVisible, viewport);
     if (visibleIds.length > 0) this.feed.requestGeometry(visibleIds, 1);
-    if (missingBackground.length > 0) this.feed.requestGeometry(missingBackground, 2);
+    if (missingBackground.length > 0)
+      this.feed.requestGeometry(missingBackground, 2);
     // As geometries arrive they are adopted on the next ingest; nudge one extra
     // ingest shortly after so early geometries apply without waiting a full
     // poll. Tracked so teardown can cancel it. (The geometry-landed event
     // usually beats this; the nudge remains the fallback for feeds without the
     // optional subscribeGeometry capability.)
-    if (missingVisible.length > 0 || missingBackground.length > 0 || changedTrips.length > 0) {
+    if (
+      missingVisible.length > 0 ||
+      missingBackground.length > 0 ||
+      changedTrips.length > 0
+    ) {
       // One pending nudge at a time — a fresh poll supersedes the previous one.
       if (this.nudgeTimer) clearTimeout(this.nudgeTimer);
       this.nudgeTimer = setTimeout(() => {
         this.nudgeTimer = null;
         if (gen !== this.generation) return;
-        this.fleet.ingest(this.lastSnapshots, (tripId) => this.feed.getGeometry(tripId));
+        this.fleet.ingest(this.lastSnapshots, (tripId) =>
+          this.feed.getGeometry(tripId),
+        );
         this.bumpUi();
       }, GEOMETRY_NUDGE_MS);
     }
@@ -562,12 +630,19 @@ export class TramRuntime {
    * (timer registered with halt(), generation-guarded — invariants #1/#3).
    */
   private readonly onGeometryLoaded = (): void => {
-    if (this.runMode === 'paused' || this.adoptTimer || this.lastSnapshots.length === 0) return;
+    if (
+      this.runMode === "paused" ||
+      this.adoptTimer ||
+      this.lastSnapshots.length === 0
+    )
+      return;
     const gen = this.generation;
     this.adoptTimer = setTimeout(() => {
       this.adoptTimer = null;
       if (gen !== this.generation) return;
-      this.fleet.ingest(this.lastSnapshots, (tripId) => this.feed.getGeometry(tripId));
+      this.fleet.ingest(this.lastSnapshots, (tripId) =>
+        this.feed.getGeometry(tripId),
+      );
       this.bumpUi();
     }, GEOMETRY_ADOPT_DEBOUNCE_MS);
   };
@@ -583,6 +658,11 @@ export class TramRuntime {
   }
 
   /** Freshest viewport: the live provider, else the last one it ever gave. */
+  /** Current measured map zoom for the1 Hz inspector; never changes cadence. */
+  get mapZoom(): number | null {
+    return this.viewportProvider?.()?.zoom ?? this.lastViewport?.zoom ?? null;
+  }
+
   private resolveViewport(): Viewport | null {
     const vp = this.viewportProvider?.() ?? null;
     if (vp) this.lastViewport = vp;
@@ -632,7 +712,7 @@ export class TramRuntime {
   private bumpUi(force = false): void {
     // rideBackground: ALL UI notifications are off by contract (the app is
     // backgrounded; subscribers would re-render an invisible tree).
-    if (this.runMode === 'rideBackground') return;
+    if (this.runMode === "rideBackground") return;
     // No UI subscriber → skip entirely; bumping the version would only
     // invalidate the states cache and force a full getStates() allocation for
     // nobody (1 Hz background churn, thermal).
@@ -656,7 +736,10 @@ export class TramRuntime {
 
   getStatesCached(): TramPublicState[] {
     if (!this.uiStatesCache || this.uiStatesCache.version !== this.uiVersion) {
-      this.uiStatesCache = { version: this.uiVersion, states: this.fleet.getStates(Date.now()) };
+      this.uiStatesCache = {
+        version: this.uiVersion,
+        states: this.fleet.getStates(Date.now()),
+      };
     }
     return this.uiStatesCache.states;
   }
@@ -666,7 +749,7 @@ let runtime: TramRuntime | null = null;
 
 /** The public backend (self-hosted CONVEX_CLOUD_ORIGIN) — the baked fallback
  * when the build carries no EXPO_PUBLIC_CONVEX_URL. */
-const DEFAULT_CONVEX_URL = 'https://tram-api.acex.sh';
+const DEFAULT_CONVEX_URL = "https://tram-api.acex.sh";
 
 /**
  * Feed selection: RemoteFeed over the Convex backend, unconditionally.
@@ -678,11 +761,13 @@ const DEFAULT_CONVEX_URL = 'https://tram-api.acex.sh';
 function constructFeed(): TramFeed {
   try {
     const env = process.env.EXPO_PUBLIC_CONVEX_URL;
-    const url = typeof env === 'string' && env.length > 0 ? env : DEFAULT_CONVEX_URL;
+    const url =
+      typeof env === "string" && env.length > 0 ? env : DEFAULT_CONVEX_URL;
     // Lazy require: keeps the convex client stack out of the module graph
     // (and out of bare jest workers) until the runtime actually constructs.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { RemoteFeed } = require('@/lib/feed/remoteFeed') as typeof import('@/lib/feed/remoteFeed');
+    const { RemoteFeed } =
+      require("@/lib/feed/remoteFeed") as typeof import("@/lib/feed/remoteFeed");
     return new RemoteFeed({ url });
   } catch {
     // The convex stack failed to even load (bare test environment). There is
@@ -715,7 +800,9 @@ export function useAllTramStates(): TramPublicState[] {
 }
 
 /** One tram's state by key (registration number string), ~1 Hz. */
-export function useTramState(key: string | null | undefined): TramPublicState | undefined {
+export function useTramState(
+  key: string | null | undefined,
+): TramPublicState | undefined {
   const rt = getRuntime();
   useSyncExternalStore(rt.subscribeUi, rt.getUiVersion);
   // The wall clock IS the datum here — the evaluator answers for "now",

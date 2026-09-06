@@ -23,24 +23,25 @@
 // Fields that lost their meaning with the old engine (paceBias, the
 // dead-reckoned projectedObservedDistM) are GONE rather than faked.
 
-import { bearingAt, pointAt } from '@/lib/geo/polyline';
+import { sourceFreshness } from "./sourceFreshness";
+import { bearingAt, pointAt } from "@/lib/geo/polyline";
 import type {
   RouteGeometry,
   RouteStop,
   TramModelSpec,
   TramPublicState,
   TramSnapshot,
-} from '@/lib/types';
-import type { ParsedVehicle } from './bundle';
-import { crossingTimeMs, evalTrajectory } from './evaluator';
-import { SMOOTH_CATCHUP_V_MS } from './fixForward';
+} from "@/lib/types";
+import type { ParsedVehicle } from "./bundle";
+import { crossingTimeMs, evalTrajectory } from "./evaluator";
+import { SMOOTH_CATCHUP_V_MS } from "./fixForward";
 import {
   renderedDistM,
   renderSpeedMs,
   renderTram,
   smoothFixedDeltaM,
   type RenderMode,
-} from './render';
+} from "./render";
 
 /** At or below this rendered speed the tram counts as standing, km/h. */
 export const DWELL_SPEED_KMH = 1;
@@ -48,7 +49,10 @@ export const DWELL_SPEED_KMH = 1;
 export const DWELL_NEAR_STOP_M = 30;
 
 /** Index of the stop nearest to `s`, or -1 when there are none. */
-export function nearestStopIndex(stops: readonly RouteStop[], s: number): number {
+export function nearestStopIndex(
+  stops: readonly RouteStop[],
+  s: number,
+): number {
   const n = stops.length;
   if (n === 0) return -1;
   let lo = 0;
@@ -92,6 +96,8 @@ export interface AdaptInput {
   vehicle: ParsedVehicle | undefined;
   /** SERVER-corrected wall clock — every evaluation uses this, never Date.now(). */
   serverNowMs: number;
+  /** True only after a valid server-clock sample for the current endpoint. */
+  clockTrusted?: boolean;
   /** Actual local frame time; clock synchronization only retimes the raw
    * curve, never the presentation guard's velocity/acceleration interval. */
   presentationNowMs?: number;
@@ -101,6 +107,21 @@ export interface AdaptInput {
    * fallback when this tram has no curves at all; 0 ⇒ stand on the fix.
    */
   observedPaceMs?: number;
+  /** Causal, corridor-validated GPS projection for no-curve fallback only. */
+  fallbackFixDistM?: number;
+  /** The actual frame owner supplies the one presentation projection. */
+  present?: (
+    s: number,
+    speedKmh: number,
+  ) =>
+    | {
+        s: number;
+        v: number;
+        position: [number, number];
+        bearing: number;
+        comparable: boolean;
+      }
+    | undefined;
   /**
    * Per-frame slew guard (fleet.ts): where THIS tram was rendered last frame.
    * Applied to the SMOOTH mode only — the never-teleport track: the marker may
@@ -164,17 +185,29 @@ export function guardedDistM(
   const dtMs = nowMs - prevAtMs;
   if (dtMs < 0 || dtMs > SLEW_MAX_FRAME_GAP_MS) return s;
   const dtS = dtMs / 1000;
-  const previousSpeed = Number.isFinite(prevSpeedMs) ? Math.max(0, prevSpeedMs) : 0;
-  const reachableSpeed = Math.min(SLEW_MAX_MS, previousSpeed + SLEW_CATCHUP_ACCEL_MS2 * dtS);
+  const previousSpeed = Number.isFinite(prevSpeedMs)
+    ? Math.max(0, prevSpeedMs)
+    : 0;
+  const reachableSpeed = Math.min(
+    SLEW_MAX_MS,
+    previousSpeed + SLEW_CATCHUP_ACCEL_MS2 * dtS,
+  );
   // Never coast past a revised target just to satisfy a braking bound: that
   // lengthens false stops. The raw target and diagnostics remain independent.
   return Math.max(prevS, Math.min(s, prevS + reachableSpeed * dtS));
 }
 
 /** Bounded no-curve position, also used by the allocation-free viewport cull. */
-export function naiveDistM(fixS: number, fixAtMs: number, nowMs: number, paceMs: number): number {
+export function naiveDistM(
+  fixS: number,
+  fixAtMs: number,
+  nowMs: number,
+  paceMs: number,
+): number {
   return (
-    fixS + Math.max(0, paceMs) * Math.max(0, Math.min(NAIVE_HORIZON_S, (nowMs - fixAtMs) / 1000))
+    fixS +
+    Math.max(0, paceMs) *
+      Math.max(0, Math.min(NAIVE_HORIZON_S, (nowMs - fixAtMs) / 1000))
   );
 }
 
@@ -227,7 +260,8 @@ export function adaptTram(input: AdaptInput): AdaptedTramState {
     // Read off the RENDERED motion, not the raw curve: past the horizon that
     // is the coast decaying to zero, and inside it the fix-forward offset is
     // part of how fast the marker is really travelling. `phase` reads this.
-    simSpeedKmh = renderSpeedMs(vehicle, serverNowMs, mode, fixS, fixAtMs) * 3.6;
+    simSpeedKmh =
+      renderSpeedMs(vehicle, serverNowMs, mode, fixS, fixAtMs) * 3.6;
     // The opinion curve RAW — no shim, no floor. This is not a UI readout:
     // it is written to every calibration and ride record as `projDist`, and
     // docs/calibration/analyze.py scores `prev.projDist − cur.obsDist` as the
@@ -255,15 +289,22 @@ export function adaptTram(input: AdaptInput): AdaptedTramState {
       paceMs > 0 && aheadS > 0 && hasGeometry
         ? paceMs * (aheadS < NAIVE_HORIZON_S ? aheadS : NAIVE_HORIZON_S)
         : 0;
-    simDistM = clampToShape(fixS + advanceM, geometry);
-    if (advanceM > 0 && aheadS < NAIVE_HORIZON_S && simDistM < (geometry?.totalM ?? Infinity)) {
+    simDistM = clampToShape(
+      (input.fallbackFixDistM ?? fixS) + advanceM,
+      geometry,
+    );
+    if (
+      advanceM > 0 &&
+      aheadS < NAIVE_HORIZON_S &&
+      simDistM < (geometry?.totalM ?? Infinity)
+    ) {
       simSpeedKmh = paceMs * 3.6;
     }
     pastHorizon = true;
   }
 
   const renderTargetDistM = simDistM;
-  const guard = mode === 'smooth' ? input.guard : undefined;
+  const guard = mode === "smooth" ? input.guard : undefined;
   const presentationNowMs = input.presentationNowMs ?? serverNowMs;
   if (guard)
     simDistM = clampToShape(
@@ -289,29 +330,48 @@ export function adaptTram(input: AdaptInput): AdaptedTramState {
   ) {
     const dtMs = presentationNowMs - guard.prevAtMs;
     simSpeedKmh =
-      dtMs > 0 ? Math.max(0, ((simDistM - guard.prevS) * 3600) / dtMs) : (guard.prevSpeedKmh ?? 0);
+      dtMs > 0
+        ? Math.max(0, ((simDistM - guard.prevS) * 3600) / dtMs)
+        : (guard.prevSpeedKmh ?? 0);
   }
   if (!geometry || simDistM >= geometry.totalM) simSpeedKmh = 0;
 
-  const position = geometry
-    ? pointAt(geometry.coordinates, geometry.cumDistM, simDistM)
-    : ([snapshot.coordinates[0], snapshot.coordinates[1]] as [number, number]);
-  const bearing = geometry
-    ? bearingAt(geometry.coordinates, geometry.cumDistM, simDistM)
-    : (snapshot.bearing ?? 0);
+  const presented = input.present?.(simDistM, simSpeedKmh);
+  if (presented) {
+    simDistM = presented.s;
+    simSpeedKmh = presented.v * 3.6;
+  }
+
+  const position =
+    presented?.position ??
+    (geometry
+      ? pointAt(geometry.coordinates, geometry.cumDistM, simDistM)
+      : ([snapshot.coordinates[0], snapshot.coordinates[1]] as [
+          number,
+          number,
+        ]));
+  const bearing =
+    presented?.bearing ??
+    (geometry
+      ? bearingAt(geometry.coordinates, geometry.cumDistM, simDistM)
+      : (snapshot.bearing ?? 0));
 
   // Phase + next stop need the timetable side of the geometry.
-  let phase: TramPublicState['phase'] = 'unknown';
+  let phase: TramPublicState["phase"] = "unknown";
   let nextStopName: string | null = null;
   let nextStopEtaS: number | null = null;
   if (geometry && geometry.stops.length > 0 && vehicle) {
     const nearIdx = nearestStopIndex(geometry.stops, simDistM);
     const near = nearIdx >= 0 ? geometry.stops[nearIdx] : null;
     const standing = simSpeedKmh <= DWELL_SPEED_KMH;
-    if (standing && near && Math.abs(near.distM - simDistM) <= DWELL_NEAR_STOP_M) {
-      phase = near.isTerminal ? 'terminal' : 'dwell';
+    if (
+      standing &&
+      near &&
+      Math.abs(near.distM - simDistM) <= DWELL_NEAR_STOP_M
+    ) {
+      phase = near.isTerminal ? "terminal" : "dwell";
     } else {
-      phase = 'cruise';
+      phase = "cruise";
     }
     const aheadIdx = nextStopIndex(geometry.stops, simDistM);
     if (aheadIdx >= 0) {
@@ -338,12 +398,13 @@ export function adaptTram(input: AdaptInput): AdaptedTramState {
       // The fixed marker runs ahead of this basis, so its ETA errs late, which
       // is the safe direction and the same "fixed is beaten by smooth"
       // relationship the two tracks already have.
-      const smoothTrack = vehicle.smooth.length > 0 ? vehicle.smooth : vehicle.opinion;
+      const smoothTrack =
+        vehicle.smooth.length > 0 ? vehicle.smooth : vehicle.opinion;
       const smoothRenderedS = renderedDistM(
         smoothTrack,
         serverNowMs,
         SMOOTH_CATCHUP_V_MS,
-        fixS,
+        vehicle.motionPolicy === "continuous-v1" ? Number.NaN : fixS,
         fixAtMs,
         vehicle.anchorMs,
       );
@@ -362,8 +423,15 @@ export function adaptTram(input: AdaptInput): AdaptedTramState {
   }
 
   return {
+    ...sourceFreshness(
+      snapshot.observedAtMs,
+      serverNowMs,
+      input.clockTrusted === true,
+    ),
     renderTargetDistM,
-    renderGuardActive,
+    renderGuardActive: presented
+      ? Math.abs(simDistM - renderTargetDistM) > 1e-6
+      : renderGuardActive,
     key: snapshot.key,
     snapshot,
     model,

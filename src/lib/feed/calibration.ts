@@ -9,6 +9,7 @@
 
 import type { TramPublicState } from '@/lib/types';
 import type { CalibrationRecord } from './types';
+import { predictionTimingEligibility } from '@/lib/physics/predictionTiming';
 
 /** Round to `p` decimals; null for missing/non-finite values. */
 function r(n: number | null | undefined, p = 0): number | null {
@@ -48,6 +49,10 @@ export function toCalibrationRecord(s: TramPublicState, t: number): CalibrationR
     statePos: s.snapshot.statePosition ?? null,
     delayS: r(s.snapshot.delaySeconds),
     nextSeq: r(s.snapshot.nextStopSequence),
+    predictionEvaluatedAtMs: r(s.predictionEvaluatedAtMs),
+    predictionInputsAvailableAtMs: r(s.predictionInputsAvailableAtMs),
+    predictionAccuracyEligible: predictionTimingEligibility(s, t) === 'eligible',
+    predictionTimingReason: predictionTimingEligibility(s, t),
   };
 }
 

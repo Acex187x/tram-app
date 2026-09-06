@@ -16,7 +16,7 @@ describe('imperatively-fed ShapeSources', () => {
     const source = readFileSync(join(process.cwd(), file), 'utf8');
     expect(source).not.toMatch(/<ShapeSource\b[^>]*\bshape=/g);
     expect(source).not.toMatch(/\.setNativeProps\s*\(/g);
-    expect(source).toMatch(/\.updateShape\s*\(/g);
+    expect(source).toMatch(file.endsWith('TramLayers.tsx') || file.endsWith('DebugMapTraces.tsx') ? /(?:sourceWriterRef\.current|writer)\.send\s*\(/g : /\.updateShape\s*\(/g);
   });
 
   it('does not continuously re-push an empty close-zoom points source', () => {
@@ -25,7 +25,8 @@ describe('imperatively-fed ShapeSources', () => {
       'utf8',
     );
     expect(source).toContain('const pointsEmpty = frame.points.features.length === 0');
-    expect(source).toContain('if (!pointsEmpty || !pointsEmptyRef.current)');
+    expect(source).toContain('sourceWriterRef.current.send');
+    expect(source).not.toContain('pointsEmptyRef');
   });
 
   it('caps native Mapbox rendering at 60 fps on ProMotion displays', () => {

@@ -78,12 +78,18 @@ export interface RouteStop {
   departureMs: number;
   /** Golemio computed_dwell_time_seconds (0 if absent). */
   dwellSeconds: number;
+  /** Explicit PID pickup_type=3 AND drop_off_type=3; missing means required. */
+  requestOnly?: boolean;
   isTerminal: boolean;
 }
 
 /** Geometry + timetable for one trip, built from GTFS trip detail. */
 export interface RouteGeometry {
   shapeId: string;
+  /** Content identity used by new cold-start packs; provider IDs may be reused. */
+  geometryKey?: string;
+  /** A sibling pack seed; both its axis and timetable require per-trip refinement. */
+  provisional?: boolean;
   tripId: string;
   routeId: string;
   line: string;
@@ -111,6 +117,8 @@ export type ZoomMode = 1 | 2 | 3 | 4;
  * bundle at the same wall-clock instant.
  */
 export interface TramPublicState {
+  predictionEvaluatedAtMs?: number;
+  predictionInputsAvailableAtMs?: number | null;
   key: string;
   snapshot: TramSnapshot;
   model: TramModelSpec;
@@ -124,6 +132,20 @@ export interface TramPublicState {
   position: [number, number];
   bearing: number;
   phase: 'cruise' | 'dwell' | 'terminal' | 'unknown';
+  /** Explicit presentation transition, independent of source freshness. */
+  presentationTransitionId?: number;
+  presentationHiddenFrameId?: number;
+  /** East/north meters added to every section when a compatible axis aligns. */
+  presentationOffsetM?: [number, number];
+  presentationOpacity?: number;
+  /** Independent uncertainty factor; never a hidden transition acknowledgement. */
+  sourceOpacity?: number;
+  sourceFreshness?: 'fresh' | 'aging' | 'stale' | 'unknown';
+  sourceAgeS?: number | null;
+  presentationTransitionReason?: 'trip-change' | 'incompatible-geometry' | 'unreachable-correction' | 'resume-gap' | null;
+  presentationCorrectionM?: number | null;
+  /** False means correction distance is unsigned world distance, not route-axis delta. */
+  presentationCorrectionComparable?: boolean;
   /** Last REAL reported position (raw AVL fix), on-shape when geometry known. */
   observedPosition: [number, number];
   /** Bearing at the observed position (shape tangent; falls back to AVL bearing). */
@@ -169,6 +191,12 @@ export interface TramPublicState {
  * everything is. Distances are along-shape meters; speeds km/h.
  */
 export interface PhysicsDebugInfo {
+  motionPolicy?: 'continuous-v1' | 'legacy' | null;
+  presentationModeChanges?: number;
+  presentationRebaseCount?: number;
+  presentationLastWorldJumpM?: number | null;
+  presentationLastRebaseAtMs?: number | null;
+  presentationAccelerationMs2?: number | null;
   /** Target before the map-frame presentation limit, meters along the shape. */
   renderTargetDistM: number;
   /** Target minus displayed position: negative means waiting for the curve. */
@@ -324,6 +352,9 @@ export interface PointFeatureProps {
   modelId: TramModelId;
   selected: 0 | 1;
   favorite: 0 | 1;
+  presentationOpacity?: number;
+  /** Independent uncertainty factor; never a hidden transition acknowledgement. */
+  sourceOpacity?: number;
   /**
    * 1 when the tram has no loaded shape yet (trip just changed / geometry
    * streaming in). Such a tram renders as a plain un-oriented dot at its raw
@@ -346,6 +377,11 @@ export interface SectionFeatureProps {
   key: string; // parent tram key
   modelKey: string; // GLB registry key, e.g. '15t-b'
   bearing: number;
+  presentationOpacity?: number;
+  /** Independent uncertainty factor; never a hidden transition acknowledgement. */
+  sourceOpacity?: number;
+  /** Same sampled scale used for the whole assembly's physical spacing. */
+  displayScale?: [number, number, number];
   /** Frozen (past horizon) — the ModelLayer dims the whole body. See PointFeatureProps.stale. */
   stale: 0 | 1;
 }

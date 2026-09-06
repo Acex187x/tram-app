@@ -157,6 +157,12 @@
       "source": "https://www.dpp.cz/vozovy-park/tramvaje/skoda-15t",
       "image": "https://www.dpp.cz/data/photo_gallery/2836/thumbs/2024-02-12-12-31-30-894-596-24-mhd-tram-548a.jpg",
       "credit": "DPP; reference only, not bundled in app"
+    },
+    {
+      "file": "docs/model-references/15t-06-dpp-front.jpg",
+      "source": "https://www.dpp.cz/spolecnost/pro-media/fotografie-pro-media/fotografie-ke-stazeni",
+      "image": "https://www.dpp.cz/cs/data/Fotogalerie/Pro%20media/Tramvaje/MHD_tram_083.jpg",
+      "credit": "DPP press gallery, MHD_tram_083; reference only, not bundled in app"
     }
   ],
   "52t": [

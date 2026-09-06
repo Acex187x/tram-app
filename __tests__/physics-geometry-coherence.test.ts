@@ -44,6 +44,32 @@ it('requires both independent contradictions and does not reject missing evidenc
   expect(assessGeometryCoherence({ ...bad, coordinates: [NaN, 50] }, geom).status).toBe('unknown');
 });
 
+it('rejects a provisional opposite-direction seed even on nearby parallel tracks', () => {
+  const provisional = { ...straightGeometry([
+    { stopId: 'U269Z2P', distM: 0 }, { stopId: 'U508Z2P', distM: 500 },
+  ]), provisional: true };
+  const fix = snapshot({ lastStopId: 'U269Z1P', nextStopId: 'U508Z1P',
+    shapeDistM: 200, coordinates: pointAt(provisional.coordinates, provisional.cumDistM, 200) });
+  const result = assessGeometryCoherence(fix, provisional);
+  expect(result.axisCoordinateErrorM).toBe(0);
+  expect(result.reason).toBe('provisional-stop-order-disagrees');
+  expect(result.status).toBe('invalid');
+  const corrected = { ...provisional, provisional: false,
+    stops: provisional.stops.map((stop, i) => ({ ...stop, stopId: i ? 'U508Z1P' : 'U269Z1P' })) };
+  expect(assessGeometryCoherence(fix, corrected).status).toBe('valid');
+});
+
+it('requires ordered provisional platform occurrences, allowing repeated loop platforms', () => {
+  const fix = snapshot({ lastStopId: 'B', nextStopId: 'A' });
+  const provisional = { ...straightGeometry([
+    { stopId: 'A', distM: 0 }, { stopId: 'B', distM: 500 },
+  ]), provisional: true };
+  expect(assessGeometryCoherence(fix, provisional).status).toBe('invalid');
+  const loop = { ...provisional, stops: [...provisional.stops, { ...provisional.stops[0], sequence: 3, distM: 1000 }] };
+  expect(assessGeometryCoherence(fix, loop).status).toBe('valid');
+  expect(assessGeometryCoherence({ ...fix, nextStopId: null }, provisional).status).toBe('unknown');
+});
+
 it('quarantines invalid geometry and curves at raw GPS, culls there, and recovers on a coherent fix', () => {
   const store = new TrajectoryStore();
   store.ingest(wireBundle(), T0);
@@ -94,3 +120,11 @@ it.each([undefined, null, [], [14], [Infinity, 50]])(
     );
   },
 );
+
+it('quarantines an incomplete cached distance axis before the fleet can evaluate it', () => {
+  const malformed = { ...geom, cumDistM: undefined } as unknown as typeof geom;
+  expect(assessGeometryCoherence(bad, malformed).reason).toBe('malformed-geometry');
+  const fleet = new TramFleet({ trajectories: new TrajectoryStore(), resolveModel: () => getModelSpec('15t') });
+  expect(() => fleet.ingest([bad], () => malformed)).not.toThrow();
+  expect(fleet.getPredictionState(bad.key, T0)?.hasGeometry).toBe(false);
+});

@@ -63,8 +63,8 @@ export function getMotionLog(): MotionLog {
       location: createExpoLocationWatcher(),
       motion: createExpoDeviceMotionWatcher(),
       now: () => Date.now(),
-      stateProvider: (key) => getRuntime().fleet.getState(key, Date.now()),
-      geometry: (key) => getRuntime().fleet.getGeometry(key),
+      stateProvider: (key, atMs) => getRuntime().fleet.getPredictionState(key, atMs ?? Date.now()),
+      geometry: (key) => getRuntime().fleet.getPredictionGeometry(key),
       positionMode: () => useSettingsStore.getState().positionMode,
     });
     instance = log;

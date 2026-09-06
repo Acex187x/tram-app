@@ -839,6 +839,7 @@ const mkDrive = (over: Partial<Parameters<typeof buildDriveVehicle>[0]> &
 // ── D15. §14.2 request-stop skip: evidence-gated, never random ──────────────
 {
   const geom = synthGeometry({ totalM: 4000, stops: [{ atM: 500, id: 'REQ' }, { atM: 2600, id: 'S2' }] });
+  geom.stops[0].requestOnly = true; // Explicit GTFS3/3 eligibility, not inferred from ML speed.
   // Skippable class (no trusted dwell evidence) + ML shows no dwell (constant
   // pace through the stop) ⇒ the platform is passed at pace, doors closed.
   const b = mkDrive({ raw: raw(100, 6), geom, surfaces: surfSkippable(6) });

@@ -30,6 +30,8 @@ export interface ParsedVehicle {
   emittedAtMs: number;
   /** Server flagged a sanctioned break in continuity (trip change / model break). */
   discontinuity: boolean;
+  /** Explicit producer ownership of smooth motion; unknown/absent stays legacy. */
+  motionPolicy?: 'continuous-v1';
   /** Raw model opinion, interleaved [t,s,…] — the «fixed» render mode. */
   opinion: Float64Array;
   /** Continuity-blended curve, interleaved [t,s,…] — the «smooth» render mode. */
@@ -129,6 +131,7 @@ export function parseVehicle(raw: unknown): ParsedVehicle | null {
     anchorS?: unknown;
     emittedAtMs?: unknown;
     discontinuity?: unknown;
+    motionPolicy?: unknown;
     opinion?: unknown;
     smooth?: unknown;
     source?: unknown;
@@ -145,6 +148,7 @@ export function parseVehicle(raw: unknown): ParsedVehicle | null {
     anchorMs: num(v.anchorMs),
     emittedAtMs: num(v.emittedAtMs),
     discontinuity: v.discontinuity === true,
+    motionPolicy: v.motionPolicy === 'continuous-v1' ? 'continuous-v1' : undefined,
     opinion,
     smooth,
     source: v.source === 'ml' || v.source === 'naive' ? v.source : null,

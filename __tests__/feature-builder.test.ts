@@ -4,9 +4,12 @@ import { bearingAt, destinationPoint, haversineM, pointAt, type LngLat } from '@
 import {
   buildFrame,
   COUPLED_OFFSET_M,
+  CULL_MARGIN_M,
   TRACK_OFFSET_M,
   type BuildFrameOptions,
 } from '@/lib/render/featureBuilder';
+import { assemblyScale } from '@/lib/render/assemblyScale';
+import { MODEL_SPECS } from '@/lib/fleet/modelSpecs';
 import type { RouteGeometry, TramPublicState, Viewport } from '@/lib/types';
 import { angularDiff, makeGeometry, makeSnapshot, makeSpec1, makeSpec3, metersToCoord, ORIGIN } from './helpers';
 
@@ -63,7 +66,7 @@ function opts(geo: RouteGeometry | null, extra: Partial<BuildFrameOptions> = {})
   };
 }
 
-const WIDE = viewportM(-2000, -2000, 2000, 2000, 16);
+const WIDE = viewportM(-2000, -2000, 2000, 2000, 17);
 
 /** Expected rendered position: track position shifted right of bearing. */
 function rightOf(p: LngLat, bearing: number): LngLat {
@@ -764,7 +767,7 @@ describe('all bands share ONE rendered anchor (dots = badges = sections)', () =>
     const pos = head.geometry.coordinates as LngLat;
     const bearing = head.properties.bearing as number;
     // Section center sits halfLength behind the head along the bearing.
-    return destinationPoint(pos, bearing, 5); // makeSpec3 sections are 10 m
+    return destinationPoint(pos, bearing, 5 * (head.properties.displayScale?.[0] ?? 1)); // 10 m rigid section
   }
 
   it('smooth mode: the point marker, badge candidate and section head all derive from the sim position', () => {
@@ -867,3 +870,101 @@ describe('render safety: non-finite positions never poison a push', () => {
     expectAllFinite(frame);
   });
 });
+
+describe('whole-assembly display scale', () => {
+  const geo = makeGeometry([[0, 0], [2000, 0]], []);
+  it.each([14.8, 15.6, 16.4, 17, 15.2])('preserves physical contacts at zoom %s', (zoom) => {
+    const scale = assemblyScale(zoom);
+    for (const model of Object.values(MODEL_SPECS)) {
+      const state = makeState('test', geo, 1000, { model });
+      const frame = buildFrame([state], { ...WIDE, zoom }, opts(geo));
+      const parts = frame.sections.features;
+      expect(parts).toHaveLength(model.sections.length);
+      for (const part of parts) expect(part.properties.displayScale).toEqual([scale, scale, scale]);
+      for (let i = 1; i < parts.length; i++) {
+        const distance = haversineM(parts[i - 1].geometry.coordinates as LngLat, parts[i].geometry.coordinates as LngLat);
+        // Adjacent ends leave precisely the scaled bellows width. The old
+        // unscaled centers produced overlapping rigid shells at every low zoom.
+        const expected = (model.sections[i - 1].lengthM / 2 + model.jointGapM + model.sections[i].lengthM / 2) * scale;
+        expect(distance).toBeCloseTo(expected, 2);
+      }
+      const firstCenter = parts[0].geometry.coordinates as LngLat;
+      expect(haversineM(firstCenter, rightOf(state.position, 90))).toBeCloseTo(model.sections[0].lengthM / 2 * scale, 2);
+    }
+  });
+  it.each([14.8, 15.6, 16.4, 17])('scales pair spacing with both shells at zoom %s', (zoom) => {
+    for (const model of [MODEL_SPECS.t3, MODEL_SPECS.t3rp, MODEL_SPECS.t3rplf]) {
+      const frame = buildFrame([makeState('pair', geo, 1000, { model })], { ...WIDE, zoom }, opts(geo, { coupledPairFn: () => true }));
+      const [a, b] = frame.sections.features;
+      const expected = model.sections[0].lengthM + (model.id === 't3rplf' ? 1.1 : 1.104);
+      expect(haversineM(a.geometry.coordinates as LngLat, b.geometry.coordinates as LngLat)).toBeCloseTo(expected * assemblyScale(zoom), 2);
+    }
+  });
+  it.each([0, 5])('extends the body behind route origin with head at %s m', (headM) => {
+    for (const zoom of [14.8, 15.6, 16.4, 17]) for (const model of Object.values(MODEL_SPECS)) {
+      const frame = buildFrame([makeState('origin', geo, headM, { model })], { ...WIDE, zoom }, opts(geo, { coupledPairFn: () => model.sections.length === 1 }));
+      const centers = frame.sections.features.map((f) => f.geometry.coordinates as LngLat);
+      for (let i = 1; i < centers.length; i++) {
+        const physical = model.sections.length === 1 ? model.sections[0].lengthM + (model.id === 't3rplf' ? 1.1 : 1.104) : (model.sections[i - 1].lengthM + model.sections[i].lengthM) / 2 + model.jointGapM;
+        expect(haversineM(centers[i - 1], centers[i])).toBeCloseTo(physical * assemblyScale(zoom), 2);
+      }
+    }
+  });
+  it('keeps the largest displayed full assembly inside the culling margin', () => {
+    for (const model of Object.values(MODEL_SPECS)) {
+      const rigid = model.sections.reduce((sum, part) => sum + part.lengthM, 0);
+      const length = rigid + Math.max(0, model.sections.length - 1) * model.jointGapM;
+      const full = model.sections.length === 1 ? 2 * length + 1.104 : length;
+      expect(full * assemblyScale(14.8)).toBeLessThan(CULL_MARGIN_M);
+    }
+  });
+  it('carries hidden rebase opacity through point, badge and section sources without dropping features', () => {
+    for (const opacity of [0, 0.3, 1]) {
+      const state = makeState('test', geo, 1000, { presentationOpacity: opacity });
+      for (const zoom of [14.4, 17]) {
+        const frame = buildFrame([state], { ...WIDE, zoom }, opts(geo));
+        expect(frame.points.features[0].properties.presentationOpacity).toBe(opacity);
+        for (const feature of [...frame.sections.features, ...(frame.badges?.features ?? [])]) {
+          expect(feature.properties?.presentationOpacity).toBe(opacity);
+        }
+      }
+    }
+  });
+});
+
+describe('skin identity and world-space presentation alignment', () => {
+  const geo=makeGeometry([[0,0],[1000,0]],[]);
+  it('changes only the known registration model keys, leaving an anonymous trailer standard',()=>{
+    const state=makeState('7001',geo,300,{model:MODEL_SPECS.t3});
+    const frame=buildFrame([state],WIDE,opts(geo,{coupledPairFn:()=>true,resolveModelKey:(reg,model,key)=>`${reg}-${model}-${key}`}));
+    expect(frame.sections.features.map(f=>f.properties.modelKey)).toEqual(['7001-t3-t3','t3']);
+  });
+  it.each([MODEL_SPECS.t3,MODEL_SPECS['15t']])('shifts every section and coupled center once for $id',model=>{
+    const original=makeState('align',geo,300,{model});
+    const shifted=makeState('align',geo,300,{model,presentationOffsetM:[30,20],position:metersToCoord(original.position,30,20)});
+    const options=opts(geo,{coupledPairFn:()=>true});
+    const before=buildFrame([original],WIDE,options),after=buildFrame([shifted],WIDE,options);
+    expect(after.sections.features).toHaveLength(before.sections.features.length);
+    after.sections.features.forEach((part,i)=>{
+      const expected=metersToCoord(before.sections.features[i].geometry.coordinates as LngLat,30,20);
+      expect(haversineM(part.geometry.coordinates as LngLat,expected)).toBeLessThan(.06);
+      expect(part.properties.bearing).toBe(before.sections.features[i].properties.bearing);
+    });
+    expect(haversineM(after.points.features[0].geometry.coordinates as LngLat,metersToCoord(before.points.features[0].geometry.coordinates as LngLat,30,20))).toBeLessThan(.06);
+  });
+});
+
+it('carries observation freshness separately without altering positions or rebase opacity',()=>{
+ const geo=makeGeometry([[0,0],[1000,0]],[]);
+ for(const zoom of [14.4,17])for(const presentationOpacity of [0,.4,1]){
+  const state=makeState('freshness',geo,300,{presentationOpacity,sourceOpacity:.55});
+  const frame=buildFrame([state],{...WIDE,zoom},opts(geo,{coupledPairFn:()=>true}));
+  const reference=buildFrame([{...state,sourceOpacity:1}],{...WIDE,zoom},opts(geo,{coupledPairFn:()=>true}));
+  const features=[...frame.points.features,...frame.sections.features,...(frame.badges?.features??[])];
+  expect(features.length).toBeGreaterThan(1);
+  for(const feature of features){expect(feature.properties?.sourceOpacity).toBe(.55);expect(feature.properties?.presentationOpacity).toBe(presentationOpacity);}
+  expect(frame.points.features.map(f=>f.geometry)).toEqual(reference.points.features.map(f=>f.geometry));
+  expect(frame.sections.features.map(f=>f.geometry)).toEqual(reference.sections.features.map(f=>f.geometry));
+ }
+});
+it('preserves full source visibility for legacy state fixtures with no freshness field',()=>{const geo=makeGeometry([[0,0],[1000,0]],[]),frame=buildFrame([makeState('legacy',geo,300)],WIDE,opts(geo));for(const f of [...frame.points.features,...frame.sections.features])expect(f.properties.sourceOpacity).toBe(1);});

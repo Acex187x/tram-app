@@ -39,7 +39,7 @@
 import { round2 } from './db';
 import { renderedDistM } from '@/lib/physics/render';
 import { SMOOTH_CATCHUP_V_MS } from '@/lib/physics/fixForward';
-import { prepareHermiteTrack } from '@/lib/physics/evaluator';
+import { evalTrajectory, prepareHermiteTrack } from '@/lib/physics/evaluator';
 import {
   TRAJ_A_ACC,
   TRAJ_A_BRK,
@@ -88,6 +88,7 @@ export interface V2Vehicle {
   emittedAtMs: number;
   /** true ⇒ `smooth` starts AT `opinion`; clients may fade-teleport once. */
   discontinuity: boolean;
+  motionPolicy?: 'continuous-v1';
   opinion: TrackPoint[];
   smooth: TrackPoint[];
 }
@@ -117,6 +118,12 @@ export function withKnotVelocities(track: KinTrack): TrackPoint[] {
       ? { t: point.t, s: point.s, v: Math.round(speed * 1_000_000) / 1_000_000 }
       : { t: point.t, s: point.s };
   });
+}
+
+/** Exact eligible-Hermite position, shared with capability-aware clients. */
+export function evalContinuousTrack(track: TrackPoint[], tMs: number): number {
+  const packed=prepareHermiteTrack(new Float64Array(track.flatMap(p=>[p.t,p.s])),new Float64Array(track.map(p=>p.v??NaN)));
+  return evalTrajectory(packed,tMs);
 }
 
 /** THE client physics engine, server-side copy — pure `(track, t) → s`:

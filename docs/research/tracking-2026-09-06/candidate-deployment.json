@@ -1,0 +1,118 @@
+{
+  "deployedAt": "2026-09-06T11:05:14Z",
+  "mlReadyAt": "2026-09-06T11:05:41.285Z",
+  "captureNotBefore": "2026-09-06T11:06:30Z",
+  "requiredWarmupS": 120,
+  "scope": "private candidate only",
+  "protocolCommits": [
+    "2cfc637",
+    "62df333",
+    "dae5a03",
+    "2598a3f"
+  ],
+  "labSha256": "06507b9ab342682dcedf831ea182f0910cdbbe13ad35ff401016d1ea4235515a",
+  "gbdtSha256": "a5f5434bfc0c82bb2f76adc5aee5acdbfeac8e38daa094dc9494bebfc82acd28",
+  "backupPath": "/root/tram-tracking-candidate-20260905/backup-r2-20260906T1105",
+  "productionContainerIdentitiesUnchanged": true,
+  "capability": "continuous-v1",
+  "featureVersion": 4,
+  "featureColumns": 20,
+  "driverCeilingMs": 16.7,
+  "physicalAcceptance": "pending fresh full publication chain capture",
+  "localTests": {
+    "focusedJest": 36,
+    "pythonMotion": 4,
+    "pythonServing": 3,
+    "typescript": "app and Lab passed"
+  },
+  "realModelHttp": {
+    "rows": 512,
+    "featureCount": 20,
+    "version": 4,
+    "maxHttpVsNativeDifferenceM": 0.04996559697596581,
+    "wireRoundingM": 0.1,
+    "missingMlpIsNull": true
+  },
+  "subsequentUpdates": [
+    {
+      "at": "2026-09-06T11:10:01Z",
+      "change": "Convex2to3GiB,no restart,total memory+swap4GiB",
+      "purpose": "headroom mitigation; anonymous growth unresolved"
+    },
+    {
+      "at": "2026-09-06T11:27:46.184Z",
+      "change": "Lab content-addressed geometry pack and exact per-emission inference rows",
+      "model": "unchanged firstv4"
+    },
+    {
+      "at": "2026-09-06T11:31:16.141Z",
+      "mlReadyAt": "2026-09-06T11:31:45.573Z",
+      "change": "corrected14daytrust v4 model, exact model revision diagnostics",
+      "labSha256": "2504024f0c594da7af63b540a0eb08db89e61c7d658223441a6672e5c87de1b0",
+      "modelSha256": "5e7c59877064aac605723e8ea040b3fb4db0f83d812931e8b77273606b35e39e"
+    },
+    {
+      "at": "2026-09-06T12:48:07.386Z",
+      "change": "releaseStats 14-day trust parity only; no recovery policy activated",
+      "protocolCommit": "e8cc7f6",
+      "labSha256": "1e791e958c6a942933511c9d59ce1ab833de82f2b06980615e6d477dc5b1f01f",
+      "modelSha256": "5e7c59877064aac605723e8ea040b3fb4db0f83d812931e8b77273606b35e39e",
+      "artifactMethod": "Pinned previous 2504024f bundle plus exact one-function source change; shared geometryCoherence kept at previous deployed behavior to isolate this rollout.",
+      "backupPath": "/root/tram-tracking-candidate-20260905/backup-release-trust-final",
+      "productionAndCandidateMlConvexIdentitiesUnchanged": true,
+      "focusedTests": 22,
+      "pythonSharedParity": "pass"
+    }
+  ],
+  "latestReadOnlyVerification": {
+    "atMs": 1788701987517,
+    "noNewActivation": true,
+    "labStartedAt": "2026-09-06T12:48:07.386173165Z",
+    "mlStartedAt": "2026-09-06T11:31:16.147768831Z",
+    "convexStartedAt": "2026-09-06T05:56:52.652791043Z",
+    "currentLabSha256": "1e791e958c6a942933511c9d59ce1ab833de82f2b06980615e6d477dc5b1f01f",
+    "currentModelSha256": "5e7c59877064aac605723e8ea040b3fb4db0f83d812931e8b77273606b35e39e",
+    "trajectories": 190,
+    "ml": {
+      "ready": true,
+      "lastOkMs": 1788701986658,
+      "lastError": null,
+      "lastRequestMs": 1788701986641,
+      "lastLatencyMs": 17,
+      "inFlight": false
+    },
+    "publish": {
+      "enabled": true,
+      "pushes": 1531,
+      "vehiclesPushed": 15006,
+      "removalsPushed": 213,
+      "heartbeats": 614,
+      "failures": 0,
+      "lastError": null,
+      "lastOkAtMs": 1788701986703
+    },
+    "poller": {
+      "authFailed": false,
+      "consecutiveFailures": 0,
+      "fleetSize": 182,
+      "generation": 732,
+      "lastError": null,
+      "lastOkAtMs": 1788701976206,
+      "lastPollAtMs": 1788701976206,
+      "lastSeq": 479137,
+      "pollIntervalMs": 2000,
+      "rejectedByReason": {
+        "bad-coordinates": 0,
+        "bad-distance": 0,
+        "missing-core": 0,
+        "missing-timestamp": 0
+      },
+      "rejectedTotal": 0,
+      "restarts": 731,
+      "running": true
+    },
+    "convexMemoryGiB": 2.51,
+    "convexMemoryLimitGiB": 3,
+    "productionContainerIdsAndStartTimesUnchanged": true
+  }
+}

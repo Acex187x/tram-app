@@ -1,11 +1,11 @@
 diff --git a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSource.swift b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSource.swift
-index 5f6a0c0..27e30bc 100644
+index 5f6a0c0..4150131 100644
 --- a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSource.swift
 +++ b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSource.swift
 @@ -171,6 +171,28 @@ public class RNMBXShapeSource : RNMBXSource {
      }
    }
- 
+   
 +  /** Update GeoJSON without changing the React/Fabric `shape` prop. */
 +  @objc public func updateShape(
 +    shapeJSON: String,
@@ -32,25 +32,92 @@ index 5f6a0c0..27e30bc 100644
      shapeAnimator?.unsubscribe(consumer: self)
    }
 diff --git a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSourceModule.mm b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSourceModule.mm
-index 11a7d70..74ef317 100644
+index 11a7d70..60e21e5 100644
 --- a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSourceModule.mm
 +++ b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeSourceModule.mm
-@@ -41,6 +41,13 @@ - (void)withShapeSource:(nonnull NSNumber*)viewRef block:(void (^)(RNMBXShapeSou
+@@ -4,10 +4,13 @@
+ 
+ #import "RNMBXShapeSourceModule.h"
+ #import "RNMBXShapeSourceComponentView.h"
++#include "RNMBXShapeUpdateGate.h"
+ 
+ #import "rnmapbox_maps-Swift.pre.h"
+ 
+-@implementation RNMBXShapeSourceModule
++@implementation RNMBXShapeSourceModule {
++    rnmbx::ShapeUpdateGate _shapeUpdates;
++}
+ 
+ RCT_EXPORT_MODULE();
+ 
+@@ -41,6 +44,22 @@ RCT_EXPORT_METHOD(getClusterChildren:(nonnull NSNumber *)viewRef featureJSON:(NS
      } reject:reject methodName:@"getClusterChildren"];
  }
  
 +RCT_EXPORT_METHOD(updateShape:(nonnull NSNumber *)viewRef shapeJSON:(NSString *)shapeJSON resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject)
 +{
++    const int64_t viewTag = viewRef.longLongValue;
++    const uint64_t token = _shapeUpdates.begin(viewTag);
 +    [self withShapeSource:viewRef block:^(RNMBXShapeSource *view) {
++        if (!self->_shapeUpdates.consume(viewTag, token)) {
++            resolve(@NO);
++            return;
++        }
 +        [view updateShapeWithShapeJSON:shapeJSON resolver:resolve rejecter:reject];
-+    } reject:reject methodName:@"updateShape"];
++    } reject:^(NSString *code, NSString *message, NSError *error) {
++        self->_shapeUpdates.consume(viewTag, token);
++        reject(code, message, error);
++    } methodName:@"updateShape"];
 +}
 +
  RCT_EXPORT_METHOD(getClusterLeaves:(nonnull NSNumber *)viewRef featureJSON:(NSString *)featureJSON number:(NSInteger)number offset:(NSInteger)offset resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject)
  {
   [self withShapeSource:viewRef block:^(RNMBXShapeSource *view) {
+diff --git a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeUpdateGate.h b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeUpdateGate.h
+new file mode 100644
+index 0000000..2c5f866
+--- /dev/null
++++ b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXShapeUpdateGate.h
+@@ -0,0 +1,36 @@
++#pragma once
++#ifdef __cplusplus
++#include <cstdint>
++#include <mutex>
++#include <unordered_map>
++
++namespace rnmbx {
++// Registered before view resolution. A delayed lookup must never replay an
++// old shape after a newer request for the same view has been accepted.
++class ShapeUpdateGate {
++ public:
++  uint64_t begin(int64_t view) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    const auto token = ++sequence_;
++    pending_[view] = token;
++    return token;
++  }
++  bool consume(int64_t view, uint64_t token) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    const auto found = pending_.find(view);
++    if (found == pending_.end() || found->second != token) return false;
++    pending_.erase(found);
++    return true;
++  }
++  size_t size() {
++    std::lock_guard<std::mutex> lock(mutex_);
++    return pending_.size();
++  }
++ private:
++  std::mutex mutex_;
++  uint64_t sequence_ = 0;
++  std::unordered_map<int64_t, uint64_t> pending_;
++};
++}
++
++#endif // __cplusplus: CocoaPods also imports public headers from Objective-C/Swift.
+
 diff --git a/node_modules/@rnmapbox/maps/lib/module/components/ShapeSource.js b/node_modules/@rnmapbox/maps/lib/module/components/ShapeSource.js
-index 8ebd274..140d99c 100644
+index 8ebd274..f742be6 100644
 --- a/node_modules/@rnmapbox/maps/lib/module/components/ShapeSource.js
 +++ b/node_modules/@rnmapbox/maps/lib/module/components/ShapeSource.js
 @@ -76,6 +76,10 @@ export class ShapeSource extends NativeBridgeComponent(AbstractSource, NativeRNM
@@ -65,7 +132,7 @@ index 8ebd274..140d99c 100644
      const shallowProps = Object.assign({}, props);
  
 diff --git a/node_modules/@rnmapbox/maps/lib/typescript/src/components/ShapeSource.d.ts b/node_modules/@rnmapbox/maps/lib/typescript/src/components/ShapeSource.d.ts
-index b2f165c..9e5bcb2 100644
+index b2f165c..b97fcdd 100644
 --- a/node_modules/@rnmapbox/maps/lib/typescript/src/components/ShapeSource.d.ts
 +++ b/node_modules/@rnmapbox/maps/lib/typescript/src/components/ShapeSource.d.ts
 @@ -186,6 +186,8 @@ export declare class ShapeSource extends ShapeSource_base {

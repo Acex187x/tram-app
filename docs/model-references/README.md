@@ -44,6 +44,10 @@ Running gear:
   confirms the body and wheelbase dimensions; `dpp-dimensions.png` is the saved page.
 - KT8 outer bogie centers are 3.9/26.4 m from the front; shared bogies/articulations
   are 11.4/18.9 m. The 1 m bellows fit preserves those articulation centers.
+  The same original type drawing explicitly dimensions **470 mm coupling
+  projection per end**, **31.240 m over couplers**, and a **525 mm coupling
+  axis**. The previous model omitted those visible assemblies; the current
+  reconstruction keeps the 30.300 m body and adds the documented attachments.
 - 14T has bogies in sections 1/3/5, centered approximately at 4.55/15.125/25.70 m;
   axle spacing is 1.880 m. The rear passenger doorway is single width (model fit
   0.70 m); the four suspended-section passenger doors are 1.30 m. The separate
@@ -144,6 +148,18 @@ belongs outside the mobile app's runtime dependencies.
 
 ## Validation and delivery record
 
+The September6 revision uses the additional high-resolution DPP frontal image
+[`15t-06-dpp-front.jpg`](15t-06-dpp-front.jpg), retained with its exact download
+URL in `sources.json`. It resolves the original red-brow 15T's tall windscreen,
+shallow upper lamp pockets, continuous lower black light strip, deeper red
+valance and linked right-side wiper. The proportions were compared as visible
+ratios within that frontal photograph; these are not additional CAD dimensions.
+PLF's DPP front assembly photograph resolves the closed cream apron, narrow
+coupler slot and curved chevron shoulders. Its side photograph resolves rounded
+lower corners of the low-floor center glazing. RP/PLF route displays use flat
+rectangular LED housings; the historic6102 keeps its rounded sign enclosure and
+central linked wiper. Each variant keeps its own fittings.
+
 The completed optics validation covers **53 tram GLBs**: 34 static map assets in
 [validation.json](../model-previews/validation.json) and 19 movable-part assets in
 [viewer-validation.json](../model-previews/viewer-validation.json). The current
@@ -154,3 +170,14 @@ separate current-build evidence. See [preview workflow](../model-previews/README
 
 The user waived Telegram/Mobbin feature reports for this task. Delivery is the
 current application on reachable devices, with no push before user approval.
+
+## KT8D5 correction after build34 review
+
+The operator's existing side and cab photographs (`kt8d5-01.jpg`,
+`kt8d5-03.jpg`, `kt8d5-04.jpg`) contradict the previous diamond collectors.
+RN2P uses a single-arm collector, mirrored on the opposite cab; the revised
+representative running state raises the leading one and folds the trailing one.
+The ML8LF middle section now has deep glazing with diagonal lower edges and
+a white waist following those edges into the low entrance. The former straight
+window sill with a separate diagonal stripe was not the observed body shape.
+Dimensions of these small fittings are photo-derived, not manufacturer CAD.

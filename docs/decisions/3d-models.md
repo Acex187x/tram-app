@@ -64,6 +64,9 @@ that similarity. A new generic rear shape would not improve accuracy.
   remain a limitation of the available same-type trailer heuristic.
 - Body-height metadata excludes a raised pantograph. Complete GLB bounds include
   roof equipment, collector and other attachments.
+- KT8 also has projecting couplers: 0.470 m per end on the original type drawing,
+  31.240 m over couplers and a 0.525 m axis. Its rigid-body metadata remains
+  30.300 m; the end-section validation includes each asymmetric attachment.
 
 ## Static map assets and movable viewer assets
 
@@ -91,6 +94,15 @@ pose. Indicators use an 800 ms cycle. Reduce Motion snaps the doors to their
 requested pose and holds the selected indicator steadily lit. This local viewer
 work does not change the tracking engine or add a map subscription.
 
+The GL viewport follows the measured `GLView.onLayout` size in physical pixels.
+Expo GL 57.0.1 initializes `drawingBufferWidth/Height` once in
+`EXWebGLRenderer.cpp`; `GLView.swift` subsequently resizes native buffers without
+updating those JavaScript properties. Reading them on each frame therefore does
+not detect a resize. Build32 native screenshots exposed the result: the taller
+ready-state control card cropped cab roofs and destination boards. Layout now
+resizes the renderer, simulator render target and camera together. Aspect changes
+preserve the current relative zoom, including iPad rotation/Stage Manager.
+
 ## Material and geometry budgets
 
 Materials use opaque, single-sided metallic/roughness factors with no image
@@ -98,6 +110,14 @@ textures. Outward triangle winding matters; broad glass and painted cab patches
 must follow the actual triangulated shell so they do not disappear into it.
 Mirrors, wipers, number labels and couplers also need to follow their local
 surface, rather than cutting a curved shell with a straight chord.
+
+Clipped cab patches inherit the parent loft's interpolated normals. Independently
+recomputed patch normals previously produced stripes and triangular shading
+defects even where the positions followed the hull. The collapsed roof crest
+uses an explicit upward normal; the exporter rejects smooth faces whose corner
+normals point inside the surface. The Blender subprocess uses
+`--python-exit-code 1`, so a failed generator cannot validate yesterday's GLBs
+and report success. Geometry validation remains separate from visual fidelity.
 
 | Constraint | Current contract |
 |---|---|

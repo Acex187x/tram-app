@@ -292,7 +292,10 @@ export class LearnedModel {
   /** Learned release distribution (mean, sd) for the two-hypothesis variant. */
   releaseStats(stopId: string, atMs: number): { mean: number; sd: number } {
     const c = this.cell('stopRelease', stopKey(stopId, atMs));
-    if (!c || c.weight < MIN_CELL_WEIGHT) return { mean: DEFAULT_RELEASE_S, sd: DEFAULT_RELEASE_S * 0.6 };
+    const decayed = c
+      ? c.weight * Math.pow(0.5, Math.max(0, atMs - c.updatedAtMs) / EWMA_HALF_LIFE_MS)
+      : 0;
+    if (!c || decayed < MIN_CELL_WEIGHT) return { mean: DEFAULT_RELEASE_S, sd: DEFAULT_RELEASE_S * 0.6 };
     const variance = c.weight > 1 ? c.s / c.weight : 0;
     return { mean: c.mean, sd: Math.max(3, Math.sqrt(variance)) };
   }

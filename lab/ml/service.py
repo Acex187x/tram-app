@@ -25,6 +25,7 @@ lab at /api/mlreport.
 """
 
 import json
+import hashlib
 import os
 import sqlite3
 import threading
@@ -42,7 +43,7 @@ from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-FEATURE_VERSION = 3
+FEATURE_VERSION = 4 if os.environ.get("ML_FEATURE_VERSION") == "4" else 3
 FEATURES = [
     "gapS", "atStop", "delayS", "hourSin", "hourCos", "weekend",
     "distToNextStopM", "stopsNext1km", "learnedPace", "learnedRelease", "posFrac",
@@ -53,6 +54,10 @@ FEATURES = [
     # Version 2 incorrectly included target-pair speed before target arrival.
     "corridorPace", "corridorTrust",
 ]
+
+if FEATURE_VERSION == 4:
+    FEATURES += ["lastLegPace", "motionTrust", "motionAgeS", "tripPaceRatio",
+                 "currentPlatformOffsetM", "platformKnown", "stationaryEvidenceS"]
 
 CORRIDOR_HL_MS = 12 * 60 * 1000
 CORRIDOR_WIN_MS = 30 * 60 * 1000
@@ -67,7 +72,7 @@ NIGHT_SAMPLE_WEIGHT = 3.0
 TRAIN_HOUR_UTC = 2
 RETRAIN_MIN_INTERVAL_S = 20 * 3600
 
-state = {"gbdt": None, "mlp": None, "ready": False, "trained_at": 0.0}
+state = {"gbdt": None, "mlp": None, "ready": False, "trained_at": 0.0, "model_revision": None}
 lock = threading.Lock()
 
 
@@ -85,12 +90,17 @@ def connect():
 
 def load_learned_cells(c):
     cells = {}
-    for tbl, key, mean, weight in c.execute("SELECT tbl, cellKey, mean, weight FROM learned_cells"):
-        cells.setdefault(tbl, {})[key] = (mean, weight)
+    for tbl, key, mean, weight, updated_at in c.execute("SELECT tbl, cellKey, mean, weight, updatedAtMs FROM learned_cells"):
+        cells.setdefault(tbl, {})[key] = (mean, weight, updated_at)
     return cells
 
 
-def pace_at(cells, shape_id, route_id, s, band, day):
+def trusted_weight(cell, at_ms):
+    """Mirror LearnedModel.trusted, including future-cell zero elapsed clamp."""
+    return cell[1] * 0.5 ** (max(0.0, at_ms - cell[2]) / (14 * 86400000.0))
+
+
+def pace_at(cells, shape_id, route_id, s, band, day, at_ms):
     b = int(s // 250)
     for tbl, key, minw in (
         ("seg", f"{shape_id}|{b}|{band}|{day}", 3),
@@ -99,20 +109,20 @@ def pace_at(cells, shape_id, route_id, s, band, day):
         ("global", f"{band}", 10),
     ):
         v = cells.get(tbl, {}).get(key)
-        if v and v[1] >= minw:
+        if v and trusted_weight(v, at_ms) >= minw:
             return v[0]
     return 5.5
 
 
-def release_at(cells, stop_id, band, day):
+def release_at(cells, stop_id, band, day, at_ms):
     v = cells.get("stopRelease", {}).get(f"{stop_id}|{band}|{day}")
-    return v[0] if v and v[1] >= 3 else 20.0
+    return v[0] if v and trusted_weight(v, at_ms) >= 3 else 20.0
 
 
 # ── dataset ──────────────────────────────────────────────────────────────────
 
 def build_dataset(*, since_ms=None, until_ms=None, target_clock="observation", causal_corridor=True, metadata=False):
-    """Build version-3 rows; legacy options exist only for paired offline evaluation.
+    """Build configured version-3/4 rows; legacy options are offline-only.
 
     No writes occur here. Metadata contains numeric timestamps, not raw fixes.
     """
@@ -125,7 +135,8 @@ def build_dataset(*, since_ms=None, until_ms=None, target_clock="observation", c
     where = " WHERE " + " AND ".join(filters) if filters else ""
     fixes = pd.read_sql_query(
         "SELECT key, tripId, routeId, obsAtMs, seenAtMs, shapeDistM, statePos, delayS, nextStopId"
-        " FROM fixes" + where + " ORDER BY key, obsAtMs",
+        + (", lat, lng" if FEATURE_VERSION == 4 else "")
+        + " FROM fixes" + where + " ORDER BY key, obsAtMs",
         c, params=parameters,
     )
     geoms = {}
@@ -141,6 +152,9 @@ def build_dataset(*, since_ms=None, until_ms=None, target_clock="observation", c
         geoms[trip_id] = (shape_id, float(g.get("totalM", 0) or 0), stops)
     cells = load_learned_cells(c)
     c.close()
+    if FEATURE_VERSION == 4:
+        from research_motion_features import add_motion_history, motion_at
+        fixes = add_motion_history(fixes, geoms, cells, pace_at, PRAGUE)
 
     nxt = fixes.shift(-1)
     same = (nxt["key"] == fixes["key"]) & (nxt["tripId"] == fixes["tripId"])
@@ -222,6 +236,8 @@ def build_dataset(*, since_ms=None, until_ms=None, target_clock="observation", c
             & (nxt["seenAtMs"] >= nxt["obsAtMs"])
             & (fixes["seenAtMs"] < nxt["obsAtMs"])
             & (d_dist.abs() / gap_obs <= 22))
+    if FEATURE_VERSION == 4:
+        mask &= fixes["motionFresh"] == 1
     prev = fixes[mask].reset_index(drop=True)
     nxt = nxt[mask].reset_index(drop=True)
     if len(prev) < MIN_PAIRS:
@@ -261,8 +277,8 @@ def build_dataset(*, since_ms=None, until_ms=None, target_clock="observation", c
                 else:
                     break
 
-        lp = pace_at(cells, shape_id, p.routeId, s0 + 100, band, day)
-        lr = release_at(cells, p.nextStopId, band, day) if (at_stop and p.nextStopId) else 0.0
+        lp = pace_at(cells, shape_id, p.routeId, s0 + 100, band, day, t_eval_ms)
+        lr = release_at(cells, p.nextStopId, band, day, t_eval_ms) if (at_stop and p.nextStopId) else 0.0
         pos_frac = min(1.0, max(0.0, s0 / total_m)) if total_m > 0 else 0.0
 
         ds = float(n_dist) - s0
@@ -274,6 +290,7 @@ def build_dataset(*, since_ms=None, until_ms=None, target_clock="observation", c
             np.sin(2 * np.pi * hour / 24), np.cos(2 * np.pi * hour / 24), weekend,
             dist_next, float(stops_1km), lp, lr, pos_frac,
             cp, ct,
+            *(motion_at(p, t_eval_ms) if FEATURE_VERSION == 4 else []),
         ])
         targets.append(ds)
         target_times.append(float(n_obs_at))
@@ -368,7 +385,10 @@ def train_once():
     c.commit()
     c.close()
 
+    with open(os.path.join(MODELS_DIR, "gbdt.pkl"), "rb") as model_file:
+        revision = hashlib.file_digest(model_file, "sha256").hexdigest()
     with lock:
+        state["model_revision"] = revision
         state["gbdt"] = gbdt
         state["mlp"] = mlp
         state["ready"] = True
@@ -385,8 +405,16 @@ def load_persisted():
                 log("persisted models are a different feature version — waiting for boot train")
                 return
         gbdt = joblib.load(os.path.join(MODELS_DIR, "gbdt.pkl"))
-        mlp = joblib.load(os.path.join(MODELS_DIR, "mlp.pkl"))
+        mlp_path = os.path.join(MODELS_DIR, "mlp.pkl")
+        mlp = joblib.load(mlp_path) if os.path.exists(mlp_path) else None
+        if getattr(gbdt, "n_features_in_", None) != len(FEATURES):
+            raise ValueError("persisted GBDT feature width mismatch")
+        if mlp is not None and getattr(mlp, "n_features_in_", None) != len(FEATURES):
+            raise ValueError("persisted MLP feature width mismatch")
+        with open(os.path.join(MODELS_DIR, "gbdt.pkl"), "rb") as model_file:
+            revision = hashlib.file_digest(model_file, "sha256").hexdigest()
         with lock:
+            state["model_revision"] = revision
             state["gbdt"] = gbdt
             state["mlp"] = mlp
             state["ready"] = True
@@ -428,7 +456,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/healthz":
-            self._json(200, {"ok": True, "ready": state["ready"], "trainedAt": state["trained_at"]})
+            self._json(200, {"ok": True, "ready": state["ready"], "trainedAt": state["trained_at"], "featureVersion": FEATURE_VERSION, "featureCount": len(FEATURES), "mlpReady": state["mlp"] is not None, "modelRevision": state["model_revision"]})
         elif self.path == "/report":
             try:
                 with open(os.path.join(MODELS_DIR, "report.json")) as f:
@@ -449,16 +477,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(409, {"error": "feature version mismatch", "version": FEATURE_VERSION})
         rows = body.get("rows", [])
         with lock:
-            gbdt, mlp, ready = state["gbdt"], state["mlp"], state["ready"]
+            gbdt, mlp, ready, revision = state["gbdt"], state["mlp"], state["ready"], state["model_revision"]
         if not ready or not rows:
             return self._json(200, {"version": FEATURE_VERSION, "ready": ready, "gbdt": [], "mlp": []})
-        X = np.asarray(rows, dtype=np.float64)
+        try:
+            X = np.asarray(rows, dtype=np.float64)
+            if X.ndim != 2 or X.shape[1] != len(FEATURES) or not np.isfinite(X).all():
+                return self._json(400, {"error": "invalid feature matrix", "columns": len(FEATURES)})
+        except (ValueError, TypeError):
+            return self._json(400, {"error": "invalid feature matrix"})
         try:
             g = [round(float(v), 1) for v in gbdt.predict(X)]
-            m = [round(float(v), 1) for v in mlp.predict(X)]
+            m = [round(float(v), 1) for v in mlp.predict(X)] if mlp is not None else [None] * len(rows)
         except Exception as e:
             return self._json(500, {"error": str(e)})
-        self._json(200, {"version": FEATURE_VERSION, "ready": True, "gbdt": g, "mlp": m})
+        self._json(200, {"version": FEATURE_VERSION, "ready": True, "gbdt": g, "mlp": m, "modelRevision": revision})
 
 
 def main():

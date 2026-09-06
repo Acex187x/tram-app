@@ -1,0 +1,5563 @@
+{
+  "featureVersion": 4,
+  "featureNames": [
+    "lastLegPace",
+    "motionTrust",
+    "motionAgeS",
+    "tripPaceRatio",
+    "currentPlatformOffsetM",
+    "platformKnown",
+    "stationaryEvidenceS"
+  ],
+  "authority": "lab/ml/research_motion_features.py",
+  "scenarios": [
+    {
+      "name": "receipt-reordering-and-duplicates",
+      "geometries": {
+        "trip": {
+          "shapeId": "shape",
+          "totalM": 2000,
+          "stops": [
+            [
+              0,
+              "start"
+            ],
+            [
+              500,
+              "current"
+            ],
+            [
+              1000,
+              "next"
+            ],
+            [
+              1800,
+              "last"
+            ]
+          ]
+        }
+      },
+      "rows": [
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 100000,
+          "receivedAtMs": 105000,
+          "shapeDistM": 100,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 130000,
+          "receivedAtMs": 170000,
+          "shapeDistM": 400,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 150000,
+          "receivedAtMs": 155000,
+          "shapeDistM": 500,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 150000,
+          "receivedAtMs": 175000,
+          "shapeDistM": 900,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        }
+      ],
+      "horizonOffsetsMs": [
+        0,
+        180000,
+        360000,
+        720000
+      ],
+      "expected": {
+        "rows": [
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 105000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 285000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 465000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 825000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": false,
+            "queries": [
+              {
+                "atMs": 170000,
+                "values": [
+                  8.0,
+                  0.9258747122872905,
+                  20.0,
+                  1.2884532539048703,
+                  100.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 350000,
+                "values": [
+                  8.0,
+                  0.4629373561436452,
+                  200.0,
+                  1.1898662389880992,
+                  100.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 530000,
+                "values": [
+                  0.0,
+                  0.2314686780718226,
+                  300,
+                  1.1127768893485357,
+                  100.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 890000,
+                "values": [
+                  0.0,
+                  0.05786716951795567,
+                  300,
+                  1.0328210409692502,
+                  100.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 155000,
+                "values": [
+                  8.0,
+                  0.980930087668915,
+                  5.0,
+                  1.297111975967785,
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 335000,
+                "values": [
+                  8.0,
+                  0.4904650438344575,
+                  185.0,
+                  1.1974410788887708,
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 515000,
+                "values": [
+                  0.0,
+                  0.24523252191722875,
+                  300,
+                  1.1181622793820012,
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 875000,
+                "values": [
+                  0.0,
+                  0.06130813047930719,
+                  300,
+                  1.034659942038672,
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": false,
+            "queries": [
+              {
+                "atMs": 175000,
+                "values": [
+                  8.0,
+                  0.9082183626944031,
+                  25.0,
+                  1.2855705763397014,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 355000,
+                "values": [
+                  8.0,
+                  0.45410918134720163,
+                  205.0,
+                  1.1873762385269362,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 535000,
+                "values": [
+                  0.0,
+                  0.22705459067360081,
+                  300,
+                  1.111024200096407,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 895000,
+                "values": [
+                  0.0,
+                  0.05676364766840018,
+                  300,
+                  1.0322287662678262,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          }
+        ],
+        "paceCalls": [
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 300.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 150000
+          }
+        ]
+      }
+    },
+    {
+      "name": "pace-decay-trip-reset-and-older-new-trip",
+      "geometries": {
+        "trip": {
+          "shapeId": "shape",
+          "totalM": 2000,
+          "stops": [
+            [
+              0,
+              "start"
+            ],
+            [
+              500,
+              "current"
+            ],
+            [
+              1000,
+              "next"
+            ],
+            [
+              1800,
+              "last"
+            ]
+          ]
+        }
+      },
+      "rows": [
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 100000,
+          "receivedAtMs": 105000,
+          "shapeDistM": 100,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 130000,
+          "receivedAtMs": 135000,
+          "shapeDistM": 400,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 160000,
+          "receivedAtMs": 165000,
+          "shapeDistM": 650,
+          "nextStopId": "last",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "new",
+          "routeId": "L1",
+          "observedAtMs": 80000,
+          "receivedAtMs": 200000,
+          "shapeDistM": 0,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        }
+      ],
+      "horizonOffsetsMs": [
+        0,
+        180000,
+        360000,
+        720000
+      ],
+      "expected": {
+        "rows": [
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 105000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 285000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 465000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 825000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 135000,
+                "values": [
+                  10.0,
+                  0.980930087668915,
+                  5.0,
+                  1.4951866266129752,
+                  100.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 315000,
+                "values": [
+                  10.0,
+                  0.4904650438344575,
+                  185.0,
+                  1.3290684648146183,
+                  100.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 495000,
+                "values": [
+                  0.0,
+                  0.24523252191722875,
+                  300,
+                  1.196937132303335,
+                  100.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 855000,
+                "values": [
+                  0.0,
+                  0.06130813047930719,
+                  300,
+                  1.0577665700644534,
+                  100.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 165000,
+                "values": [
+                  10.0,
+                  0.8739093576895269,
+                  35.0,
+                  1.466356258963897,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 345000,
+                "values": [
+                  10.0,
+                  0.43695467884476347,
+                  215.0,
+                  1.3040838276096864,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 525000,
+                "values": [
+                  0.0,
+                  0.2184773394223817,
+                  300,
+                  1.1793035720516154,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 885000,
+                "values": [
+                  0.0,
+                  0.054619334855595426,
+                  300,
+                  1.051790568454801,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 200000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 380000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 560000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 920000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            ]
+          }
+        ],
+        "paceCalls": [
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 250.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 130000
+          }
+        ]
+      }
+    },
+    {
+      "name": "standing-needs-axis-and-gps",
+      "geometries": {
+        "trip": {
+          "shapeId": "shape",
+          "totalM": 2000,
+          "stops": [
+            [
+              0,
+              "start"
+            ],
+            [
+              500,
+              "current"
+            ],
+            [
+              1000,
+              "next"
+            ],
+            [
+              1800,
+              "last"
+            ]
+          ]
+        }
+      },
+      "rows": [
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 100000,
+          "receivedAtMs": 105000,
+          "shapeDistM": 400,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "at_stop",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 120000,
+          "receivedAtMs": 125000,
+          "shapeDistM": 480,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "at_stop",
+          "coordinates": [
+            14.001,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 140000,
+          "receivedAtMs": 145000,
+          "shapeDistM": 481,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "at_stop",
+          "coordinates": [
+            14.001,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 160000,
+          "receivedAtMs": 165000,
+          "shapeDistM": 482,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "at_stop",
+          "coordinates": [
+            14.001,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 180000,
+          "receivedAtMs": 185000,
+          "shapeDistM": 482,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "at_stop",
+          "coordinates": [
+            14.002,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 200000,
+          "receivedAtMs": 205000,
+          "shapeDistM": 482,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        }
+      ],
+      "horizonOffsetsMs": [
+        0,
+        180000,
+        360000,
+        720000
+      ],
+      "expected": {
+        "rows": [
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 105000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  100.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 285000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  100.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 465000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  100.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 825000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  100.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 125000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 305000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 485000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 845000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 145000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  19.0,
+                  1.0,
+                  20.0
+                ]
+              },
+              {
+                "atMs": 325000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  19.0,
+                  1.0,
+                  20.0
+                ]
+              },
+              {
+                "atMs": 505000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  19.0,
+                  1.0,
+                  20.0
+                ]
+              },
+              {
+                "atMs": 865000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  19.0,
+                  1.0,
+                  20.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 165000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  18.0,
+                  1.0,
+                  40.0
+                ]
+              },
+              {
+                "atMs": 345000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  18.0,
+                  1.0,
+                  40.0
+                ]
+              },
+              {
+                "atMs": 525000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  18.0,
+                  1.0,
+                  40.0
+                ]
+              },
+              {
+                "atMs": 885000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  18.0,
+                  1.0,
+                  40.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 185000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  18.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 365000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  18.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 545000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  18.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 905000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  18.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 205000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  18.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 385000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  18.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 565000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  18.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 925000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  18.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          }
+        ],
+        "paceCalls": []
+      }
+    },
+    {
+      "name": "standing-cap-and-stale-row",
+      "geometries": {
+        "trip": {
+          "shapeId": "shape",
+          "totalM": 2000,
+          "stops": [
+            [
+              0,
+              "start"
+            ],
+            [
+              500,
+              "current"
+            ],
+            [
+              1000,
+              "next"
+            ],
+            [
+              1800,
+              "last"
+            ]
+          ]
+        }
+      },
+      "rows": [
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 100000,
+          "receivedAtMs": 105000,
+          "shapeDistM": 480,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "at_stop",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 120000,
+          "receivedAtMs": 125000,
+          "shapeDistM": 480,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "at_stop",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 140000,
+          "receivedAtMs": 145000,
+          "shapeDistM": 480,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "at_stop",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 160000,
+          "receivedAtMs": 165000,
+          "shapeDistM": 480,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "at_stop",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 180000,
+          "receivedAtMs": 185000,
+          "shapeDistM": 480,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "at_stop",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 200000,
+          "receivedAtMs": 205000,
+          "shapeDistM": 480,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "at_stop",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 220000,
+          "receivedAtMs": 225000,
+          "shapeDistM": 480,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "at_stop",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 240000,
+          "receivedAtMs": 245000,
+          "shapeDistM": 480,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "at_stop",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 260000,
+          "receivedAtMs": 265000,
+          "shapeDistM": 480,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "at_stop",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 180000,
+          "receivedAtMs": 300000,
+          "shapeDistM": 490,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "at_stop",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        }
+      ],
+      "horizonOffsetsMs": [
+        0,
+        180000,
+        360000,
+        720000
+      ],
+      "expected": {
+        "rows": [
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 105000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 285000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 465000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 825000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 125000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  20.0
+                ]
+              },
+              {
+                "atMs": 305000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  20.0
+                ]
+              },
+              {
+                "atMs": 485000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  20.0
+                ]
+              },
+              {
+                "atMs": 845000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  20.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 145000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  40.0
+                ]
+              },
+              {
+                "atMs": 325000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  40.0
+                ]
+              },
+              {
+                "atMs": 505000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  40.0
+                ]
+              },
+              {
+                "atMs": 865000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  40.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 165000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  60.0
+                ]
+              },
+              {
+                "atMs": 345000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  60.0
+                ]
+              },
+              {
+                "atMs": 525000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  60.0
+                ]
+              },
+              {
+                "atMs": 885000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  60.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 185000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  80.0
+                ]
+              },
+              {
+                "atMs": 365000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  80.0
+                ]
+              },
+              {
+                "atMs": 545000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  80.0
+                ]
+              },
+              {
+                "atMs": 905000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  80.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 205000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  100.0
+                ]
+              },
+              {
+                "atMs": 385000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  100.0
+                ]
+              },
+              {
+                "atMs": 565000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  100.0
+                ]
+              },
+              {
+                "atMs": 925000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  100.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 225000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  120.0
+                ]
+              },
+              {
+                "atMs": 405000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  120.0
+                ]
+              },
+              {
+                "atMs": 585000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  120.0
+                ]
+              },
+              {
+                "atMs": 945000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  120.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 245000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  120.0
+                ]
+              },
+              {
+                "atMs": 425000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  120.0
+                ]
+              },
+              {
+                "atMs": 605000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  120.0
+                ]
+              },
+              {
+                "atMs": 965000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  120.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 265000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  120.0
+                ]
+              },
+              {
+                "atMs": 445000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  120.0
+                ]
+              },
+              {
+                "atMs": 625000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  120.0
+                ]
+              },
+              {
+                "atMs": 985000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  120.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": false,
+            "queries": [
+              {
+                "atMs": 300000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  10.0,
+                  1.0,
+                  80.0
+                ]
+              },
+              {
+                "atMs": 480000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  10.0,
+                  1.0,
+                  80.0
+                ]
+              },
+              {
+                "atMs": 660000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  10.0,
+                  1.0,
+                  80.0
+                ]
+              },
+              {
+                "atMs": 1020000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  10.0,
+                  1.0,
+                  80.0
+                ]
+              }
+            ]
+          }
+        ],
+        "paceCalls": []
+      }
+    },
+    {
+      "name": "missing-ambiguous-and-first-next-platform",
+      "geometries": {
+        "trip": {
+          "shapeId": "shape",
+          "totalM": 2000,
+          "stops": [
+            [
+              0,
+              "start"
+            ],
+            [
+              100,
+              "repeat"
+            ],
+            [
+              200,
+              "middle"
+            ],
+            [
+              300,
+              "repeat"
+            ]
+          ]
+        }
+      },
+      "rows": [
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 100000,
+          "receivedAtMs": 105000,
+          "shapeDistM": 100,
+          "nextStopId": "repeat",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 120000,
+          "receivedAtMs": 125000,
+          "shapeDistM": 120,
+          "nextStopId": null,
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 140000,
+          "receivedAtMs": 145000,
+          "shapeDistM": 140,
+          "nextStopId": "unknown",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 160000,
+          "receivedAtMs": 165000,
+          "shapeDistM": 160,
+          "nextStopId": "start",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        }
+      ],
+      "horizonOffsetsMs": [
+        0,
+        180000,
+        360000,
+        720000
+      ],
+      "expected": {
+        "rows": [
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 105000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 285000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 465000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 825000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 125000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 305000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 485000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 845000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 145000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 325000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 505000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 865000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 165000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 345000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 525000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 885000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            ]
+          }
+        ],
+        "paceCalls": []
+      }
+    },
+    {
+      "name": "exact-current-identity-is-diagnostic-only",
+      "geometries": {
+        "trip": {
+          "shapeId": "shape",
+          "totalM": 2000,
+          "stops": [
+            [
+              0,
+              "start"
+            ],
+            [
+              500,
+              "current"
+            ],
+            [
+              1000,
+              "next"
+            ],
+            [
+              1800,
+              "last"
+            ]
+          ]
+        }
+      },
+      "rows": [
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 100000,
+          "receivedAtMs": 105000,
+          "shapeDistM": 200,
+          "nextStopId": "next",
+          "lastStopId": "current",
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 120000,
+          "receivedAtMs": 125000,
+          "shapeDistM": 700,
+          "nextStopId": "next",
+          "lastStopId": "contradiction",
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 140000,
+          "receivedAtMs": 145000,
+          "shapeDistM": 1000,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        }
+      ],
+      "horizonOffsetsMs": [
+        0,
+        180000,
+        360000,
+        720000
+      ],
+      "expected": {
+        "rows": [
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 105000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 285000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 465000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 825000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 125000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 305000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 485000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 845000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 145000,
+                "values": [
+                  15.0,
+                  0.980930087668915,
+                  5.0,
+                  1.4951866266129752,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 325000,
+                "values": [
+                  15.0,
+                  0.4904650438344575,
+                  185.0,
+                  1.3290684648146183,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 505000,
+                "values": [
+                  0.0,
+                  0.24523252191722875,
+                  300,
+                  1.196937132303335,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 865000,
+                "values": [
+                  0.0,
+                  0.06130813047930719,
+                  300,
+                  1.0577665700644534,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          }
+        ],
+        "paceCalls": [
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 850.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 140000
+          }
+        ]
+      }
+    },
+    {
+      "name": "prague-midnight-weekend-context",
+      "geometries": {
+        "trip": {
+          "shapeId": "shape",
+          "totalM": 2000,
+          "stops": [
+            [
+              0,
+              "start"
+            ],
+            [
+              500,
+              "current"
+            ],
+            [
+              1000,
+              "next"
+            ],
+            [
+              1800,
+              "last"
+            ]
+          ]
+        }
+      },
+      "rows": [
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 1788559140000,
+          "receivedAtMs": 1788559145000,
+          "shapeDistM": 100,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 1788559170000,
+          "receivedAtMs": 1788559175000,
+          "shapeDistM": 220,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 1788559200000,
+          "receivedAtMs": 1788559205000,
+          "shapeDistM": 520,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 1788559230000,
+          "receivedAtMs": 1788559235000,
+          "shapeDistM": 1000,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        }
+      ],
+      "horizonOffsetsMs": [
+        0,
+        180000,
+        360000,
+        720000
+      ],
+      "expected": {
+        "rows": [
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 1788559145000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 1788559325000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 1788559505000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 1788559865000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 1788559175000,
+                "values": [
+                  4.0,
+                  0.980930087668915,
+                  5.0,
+                  0.702888024032215,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 1788559355000,
+                "values": [
+                  4.0,
+                  0.4904650438344575,
+                  185.0,
+                  0.8025589211112291,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 1788559535000,
+                "values": [
+                  0.0,
+                  0.24523252191722875,
+                  300,
+                  0.881837720617999,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 1788559895000,
+                "values": [
+                  0.0,
+                  0.06130813047930719,
+                  300,
+                  0.9653400579613278,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 1788559205000,
+                "values": [
+                  7.173094329399556,
+                  1.8548394453584418,
+                  5.0,
+                  0.9635891938575546,
+                  -20.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 1788559385000,
+                "values": [
+                  7.173094329399556,
+                  0.9274197226792209,
+                  185.0,
+                  0.9730346731462671,
+                  -20.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 1788559565000,
+                "values": [
+                  7.173094329399556,
+                  0.46370986133961045,
+                  300,
+                  0.9822459682143532,
+                  -20.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 1788559925000,
+                "values": [
+                  0.0,
+                  0.11592746533490261,
+                  300,
+                  0.9941782167276909,
+                  -20.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 1788559235000,
+                "values": [
+                  10.461073229758396,
+                  2.6334041718948886,
+                  5.0,
+                  1.244488031495464,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 1788559415000,
+                "values": [
+                  10.461073229758396,
+                  1.3167020859474443,
+                  185.0,
+                  1.1917216371933073,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 1788559595000,
+                "values": [
+                  10.461073229758396,
+                  0.6583510429737222,
+                  300,
+                  1.1339167357505116,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 1788559955000,
+                "values": [
+                  0.0,
+                  0.16458776074343054,
+                  300,
+                  1.0476737275389467,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          }
+        ],
+        "paceCalls": [
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 160.0,
+            "hourBand": 5,
+            "dayType": "weekday",
+            "observedAtMs": 1788559170000
+          },
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 370.0,
+            "hourBand": 0,
+            "dayType": "weekend",
+            "observedAtMs": 1788559200000
+          },
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 760.0,
+            "hourBand": 0,
+            "dayType": "weekend",
+            "observedAtMs": 1788559230000
+          }
+        ]
+      }
+    },
+    {
+      "name": "pace-gates-and-clamps",
+      "geometries": {
+        "trip": {
+          "shapeId": "shape",
+          "totalM": 2000,
+          "stops": [
+            [
+              0,
+              "start"
+            ],
+            [
+              500,
+              "current"
+            ],
+            [
+              1000,
+              "next"
+            ],
+            [
+              1800,
+              "last"
+            ]
+          ]
+        }
+      },
+      "rows": [
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 100000,
+          "receivedAtMs": 105000,
+          "shapeDistM": 100,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 104000,
+          "receivedAtMs": 109000,
+          "shapeDistM": 180,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 109000,
+          "receivedAtMs": 114000,
+          "shapeDistM": 190,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 139000,
+          "receivedAtMs": 144000,
+          "shapeDistM": 204,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 169000,
+          "receivedAtMs": 174000,
+          "shapeDistM": 219,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 199000,
+          "receivedAtMs": 204000,
+          "shapeDistM": 879,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 229000,
+          "receivedAtMs": 234000,
+          "shapeDistM": 1540,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 350000,
+          "receivedAtMs": 355000,
+          "shapeDistM": 1600,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 380000,
+          "receivedAtMs": 385000,
+          "shapeDistM": 1590,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 410000,
+          "receivedAtMs": 415000,
+          "shapeDistM": 1700,
+          "nextStopId": null,
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        }
+      ],
+      "horizonOffsetsMs": [
+        0,
+        180000,
+        360000,
+        720000
+      ],
+      "expected": {
+        "rows": [
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 105000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 285000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 465000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 825000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 109000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 289000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 469000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 829000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 114000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 294000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 474000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 834000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 144000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 324000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 504000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 864000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 174000,
+                "values": [
+                  0.5,
+                  0.980930087668915,
+                  5.0,
+                  0.702888024032215,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 354000,
+                "values": [
+                  0.5,
+                  0.4904650438344575,
+                  185.0,
+                  0.8025589211112291,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 534000,
+                "values": [
+                  0.0,
+                  0.24523252191722875,
+                  300,
+                  0.881837720617999,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 894000,
+                "values": [
+                  0.0,
+                  0.06130813047930719,
+                  300,
+                  0.9653400579613278,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 204000,
+                "values": [
+                  11.87025468034841,
+                  1.8548394453584418,
+                  5.0,
+                  1.1599335030197722,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 384000,
+                "values": [
+                  11.87025468034841,
+                  0.9274197226792209,
+                  185.0,
+                  1.118444485049816,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 564000,
+                "values": [
+                  11.87025468034841,
+                  0.46370986133961045,
+                  300,
+                  1.077984115075464,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 924000,
+                "values": [
+                  0.0,
+                  0.11592746533490261,
+                  300,
+                  1.0255720290542232,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 234000,
+                "values": [
+                  11.87025468034841,
+                  1.6524740842259735,
+                  35.0,
+                  1.1533551351874414,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 414000,
+                "values": [
+                  11.87025468034841,
+                  0.8262370421129868,
+                  215.0,
+                  1.1113684895190328,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 594000,
+                "values": [
+                  11.87025468034841,
+                  0.4131185210564934,
+                  300,
+                  1.0719632705442754,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 954000,
+                "values": [
+                  0.0,
+                  0.10327963026412335,
+                  300,
+                  1.0230432584025797,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 355000,
+                "values": [
+                  11.87025468034841,
+                  1.0369924740644358,
+                  156.0,
+                  1.1253144047251715,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 535000,
+                "values": [
+                  11.87025468034841,
+                  0.5184962370322179,
+                  300,
+                  1.0840517391784696,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 715000,
+                "values": [
+                  11.87025468034841,
+                  0.25924811851610896,
+                  300,
+                  1.0506779592448074,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 1075000,
+                "values": [
+                  0.0,
+                  0.06481202962902727,
+                  300,
+                  1.0149829554544696,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 385000,
+                "values": [
+                  11.87025468034841,
+                  0.923855265865185,
+                  186.0,
+                  1.1182078606760546,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 565000,
+                "values": [
+                  11.87025468034841,
+                  0.46192763293259254,
+                  300,
+                  1.077779094568483,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 745000,
+                "values": [
+                  0.0,
+                  0.23096381646629627,
+                  300,
+                  1.046186332243526,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 1105000,
+                "values": [
+                  0.0,
+                  0.05774095411657407,
+                  300,
+                  1.013437530140486,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 415000,
+                "values": [
+                  11.87025468034841,
+                  0.8230614721064956,
+                  216.0,
+                  1.1111337003567407,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 595000,
+                "values": [
+                  11.87025468034841,
+                  0.41153073605324775,
+                  300,
+                  1.0717673240114833,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 775000,
+                "values": [
+                  0.0,
+                  0.20576536802662387,
+                  300,
+                  1.0420072538044003,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 1135000,
+                "values": [
+                  0.0,
+                  0.05144134200665597,
+                  300,
+                  1.0120432043661571,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            ]
+          }
+        ],
+        "paceCalls": [
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 211.5,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 169000
+          },
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 549.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 199000
+          }
+        ]
+      }
+    },
+    {
+      "name": "stationary-on-track-does-not-mean-boarding",
+      "geometries": {
+        "trip": {
+          "shapeId": "shape",
+          "totalM": 2000,
+          "stops": [
+            [
+              0,
+              "start"
+            ],
+            [
+              500,
+              "current"
+            ],
+            [
+              1000,
+              "next"
+            ],
+            [
+              1800,
+              "last"
+            ]
+          ]
+        }
+      },
+      "rows": [
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 100000,
+          "receivedAtMs": 105000,
+          "shapeDistM": 480,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 120000,
+          "receivedAtMs": 125000,
+          "shapeDistM": 481,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 140000,
+          "receivedAtMs": 145000,
+          "shapeDistM": 482,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        }
+      ],
+      "horizonOffsetsMs": [
+        0,
+        180000,
+        360000,
+        720000
+      ],
+      "expected": {
+        "rows": [
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 105000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 285000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 465000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 825000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  20.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 125000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  19.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 305000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  19.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 485000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  19.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 845000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  19.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 145000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  18.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 325000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  18.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 505000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  18.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 865000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  18.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          }
+        ],
+        "paceCalls": []
+      }
+    },
+    {
+      "name": "equal-receipts-preserve-input-order",
+      "geometries": {
+        "trip": {
+          "shapeId": "shape",
+          "totalM": 2000,
+          "stops": [
+            [
+              0,
+              "start"
+            ],
+            [
+              500,
+              "current"
+            ],
+            [
+              1000,
+              "next"
+            ],
+            [
+              1800,
+              "last"
+            ]
+          ]
+        }
+      },
+      "rows": [
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 100000,
+          "receivedAtMs": 160000,
+          "shapeDistM": 100,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 150000,
+          "receivedAtMs": 160000,
+          "shapeDistM": 600,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 120000,
+          "receivedAtMs": 160000,
+          "shapeDistM": 300,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        }
+      ],
+      "horizonOffsetsMs": [
+        0,
+        180000,
+        360000,
+        720000
+      ],
+      "expected": {
+        "rows": [
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 160000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 340000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 520000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 880000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 160000,
+                "values": [
+                  10.0,
+                  0.9622238368941451,
+                  10.0,
+                  1.4903741452948487,
+                  -100.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 340000,
+                "values": [
+                  10.0,
+                  0.4811119184470726,
+                  190.0,
+                  1.3248315758281877,
+                  -100.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 520000,
+                "values": [
+                  0.0,
+                  0.24055595922353631,
+                  300,
+                  1.1939098010331597,
+                  -100.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 880000,
+                "values": [
+                  0.0,
+                  0.06013898980588408,
+                  300,
+                  1.0567274577995625,
+                  -100.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": false,
+            "queries": [
+              {
+                "atMs": 160000,
+                "values": [
+                  10.0,
+                  0.9622238368941451,
+                  10.0,
+                  1.4903741452948487,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 340000,
+                "values": [
+                  10.0,
+                  0.4811119184470726,
+                  190.0,
+                  1.3248315758281877,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 520000,
+                "values": [
+                  0.0,
+                  0.24055595922353631,
+                  300,
+                  1.1939098010331597,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 880000,
+                "values": [
+                  0.0,
+                  0.06013898980588408,
+                  300,
+                  1.0567274577995625,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          }
+        ],
+        "paceCalls": [
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 350.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 150000
+          }
+        ]
+      }
+    },
+    {
+      "name": "fleet-independent-history",
+      "geometries": {
+        "trip": {
+          "shapeId": "shape",
+          "totalM": 2000,
+          "stops": [
+            [
+              0,
+              "start"
+            ],
+            [
+              500,
+              "current"
+            ],
+            [
+              1000,
+              "next"
+            ],
+            [
+              1800,
+              "last"
+            ]
+          ]
+        }
+      },
+      "rows": [
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 100000,
+          "receivedAtMs": 105000,
+          "shapeDistM": 100,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "other",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 110000,
+          "receivedAtMs": 115000,
+          "shapeDistM": 500,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 130000,
+          "receivedAtMs": 135000,
+          "shapeDistM": 400,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "other",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 140000,
+          "receivedAtMs": 145000,
+          "shapeDistM": 560,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        }
+      ],
+      "horizonOffsetsMs": [
+        0,
+        180000,
+        360000,
+        720000
+      ],
+      "expected": {
+        "rows": [
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 105000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 285000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 465000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 825000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 115000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 295000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 475000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 835000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 135000,
+                "values": [
+                  10.0,
+                  0.980930087668915,
+                  5.0,
+                  1.4951866266129752,
+                  100.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 315000,
+                "values": [
+                  10.0,
+                  0.4904650438344575,
+                  185.0,
+                  1.3290684648146183,
+                  100.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 495000,
+                "values": [
+                  0.0,
+                  0.24523252191722875,
+                  300,
+                  1.196937132303335,
+                  100.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 855000,
+                "values": [
+                  0.0,
+                  0.06130813047930719,
+                  300,
+                  1.0577665700644534,
+                  100.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 145000,
+                "values": [
+                  2.0,
+                  0.980930087668915,
+                  5.0,
+                  0.702888024032215,
+                  -60.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 325000,
+                "values": [
+                  2.0,
+                  0.4904650438344575,
+                  185.0,
+                  0.8025589211112291,
+                  -60.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 505000,
+                "values": [
+                  0.0,
+                  0.24523252191722875,
+                  300,
+                  0.881837720617999,
+                  -60.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 865000,
+                "values": [
+                  0.0,
+                  0.06130813047930719,
+                  300,
+                  0.9653400579613278,
+                  -60.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          }
+        ],
+        "paceCalls": [
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 250.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 130000
+          },
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 530.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 140000
+          }
+        ]
+      }
+    },
+    {
+      "name": "trust-cap-retained-memory",
+      "geometries": {
+        "trip": {
+          "shapeId": "shape",
+          "totalM": 2000,
+          "stops": [
+            [
+              0,
+              "start"
+            ],
+            [
+              500,
+              "current"
+            ],
+            [
+              1000,
+              "next"
+            ],
+            [
+              1800,
+              "last"
+            ]
+          ]
+        }
+      },
+      "rows": [
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 100000,
+          "receivedAtMs": 105000,
+          "shapeDistM": 100,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 110000,
+          "receivedAtMs": 115000,
+          "shapeDistM": 180,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 120000,
+          "receivedAtMs": 125000,
+          "shapeDistM": 260,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 130000,
+          "receivedAtMs": 135000,
+          "shapeDistM": 340,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 140000,
+          "receivedAtMs": 145000,
+          "shapeDistM": 420,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 150000,
+          "receivedAtMs": 155000,
+          "shapeDistM": 500,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 160000,
+          "receivedAtMs": 165000,
+          "shapeDistM": 580,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 170000,
+          "receivedAtMs": 175000,
+          "shapeDistM": 660,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 180000,
+          "receivedAtMs": 185000,
+          "shapeDistM": 740,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 190000,
+          "receivedAtMs": 195000,
+          "shapeDistM": 820,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 200000,
+          "receivedAtMs": 205000,
+          "shapeDistM": 900,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 210000,
+          "receivedAtMs": 215000,
+          "shapeDistM": 980,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 220000,
+          "receivedAtMs": 225000,
+          "shapeDistM": 1060,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "trip",
+          "routeId": "L1",
+          "observedAtMs": 230000,
+          "receivedAtMs": 235000,
+          "shapeDistM": 1140,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        }
+      ],
+      "horizonOffsetsMs": [
+        0,
+        180000,
+        360000,
+        720000
+      ],
+      "expected": {
+        "rows": [
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 105000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 285000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 465000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 825000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 115000,
+                "values": [
+                  8.0,
+                  0.980930087668915,
+                  5.0,
+                  1.297111975967785,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 295000,
+                "values": [
+                  8.0,
+                  0.4904650438344575,
+                  185.0,
+                  1.1974410788887708,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 475000,
+                "values": [
+                  0.0,
+                  0.24523252191722875,
+                  300,
+                  1.1181622793820012,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 835000,
+                "values": [
+                  0.0,
+                  0.06130813047930719,
+                  300,
+                  1.034659942038672,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 125000,
+                "values": [
+                  8.0,
+                  1.9248044003506086,
+                  5.0,
+                  1.3948580766877692,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 305000,
+                "values": [
+                  8.0,
+                  0.9624022001753043,
+                  185.0,
+                  1.294252279198219,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 485000,
+                "values": [
+                  8.0,
+                  0.48120110008765216,
+                  300,
+                  1.1949233362272724,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 845000,
+                "values": [
+                  0.0,
+                  0.12030027502191304,
+                  300,
+                  1.064429302234828,
+                  200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 135000,
+                "values": [
+                  8.0,
+                  2.8330227630450118,
+                  5.0,
+                  1.4434655787112125,
+                  160.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 315000,
+                "values": [
+                  8.0,
+                  1.4165113815225059,
+                  185.0,
+                  1.3517081837115228,
+                  160.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 495000,
+                "values": [
+                  8.0,
+                  0.7082556907612529,
+                  300,
+                  1.2487645243946937,
+                  160.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 855000,
+                "values": [
+                  0.0,
+                  0.17706392269031324,
+                  300,
+                  1.090257080831573,
+                  160.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 145000,
+                "values": [
+                  8.0,
+                  3.706932120734539,
+                  5.0,
+                  1.4725284358028161,
+                  80.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 325000,
+                "values": [
+                  8.0,
+                  1.8534660603672695,
+                  185.0,
+                  1.389729407216859,
+                  80.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 505000,
+                "values": [
+                  8.0,
+                  0.9267330301836347,
+                  300,
+                  1.2885920412425718,
+                  80.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 865000,
+                "values": [
+                  0.0,
+                  0.23168325754590868,
+                  300,
+                  1.112861771625051,
+                  80.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 155000,
+                "values": [
+                  8.0,
+                  4.547828535988254,
+                  5.0,
+                  1.491849577522475,
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 335000,
+                "values": [
+                  8.0,
+                  2.273914267994127,
+                  185.0,
+                  1.416733136274943,
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 515000,
+                "values": [
+                  8.0,
+                  1.1369571339970634,
+                  300,
+                  1.3192269370056422,
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 875000,
+                "values": [
+                  8.0,
+                  0.28423928349926586,
+                  300,
+                  1.1327973472629387,
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 165000,
+                "values": [
+                  8.0,
+                  5,
+                  5.0,
+                  1.5056152494434123,
+                  -80.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 345000,
+                "values": [
+                  8.0,
+                  2.6784795555521077,
+                  185.0,
+                  1.4368891301585758,
+                  -80.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 525000,
+                "values": [
+                  8.0,
+                  1.3392397777760539,
+                  300,
+                  1.3435064136219383,
+                  -80.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 885000,
+                "values": [
+                  8.0,
+                  0.33480994444401346,
+                  300,
+                  1.1504978049516126,
+                  -80.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 175000,
+                "values": [
+                  8.0,
+                  5,
+                  5.0,
+                  1.5159136717006068,
+                  -160.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 355000,
+                "values": [
+                  8.0,
+                  3.0677619188203313,
+                  185.0,
+                  1.452498742066497,
+                  -160.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 535000,
+                "values": [
+                  8.0,
+                  1.5338809594101657,
+                  300,
+                  1.3632090814007036,
+                  -160.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 895000,
+                "values": [
+                  8.0,
+                  0.3834702398525414,
+                  300,
+                  1.1663079821189708,
+                  -160.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 185000,
+                "values": [
+                  8.0,
+                  5,
+                  5.0,
+                  1.5239030373239728,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 365000,
+                "values": [
+                  8.0,
+                  3.4423386880395017,
+                  185.0,
+                  1.4649360073297804,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 545000,
+                "values": [
+                  8.0,
+                  1.7211693440197509,
+                  300,
+                  1.3795065561360207,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 905000,
+                "values": [
+                  8.0,
+                  0.4302923360049377,
+                  300,
+                  1.180505338037462,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 195000,
+                "values": [
+                  8.0,
+                  5,
+                  5.0,
+                  1.5302773976228012,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 375000,
+                "values": [
+                  8.0,
+                  3.8027653841289846,
+                  185.0,
+                  1.4750719737460558,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 555000,
+                "values": [
+                  8.0,
+                  1.9013826920644923,
+                  300,
+                  1.3932020475475204,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 915000,
+                "values": [
+                  8.0,
+                  0.47534567301612307,
+                  300,
+                  1.193315647326643,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 205000,
+                "values": [
+                  8.0,
+                  5,
+                  5.0,
+                  1.53547799519935,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 385000,
+                "values": [
+                  8.0,
+                  4.149576542559287,
+                  185.0,
+                  1.4834855652612933,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 565000,
+                "values": [
+                  8.0,
+                  2.0747882712796435,
+                  300,
+                  1.4048646127590776,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 925000,
+                "values": [
+                  8.0,
+                  0.5186970678199109,
+                  300,
+                  1.2049245022502744,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 215000,
+                "values": [
+                  8.0,
+                  5,
+                  5.0,
+                  1.5397987654065919,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 395000,
+                "values": [
+                  8.0,
+                  4.483286506101795,
+                  185.0,
+                  1.4905765731314022,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 575000,
+                "values": [
+                  8.0,
+                  2.2416432530508974,
+                  300,
+                  1.4149086888462188,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 935000,
+                "values": [
+                  8.0,
+                  0.5604108132627243,
+                  300,
+                  1.2154858740401597,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 225000,
+                "values": [
+                  8.0,
+                  5,
+                  5.0,
+                  1.5434430746253311,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 405000,
+                "values": [
+                  8.0,
+                  4.804390187631473,
+                  185.0,
+                  1.4966299679028239,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 585000,
+                "values": [
+                  8.0,
+                  2.4021950938157364,
+                  300,
+                  1.4236432704606987,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 945000,
+                "values": [
+                  8.0,
+                  0.6005487734539341,
+                  300,
+                  1.2251285746792842,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 235000,
+                "values": [
+                  8.0,
+                  5,
+                  5.0,
+                  1.5465561095861733,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 415000,
+                "values": [
+                  8.0,
+                  5,
+                  185.0,
+                  1.5018543605083263,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 595000,
+                "values": [
+                  8.0,
+                  2.556681902056898,
+                  300,
+                  1.4313034405317473,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 955000,
+                "values": [
+                  8.0,
+                  0.6391704755142245,
+                  300,
+                  1.2339611962497228,
+                  -200.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            ]
+          }
+        ],
+        "paceCalls": [
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 140.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 110000
+          },
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 220.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 120000
+          },
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 300.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 130000
+          },
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 380.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 140000
+          },
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 460.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 150000
+          },
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 540.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 160000
+          },
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 620.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 170000
+          },
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 700.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 180000
+          },
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 780.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 190000
+          },
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 860.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 200000
+          },
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 940.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 210000
+          },
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 1020.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 220000
+          },
+          {
+            "shapeId": "shape",
+            "routeId": "L1",
+            "distM": 1100.0,
+            "hourBand": 0,
+            "dayType": "weekday",
+            "observedAtMs": 230000
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing-geometry-does-not-learn",
+      "geometries": {
+        "trip": {
+          "shapeId": "shape",
+          "totalM": 2000,
+          "stops": [
+            [
+              0,
+              "start"
+            ],
+            [
+              500,
+              "current"
+            ],
+            [
+              1000,
+              "next"
+            ],
+            [
+              1800,
+              "last"
+            ]
+          ]
+        }
+      },
+      "rows": [
+        {
+          "key": "v",
+          "tripId": "absent",
+          "routeId": "L1",
+          "observedAtMs": 100000,
+          "receivedAtMs": 105000,
+          "shapeDistM": 100,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        },
+        {
+          "key": "v",
+          "tripId": "absent",
+          "routeId": "L1",
+          "observedAtMs": 130000,
+          "receivedAtMs": 135000,
+          "shapeDistM": 400,
+          "nextStopId": "next",
+          "lastStopId": null,
+          "statePosition": "on_track",
+          "coordinates": [
+            14.0,
+            50.0
+          ]
+        }
+      ],
+      "horizonOffsetsMs": [
+        0,
+        180000,
+        360000,
+        720000
+      ],
+      "expected": {
+        "rows": [
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 105000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 285000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 465000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 825000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "fresh": true,
+            "queries": [
+              {
+                "atMs": 135000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 315000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 495000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "atMs": 855000,
+                "values": [
+                  0.0,
+                  0.0,
+                  300,
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            ]
+          }
+        ],
+        "paceCalls": []
+      }
+    }
+  ]
+}

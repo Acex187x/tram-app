@@ -135,6 +135,7 @@ export default function RootLayout() {
           <Stack.Screen name="settings" options={sheet(0.55)} />
           <Stack.Screen name="icon-preview/[pack]" options={sheet(null, 'none')} />
           <Stack.Screen name="rides" options={sheet(HOME_DETENT)} />
+          <Stack.Screen name="skins" options={sheet(0.7)} />
           <Stack.Screen name="model-info/[id]" options={{ headerShown: false }} />
           <Stack.Screen name="tram-photos/[reg]" options={{ headerShown: false }} />
           <Stack.Screen

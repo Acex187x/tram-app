@@ -139,3 +139,20 @@ Keep NSAllowsArbitraryLoads=false. Include local-network usage text if the
 runtime requests it. This test build requires the user's home LAN/IPsec path;
 no public route or TLS infrastructure is changed. Confirm real phone WS and
 clock connectivity, rather than assuming Mac reachability proves it.
+
+## 6 September afternoon candidate revision
+
+The later candidate enables `TRAJ_CONTINUOUS_V1=1` and `ML_FEATURE_VERSION=4`
+for Lab, and feature version 4 for ML. It serves the 20-column model and explicit
+request-only GTFS metadata; packs carry content-addressed geometry keys.
+The repository Compose template remains an opt-in baseline, so reproduce the
+exact flags from the recorded deployment rather than inferring them from defaults.
+Convex now has a 3 GiB memory cap with a 4 GiB memory-plus-swap cap. Growth of
+anonymous memory remains under investigation; increasing headroom did not prove
+or fix its cause. No existing production resources were reconfigured.
+
+The release-trust parity update restarted only Lab at 12:48:07.386Z. Exact hashes,
+backup paths, unchanged production identities, and preceding intentional restart
+boundaries are in `docs/research/tracking-2026-09-06/candidate-deployment.json`.
+Use at least 120 seconds of real source/client warmup for a new measured window.
+Rejected recovery experiments remain research-only and are absent from the artifact.

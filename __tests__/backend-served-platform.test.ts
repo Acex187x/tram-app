@@ -30,7 +30,10 @@ it('retains terminal, intervening-platform and ambiguous loop stops',()=>{
 const surface = fixture.surface;
 const exact: DriveArgs = {
  ...(fixture.inputs as unknown as DriveArgs),
- geom:surface.geom as unknown as RouteGeometry,
+ // This frozen fixture predates GTFS service flags. Mark historical skip
+ // eligibility explicitly to isolate its consumed-platform/seam regression;
+ // backend-stop-service tests cover the new conservative ordinary-stop gate.
+ geom:{...surface.geom,stops:surface.geom.stops.map(s=>({...s,requestOnly:true}))} as unknown as RouteGeometry,
  surfaces:{paceAt:s=>surface.pace[Math.min(surface.pace.length-1,Math.max(0,Math.floor(s/250)))],dwellStats:id=>(surface.dwell as Record<string,{mean:number;sd:number;trusted:boolean}>)[id]??{mean:18,sd:8,trusted:false}},
  servedPlatform:{stopId:fixture.case.lastStopId,sequence:fixture.case.lastStopSequence,nextStopId:fixture.case.nextStopId,nextSequence:fixture.case.rawFix.nextStopSequence},
 };

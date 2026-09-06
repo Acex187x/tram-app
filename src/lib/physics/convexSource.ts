@@ -19,6 +19,7 @@
 // Lifecycle discipline is the store's (generation-guarded start/stop); this
 // class owns only the Convex client and its subscriptions.
 
+import type { TrajectorySourceStatus } from './resilientSource';
 import { ConvexClient } from 'convex/browser';
 import { makeFunctionReference, type FunctionReference } from 'convex/server';
 
@@ -97,7 +98,8 @@ export interface TrajectorySink {
   foldConvex(batch: TrajectoryBatchWire, serverNowMs: number, receivedAtMs: number): void;
   noteConvexMeta(meta: TrajectoryMetaWire, receivedAtMs: number): void;
   noteConvexFailure(message: string): void;
-  noteConvexClock(serverNowMs: number, sentAtMs: number, receivedAtMs: number): void;
+  noteConvexClock(serverNowMs: number, sentAtMs: number, receivedAtMs: number, appliedAtMs?: number): void;
+  noteConvexSource?(status: TrajectorySourceStatus, newEpoch: boolean): void;
 }
 
 /** Batches folded at one cursor before re-subscribing at the advanced cursor. */

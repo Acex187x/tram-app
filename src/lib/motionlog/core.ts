@@ -53,6 +53,7 @@ import { toCalibrationRecord, toCalibrationRecords } from '@/lib/feed/calibratio
 import type { CalibrationRecord } from '@/lib/feed/types';
 import { projectPointToPolyline, type PolylineProjection } from '@/lib/geo/polyline';
 import type { RouteGeometry, TramPublicState } from '@/lib/types';
+import { predictionTimingEligibility } from '@/lib/physics/predictionTiming';
 
 import { GpsFilter, type GpsFilterOutput } from './gpsFilter';
 
@@ -151,7 +152,7 @@ export interface MotionLogDeps {
   /** Current wall-clock ms. */
   now: () => number;
   /** Latest public state for a tram key (from the engine), or undefined. */
-  stateProvider: (key: string) => TramPublicState | undefined;
+  stateProvider: (key: string, atMs?: number) => TramPublicState | undefined;
   /**
    * Geometry currently driving a tram's sim (engine.getGeometry), for
    * projecting the rider's GPS onto the tram's shape (gpsDist/lagM ride
@@ -367,6 +368,10 @@ export function rideRecord(
     fDist: fProj ? r(fProj.distM, 1) : null,
     fOffM: fProj ? r(fProj.offsetM, 1) : null,
     fLagM: fProj && s && Number.isFinite(s.simDistM) ? r(s.simDistM - fProj.distM, 1) : null,
+    predictionEvaluatedAtMs: r(s?.predictionEvaluatedAtMs),
+    predictionInputsAvailableAtMs: r(s?.predictionInputsAvailableAtMs),
+    predictionAccuracyEligible: predictionTimingEligibility(s, sample.t) === 'eligible',
+    predictionTimingReason: predictionTimingEligibility(s, sample.t),
   });
 }
 
@@ -801,7 +806,7 @@ export class MotionLog {
       return;
     }
     try {
-      const state = this.deps.stateProvider(ride.key);
+      const state = this.deps.stateProvider(ride.key, sample.t);
       const posMode = this.deps.positionMode?.() ?? null;
       // Ground truth (v3): the rider's GPS projected onto the tram's shape.
       const geom = this.deps.geometry?.(ride.key);

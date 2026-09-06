@@ -512,7 +512,7 @@ describe('badge metrics', () => {
     // positions, no speeds, nothing derivable at render time.
     const frame = buildFrame([makeState('9201', geo, 300)], WIDE, opts(geo));
     expect(Object.keys(frame.points.features[0].properties).sort()).toEqual(
-      ['bearing', 'favorite', 'geometryless', 'key', 'line', 'modelId', 'selected', 'stale'].sort(),
+      ['bearing', 'favorite', 'geometryless', 'key', 'line', 'modelId', 'presentationOpacity', 'selected', 'sourceOpacity', 'stale'].sort(),
     );
   });
 });

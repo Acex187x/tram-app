@@ -51,14 +51,34 @@ function isRamp(expr: unknown): expr is unknown[] {
  *   ["step",        <input>, <default>,      s0, v0, …]           → outputs at 2,4,…
  */
 export function dimIfStale(base: unknown): number {
+  return multiplyOpacity(base, STALE_FACTOR);
+}
+
+/** Fade actual geometry for explicit presentation rebases, never source flags. */
+export const PRESENTATION_FACTOR = ['coalesce', ['get', 'presentationOpacity'], 1];
+
+export function fadePresentation(base: unknown): number {
+  return multiplyOpacity(base, PRESENTATION_FACTOR);
+}
+
+/** Observation freshness is visual confidence, separate from rebase hiding. */
+export const SOURCE_FACTOR = ['coalesce', ['get', 'sourceOpacity'], 1];
+export function fadePresentationWithSource(base: unknown): number {
+  return multiplyOpacity(fadePresentation(base), SOURCE_FACTOR);
+}
+export function tramOpacity(base: unknown): number {
+  return fadePresentationWithSource(dimIfStale(base));
+}
+
+function multiplyOpacity(base: unknown, factor: unknown): number {
   if (!isRamp(base)) {
-    return ['*', base, STALE_FACTOR] as unknown as number;
+    return ['*', base, factor] as unknown as number;
   }
   const out = [...base];
   // First output index: interpolate carries an extra interpolation-type slot.
   const firstOutput = base[0] === 'interpolate' ? 4 : 2;
   for (let i = firstOutput; i < out.length; i += 2) {
-    out[i] = ['*', out[i], STALE_FACTOR];
+    out[i] = ['*', out[i], factor];
   }
   return out as unknown as number;
 }

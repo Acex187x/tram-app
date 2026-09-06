@@ -23,6 +23,8 @@
 //                     signal; falls back to learnedPace when no fresh sample
 //  12 corridorTrust   v2: decayed weight of that signal, clamp [0, 5]
 //
+// v4 appends the seven causal per-trip fields from motionFeatures.ts.
+// Its history is updated only after scoring the prior information set.
 // v3: target horizon uses observation time; arrival is transport telemetry.
 // Offline corridor evidence must be available by anchor receipt.
 // Target: dsM = actualNext.shapeDistM − anchor.shapeDistM. The stacked
@@ -34,14 +36,16 @@
 import type { RouteGeometry, TramSnapshot } from '@/lib/types';
 import { ML_URL, pragueContext } from './config';
 import type { LearnedModel } from './learned';
+import {unknownMotionFeatures,type MotionFeatureHistory} from './motionFeatures';
 
-export const FEATURE_VERSION = 3;
+export const FEATURE_VERSION = process.env.ML_FEATURE_VERSION === '4' ? 4 : 3;
 
 export function buildMlFeatures(
   prev: TramSnapshot,
   geom: RouteGeometry,
   learned: LearnedModel,
   tEvalMs: number,
+  motion?: MotionFeatureHistory,
 ): number[] {
   const s0 = prev.shapeDistM;
   const gapS = (tEvalMs - prev.observedAtMs) / 1000;
@@ -84,10 +88,12 @@ export function buildMlFeatures(
     posFrac,
     corridor.paceMs ?? learnedPace,
     corridor.trust,
+    ...(FEATURE_VERSION===4 ? motion?.features(prev.key,prev.tripId,tEvalMs) ?? unknownMotionFeatures() : []),
   ];
 }
 
 export interface MlPredictions {
+  modelRevision?: string | null;
   gbdt: (number | null)[];
   mlp: (number | null)[];
 }
@@ -96,6 +102,7 @@ export class MlClient {
   lastOkMs = 0;
   lastError: string | null = null;
   modelsReady = false;
+  modelRevision: string | null = null;
   lastRequestMs = 0;
   lastLatencyMs: number | null = null;
   private pendingRequests = 0;
@@ -114,7 +121,7 @@ export class MlClient {
         signal: AbortSignal.timeout(2_500),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as { version: number; ready: boolean; gbdt: (number | null)[]; mlp: (number | null)[] };
+      const body = (await res.json()) as { modelRevision?:string; version: number; ready: boolean; gbdt: (number | null)[]; mlp: (number | null)[] };
       if (body.version !== FEATURE_VERSION) throw new Error(`feature version ${body.version} != ${FEATURE_VERSION}`);
       if (body.ready && (!Array.isArray(body.gbdt) || body.gbdt.length !== rows.length ||
           !Array.isArray(body.mlp) || body.mlp.length !== rows.length)) {
@@ -123,8 +130,9 @@ export class MlClient {
       this.lastOkMs = Date.now();
       this.lastError = null;
       this.modelsReady = body.ready;
+      this.modelRevision = typeof body.modelRevision === 'string' ? body.modelRevision : null;
       if (!body.ready) return null;
-      return { gbdt: body.gbdt, mlp: body.mlp };
+      return { gbdt: body.gbdt, mlp: body.mlp, modelRevision: this.modelRevision };
     } catch (e) {
       this.lastError = e instanceof Error ? e.message : String(e);
       return null;

@@ -3,6 +3,8 @@
 // app consumes), caches in SQLite + memory, and re-anchors stop epochs onto
 // the current Prague service day with the app's own shared helper.
 
+import {createHash} from 'node:crypto';
+import {StopServiceMetadata} from './stopService';
 import type { RouteGeometry } from '@/lib/types';
 import { GEOMETRY_404_TTL_MS, GEOMETRY_TTL_MS, SITE_URL } from './config';
 import type { Store } from './db';
@@ -44,19 +46,20 @@ export class GeometryStore {
   private queue: string[] = [];
   private concurrency = 0;
   private active = new Set<string>();
+  readonly stopService = new StopServiceMetadata(process.env.STOP_SERVICE_METADATA_FILE, process.env.STOP_SERVICE_REFRESH_SCRIPT);
   fetchOk = 0;
   fetchFail = 0;
 
   // SQLite is the historical cache. Loading every archived trip into memory
   // retained 26,279 geometries for a 171-vehicle fleet in the live service.
   // Hydrate only the active set, which also releases drive WeakMap profiles.
-  constructor(private store: Store) {}
+  constructor(private store: Store) { this.stopService.start(); }
 
   size(): number {
     return this.mem.size;
   }
 
-  resolve = (tripId: string): RouteGeometry | undefined => this.mem.get(tripId);
+  resolve = (tripId: string): RouteGeometry | undefined => { const g=this.mem.get(tripId); return g ? this.stopService.apply(g) : undefined; };
 
   coordAt(geom: RouteGeometry, distM: number): [number, number] {
     return pointAt(geom.coordinates, geom.cumDistM, distM);
@@ -70,6 +73,7 @@ export class GeometryStore {
   ensure(tripIds: Iterable<string>): void {
     const nowMs = Date.now();
     this.active = new Set(tripIds);
+    this.stopService.retain(this.active);
     for (const tripId of this.mem.keys()) {
       if (!this.active.has(tripId)) {
         this.mem.delete(tripId);
@@ -138,23 +142,17 @@ export class GeometryStore {
     }
   }
 
-  /** Cold-start pack for a set of ACTIVE trips: one geometry per distinct
-   *  shapeId plus the tripId → shapeId index (GET /api/geometry-pack).
-   *
-   *  Deduplication is by shape because that is what the client renders along —
-   *  a physics-v3 phone needs `coordinates`/`cumDistM` to turn the published
-   *  `s` into a point and a bearing, and dozens of trips run the same shape.
-   *  The representative geometry's TRIP-scoped fields (tripId, headsign,
-   *  stops[].arrivalMs/departureMs) belong to whichever trip was picked; only
-   *  the shape-scoped fields are valid for every trip in `trips`. */
-  pack(tripIds: Iterable<string>): { shapes: RouteGeometry[]; trips: Record<string, string> } {
-    const shapes = new Map<string, RouteGeometry>();
+  /** Content-addressed cold-start axes. Provider IDs are reused across GTFS
+   * generations, including opposite directions; sibling schedules are excluded. */
+  pack(tripIds: Iterable<string>): { shapes: PackedGeometry[]; trips: Record<string, string> } {
+    const shapes = new Map<string, PackedGeometry>();
     const trips: Record<string, string> = {};
     for (const tripId of tripIds) {
-      const geom = this.mem.get(tripId);
+      const geom = this.resolve(tripId);
       if (!geom) continue;
-      trips[tripId] = geom.shapeId;
-      if (!shapes.has(geom.shapeId)) shapes.set(geom.shapeId, geom);
+      const geometryKey = geometryContentKey(geom);
+      trips[tripId] = geometryKey;
+      if (!shapes.has(geometryKey)) shapes.set(geometryKey, {...geom, geometryKey});
     }
     return { shapes: [...shapes.values()], trips };
   }
@@ -165,4 +163,14 @@ export class GeometryStore {
       this.mem.set(tripId, reanchor(geom as ServedGeometry, nowMs));
     }
   }
+}
+
+export type PackedGeometry = RouteGeometry & {geometryKey:string};
+/** Preserve provider identity for learned-cell references while distinguishing
+ * every spatial/platform axis. Timetable/headsign are explicitly provisional. */
+export function geometryContentKey(g:RouteGeometry):string {
+  const axis = [g.shapeId,g.coordinates,g.cumDistM,g.totalM,g.stops.map(s=>[
+    s.stopId,s.sequence,s.distM,s.coordinates,s.isTerminal??false,s.requestOnly??false,
+  ])];
+  return 'axis-v1-'+createHash('sha256').update(JSON.stringify(axis)).digest('hex');
 }

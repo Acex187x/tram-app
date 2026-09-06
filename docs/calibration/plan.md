@@ -202,3 +202,26 @@ You are picking up the calibration loop. Everything you need:
    gates: Node replay does not measure Hermes, Mapbox GPU or phone temperature.
 6. Repeat. Device ride recordings (`session-*.jsonl`, exported by the user) outrank sim
    data on conflicts.
+
+### Current recording time gate (September 2026)
+
+Map presentation advances only on native frame ownership; hidden-map recording
+uses `TramFleet.getPredictionState(s)` and never advances that presentation.
+These are current server-model predictions, not a claim about the last visible
+marker. Ride GPS callbacks evaluate at `sample.t`; passive records evaluate at
+batch `t`. Appended fields `predictionEvaluatedAtMs` and
+`predictionInputsAvailableAtMs` identify the evaluation epoch and the latest
+required curve/fix/geometry/clock input availability. A current revision may be
+evaluated retrospectively, but is excluded if any required input arrived after
+GPS time. No retained prediction history is implied.
+
+Run `node bench/scripts/analyze-recording.mjs <ride-or-calibration.jsonl...>`
+for explicit eligible/excluded counts. This uses the same pure timing predicate
+as recording and the ride parser; unknown legacy metadata, timestamp mismatch,
+and future inputs are separate exclusions. Ride accuracy also requires raw GPS
+accuracy ≤25 m, shape offset ≤30 m and no filter rejection. Filtered/coasted GPS
+is not substituted for truth. Correct-trip/rail identity still needs independent
+validation. Passive same-row `obsDist`/`simDist` are never an accuracy pair:
+`obsAt` is an older observation and needs an already-issued prediction history.
+The historical parser's `meanLagM` / `meanFLagM` remain descriptive compatibility
+fields; use explicit timing-gated fields or the strict analyzer for new gates.

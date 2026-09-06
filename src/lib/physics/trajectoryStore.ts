@@ -24,10 +24,10 @@ import {
   type ParsedBundle,
   type ParsedVehicle,
 } from './bundle';
+import type { ResilientTrajectorySource, TrajectorySourceStatus } from './resilientSource';
 import { ClockSync } from './clock';
 import { connectionState, type ConnectionState } from './connection';
 import type {
-  ConvexTrajectorySource,
   TrajectoryBatchWire,
   TrajectoryMetaWire,
   TrajectorySink,
@@ -35,6 +35,7 @@ import type {
 
 /** Fetch/staleness health for the devtools and the connection banner. */
 export interface TrajectoryHealth {
+  source?: TrajectorySourceStatus | null;
   connection: ConnectionState;
   /** Age of the newest publication in seconds, or null when none decoded yet. */
   bundleAgeS: number | null;
@@ -63,9 +64,12 @@ export class TrajectoryStore implements TrajectorySink {
   private running = false;
   private generation = 0;
   /** Convex push transport, created lazily on the first start. */
-  private convexSource: ConvexTrajectorySource | null = null;
+  private convexSource: ResilientTrajectorySource | null = null;
+  private sourceStatus: TrajectorySourceStatus | null = null;
 
   private current: ParsedBundle | null = null;
+  /** First local receipt of the current revision, scoped to its source epoch. */
+  private vehicleReceivedAtMs = new Map<string, number>();
   private lastSeqSeen = 0;
   private failures = 0;
   private lastError: string | null = null;
@@ -109,14 +113,17 @@ export class TrajectoryStore implements TrajectorySink {
         // Lazy require: keeps the convex client stack out of the module graph
         // until a real runtime starts (same discipline as constructFeed()).
         // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { ConvexTrajectorySource } =
-          require('./convexSource') as typeof import('./convexSource');
+        const { ResilientTrajectorySource } =
+          require('./resilientSource') as typeof import('./resilientSource');
         // An isolated trajectory deployment can share the production public fix
         // feed. This override routes curves and their clock together only.
         const trajectoryEnv = process.env.EXPO_PUBLIC_TRAJECTORY_CONVEX_URL;
         const env = trajectoryEnv || process.env.EXPO_PUBLIC_CONVEX_URL;
         const url = typeof env === 'string' && env.length > 0 ? env : 'https://tram-api.acex.sh';
-        this.convexSource = new ConvexTrajectorySource(this, { url });
+        const fallbackUrl = process.env.EXPO_PUBLIC_CONVEX_URL || 'https://tram-api.acex.sh';
+        this.convexSource = new ResilientTrajectorySource(this, {
+          url, fallbackUrl: trajectoryEnv ? fallbackUrl : undefined,
+        });
       }
       this.convexSource.start();
       return true;
@@ -141,6 +148,26 @@ export class TrajectoryStore implements TrajectorySink {
     return this.current?.vehicles.get(key);
   }
 
+  getVehicleReceivedAtMs(key: string): number | undefined {
+    return this.vehicleReceivedAtMs.get(key);
+  }
+
+  private noteVehicleReceipt(vehicle: ParsedVehicle, previous: ParsedVehicle | undefined, atMs: number): void {
+    if (!this.vehicleReceivedAtMs.has(vehicle.key) || !previous ||
+        previous.tripId !== vehicle.tripId || previous.emittedAtMs !== vehicle.emittedAtMs) {
+      this.vehicleReceivedAtMs.set(vehicle.key, atMs);
+    }
+  }
+
+  private noteSnapshotReceipts(vehicles: Map<string, ParsedVehicle>, atMs: number): void {
+    for (const vehicle of vehicles.values()) {
+      this.noteVehicleReceipt(vehicle, this.current?.vehicles.get(vehicle.key), atMs);
+    }
+    for (const key of this.vehicleReceivedAtMs.keys()) {
+      if (!vehicles.has(key)) this.vehicleReceivedAtMs.delete(key);
+    }
+  }
+
   /** Server-corrected wall clock — the instant ALL evaluation happens at. */
   nowMs(localNowMs: number = Date.now()): number {
     return this.clock.now(localNowMs);
@@ -161,6 +188,7 @@ export class TrajectoryStore implements TrajectorySink {
 
   health(localNowMs: number = Date.now()): TrajectoryHealth {
     return {
+      source: this.sourceStatus,
       connection: this.connection(localNowMs),
       bundleAgeS: this.bundleAgeS(localNowMs),
       clockOffsetMs: this.clock.offsetAt(localNowMs),
@@ -194,6 +222,7 @@ export class TrajectoryStore implements TrajectorySink {
       const before = prev?.vehicles.get(v.key);
       if (!before || before.emittedAtMs !== v.emittedAtMs) this.discontinuities += 1;
     }
+    this.noteSnapshotReceipts(next.vehicles, receivedAtMs);
     this.current = next;
     this.clock.sample(next.serverNowMs, receivedAtMs);
     this.failures = 0;
@@ -224,6 +253,7 @@ export class TrajectoryStore implements TrajectorySink {
       const before = prev?.vehicles.get(v.key);
       if (!before || before.emittedAtMs !== v.emittedAtMs) this.discontinuities += 1;
     }
+    this.noteSnapshotReceipts(vehicles, receivedAtMs);
     this.current = {
       protocolVersion: PROTOCOL_VERSION,
       serverNowMs,
@@ -253,10 +283,14 @@ export class TrajectoryStore implements TrajectorySink {
       if (parsed.discontinuity && (!before || before.emittedAtMs !== parsed.emittedAtMs)) {
         this.discontinuities += 1;
       }
+      this.noteVehicleReceipt(parsed, before, receivedAtMs);
       cur.vehicles.set(parsed.key, parsed);
     }
     if (batch.removed) {
-      for (const key of batch.removed) cur.vehicles.delete(key);
+      for (const key of batch.removed) {
+        cur.vehicles.delete(key);
+        this.vehicleReceivedAtMs.delete(key);
+      }
     }
     if (batch.atMs > cur.atMs) cur.atMs = batch.atMs;
     if (serverNowMs > cur.serverNowMs) cur.serverNowMs = serverNowMs;
@@ -269,7 +303,8 @@ export class TrajectoryStore implements TrajectorySink {
   }
 
   /**
-   * Publisher heartbeat: advances bundle age + clock even when no vehicle
+   * Publisher heartbeat: advances bundle age only after its advertised head is
+   * applied, even when no vehicle
    * changed, so a quiet fleet does not decay into a false 'offline' banner.
    * Deliberately does NOT reset the failure counter — a live heartbeat with a
    * failing seed must keep reporting the seed failure.
@@ -277,7 +312,7 @@ export class TrajectoryStore implements TrajectorySink {
   noteConvexMeta(meta: TrajectoryMetaWire, receivedAtMs: number): void {
     // A heartbeat head is not an applied diff cursor: metadata can beat the batch.
     const cur = this.current;
-    if (cur) {
+    if (cur && meta.lastSeq === this.lastSeqSeen) {
       if (meta.atMs > cur.atMs) cur.atMs = meta.atMs;
       if (meta.serverNowMs > cur.serverNowMs) cur.serverNowMs = meta.serverNowMs;
       cur.generator = meta.generator;
@@ -286,10 +321,20 @@ export class TrajectoryStore implements TrajectorySink {
   }
 
   /** Only a nonce query is a clock sample: reactive query results may be cached. */
-  noteConvexClock(serverNowMs: number, sentAtMs: number, receivedAtMs: number): void {
+  noteConvexClock(serverNowMs: number, sentAtMs: number, receivedAtMs: number, appliedAtMs = receivedAtMs): void {
     const rttMs = receivedAtMs - sentAtMs;
     if (rttMs < 0 || rttMs > 2_000) return;
-    this.clock.sample(serverNowMs, sentAtMs + rttMs / 2, receivedAtMs);
+    this.clock.sample(serverNowMs, sentAtMs + rttMs / 2, appliedAtMs);
+  }
+
+  noteConvexSource(status: TrajectorySourceStatus, newEpoch: boolean): void {
+    this.sourceStatus = status;
+    if (newEpoch) {
+      this.lastSeqSeen = 0;
+      this.vehicleReceivedAtMs.clear();
+      this.clock.beginEpoch(Date.now());
+    }
+    this.listeners.forEach((l) => l());
   }
 
   noteConvexFailure(message: string): void {

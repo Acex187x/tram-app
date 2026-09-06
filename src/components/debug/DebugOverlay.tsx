@@ -9,6 +9,7 @@ import Svg, { Line, Polyline } from 'react-native-svg';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { SegmentedPills } from '@/components/ui/SegmentedPills';
 import { getRuntime } from '@/hooks/tramData';
+import { getMapSourceDeliveries, type SourceDelivery } from '@/lib/render/sourceWriter';
 import { getOnlineLocator, projectOnlineFix } from '@/lib/motionlog';
 import type { PhysicsDebugInfo, TramPublicState } from '@/lib/types';
 import type { TrajectoryHealth } from '@/lib/physics/trajectoryStore';
@@ -25,6 +26,8 @@ interface Snapshot {
   dbg: PhysicsDebugInfo | undefined;
   state: TramPublicState | undefined;
   health: TrajectoryHealth;
+  mapSources: Record<string, SourceDelivery>;
+  mapZoom: number | null;
   future: FuturePoint[];
   fixedFuture: FuturePoint[];
   history: MotionSample[];
@@ -57,7 +60,7 @@ function useSnapshot(key: string | null, enabled: boolean): Snapshot | null {
         renderedM: dbg.simDistM, speedKmh: dbg.simSpeedKmh, deltaM: dbg.deltaM,
         fixAgeS: dbg.fixAgeS, emissionAgeS: dbg.emissionAgeS,
       });
-      setSnap({ nowMs, dbg, state, health: runtime.trajectories.health(nowMs), history: history.current,
+      setSnap({ nowMs, dbg, state, mapSources: getMapSourceDeliveries(), mapZoom: runtime.mapZoom, health: runtime.trajectories.health(nowMs), history: history.current,
         future: sampleFuture(matching ? vehicle.smooth : undefined, serverNow),
         fixedFuture: sampleFuture(matching ? vehicle.opinion : undefined, serverNow) });
     };
@@ -95,14 +98,16 @@ export function DebugOverlay() {
   const snap = useSnapshot(key, active && !paused && tab !== 'help');
   const d = snap?.dbg;
   const future = d?.mode === 'fixed' ? snap?.fixedFuture ?? [] : snap?.future ?? [];
-  const verdict = d ? diagnose(d, snap?.history ?? [], future) : null;
+  const verdict = d ? diagnose(d, snap?.history ?? [], future, snap?.state) : null;
+  const freshness = snap?.state?.sourceFreshness;
+  const freshnessLabel = freshness === 'aging' ? 'наблюдение стареет' : freshness === 'stale' ? 'наблюдение устарело' : freshness === 'unknown' ? 'возраст неизвестен' : null;
   const maxHeight = Math.min(height * 0.48, 520);
   return <View pointerEvents="box-none" style={[styles.wrap, { top: insets.top + 5, left: width >= 700 ? undefined : 8, width: width >= 700 ? 440 : undefined, maxWidth: width >= 700 ? 440 : undefined }]}>
     <GlassPanel appearance="dark" readableOverContent style={styles.panel}>
       <Pressable style={styles.header} accessibilityRole="button" accessibilityLabel={expanded ? 'Свернуть инспектор трекинга' : 'Развернуть инспектор трекинга'} onPress={() => setExpanded(!expanded)}>
         <View style={styles.grow}>
           <Text style={styles.title}>Трекинг {snap?.state ? `· ${snap.state.snapshot.line} / ${key}` : key ? `· ${key}` : ''}</Text>
-          <Text style={[styles.subtitle, verdict?.level === 'warning' && styles.warning]} numberOfLines={expanded ? 2 : 1}>{paused ? 'Снимок на паузе' : verdict?.title ?? 'Выберите трамвай на карте'}</Text>
+          <Text style={[styles.subtitle, verdict?.level === 'warning' && styles.warning]} numberOfLines={expanded ? 2 : 1}>{paused ? 'Снимок на паузе' : freshnessLabel ? `${freshnessLabel} · ${verdict?.title ?? ''}` : verdict?.title ?? 'Выберите трамвай на карте'}</Text>
         </View>
         <Text style={styles.speed}>{n(d?.simSpeedKmh, 1)}<Text style={styles.unit}> км/ч</Text></Text>
         <Text style={styles.chevron}>{expanded ? '⌃' : '⌄'}</Text>
@@ -122,6 +127,10 @@ export function DebugOverlay() {
               <Note>{geometryEvidence(d).detail}</Note>
             </Card>
             <Card title="Свежесть · четыре разных возраста">
+              <Row label="Свежесть наблюдения" value={freshness == null ? 'не сообщена' : {fresh:'свежее',aging:'стареет',stale:'устарело',unknown:'возраст неизвестен'}[freshness]} warn={freshness !== undefined && freshness !== 'fresh'} />
+              <Row label="Достоверный возраст источника" value={`${n(snap.state?.sourceAgeS, 1)} с`} />
+              <Row label="Видимость по свежести" value={snap.state?.sourceOpacity == null ? 'не сообщена' : `${n(snap.state.sourceOpacity * 100)} %`} />
+              <Note>Этот коэффициент меняет только видимость. Возраст наблюдения не задаёт остановку, двери или перенос маркера.</Note>
               <Row label="Наблюдение трамвая" value={`${n(d.fixAgeS, 1)} с`} warn={d.fixAgeS > 30} />
               <Row label="Профиль этого трамвая" value={`${n(d.emissionAgeS, 1)} с`} warn={d.emissionAgeS != null && d.emissionAgeS > 60} />
               <Row label="Публикация всего флота" value={`${n(d.bundleAgeS, 1)} с`} warn={d.connection !== 'live'} />
@@ -130,14 +139,14 @@ export function DebugOverlay() {
               <Note>Свежая лента не означает свежий профиль каждого трамвая.</Note>
             </Card>
             <Card title="Положение · метры вдоль маршрута">
-              <Row label={`На карте · ${d.mode.toUpperCase()}`} value={d.hasGeometry ? `${n(d.simDistM, 1)} м` : 'GPS · ось не применяется'} />
+              <Row label={`Расчёт отображения · ${d.mode.toUpperCase()}`} value={d.hasGeometry ? `${n(d.simDistM, 1)} м` : 'GPS · ось не применяется'} />
               <Row label="SMOOTH · сервер" value={`${n(d.smoothDistM, 1)} м`} color={COLORS.smooth} />
               <Row label="FIXED · сервер" value={`${n(d.fixedDistM, 1)} м`} color={COLORS.fixed} />
               <Row label="ФИКС · ось маршрута" value={`${n(d.obsDistM, 1)} м`} color={COLORS.fix} />
               <Row label="SMOOTH − FIXED" value={`${n(d.deltaM, 1, true)} м`} />
               <Row label="Скорость между снимками" value={`${n(sampledSpeed(snap.history), 1)} км/ч`} />
               <Row label="Неподвижен (наблюдаем)" value={`${n(standDuration(snap.history))} с`} />
-              <Note>Цветные точки карты учитывают клиентские поправки. Значения «сервер» показывают исходные кривые. Разрыв не равен ошибке относительно реальности.</Note>
+              <Note>Положение и скорость — расчёт на момент снимка. Проверка доставки кадров находится во вкладке «Сервер». Цветные точки учитывают клиентские поправки. Значения «сервер» показывают исходные кривые. Разрыв не равен ошибке относительно реальности.</Note>
             </Card>
             <Card title="Дальше · опубликованный профиль">
               <FutureChart smooth={snap.future} fixed={snap.fixedFuture} />
@@ -148,12 +157,17 @@ export function DebugOverlay() {
               <Note>Это расстояние относительно текущей точки каждого серверного профиля. Будущие обновления и клиентская поправка могут изменить движение.</Note>
             </Card>
             <Card title="Как телефон меняет профиль">
+              <Row label="Контракт движения" value={d.motionPolicy ?? 'не указан'} />
               <Row label="Источник" value={{ 'curve-ml': 'ML-профиль', 'curve-naive': 'Резервный профиль', 'client-naive': 'Клиентская протяжка', 'raw-fix': 'Последний фикс' }[d.renderSource]} />
               <Row label="Поправка" value={{ off: 'Не применяется', ahead: 'Кривая впереди фикса', wind: 'Сдвиг по времени', walk: 'Догоняем фикс за кривой' }[d.shimBranch]} />
               <Row label="Сдвиг по времени" value={d.tauS === Infinity ? 'За пределами кривой' : `${n(d.tauS, 1)} с`} />
               <Row label="Цель до ограничения движения" value={`${n(d.renderTargetDistM, 1)} м`} />
               <Row label="Цель − маркер" value={`${n(d.renderGuardGapM, 1, true)} м`} warn={d.renderGuardActive} />
+              <Row label="Ускорение отображения" value={`${n(d.presentationAccelerationMs2, 2, true)} м/с²`} />
               <Row label="Ограничитель движения" value={d.renderGuardActive ? 'Активен' : 'Не вмешивается'} />
+              <Row label="Видимость при переносе" value={snap.state?.presentationOpacity == null ? 'не сообщена' : `${n(snap.state.presentationOpacity * 100)} %`} />
+              <Row label="Причина переноса" value={snap.state?.presentationTransitionReason ?? 'нет активного переноса'} />
+              <Row label={snap.state?.presentationCorrectionComparable === false ? 'Расстояние переноса в мире' : 'Поправка переноса вдоль оси'} value={`${n(snap.state?.presentationCorrectionM, 1, snap.state?.presentationCorrectionComparable !== false)} м`} />
               <Row label="Поправка по фиксу" value={`${n(d.fixForwardM, 1, true)} м`} />
               <Row label="До фикса в режиме догоняния" value={`${n(d.walkRemainingM, 1)} м`} />
               <Row label="Фаза профиля / статус фида" value={`${d.phase} / ${d.statePosition}`} />
@@ -169,7 +183,10 @@ export function DebugOverlay() {
               <HistoryChart history={snap.history} />
               <Note>Голубой: скорость между снимками. Пропуски после паузы не соединяются. Это 1 Гц диагностика, не измерение частоты кадров.</Note>
               <Row label="Последний обнаруженный скачок" value={d.lastJumpM == null ? 'не наблюдался' : `${n(d.lastJumpM, 1, true)} м · ${n(d.lastJumpAgoS)} с назад`} warn={d.lastJumpAgoS != null && d.lastJumpAgoS < 60} />
-              <Row label="Сервер разрешил разрыв" value={d.discontinuity ? 'Да, у текущего профиля' : 'Нет'} />
+              <Row label="Скрытых переносов · с запуска" value={n(d.presentationRebaseCount)} />
+              <Row label="Последний перенос в мире" value={d.presentationLastWorldJumpM == null ? 'не наблюдался' : `${n(d.presentationLastWorldJumpM, 1)} м`} />
+              <Row label="Время последнего переноса" value={d.presentationLastRebaseAtMs == null ? 'не наблюдалось' : new Date(d.presentationLastRebaseAtMs).toLocaleTimeString('ru-RU')} />
+              <Row label="Флаг разрыва сервера" value={d.discontinuity ? 'Есть · видимый скачок запрещён' : 'Нет'} />
               <Note>Журнал начинается при открытии инспектора; отсутствие записи не доказывает отсутствие проблемы.</Note>
             </Card>
             <Card title="События · новые сверху">
@@ -184,7 +201,9 @@ export function DebugOverlay() {
 }
 
 function ServerCard({ tramKey, snap, paused }: { tramKey: string; snap: Snapshot; paused: boolean }) {
-  const result = useServerDebug(paused ? null : tramKey);
+  const source = snap.health.source;
+  const fallback = source?.active === 'fallback';
+  const result = useServerDebug(paused || fallback ? null : tramKey);
   const data = result.data;
   const d = snap.dbg!;
   return <>
@@ -192,11 +211,30 @@ function ServerCard({ tramKey, snap, paused }: { tramKey: string; snap: Snapshot
       <Row label="Связь" value={{ live: 'Свежая публикация', degraded: 'Публикация запаздывает', offline: 'Нет свежей связи' }[d.connection]} warn={d.connection !== 'live'} />
       <Row label="Ошибка транспорта" value={snap.health.lastError ?? 'нет зарегистрированной'} warn={!!snap.health.lastError} />
       <Row label="Кривых / номер обновления" value={`${snap.health.vehicleCount} / ${d.feedSeq}`} />
+      <Row label="Источник профилей" value={source ? source.active === 'primary' ? 'Основной · заданный в сборке' : 'Резервный · production' : 'не сообщён'} warn={fallback} />
+      <Row label="Подключение" value={source ? source.connecting === 'primary' ? 'К основному источнику' : source.connecting === 'fallback' ? 'К production-резерву' : 'Нет ожидающего подключения' : 'не сообщено'} />
+      <Row label="Адрес активного источника" value={source?.url ?? 'не сообщён'} />
+      <Row label="Возврат к основному" value={source ? source.probing ? 'Проверяется' : 'Нет активной проверки' : 'не сообщён'} />
+      <Row label="Причина переключения" value={source?.reason ?? 'не сообщена'} />
+      <Row label="Переключений источника" value={n(source?.switches)} />
       <Row label="Генератор" value={d.serverGen ?? 'не указан'} />
       <Row label="Часы сервер − телефон" value={snap.health.clockSynced ? `${n(d.clockOffsetMs, 0, true)} мс` : 'синхронизация не завершена'} warn={snap.health.clockImplausible} />
     </Card>
+    <Card title="Доставка геометрии · Mapbox">
+      <Row label="Масштаб карты" value={snap.mapZoom == null ? 'не измерен' : `z${n(snap.mapZoom, 2)}`} />
+      {Object.entries(snap.mapSources).length === 0 ? <Note>Нет зарегистрированных источников карты.</Note> : Object.entries(snap.mapSources).map(([name, source]) => <View key={name}>
+        <Row label={name} value={`${source.submitted} отправлено · ${source.pending}+${source.queued} ждут`} warn={source.queued > 0} />
+        <Row label="Подтверждено / без изменений" value={`${source.acknowledged} / ${source.unchanged}`} />
+        <Row label="Последняя отправка / ответ API" value={`${source.lastSubmittedAtMs == null ? '—' : n((snap.nowMs - source.lastSubmittedAtMs) / 1000, 1)} / ${source.lastCompletedAtMs == null ? '—' : n((snap.nowMs - source.lastCompletedAtMs) / 1000, 1)} с назад`} />
+        <Row label="Задержка native · последняя / максимум" value={`${n(source.lastLatencyMs)} / ${n(source.maxLatencyMs)} мс`} />
+        <Row label="Заменены до отправки" value={`${source.coalesced}`} />
+        <Row label="Объём строк · суммарно" value={`${n(source.payloadChars / 1024)} Ки символов`} />
+        <Row label="Последняя ошибка" value={source.lastError ?? 'нет зарегистрированной'} warn={!!source.lastError} />
+      </View>)}
+      <Note>Счётчики за время жизни источника. Подтверждение означает выполнение native API, а не показ кадра GPU. Объём — символы JSON, не байты сети.</Note>
+    </Card>
     <Card title="Диагностика сервера · отдельный запрос">
-      {paused ? <Note>Запросы панели приостановлены. Карта и её трассы продолжают работать.</Note> : <>
+      {fallback ? <Note>Карта сейчас использует production-профили. Частный диагностический сервер относится к другому генератору и не описывает активное движение; его данные и ML-трассы скрыты.</Note> : paused ? <Note>Запросы панели приостановлены. Карта и её трассы продолжают работать.</Note> : <>
         <Row label="Ответ получен" value={result.receivedAtMs ? `${n((Date.now() - result.receivedAtMs) / 1000)} с назад` : result.loading ? 'загрузка…' : 'ответа нет'} />
         {result.error && <Note>Ошибка диагностики: {result.error}. Она не доказывает сбой ленты движения.</Note>}
         {data && !data.found && <Note>У сервера сейчас нет записи этого трамвая.</Note>}

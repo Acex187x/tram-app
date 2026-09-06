@@ -1,0 +1,31 @@
+{
+  "captureStartedAtMs": 1788694533625,
+  "captureDurationS": 900,
+  "measuredColdStartAtMs": 1788694533625,
+  "measuredWarmStartAtMs": 1788694653625,
+  "coldDurationS": 300,
+  "warmDurationS": 770,
+  "warmupS": 120,
+  "fps": 30,
+  "note": "Public fixes, trajectories and actual geometry response receipts. No credentials or private user data. Pre-world replay is an immutable bundled historical client baseline, not current implementation. The static geometry argument is ignored for initial seeding when receipt events are present.",
+  "files": [
+    {
+      "file": "geometry-receipt-candidate-wire.jsonl.gz",
+      "sha256": "e188f2d7673ac7cab9a6d1120f739999c6a1fa7cfb1a91562e341a1d61490d1f",
+      "uncompressedBytes": 36021957,
+      "gzipBytes": 9468564
+    },
+    {
+      "file": "geometry-receipt-final-pack.json.gz",
+      "sha256": "7c48f7990cdad1a0e78acdeb257fec40599e150840d434e44485486486a063aa",
+      "uncompressedBytes": 1238651,
+      "gzipBytes": 344371
+    },
+    {
+      "file": "pre-world-replay.cjs.gz",
+      "sha256": "cdfc21907ee1f39f9fba1a02111d5db7fc25b4d5ae51315bf95954c753224821",
+      "uncompressedBytes": 489712,
+      "gzipBytes": 99716
+    }
+  ]
+}

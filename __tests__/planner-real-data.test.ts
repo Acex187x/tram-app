@@ -1,6 +1,6 @@
 // Repro harness for the Codex-reported planner geometry bug, driven by REAL
-// cached trip geometries from the simulator container (skipped when absent).
-import { execSync } from 'node:child_process';
+// exported trip geometries (skipped when absent). Export only from a caller's
+// leased simulator; a unit test must not reach into an unrelated device.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -9,11 +9,8 @@ import type { RouteGeometry } from '@/lib/types';
 
 function loadRealGeometries(): RouteGeometry[] | null {
   try {
-    const container = execSync(
-      'xcrun simctl get_app_container 2AB8E802-E82C-4020-957B-27ACD6D56D73 cz.zabolotny.tramspotter data',
-      { encoding: 'utf8' },
-    ).trim();
-    const dir = join(container, 'Library/Caches/tripgeo');
+    const dir = process.env.TRAM_PLANNER_GEOMETRY_DIR;
+    if (!dir) return null;
     return readdirSync(dir)
       .filter((f) => f.endsWith('.json'))
       .map((f) => (JSON.parse(readFileSync(join(dir, f), 'utf8')) as { geometry: RouteGeometry }).geometry);

@@ -36,7 +36,18 @@ prerequisite for populated states. `test02AllModelMechanisms` opens all seven
 models using `XCUIApplication.open(URL)` (iOS 16.4+), exercises front/rear/whole
 presets, doors, both indicator sides from the front, pinch zoom, a drag orbit, background/foreground and
 close. The map-detail test zooms through native map gestures, opens a fleet vehicle
-and captures its selected 3D map state. All tests retain screenshots in the xcresult and the script extracts
+and captures its selected 3D map state. `test04AssemblyZooms` remeasures camera zoom after each pinch and captures
+selected articulated assemblies at15/16/17 (±0.15), including source counters.
+`test05ViewerRotation` checks15T and PLF front/rear framing in both actual iPad
+orientations; phones skip that iPad-specific test.
+`test06RideTimingMetadata` checks2 eligible and3 excluded predictions with
+individual unknown/timestamp/future-input reasons on a synthetic ride row.
+The runner stages only `ui-only-timing-fixture.jsonl` in the leased app container
+and removes that exact unchanged file on exit; it refuses to overwrite or delete
+a changed file and leaves all other rides intact. The fixture is UI-only, never
+a GPS or prediction-accuracy validation.
+
+All tests retain screenshots in the xcresult and the script extracts
 attachments after success or failure when an xcresult exists.
 `test-summary.json` preserves the machine-readable outcome; `attachments/named/`
 contains explicit screenshot copies with readable model/state names. The original
@@ -53,3 +64,5 @@ Prepared against Xcode's installed iOS 26.5 XCUIAutomation headers. The project
 plist and shell syntax are checked. The first leased run compiled and launched
 the target successfully; selectors were adjusted to the observed native tree.
 Runtime/visual results are recorded separately; this README is not a pass claim.
+
+Skin Files import/preview is an opt-in native test because the library normally starts empty. Set `TRAM_SKIN_FIXTURE=/tmp/qa-uv-kt8.skin.json` and `TRAM_UI_ONLY_TEST=TramSpotterUITests/TramSpotterUITests/test07SkinImportAndPreview`. The runner verifies the synthetic package identity, stages one Documents file, and removes that unchanged staging file afterward. Test07 exercises import, synthetic777777 assignment/reset, embedded-texture viewer doors/front/rear and same-ID replacement. It leaves the imported synthetic library record for a separate bounded Mapbox visual check; remove that record after QA. Never copy the synthetic library/assignment into a delivered physical-device container.

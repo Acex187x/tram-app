@@ -23,6 +23,31 @@ function seededStore(): TrajectoryStore {
   return store;
 }
 
+it('retains first receipt only for the same vehicle revision and source epoch', () => {
+  const store = seededStore();
+  expect(store.getVehicleReceivedAtMs('9201')).toBe(T0 + 700);
+  store.seedConvex([wireVehicle({ key: '9201' })], META, T0 + 1000);
+  expect(store.getVehicleReceivedAtMs('9201')).toBe(T0 + 700);
+  expect(store.getVehicleReceivedAtMs('9202')).toBeUndefined();
+  store.foldConvex({ seq: 42, atMs: T0, changed: [wireVehicle({ key: '9201' })] }, T0, T0 + 1200);
+  expect(store.getVehicleReceivedAtMs('9201')).toBe(T0 + 700);
+  store.foldConvex({ seq: 43, atMs: T0, changed: [wireVehicle({ key: '9201', tripId: 'other' })] }, T0, T0 + 1300);
+  expect(store.getVehicleReceivedAtMs('9201')).toBe(T0 + 1300);
+  store.noteConvexSource({ active: 'fallback', url: 'https://public', reason: 'test', switches: 1, probing: false, connecting: null }, true);
+  expect(store.getVehicleReceivedAtMs('9201')).toBeUndefined();
+  store.seedConvex([wireVehicle({ key: '9201', tripId: 'other' })], META, T0 + 1400);
+  expect(store.getVehicleReceivedAtMs('9201')).toBe(T0 + 1400);
+  store.foldConvex({ seq: 42, atMs: T0, changed: [], removed: ['9201'] }, T0, T0 + 1500);
+  expect(store.getVehicleReceivedAtMs('9201')).toBeUndefined();
+});
+
+it('a lower publisher cursor cannot freshen retained rows before its replacement seed', () => {
+  const store = seededStore();
+  store.noteConvexMeta({ ...META, lastSeq: 1, atMs: T0 + 20000 }, T0 + 20000);
+  expect(store.bundle?.atMs).toBe(T0);
+  expect(store.health(T0 + 20000).lastSeq).toBe(41);
+});
+
 describe('TrajectoryStore as the Convex sink', () => {
   it('seeds a full bundle from rows + meta (clock, generator, staleness datum)', () => {
     const store = seededStore();

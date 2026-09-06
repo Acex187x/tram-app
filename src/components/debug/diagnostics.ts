@@ -1,6 +1,6 @@
 /** Pure, bounded diagnostics. A displayed hold is evidence about the renderer,
  * never proof that the real vehicle stopped. No live fleet getters here. */
-import type { PhysicsDebugInfo } from '@/lib/types';
+import type { PhysicsDebugInfo, TramPublicState } from '@/lib/types';
 import { evalTrajectory, trackEndMs, trackStartMs } from '@/lib/physics/evaluator';
 
 export const HISTORY_MS = 60_000;
@@ -59,7 +59,7 @@ export interface Diagnosis { title: string; detail: string; level: 'ok' | 'notic
 export function geometryEvidence(d: PhysicsDebugInfo): Diagnosis {
   if (d.geometryCoherence === 'invalid') return {
     title: 'Фикс противоречит маршруту',
-    detail: 'Обе остановки фикса отсутствуют в геометрии, а GPS далеко от указанной точки оси. Маршрут и профили исключены: маркер показывает последние GPS-координаты без протяжки. Это не подтверждает остановку трамвая.',
+    detail: 'Обе остановки фикса отсутствуют в геометрии, а GPS далеко от указанной точки оси. Такая запись исключена из протяжки. Резервная цель — последние GPS-координаты без протяжки; смена отображения проходит через скрытый перенос. Это не подтверждает остановку трамвая.',
     level: 'warning',
   };
   if (d.geometryCoherence === 'valid') return {
@@ -74,7 +74,8 @@ export function geometryEvidence(d: PhysicsDebugInfo): Diagnosis {
   };
   return { title: 'Согласованность неизвестна', detail: reasons[d.geometryCoherenceReason ?? ''] ?? 'Результат проверки не сообщён.', level: 'notice' };
 }
-export function diagnose(d: PhysicsDebugInfo, history: readonly MotionSample[], future: readonly FuturePoint[]): Diagnosis {
+export function diagnose(d: PhysicsDebugInfo, history: readonly MotionSample[], future: readonly FuturePoint[], presentation?: Pick<TramPublicState, 'presentationTransitionReason' | 'presentationOpacity'>): Diagnosis {
+  if (presentation?.presentationTransitionReason) return { title: 'Перенос через скрытое состояние', detail: `Причина: ${presentation.presentationTransitionReason}. Видимость ${Math.round((presentation.presentationOpacity ?? 1) * 100)} %. Клиент ждёт подтверждений карты между скрытием, сменой позиции и появлением; это не физическая остановка.`, level: 'notice' };
   if (d.geometryCoherence === 'invalid') return geometryEvidence(d);
   if (!d.hasGeometry) return { title: 'Маршрут ещё не загружен', detail: 'На карте доступны только координаты последнего наблюдения.', level: 'warning' };
   if (!d.hasTrajectory) return { title: d.renderSource === 'client-naive' ? 'Движение без серверного профиля' : 'Нет профиля движения', detail: 'Проверьте рейс, поступление профиля и возраст фикса. Наличие линии маршрута само по себе не задаёт движение.', level: 'warning' };

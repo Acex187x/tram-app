@@ -92,6 +92,10 @@ export interface CalibrationRecord {
   delayS: number | null;
   /** Sequence number of the next stop on the trip. */
   nextSeq: number | null;
+  predictionEvaluatedAtMs?: number | null;
+  predictionInputsAvailableAtMs?: number | null;
+  predictionAccuracyEligible?: boolean;
+  predictionTimingReason?: string;
 }
 
 /**

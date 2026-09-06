@@ -12,15 +12,26 @@ The server computes motion profiles. `RemoteFeed` streams identity and AVL
 observations from Convex; a separate Convex source streams trajectories and
 publication health. Geometry comes from the initial geometry pack and cached
 per-trip requests. The phone evaluates absolute-time curves on demand. It does
-not run the retired `TramEngine` predictor/smoother fleet or integrate catch-up
-substeps after suspension.
+not run the retired `TramEngine` predictor/smoother fleet. A single client
+presentation controller retains displayed position, velocity and acceleration
+while correcting compatible source error within bounded motion limits.
 
-Only actual map frames commit the presentation guard. UI, diagnostics and future
-queries are read-only with respect to that guard. Its non-reverse floor, speed
-ceiling and forward catch-up acceleration limit operate on actual frame time;
+Only actual map submissions advance the presentation controller. UI, diagnostics
+and future queries are read-only. Numerical integration is bounded to 100 slices
+for a missed interval up to 5 seconds (normally one slice at 30 Hz, two at 10 Hz);
+a longer gap uses an explicit resume transition. Its non-reverse floor, speed,
+acceleration and jerk limits operate on actual frame time;
 curve evaluation uses the independently corrected server clock. Geometry/fix
 coherence is assessed on ingest or geometry changes, never per frame. Strongly
-contradictory geometry and curves are excluded, leaving the raw GPS fallback.
+contradictory geometry and curves are excluded. An incompatible axis transition
+fades the old presentation to zero, waits for the required native source
+acknowledgements, rebases at zero with a distinct acknowledged token, then fades
+in. Raw GPS revisions retain a bounded world-position controller. First route
+adoption preserves the world pose only with an unambiguous stop corridor,
+at most 10 m projection error, feasible correction derivatives and sufficient
+braking runway; other route changes use the explicit transition discipline. Only an
+explicit per-vehicle `continuous-v1` policy disables the legacy smooth fix-forward
+shim; absence or an unknown value retains legacy behavior.
 
 ### Cadence budgets
 
@@ -28,7 +39,8 @@ contradictory geometry and curves are excluded, leaving the raw GPS fallback.
 |---|---|---|
 | Map frame notifications / section due-checks | 33 ms, approximately 30 Hz | Enter detail at zoom ≥ 14.0; leave below 13.7; foreground |
 | Map frame notifications at far zoom | 100 ms | Outside detail band; foreground |
-| Badge/dot pushes | 66 ms / 1 s / 5 s | Zoom ≥ 14 / 12.5–14 / < 12.5 |
+| Badge/dot push opportunities | 66 ms / 200 ms / 400 ms | Zoom ≥14 / [12.5,14) / below12.5; identical payloads suppressed |
+| Selected/followed coarse target | 100 ms | Zoom below14; visible rebase frames bypass the normal due gate |
 | Follow-camera retarget | Approximately 80 ms | Following a tram, map visible; overlapping native glides |
 | UI hooks | At most 1 Hz for live sampling | No notification work without listeners; explicit user actions may update immediately |
 | Tracking inspector snapshot | 1 Hz | Debug enabled, selected/followed tram, unpaused, outside Help, foreground, model viewer closed |
@@ -45,17 +57,34 @@ refresh rather than waiting for the city-scale interval. A frame notification is
 a due-check opportunity, not an instruction to rebuild and push every source.
 
 30 Hz notifications and fast badge pushes share the same detail boundary.
-Hysteresis prevents timer churn. At far zoom, Mapbox should idle between sparse
-pushes instead of redrawing a near-identical fleet continuously.
+Hysteresis prevents timer churn. City and badge views sample moving visible
+trams at2.5/5 Hz. The former1–5 s submissions caused visible freeze/step motion;
+the first10 Hz experiment raised native Simulator process CPU from about10% to
+35% at the same default badge camera. The revised intervals are multiples of the
+existing100 ms idle notification, avoiding a250 ms gate that would actually
+submit every300 ms. Selected/followed coarse targets retain10 Hz; only transitions
+among current map keys force immediate delivery, not dormant offscreen fades.
+Stationary and empty sources send only their first changed payload; failed
+submissions permit identical retries. Revised native cost remains subject to
+the current-build comparison below.
 
 ### GPU and allocation rules
 
 - Moving GeoJSON uses the patched `ShapeSource.updateShape` direct-native path.
   Stable React props omit `shape`; Fabric cannot replay stale moving geometry
   through a concurrent text/menu commit.
-- Sections are viewport-culled with a 300 m margin. Close-zoom pre-allocation
-  rejection uses a 600 m margin so off-screen trams do not become full state or
+- Sections are viewport-culled with a 300 m margin, including the full 5×
+  assembly (current maximum under 170 m). Mesh scale and section/gap/coupled
+  offsets share one sampled per-feature scale. Pre-allocation rejection at
+  every zoom uses a 600 m margin so off-screen trams do not become full state or
   feature objects. Selected/followed vehicles remain available to overlays.
+- Each moving source has at most one native write and one latest unsent payload.
+  Superseded queued data cannot acknowledge a hidden rebase. While a required
+  native source is busy, the map does not advance the presentation controller
+  or follow camera; ingestion continues. A long delivery gap uses the explicit
+  resume transition. Native API acknowledgement does not prove a GPU frame.
+- The native resolver registers its latest token before asynchronous view lookup
+  (which can retry for 10 s). Delayed old callbacks cannot overwrite newer data.
 - Model shadows are off. Mapbox's native render ceiling is 60 fps, including on
   120 Hz ProMotion devices; fleet geometry changes at no more than 30 Hz.
 - The opaque `/model/` route unsubscribes hidden map frame pushes and follow
@@ -81,7 +110,10 @@ The next animation frame is scheduled after the Expo GL flush barrier, preventin
 an unbounded native command backlog. Backgrounding cancels frame scheduling;
 foregrounding restarts it. Unmount disposes renderer, targets, geometries and
 materials. Door and indicator controls update refs; animation is imperative.
-The viewport fits above the control card and follows GL drawing-buffer changes.
+The viewport fits above the control card and follows `GLView.onLayout` in physical
+pixels. Expo57's JavaScript drawing-buffer dimensions remain creation-time values;
+they cannot detect ready-card resizing or rotation. Renderer, offscreen target and
+camera resize together, preserving relative zoom across aspect changes.
 The camera uses a model/distance-dependent near/far range to preserve depth
 precision for separate body, glass and display surfaces.
 
@@ -99,6 +131,12 @@ Per-trip geometry fetches remain rate-limited, single-flight and disk-cached for
 cold start; authoritative trip geometry can replace it. Geometry-landed events
 adopt a burst with a 300 ms debounce, rather than waiting for another AVL fix.
 The phone no longer downloads a full Golemio positions payload every 5 s.
+
+Review builds prefer the candidate Lab geometry pack with a three-second total
+deadline, then supplement missing trips from the public pack. Public fallback
+must work when the private network is unavailable. Resident authoritative or
+preferred geometry wins over supplementation. Background aborts both requests
+and prevents late cache writes; a canceled attempt may retry on resume.
 
 ## Invariants — do not break these
 
@@ -118,7 +156,8 @@ The phone no longer downloads a full Golemio positions payload every 5 s.
 5. **Payload follows visibility.** High-rate section/point work is culled; never
    push a full fleet at detail cadence. Check serialized sizes after adding props.
 6. **No continuous idle map camera/style animation.** Only following may retarget
-   continuously. At far zoom, rendering should be event-driven between pushes.
+   continuously. Stationary sources remain event-driven; moving city/badge
+   trams use2.5/5 Hz, with the explicit selection/transition exceptions above.
 7. **Mapbox expensive features stay off** unless an on-device thermal soak
    justifies enabling shadows, terrain or additional light passes.
 8. **Hot paths stay allocation-light and read ownership stays explicit.** Avoid
@@ -145,9 +184,10 @@ React work:
 
 Stopping a ride, including the 90 min auto-stop, immediately transitions to full
 pause. Foregrounding restores normal subscriptions and due-check timers. With no
-ride, backgrounding pauses fully; there is no simulation catch-up integration
-when the app returns. Absolute-time evaluation makes the next visible state
-current. Background network traffic is therefore not accurately described as
+ride, backgrounding pauses fully. The next visible state samples the current
+absolute-time source target; a long gap enters the acknowledged resume transition
+rather than integrating the entire suspended interval. Background network traffic
+is therefore not accurately described as
 "exactly two 10 s polls": trajectory pushes and the retained source's clock
 queries follow their existing subscription lifecycle.
 
@@ -167,7 +207,7 @@ queries follow their existing subscription lifecycle.
   holds/jumps and checking fix, profile and publication age separately. Pair
   screenshot/video review with frame/replay metrics rather than inferring
   micro-jitter from the inspector's 1 Hz chart.
-- Leave city-scale map idle 30 s and check event-driven rendering between 5 s
+- Leave a stationary city-scale fleet idle 30 s and check event-driven rendering between
   point pushes. Open the model viewer and verify hidden map pushes stop.
 - Perform a physical-device thermal soak of at least 20 min at mid zoom; record
   CPU, GPU, memory and thermal state. Aim for nominal/fair thermal state and low
@@ -200,3 +240,7 @@ Related: [map rendering decisions](decisions/map-rendering.md),
 [physics-v3 contract](research/physics-v3-protocol.md),
 [architecture](architecture.md). Earlier interpolation-engine/backend-plan
 papers are historical context, not the current execution plan.
+
+## Observation freshness visibility
+
+The client carries a separate `sourceOpacity` per feature:1through60seconds of trusted observation age, linearly decreasing to0.55at120seconds, then0.55; unknown age also uses0.55. A fresh publication cannot renew an old observation. This factor multiplies the existing trajectory-horizon dim and explicit presentation fade at Mapbox expression output stops, preserving the legal top-level zoom ramp. It changes no distance, velocity, door state, horizon, rebase transition or hidden-frame acknowledgement. Features lacking the additive field retain1for compatibility. The inspector reports observation-age confidence and its opacity at1Hz separately from delivery and trajectory ages.

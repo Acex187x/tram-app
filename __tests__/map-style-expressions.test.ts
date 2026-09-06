@@ -8,6 +8,7 @@
 // was live, and the only tram layer left standing drew a plain circle.
 
 import {
+  tramOpacity,
   STALE_DIM,
   STALE_FACTOR,
   dimIfStale,
@@ -19,15 +20,15 @@ const ZOOM_RAMP = ['interpolate', ['linear'], ['zoom'], 13.2, 0, 14.8, 1];
 const ZOOM_STEP = ['step', ['zoom'], 0, 14.8, 1];
 
 /** Minimal evaluator for the subset of expressions these helpers produce. */
-function evaluate(expr: unknown, zoom: number, stale: boolean): number {
+function evaluate(expr: unknown, zoom: number, stale: boolean, opacity = 1, sourceOpacity = 1): number {
   if (typeof expr === 'number') return expr;
   if (!Array.isArray(expr)) throw new Error(`unsupported node: ${String(expr)}`);
   switch (expr[0]) {
     case 'interpolate': {
-      const input = evaluate(expr[2], zoom, stale);
+      const input = evaluate(expr[2], zoom, stale, opacity, sourceOpacity);
       const stops: [number, number][] = [];
       for (let i = 3; i < expr.length; i += 2) {
-        stops.push([expr[i] as number, evaluate(expr[i + 1], zoom, stale)]);
+        stops.push([expr[i] as number, evaluate(expr[i + 1], zoom, stale, opacity, sourceOpacity)]);
       }
       if (input <= stops[0][0]) return stops[0][1];
       const last = stops[stops.length - 1];
@@ -42,22 +43,25 @@ function evaluate(expr: unknown, zoom: number, stale: boolean): number {
       return last[1];
     }
     case 'step': {
-      const input = evaluate(expr[1], zoom, stale);
-      let out = evaluate(expr[2], zoom, stale);
+      const input = evaluate(expr[1], zoom, stale, opacity, sourceOpacity);
+      let out = evaluate(expr[2], zoom, stale, opacity, sourceOpacity);
       for (let i = 3; i < expr.length; i += 2) {
-        if (input >= (expr[i] as number)) out = evaluate(expr[i + 1], zoom, stale);
+        if (input >= (expr[i] as number)) out = evaluate(expr[i + 1], zoom, stale, opacity, sourceOpacity);
       }
       return out;
     }
     case 'zoom':
       return zoom;
     case '*':
-      return expr.slice(1).reduce<number>((a, n) => a * evaluate(n, zoom, stale), 1);
+      return expr.slice(1).reduce<number>((a, n) => a * evaluate(n, zoom, stale, opacity, sourceOpacity), 1);
     case 'case':
-      return evaluate(expr[1], zoom, stale) ? evaluate(expr[2], zoom, stale) : evaluate(expr[3], zoom, stale);
+      return evaluate(expr[1], zoom, stale, opacity, sourceOpacity) ? evaluate(expr[2], zoom, stale, opacity, sourceOpacity) : evaluate(expr[3], zoom, stale, opacity, sourceOpacity);
     case '==':
-      return evaluate(expr[1], zoom, stale) === evaluate(expr[2], zoom, stale) ? 1 : 0;
+      return evaluate(expr[1], zoom, stale, opacity, sourceOpacity) === evaluate(expr[2], zoom, stale, opacity, sourceOpacity) ? 1 : 0;
+    case 'coalesce': return evaluate(expr[1], zoom, stale, opacity, sourceOpacity);
     case 'get':
+      if (expr[1] === 'presentationOpacity') return opacity;
+      if (expr[1] === 'sourceOpacity') return sourceOpacity;
       if (expr[1] === 'stale') return stale ? 1 : 0;
       throw new Error(`unsupported get: ${String(expr[1])}`);
     default:
@@ -124,3 +128,17 @@ describe('dimIfStale', () => {
     expect(JSON.stringify(base)).toBe(snapshot);
   });
 });
+
+ describe('explicit rebase fade', () => {
+  it('multiplies stale and presentation opacity independently without illegal zoom references', () => {
+    for (const base of [1, ZOOM_RAMP, ZOOM_STEP]) {
+      const expression = tramOpacity(base);
+      expect(findIllegalZoomRefs(expression)).toEqual([]);
+      for (const zoom of [12, 14, 14.8, 17]) for (const opacity of [0, 0.4, 1]) for (const stale of [false, true]) {
+        expect(evaluate(expression, zoom, stale, opacity)).toBeCloseTo(evaluate(base, zoom, false) * opacity * (stale ? STALE_DIM : 1), 10);
+      }
+    }
+  });
+});
+
+it('source age dims independently and can never reveal a hidden rebase',()=>{for(const base of [1,ZOOM_RAMP,ZOOM_STEP]){const expr=tramOpacity(base);expect(findIllegalZoomRefs(expr)).toEqual([]);for(const source of [1,.8,.55])for(const hidden of [0,.4,1])expect(evaluate(expr,17,false,hidden,source)).toBeCloseTo(evaluate(base,17,false)*source*hidden,10);}});

@@ -7,34 +7,38 @@
 // reported after the Convex migration.
 //
 // THE DEAL: `GET /api/geometry-pack` returns every shape currently in service
-// in ONE gzip response, deduped by shapeId, plus a tripId → shapeId map. We
+// in ONE gzip response, deduped by geometryKey (legacy: shapeId). We
 // seed all of them at once, then let the ordinary per-trip warm-up refine.
 //
 // FEATURE DETECTION: the endpoint is served by the predictor service and may
-// not exist (it 404s today). Every failure mode — 404, non-JSON, malformed,
+// be unavailable. Every failure mode — 404, non-JSON, malformed,
 // timeout, offline — returns null and the app simply behaves exactly as it
 // does now. This module can never make loading worse than not having it.
 //
-// HONESTY (why seeds are PROVISIONAL): the pack dedups by shapeId, so a seeded
-// trip gets the correct polyline but a sibling trip's stop epochs. Position,
-// bearing and the 3D body are therefore exactly right immediately, while
-// arrival/departure times — which drive arrivals, spotter and planner guidance
-// — are not to be trusted. shapeCache marks these entries provisional: they
+// HONESTY (why seeds are PROVISIONAL): legacy packs dedup by provider shapeId,
+// which can be reused across GTFS generations and opposite directions. New
+// packs reference content-derived geometryKey values. Even those are provisional
+// until this trip is fetched: current stop identities can contradict a seed,
+// and sibling stop epochs never establish this trip's timetable. These entries
 // render, they are never written to disk, and the per-trip warm-up still
 // replaces them with the authoritative geometry in the background.
 
-import type { RouteGeometry } from '@/lib/types';
-import { servedToRouteGeometry, type ServedGeometry } from './gtfs';
-import * as shapeCache from './shapeCache';
+import type { RouteGeometry } from "@/lib/types";
+import { servedToRouteGeometry, type ServedGeometry } from "./gtfs";
+import * as shapeCache from "./shapeCache";
+import { fetchGeometryPackSources } from "./geometryPackFetch";
 
 /**
  * Served by the app's own backend since 2026-08-21 (Convex http action,
  * convex/geometryPack.ts — the predictor uploads the pack there). Same origin
- * as per-trip geometry, so the app knows exactly one backend.
+ * as per-trip geometry. Candidate builds may prefer the private Lab pack and
+ * supplement missing trips from this public pack; both remain provisional.
  */
 const SITE_ENV = process.env.EXPO_PUBLIC_CONVEX_SITE_URL;
 export const GEOMETRY_PACK_URL = `${
-  typeof SITE_ENV === 'string' && SITE_ENV.length > 0 ? SITE_ENV : 'https://tram-site.acex.sh'
+  typeof SITE_ENV === "string" && SITE_ENV.length > 0
+    ? SITE_ENV
+    : "https://tram-site.acex.sh"
 }/geometry-pack`;
 
 /**
@@ -47,27 +51,56 @@ export const PACK_TIMEOUT_MS = 20_000;
 export interface GeometryPack {
   /** Server wall clock when the pack was built. */
   atMs: number;
-  /** One entry per shapeId in service. */
+  /** One entry per geometryKey (legacy: shapeId) in service. */
   shapes: ServedGeometry[];
-  /** tripId → shapeId for every trip currently running. */
+  /** tripId → geometryKey (legacy: shapeId) for every trip currently running. */
   trips: Record<string, string>;
+}
+
+/** A parsed JSON object is not necessarily a usable distance axis. Validate
+ * before exposing it to the fleet, which indexes both parallel arrays. */
+function hasUsablePackAxis(shape: ServedGeometry): boolean {
+  return (
+    Array.isArray(shape.coordinates) &&
+    shape.coordinates.length >= 2 &&
+    shape.coordinates.every(
+      (c) =>
+        Array.isArray(c) &&
+        c.length >= 2 &&
+        Number.isFinite(c[0]) &&
+        Number.isFinite(c[1]),
+    ) &&
+    Array.isArray(shape.cumDistM) &&
+    shape.cumDistM.length === shape.coordinates.length &&
+    shape.cumDistM.every(
+      (d, i, ds) => Number.isFinite(d) && d >= 0 && (i === 0 || d >= ds[i - 1]),
+    ) &&
+    Number.isFinite(shape.totalM) &&
+    shape.totalM > 0 &&
+    Array.isArray(shape.stops)
+  );
 }
 
 /** Structural validation — a malformed pack is treated as "no pack at all". */
 function parsePack(payload: unknown): GeometryPack | null {
-  if (typeof payload !== 'object' || payload === null) return null;
+  if (typeof payload !== "object" || payload === null) return null;
   const p = payload as Partial<GeometryPack>;
-  if (!Array.isArray(p.shapes) || typeof p.trips !== 'object' || p.trips === null) return null;
+  if (
+    !Array.isArray(p.shapes) ||
+    typeof p.trips !== "object" ||
+    p.trips === null
+  )
+    return null;
   const shapes = p.shapes.filter(
     (s): s is ServedGeometry =>
-      typeof s === 'object' &&
+      typeof s === "object" &&
       s !== null &&
-      typeof (s as ServedGeometry).shapeId === 'string' &&
-      Array.isArray((s as ServedGeometry).coordinates),
+      typeof (s as ServedGeometry).shapeId === "string" &&
+      hasUsablePackAxis(s as ServedGeometry),
   );
   if (shapes.length === 0) return null;
   return {
-    atMs: typeof p.atMs === 'number' ? p.atMs : Date.now(),
+    atMs: typeof p.atMs === "number" ? p.atMs : Date.now(),
     shapes,
     trips: p.trips as Record<string, string>,
   };
@@ -83,32 +116,12 @@ export async function fetchGeometryPack(
   signal?: AbortSignal,
   timeoutMs: number = PACK_TIMEOUT_MS,
 ): Promise<GeometryPack | null> {
-  if (signal?.aborted) return null;
-  // Own controller so a slow pack cannot outlive its usefulness, linked to the
-  // session signal so teardown cancels it immediately.
-  const ctl = new AbortController();
-  const onAbort = (): void => ctl.abort();
-  signal?.addEventListener('abort', onAbort, { once: true });
-  const timer = setTimeout(() => ctl.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      signal: ctl.signal,
-      // Accept-Encoding is EXPLICIT on purpose: the pack is ~340 KB gzipped but
-      // 1.18 MiB raw, and the edge proxy only compresses when the client asks.
-      // Omitting it costs a mobile user ~850 KB on every cold start. CFNetwork
-      // still decodes the body transparently, and if a proxy ever handed back
-      // an undecoded body, response.json() throws and this whole function
-      // returns null — i.e. the silent per-trip fallback, never a broken app.
-      headers: { Accept: 'application/json', 'Accept-Encoding': 'gzip' },
-    });
-    if (!response.ok) return null; // 404 = not deployed yet; anything else = no pack
-    return parsePack((await response.json()) as unknown);
-  } catch {
-    return null; // offline, aborted, timed out, non-JSON — all mean "no pack"
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener('abort', onAbort);
-  }
+  return fetchGeometryPackSources({
+    publicUrl: url,
+    publicTimeoutMs: timeoutMs,
+    signal,
+    parse: parsePack,
+  });
 }
 
 /**
@@ -120,13 +133,37 @@ export async function fetchGeometryPack(
  * already resident (disk hit, or a per-trip fetch that already landed) are left
  * alone — better data always wins.
  */
-export function seedFromPack(pack: GeometryPack, nowMs: number = Date.now()): number {
-  const byShape = new Map<string, ServedGeometry>();
-  for (const shape of pack.shapes) byShape.set(shape.shapeId, shape);
+export function seedFromPack(
+  pack: GeometryPack,
+  nowMs: number = Date.now(),
+): number {
+  const byShape = new Map<string, ServedGeometry | null>();
+  const axis = (shape: ServedGeometry) =>
+    JSON.stringify([
+      shape.coordinates,
+      shape.cumDistM,
+      shape.totalM,
+      shape.stops.map((s) => [s.stopId, s.sequence, s.distM]),
+    ]);
+  for (const shape of pack.shapes) {
+    if (!hasUsablePackAxis(shape)) continue;
+    const key = shape.geometryKey ?? shape.shapeId;
+    if (typeof key !== "string" || key.length === 0) continue;
+    if (!byShape.has(key)) byShape.set(key, shape);
+    else {
+      const prior = byShape.get(key);
+      // Never choose whichever conflicting entry happened to arrive last.
+      try {
+        if (!prior || axis(prior) !== axis(shape)) byShape.set(key, null);
+      } catch {
+        byShape.set(key, null);
+      }
+    }
+  }
 
   let seeded = 0;
   for (const [tripId, shapeId] of Object.entries(pack.trips)) {
-    if (typeof tripId !== 'string' || typeof shapeId !== 'string') continue;
+    if (typeof tripId !== "string" || typeof shapeId !== "string") continue;
     if (shapeCache.has(tripId)) continue; // resident already — never downgrade
     const served = byShape.get(shapeId);
     if (!served) continue;
@@ -134,7 +171,12 @@ export function seedFromPack(pack: GeometryPack, nowMs: number = Date.now()): nu
     try {
       // The served entry names its representative trip; this trip borrows the
       // shape, so re-label it or every consumer keyed by tripId disagrees.
-      geometry = { ...servedToRouteGeometry(served, nowMs), tripId };
+      geometry = {
+        ...servedToRouteGeometry(served, nowMs),
+        tripId,
+        geometryKey: served.geometryKey,
+        provisional: true,
+      };
     } catch {
       continue; // one bad shape must not abort the whole seed
     }
@@ -150,9 +192,23 @@ export function seedFromPack(pack: GeometryPack, nowMs: number = Date.now()): nu
  */
 export async function warmFromGeometryPack(
   signal?: AbortSignal,
-  url: string = GEOMETRY_PACK_URL,
+  url?: string,
 ): Promise<number> {
-  const pack = await fetchGeometryPack(url, signal);
-  if (!pack || signal?.aborted) return 0;
-  return seedFromPack(pack, Date.now());
+  let seeded = 0;
+  const preferred = process.env.EXPO_PUBLIC_GEOMETRY_PACK_URL;
+  await fetchGeometryPackSources({
+    publicUrl: url ?? GEOMETRY_PACK_URL,
+    // An explicit argument keeps the existing single-source caller contract.
+    preferredUrl:
+      url === undefined && typeof preferred === "string"
+        ? preferred
+        : undefined,
+    supplementPublic: url === undefined,
+    signal,
+    parse: parsePack,
+    onPack: (pack) => {
+      if (!signal?.aborted) seeded += seedFromPack(pack, Date.now());
+    },
+  });
+  return signal?.aborted ? 0 : seeded;
 }

@@ -4,13 +4,20 @@
 // <Models> may only render once ALL entries are resolved.
 
 import { Asset } from 'expo-asset';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { MODEL_ASSETS, STOP_TOTEM_ASSET } from '@/lib/fleet/modelSpecs';
 import { STOP_TOTEM_MODEL_KEY } from './RouteNetwork';
+import { useSkinsStore, skinAssetUri } from '@/stores/skins';
+import { skinModelKey } from '@/lib/skins/registry';
 
-/** modelKey → local URI for <Models>, or null while any GLB is still loading. */
-export function useTramModels(): Record<string, string> | null {
+export interface TramModelResources { base: Record<string,string>; skins: {version:string;models:Record<string,string>}[]; all: Record<string,string>; }
+/** Native Models registers only on mount. Base resources stay mounted; each
+ * imported revision gets its own immutable IDs and component lifetime. */
+export function useTramModels(): TramModelResources | null {
+  const registry = useSkinsStore();
+  const skins = registry.skins;
+  const assignments = registry.assignments;
   const [uris, setUris] = useState<Record<string, string> | null>(null);
 
   useEffect(() => {
@@ -39,5 +46,10 @@ export function useTramModels(): Record<string, string> | null {
     };
   }, []);
 
-  return uris;
+  return useMemo(() => {
+    if (!uris) return null;
+    const groups = skins.filter(s => Object.values(assignments).some(a => a.skinId === s.id))
+      .map(s => ({version:s.directory, models:Object.fromEntries(s.mapKeys.map(key => [skinModelKey(s.directory,key),skinAssetUri(s,'map',key)]))}));
+    return {base:uris,skins:groups,all:Object.assign({},uris,...groups.map(g=>g.models))};
+  }, [uris,skins,assignments]);
 }

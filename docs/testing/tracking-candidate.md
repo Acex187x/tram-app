@@ -1,14 +1,18 @@
 # Private tracking review build
 
-The 2026-09-05 candidate uses production vehicle identities and route geometry,
-and a separate private trajectory publisher, version-3 ML service and inspector.
+The review candidate uses production vehicle identities and a separate private
+trajectory publisher, version-4 ML service and inspector. Review builds from
+36 prefer the direct candidate geometry pack, with bounded public fallback and
+supplementation; authoritative per-trip geometry remains available independently.
 See [the isolated server runbook](../../lab/isolated/README.md) for endpoints,
 artifacts and startup verification. No production service rollout or Git push
 is part of this review build.
 
 The phone must reach `10.10.10.1` through the home LAN/IPsec route. This is a
-temporary review dependency, not a public production endpoint. An unreachable
-trajectory service must appear as an offline/degraded source in the inspector;
+temporary review dependency, not a public production endpoint. The client can
+fall back to the public trajectory service if the private publisher stops
+advancing; inspector data from the private Lab remains unavailable off that
+network. Publication health is separate from the age of each AVL observation;
 the app must not present old predictions as current observations.
 
 ## Build and install
@@ -25,7 +29,7 @@ xcrun devicectl device install app --device <CoreDevice-ID> \
   /tmp/tram-fleet-device/Build/Products/Release-iphoneos/TramSpotter.app
 ```
 
-The script sets the private trajectory and inspector URLs during the Release
+The script sets the private trajectory, geometry-pack and inspector URLs during the Release
 bundle build. It temporarily adds a scoped ATS exception for `10.10.10.1`, a
 local-network purpose string and build number 31 (overridable with
 `--build-number`) to the generated Info.plist,

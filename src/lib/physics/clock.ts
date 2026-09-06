@@ -36,6 +36,7 @@ export class ClockSync {
   /** Most recent samples, newest last; at most CLOCK_WINDOW entries. */
   private samples: number[] = [];
   private cached = 0;
+  private hasEstimate = false;
   private fromOffsetMs = 0;
   private correctionAtMs = 0;
   private correctionDurationMs = 0;
@@ -50,7 +51,7 @@ export class ClockSync {
       !Number.isFinite(appliedAtMs)
     )
       return;
-    const wasSynced = this.synced;
+    const hadEstimate = this.hasEstimate;
     const applied = this.offsetAt(appliedAtMs);
     this.samples.push(serverNowMs - receivedAtMs);
     if (this.samples.length > CLOCK_WINDOW) this.samples.shift();
@@ -58,18 +59,35 @@ export class ClockSync {
     // A clock correction must not move every tram backward in one frame.
     // Ramp the small network-jitter correction at <=5% clock rate; evaluation
     // remains a pure function of local time and these receive-time samples.
-    this.fromOffsetMs = wasSynced ? applied : this.cached;
+    this.fromOffsetMs = hadEstimate ? applied : this.cached;
+    this.hasEstimate = true;
     this.correctionAtMs = appliedAtMs;
     this.correctionDurationMs = Math.abs(this.cached - this.fromOffsetMs) / 0.05;
+  }
+
+  /** New endpoint: invalidate confidence, preserve render time until its nonce
+   * reply arrives. The first replacement estimate is slewed like later ones. */
+  beginEpoch(localNowMs: number): void {
+    this.cached = this.offsetAt(localNowMs);
+    this.fromOffsetMs = this.cached;
+    this.samples = [];
+    this.correctionAtMs = localNowMs;
+    this.correctionDurationMs = 0;
   }
 
   /** Drop all samples (feed restart / teardown) — next fetch re-seeds. */
   reset(): void {
     this.samples = [];
+    this.hasEstimate = false;
     this.cached = 0;
     this.fromOffsetMs = 0;
     this.correctionAtMs = 0;
     this.correctionDurationMs = 0;
+  }
+
+  /** Latest local application time needed to reproduce the current clock mapping. */
+  get inputsAvailableAtMs(): number {
+    return this.correctionAtMs;
   }
 
   /** True once at least one fetch has been sampled. */

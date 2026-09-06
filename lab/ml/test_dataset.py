@@ -18,7 +18,7 @@ class DatasetClockTest(unittest.TestCase):
         CREATE TABLE fixes (key TEXT, tripId TEXT, routeId TEXT, obsAtMs REAL,
             seenAtMs REAL, shapeDistM REAL, statePos TEXT, delayS REAL, nextStopId TEXT);
         CREATE TABLE geometries (tripId TEXT, shapeId TEXT, json TEXT);
-        CREATE TABLE learned_cells (tbl TEXT, cellKey TEXT, mean REAL, weight REAL);
+        CREATE TABLE learned_cells (tbl TEXT, cellKey TEXT, mean REAL, weight REAL, updatedAtMs REAL);
         ''')
         self.t0 = 1788616800000
         geom = json.dumps({'totalM': 5000, 'stops': [{'distM': 4000, 'stopId': 'end'}]})

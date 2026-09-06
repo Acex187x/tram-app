@@ -23,7 +23,7 @@ if (!ids.length) ids.push(...Object.keys(models));
 if (ids.some(id => !(id in models))) throw new Error('Unknown tram model');
 if (!args.includes('--validate-only')) {
   const blender = process.env.BLENDER_BIN ?? '/Applications/Blender.app/Contents/MacOS/Blender';
-  const result = spawnSync(blender, ['--background', '--factory-startup', '--python',
+  const result = spawnSync(blender, ['--background', '--factory-startup', '--python-exit-code', '1', '--python',
     join(root, 'scripts/tram-models/blender_fleet.py'), '--', ...ids,
     ...(args.includes('--render') ? ['--render'] : [])], { stdio: 'inherit' });
   if (result.error) throw result.error;
@@ -47,8 +47,8 @@ for (const id of ids) {
       const doc = await new NodeIO().read(path);
       const materials = doc.getRoot().listMaterials();
       const problems = [];
-      const frontExtension = i > 0 ? gaps[id] / 2 : 0;
-      const rearExtension = i < models[id].length - 1 ? gaps[id] / 2 : 0;
+      const frontExtension = i > 0 ? gaps[id] / 2 : id === 'kt8d5' ? .470 : 0;
+      const rearExtension = i < models[id].length - 1 ? gaps[id] / 2 : id === 'kt8d5' ? .470 : 0;
       const couplers = id.startsWith('t3') ? (id === 't3rplf' ? 1.10 : 1.104) : 0;
       if (Math.abs(l - length - frontExtension - rearExtension - couplers) > .12) problems.push(`length ${l} != body ${length} + attachments`);
       // Cab mirrors extend beyond the certified body width, which remains in

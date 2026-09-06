@@ -45,7 +45,7 @@ describe('detailModeForZoom hysteresis', () => {
     // 30 Hz — perf invariant #4: the two thresholds are one constant.
     expect(TICK_MS).toBe(33);
     expect(pointsPushIntervalMs(DETAIL_ENTER_ZOOM)).toBe(TICK_MS * 2);
-    expect(pointsPushIntervalMs(DETAIL_ENTER_ZOOM - 0.01)).toBeGreaterThanOrEqual(1000);
+    expect(pointsPushIntervalMs(DETAIL_ENTER_ZOOM - 0.01)).toBe(200);
   });
 });
 
@@ -53,7 +53,7 @@ describe('detailModeForZoom hysteresis', () => {
 // BOTH published curves move continuously between bundles, so every frame
 // genuinely differs and the zoom-banded interval is the whole rule. Forced
 // pushes still bypass it (render-mode switch, selection/follow change), which
-// matters most at the 5 s city-scale cadence.
+// also applies during presentation transitions.
 describe('pointsPushWanted', () => {
   const fastZoom = DETAIL_ENTER_ZOOM; // interval 66 ms
   const due = pointsPushIntervalMs(fastZoom);
@@ -64,11 +64,20 @@ describe('pointsPushWanted', () => {
     expect(pointsPushWanted(due - 1, fastZoom, false)).toBe(false);
   });
 
-  it('respects the slower far-zoom intervals', () => {
-    expect(pointsPushWanted(999, 11, false)).toBe(false); // 5 s band
-    expect(pointsPushWanted(5_000, 11, false)).toBe(true);
-    expect(pointsPushWanted(999, 13, false)).toBe(false); // 1 s band
-    expect(pointsPushWanted(1_000, 13, false)).toBe(true);
+  it('uses whole idle ticks for city and badge movement at their exact boundary', () => {
+    for (const [zoom, interval] of [[9,400], [12.499,400], [12.5,200], [13.99,200]]) {
+      expect(pointsPushWanted(interval - 1, zoom, false)).toBe(false);
+      expect(pointsPushWanted(interval, zoom, false)).toBe(true);
+      expect(pointsPushIntervalMs(zoom)).toBe(interval);
+      expect(interval % 100).toBe(0);
+    }
+  });
+  it('keeps selected/followed coarse targets at10 Hz without changing detail', () => {
+    for (const zoom of [9, 12.5, 13.99]) {
+      expect(pointsPushWanted(99, zoom, false, true)).toBe(false);
+      expect(pointsPushWanted(100, zoom, false, true)).toBe(true);
+    }
+    expect(pointsPushIntervalMs(14, true)).toBe(66);
   });
 
   it('a forced push bypasses the interval at every zoom', () => {

@@ -1,0 +1,18 @@
+{
+  "capture": {
+    "startedAtMs": 1788687828790,
+    "endedAtMs": 1788691530337,
+    "n": 3678,
+    "errors": 0
+  },
+  "sourceBatchAgeS": {
+    "median": 8.14,
+    "p95": 17.214,
+    "max": 22.09,
+    "over45": 0
+  },
+  "publisherFailureCountEnd": 0,
+  "runtimeChangedDuringCapture": false,
+  "sourceFiles": "/tmp/tram-tracking-r2-20260906",
+  "note": "HTTPdiagnostics are sampled separately from actual pairedWS capture. Zero publisher failures does not mean display motion correct."
+}

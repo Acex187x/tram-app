@@ -1,0 +1,13 @@
+{
+  "baseMs": 1788652800000,
+  "cases": [
+    {"name":"segment exact half-life threshold","ageMs":1209600000,"rows":[["seg","shape|2|0|weekend",12,6,0],["segShape","shape|2",8,10,0]],"pace":12,"release":20},
+    {"name":"expired segment falls to shape","ageMs":1209600001,"rows":[["seg","shape|2|0|weekend",12,6,0],["segShape","shape|2",8,10,0]],"pace":8,"release":20},
+    {"name":"expired shape falls to route","ageMs":1209600001,"rows":[["segShape","shape|2",8,6,0],["route","route|0",6,20,0]],"pace":6,"release":20},
+    {"name":"expired route falls to global","ageMs":1209600001,"rows":[["route","route|0",6,10,0],["global","0",4,40,0]],"pace":4,"release":20},
+    {"name":"expired global uses default","ageMs":1209600001,"rows":[["global","0",4,20,0]],"pace":5.5,"release":20},
+    {"name":"release exact threshold","ageMs":1209600000,"rows":[["stopRelease","stop|0|weekend",42,6,0]],"pace":5.5,"release":42},
+    {"name":"expired release uses default","ageMs":1209600001,"rows":[["stopRelease","stop|0|weekend",42,6,0]],"pace":5.5,"release":20},
+    {"name":"future snapshot never increases trust","ageMs":0,"rows":[["stopRelease","stop|0|weekend",42,3,86400000]],"pace":5.5,"release":42}
+  ]
+}

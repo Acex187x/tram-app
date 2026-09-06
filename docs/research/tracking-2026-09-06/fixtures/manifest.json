@@ -1,0 +1,38 @@
+{
+  "legacy-visible-corrections-wire.jsonl.gz": {
+    "sourceSha256": "054a33bc215c3f26776d8a58fdc98a4e9795a48000ef93da8c37b12fa890895f",
+    "gzipSha256": "16679e954795de9ad68e8af55c155efe134a20d7f3b6a562af1bde6faaa7b2b3",
+    "sourceBytes": 3910663,
+    "gzipBytes": 794531
+  },
+  "legacy-visible-corrections-geometry.json.gz": {
+    "sourceSha256": "d15cacc9fa94627fd1f6e541f16dc44818eebcedc2ac9fd33621e8b8a97a28e3",
+    "gzipSha256": "1c0b4a56b2f425ca4f5e155bcb1f52634bb32920df46dd308f9c5a3c0d345711",
+    "sourceBytes": 1439564,
+    "gzipBytes": 416105
+  },
+  "segmented-chained-wire.jsonl.gz": {
+    "sourceSha256": "90457cb705618ca009e7537cc2f986a42d0a269bc4da8cfad7a0a157740a3bc9",
+    "gzipSha256": "391a3958aeedd842b1ef57f03e7a160fb16fc50489a39484f519c7944ed9c208",
+    "sourceBytes": 37274778,
+    "gzipBytes": 5889781
+  },
+  "segmented-phase-service-wire.jsonl.gz": {
+    "sourceSha256": "d29378ae72ad97ac79b3a24a537710c73b3c4ec4809bcd4c55e0aadcd7d66d2e",
+    "gzipSha256": "3e35bfb1959be1be58fb9927b934b3a21d89a200ed5e9db276ad1b5c82b7fdcb",
+    "sourceBytes": 40303860,
+    "gzipBytes": 7465253
+  },
+  "segmented-geometry.json.gz": {
+    "sourceSha256": "e82539b4906e52646305192393d55d73db1fa08e6289fcb9e1d5d31bdaf7737e",
+    "gzipSha256": "37d54bb01bcee31d25ce6f9b5147bb36e452fca003cba443ea52d481794f2bb5",
+    "sourceBytes": 1360304,
+    "gzipBytes": 391206
+  },
+  "segmented-windows.json.gz": {
+    "sourceSha256": "60359a08ecbf886f98836d1ba910796e67839344d15b3313d40f55c748271728",
+    "gzipSha256": "2f4d29e6f9ae1c64d74cca08f9c02fb2d460efcf48eb03b1ddec52e16dfb2899",
+    "sourceBytes": 17446,
+    "gzipBytes": 2174
+  }
+}

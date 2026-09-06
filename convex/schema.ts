@@ -111,6 +111,7 @@ export const routeStopValidator = v.object({
   departureMs: v.number(),
   dwellSeconds: v.number(),
   isTerminal: v.boolean(),
+  requestOnly: v.optional(v.boolean()),
 });
 
 /**
@@ -127,6 +128,7 @@ export const trajectoryVehicleValidator = v.object({
   anchorS: v.optional(v.number()),
   emittedAtMs: v.number(),
   discontinuity: v.boolean(),
+  motionPolicy: v.optional(v.literal('continuous-v1')),
   opinion: v.array(v.object({ t: v.number(), s: v.number(), v: v.optional(v.number()) })),
   smooth: v.array(v.object({ t: v.number(), s: v.number(), v: v.optional(v.number()) })),
   source: v.union(v.literal('ml'), v.literal('naive')),

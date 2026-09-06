@@ -28,6 +28,7 @@ config['NSLocalNetworkUsageDescription'] = 'Tram Spotter connects to the private
 config['CFBundleVersion'] = args.build_number
 env = dict(os.environ)
 env['EXPO_PUBLIC_TRAJECTORY_CONVEX_URL'] = 'http://10.10.10.1:13210'
+env['EXPO_PUBLIC_GEOMETRY_PACK_URL'] = 'http://10.10.10.1:18090/api/geometry-pack'
 env['EXPO_PUBLIC_LAB_DEBUG_URL'] = 'http://10.10.10.1:18090/api/vehicle'
 command = ['xcodebuild', '-workspace', 'ios/TramSpotter.xcworkspace',
            '-scheme', 'TramSpotter', '-configuration', 'Release',

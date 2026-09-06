@@ -1,0 +1,149 @@
+{
+  "scope": "Offline sensitivity only; all recovery policies rejected for runtime activation. Actual captured leader curves are not recursively counterfactual. 833 emissions in 96 contiguous segments, 38 keys; 60s warmup handled by client study. Approximate historical model rows use later frozen learned cells and producer receipt timestamps; not an exact historical ML request replay.",
+  "arms": {
+    "newMl": {
+      "gpsPairs": 627,
+      "gps": {
+        "mae": 89.35013022900267,
+        "bias": -46.55044689495936
+      },
+      "smoothMetaSums": {
+        "knots": 18838,
+        "pressureDrops": 0,
+        "curveViolations": 0,
+        "phantomDips": 35,
+        "midSegmentStops": 0,
+        "jamHolds": 0,
+        "queueHolds": 2,
+        "collisionViolations": 51,
+        "collisionMaxPenM": -5773.6900000000005,
+        "collisionPenAt0M": -8843.81,
+        "collisionGapM": 639.9499999999999,
+        "infeasibleSkips": 53
+      },
+      "cases": [
+        {
+          "key": "9139",
+          "observedAtMs": 1788689125000,
+          "errorM": -89.43477798165804
+        },
+        {
+          "key": "9324",
+          "observedAtMs": 1788689452000,
+          "errorM": 324.49718520116585
+        },
+        {
+          "key": "9324",
+          "observedAtMs": 1788689503000,
+          "errorM": 369.2318824306167
+        },
+        {
+          "key": "9365",
+          "observedAtMs": 1788689302000,
+          "errorM": -352.03990547867215
+        },
+        {
+          "key": "9365",
+          "observedAtMs": 1788689342000,
+          "errorM": -249.59273234525972
+        }
+      ]
+    },
+    "newMlRecovery": {
+      "gpsPairs": 627,
+      "gps": {
+        "mae": 88.10960470407707,
+        "bias": -44.75897037250422
+      },
+      "smoothMetaSums": {
+        "knots": 18849,
+        "pressureDrops": 0,
+        "curveViolations": 0,
+        "phantomDips": 34,
+        "midSegmentStops": 0,
+        "jamHolds": 0,
+        "queueHolds": 2,
+        "collisionViolations": 51,
+        "collisionMaxPenM": -5773.66,
+        "collisionPenAt0M": -8845.519999999999,
+        "collisionGapM": 639.9499999999999,
+        "infeasibleSkips": 53
+      },
+      "cases": [
+        {
+          "key": "9139",
+          "observedAtMs": 1788689125000,
+          "errorM": -89.44477798165826
+        },
+        {
+          "key": "9324",
+          "observedAtMs": 1788689452000,
+          "errorM": 324.49718520116585
+        },
+        {
+          "key": "9324",
+          "observedAtMs": 1788689503000,
+          "errorM": 369.2318824306167
+        },
+        {
+          "key": "9365",
+          "observedAtMs": 1788689302000,
+          "errorM": -335.81494451692924
+        },
+        {
+          "key": "9365",
+          "observedAtMs": 1788689342000,
+          "errorM": -223.17852309953014
+        }
+      ]
+    },
+    "newMlYield": {
+      "gpsPairs": 627,
+      "gps": {
+        "mae": 89.2820560280959,
+        "bias": -46.6336965582622
+      },
+      "smoothMetaSums": {
+        "knots": 18848,
+        "pressureDrops": 0,
+        "curveViolations": 0,
+        "phantomDips": 35,
+        "midSegmentStops": 4,
+        "jamHolds": 0,
+        "queueHolds": 2,
+        "collisionViolations": 51,
+        "collisionMaxPenM": -5773.6900000000005,
+        "collisionPenAt0M": -8843.81,
+        "collisionGapM": 639.9499999999999,
+        "infeasibleSkips": 54
+      },
+      "cases": [
+        {
+          "key": "9139",
+          "observedAtMs": 1788689125000,
+          "errorM": -89.43477798165804
+        },
+        {
+          "key": "9324",
+          "observedAtMs": 1788689452000,
+          "errorM": 324.49718520116585
+        },
+        {
+          "key": "9324",
+          "observedAtMs": 1788689503000,
+          "errorM": 333.05752330675386
+        },
+        {
+          "key": "9365",
+          "observedAtMs": 1788689302000,
+          "errorM": -352.03990547867215
+        },
+        {
+          "key": "9365",
+          "observedAtMs": 1788689342000,
+          "errorM": -249.59273234525972
+        }
+      ]
+    }
+  }
+}
