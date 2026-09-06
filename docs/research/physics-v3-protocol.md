@@ -53,6 +53,33 @@ frames from the headline metric. Compare accuracy, prolonged holds, actual
 platform crossings, both acceleration signs, jerk, hidden time and native map
 cadence on identical inputs; a source `at_stop` label alone is not stop truth.
 
+## Missing-axis continuity and first-axis adoption (2026-09-06)
+
+The receipt-timed geometry replay reproduces 76 transitions in its first five
+minutes: 40 first-axis arrivals, 34 new GPS fixes while geometry is absent, and
+2 other changes. A fade does not resolve this defect: disappearance followed by
+reappearance hundreds of metres away is still a perceived teleport.
+
+In smooth mode, a vehicle without a valid route axis retains one frame-owned
+world-space position, velocity and acceleration. Its target is only the latest
+received GPS point. New fixes retarget this state continuously; they do not
+create a fade for every fix. This is bounded presentation, not an additional
+route predictor or unbounded extrapolation. Staleness stays explicit.
+
+First-axis adoption may transfer the last displayed world pose only through a
+unique same-trip, stop-corridor projection within 10 metres. Preserve its
+projected tangential position/velocity/acceleration. Residual lateral offset
+must decay through a C2-continuous alignment with bounded correction velocity,
+acceleration and jerk, applied consistently to the marker and all articulated
+sections. Do not snap sideways or obtain passing metrics by hiding this normal
+adoption. Incompatible or ambiguous axes retain explicit transition handling.
+
+Validate actual world-space positions and derivatives across missing-axis GPS
+updates, first-axis adoption and later refinements. Include the vector sum of
+longitudinal and lateral corrections; distinguish path curvature from added
+presentation correction. Pure getters, native acknowledgements, lifecycle
+handling and the all-frame accounting requirements above remain mandatory.
+
 ## Driver ceiling evidence correction (2026-09-06)
 
 The former universal 13.9 m/s "50 km/h network cap" is not an accurate description
