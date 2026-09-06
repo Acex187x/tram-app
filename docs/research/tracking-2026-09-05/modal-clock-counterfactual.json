@@ -1,0 +1,80 @@
+{
+  "policy": "modal-clock",
+  "built": 404,
+  "failed": 0,
+  "realism": {
+    "tracksChecked": 1616,
+    "segmentsChecked": 31623,
+    "violations": 0,
+    "speedViolations": 0,
+    "accelViolations": 0,
+    "limits": {
+      "vMaxMs": 17,
+      "aAccMs2": 1.35,
+      "aBrkMs2": -1.45
+    },
+    "g10behindFix": {
+      "checked": 0,
+      "violations": 0,
+      "maxBehindM": 0,
+      "worst": []
+    },
+    "observed": {
+      "maxSpeedMs": 14.15,
+      "maxAccelMs2": 1.296,
+      "minAccelMs2": -1.387,
+      "speedP50": 4.85,
+      "speedP90": 8.05,
+      "speedP99": 11.75,
+      "accelP01": -1.23,
+      "accelP50": -0.01,
+      "accelP99": 1.23
+    },
+    "worst": []
+  },
+  "note": "Case-enriched sample; identical inherited seams; queue leadership not captured. Experimental flag remains off.",
+  "stats": {
+    "actual": {
+      "n": 211,
+      "mae": 106.03242387815021,
+      "bias": -75.20351446156545,
+      "p90Abs": 249.47850000000108
+    },
+    "baseline": {
+      "n": 211,
+      "mae": 106.8977546979431,
+      "bias": -74.81019307020415,
+      "p90Abs": 249.47850000000108
+    },
+    "candidate": {
+      "n": 211,
+      "mae": 102.93527340554621,
+      "bias": -63.349984681027,
+      "p90Abs": 245.9158285714293
+    },
+    "reconstruction": {
+      "n": 211,
+      "mae": 1.0735400619687092,
+      "bias": 0.39332139136129485,
+      "p90Abs": 0.06979000000001179
+    },
+    "change": {
+      "n": 211,
+      "mae": 11.460208389177149,
+      "bias": 11.460208389177149,
+      "p90Abs": 31.39696499999991
+    },
+    "modalBaseline": {
+      "n": 91,
+      "mae": 67.60937063916317,
+      "bias": -62.31069630460884,
+      "p90Abs": 162.80099999999948
+    },
+    "modalCandidate": {
+      "n": 91,
+      "mae": 58.4216392908582,
+      "bias": -35.73812520442885,
+      "p90Abs": 142.9990670270272
+    }
+  }
+}

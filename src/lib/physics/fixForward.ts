@@ -68,7 +68,7 @@
 // slow enough that it can never read as the build-13 «догоняет с невозможной
 // скоростью», which closed ~140 m in 30 s (≈4.7 m/s) with no cap at all.
 
-import { crossingTimeMs, evalTrajectory } from './evaluator';
+import { crossingTimeMs, evalTrajectory, type PreparedTrack } from './evaluator';
 
 /**
  * Extra closing speed the SMOOTH track may spend catching up to the shifted
@@ -151,7 +151,12 @@ export function trackEndSpeedMs(track: Float64Array): number {
   const a = b - 2;
   const dtMs = track[b] - track[a];
   if (!(dtMs > 0)) return 0;
-  const v = ((track[b + 1] - track[a + 1]) * 1000) / dtMs;
+  const h = (track as PreparedTrack).hermite;
+  const j = (n - 2) * 3;
+  const v =
+    h && Number.isFinite(h[j])
+      ? ((h[j] + 2 * h[j + 1] + 3 * h[j + 2]) * 1000) / dtMs
+      : ((track[b + 1] - track[a + 1]) * 1000) / dtMs;
   return v > 0 ? v : 0;
 }
 
@@ -164,5 +169,5 @@ export function coastDistM(vEndMs: number, sinceEndMs: number): number {
   if (!(vEndMs > 0) || !(sinceEndMs > 0)) return 0;
   const decayS = COAST_DECAY_MS / 1000;
   const tS = sinceEndMs < COAST_DECAY_MS ? sinceEndMs / 1000 : decayS;
-  return vEndMs * tS - ((vEndMs / (2 * decayS)) * tS) * tS;
+  return vEndMs * tS - (vEndMs / (2 * decayS)) * tS * tS;
 }

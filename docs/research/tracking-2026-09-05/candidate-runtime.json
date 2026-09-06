@@ -1,0 +1,66 @@
+{
+  "checkedAtMs": 1788676847260,
+  "labSha256": "4c6ac240245688496da2cd66551adab3abb8ea761ed29bbf9724a52c446d6d77",
+  "candidateConvexUrl": "http://10.10.10.1:13210",
+  "candidateLabUrl": "http://10.10.10.1:18090",
+  "stableAfter": "2026-09-06T06:41:00Z",
+  "convexVolume": "tram-tracking-candidate-convex-v2-20260906",
+  "convexMemoryLimitBytes": 2147483648,
+  "documentRetentionSeconds": 3600,
+  "fleet": 138,
+  "geometries": 138,
+  "ml": {
+    "ready": true,
+    "lastOkMs": 1788676844552,
+    "lastError": null,
+    "lastRequestMs": 1788676844530,
+    "lastLatencyMs": 22,
+    "inFlight": false
+  },
+  "publication": {
+    "enabled": true,
+    "pushes": 55,
+    "vehiclesPushed": 489,
+    "removalsPushed": 8,
+    "heartbeats": 40,
+    "failures": 0,
+    "lastError": null,
+    "lastOkAtMs": 1788676846514
+  },
+  "scoring": {
+    "nonFiniteSkipped": 0,
+    "nonFiniteByVariant": {},
+    "primaryClock": "observation",
+    "primarySuffix": "-obs-v3",
+    "legacyClock": "arrival",
+    "observation": {
+      "eligible": 176,
+      "missing": 28,
+      "beyondHorizon": 0,
+      "retainedCurves": 489
+    },
+    "sourceValidity": {
+      "invalidVehicles": 0,
+      "rejectedObservations": 0
+    }
+  },
+  "productionContainerIdentitiesUnchanged": true,
+  "backendValidation": {
+    "jestSuites": 11,
+    "jestTests": 32,
+    "labTypeScript": "pass",
+    "pythonDatasetTests": 2,
+    "appTypeScript": "pass"
+  },
+  "pacePolicyChanged": false,
+  "labStartedAt": "2026-09-06T06:39:01.483602407Z",
+  "servedPlatformLiveProbe": {
+    "vehicles": 37,
+    "publishedSynced": 37,
+    "duplicateHoldKeys": {
+      "opinion": [],
+      "smooth": []
+    },
+    "receivedAtMs": 1788676847162
+  }
+}

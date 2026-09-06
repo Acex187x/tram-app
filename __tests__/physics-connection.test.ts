@@ -18,6 +18,8 @@ import { TrajectoryStore } from '@/lib/physics/trajectoryStore';
 import {
   ConvexTrajectorySource,
   TRAJ_BATCHES_QUERY,
+  TRAJ_CLOCK_QUERY,
+  TRAJ_META_QUERY,
   type ConvexTrajectoryClient,
   type TrajectoryBatchesResult,
   type TrajectorySeedResult,
@@ -188,7 +190,8 @@ describe('ConvexTrajectorySource lifecycle (perf invariant #3)', () => {
       resolveSeed: null as ((v: TrajectorySeedResult) => void) | null,
     };
     const client: ConvexTrajectoryClient = {
-      query: (() => {
+      query: ((q: unknown) => {
+        if (q === TRAJ_CLOCK_QUERY) return Promise.reject(new Error('clock not deployed'));
         state.queries += 1;
         return new Promise<TrajectorySeedResult>((resolve) => {
           state.resolveSeed = resolve;

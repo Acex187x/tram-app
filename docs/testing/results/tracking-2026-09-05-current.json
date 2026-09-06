@@ -1,0 +1,37 @@
+{
+  "wirePath": "/tmp/tram-tracking-20260905/ws-comparison.jsonl",
+  "fps": 30,
+  "durationS": 296.584,
+  "frames": 8898,
+  "samples": 1462971,
+  "visibleSamples": 1274136,
+  "lastFixAgeS": 3.19,
+  "sanctionedJumps": 214,
+  "backward": 0,
+  "speedOver25": 0,
+  "maxBackwardM": 0,
+  "maxForwardM": 0.8333312988288526,
+  "guardedHolds": 46266,
+  "holdSeconds": 1542.1962348620807,
+  "actualSpeedMs": {
+    "1": 25.00000000002183,
+    "0.5": 4.803636363670355,
+    "0.9": 9.021250000017586,
+    "0.99": 24.999999999994547
+  },
+  "speedStepMs": {
+    "1": 25.00000000002183,
+    "0.5": 0,
+    "0.9": 5.456984863982939e-11,
+    "0.99": 0.19101921632982766
+  },
+  "fullFleetFrameCpuMs": {
+    "1": 4.113958000000025,
+    "0.5": 0.07233299999995779,
+    "0.9": 0.10958300000004328,
+    "0.99": 0.2763750000000016
+  },
+  "clockOffsetMs": 0,
+  "clockSynced": false,
+  "caveat": "Sampled captured inputs, known geometry-pack trips only. No rider ground truth; source timestamps and delivery timing preserved. CPU is Node on host, not Hermes/native rendering."
+}

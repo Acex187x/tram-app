@@ -37,6 +37,9 @@
 // expectation floats off the platform while the real tram is still standing.
 
 import { round2 } from './db';
+import { renderedDistM } from '@/lib/physics/render';
+import { SMOOTH_CATCHUP_V_MS } from '@/lib/physics/fixForward';
+import { prepareHermiteTrack } from '@/lib/physics/evaluator';
 import {
   TRAJ_A_ACC,
   TRAJ_A_BRK,
@@ -58,6 +61,8 @@ import { normalCdf } from './learned';
 export interface TrackPoint {
   t: number;
   s: number;
+  /** Optional instantaneous velocity; legacy clients still read only t/s. */
+  v?: number;
 }
 
 /** Which physics engine `GET /api/trajectories/v2?gen=…` serves:
@@ -89,8 +94,9 @@ export interface V2Vehicle {
 
 /** A track plus the instantaneous speed at each of its knots.
  *
- *  `v` is NEVER serialized — the wire shape is frozen. It is kept in the lab's
- *  memory for two things the emitted knots alone cannot give exactly:
+ *  `v` is retained at full precision and optionally attached to wire knots
+ *  (2026-09-05 compatible amendment). It supplies two things position-only
+ *  knots cannot give exactly:
  *  (1) the next emission starts from the real velocity, so the seam is C¹ and
  *      not just C⁰ (a tram that was doing 9 m/s is still doing 9 m/s 2 s
  *      later, whatever the fresh model output says);
@@ -101,6 +107,16 @@ export interface V2Vehicle {
 export interface KinTrack {
   points: TrackPoint[];
   v: number[];
+}
+
+/** Attach generator velocities while preserving legacy positions/times. */
+export function withKnotVelocities(track: KinTrack): TrackPoint[] {
+  return track.points.map((point, i) => {
+    const speed = track.v[i];
+    return Number.isFinite(speed) && speed >= 0
+      ? { t: point.t, s: point.s, v: Math.round(speed * 1_000_000) / 1_000_000 }
+      : { t: point.t, s: point.s };
+  });
 }
 
 /** THE client physics engine, server-side copy — pure `(track, t) → s`:
@@ -171,18 +187,11 @@ export function clientProjectionM(
   fixAtMs: number,
   atMs: number,
 ): number {
-  const base = evalTrack(track, atMs);
-  if (track.length === 0 || !(fixS > evalTrack(track, fixAtMs))) return base;
-  const reach = crossTrack(track, fixS);
-  // Past the whole curve: the phone's FIXED marker jumps to the fix and holds
-  // there until the replacement curve lands (render.ts τ=∞ branch).
-  if (!Number.isFinite(reach)) return Math.max(base, fixS);
-  const tau = reach - fixAtMs;
-  return tau > 0 ? evalTrack(track, atMs + tau) : base;
+  return projectClient(track, fixS, fixAtMs, atMs, Number.POSITIVE_INFINITY);
 }
 
 /** Mirror of the client's SMOOTH_CATCHUP_V_MS (src/lib/physics/fixForward.ts). */
-export const CLIENT_SMOOTH_CATCHUP_V_MS = 2;
+export const CLIENT_SMOOTH_CATCHUP_V_MS = SMOOTH_CATCHUP_V_MS;
 
 /**
  * Where a PHONE is drawing the SMOOTH track at `atMs`, given the newest fix —
@@ -202,27 +211,29 @@ export function clientSmoothProjectionM(
   atMs: number,
   catchupVMs: number = CLIENT_SMOOTH_CATCHUP_V_MS,
 ): number {
-  const base = evalTrack(track, atMs);
-  if (track.length === 0 || !(fixS > evalTrack(track, fixAtMs))) return base;
-  // Allowance datum = max(curve start, fix observation) — the hunt1 verdict,
-  // mirrored from render.ts allowanceDatumMs: a curve-start datum pre-accrues
-  // a 100+ m bank spent in one frame (66 % of field teleports), a fix-only
-  // datum resets on every AVL update; the max starts the 2 m/s walk at the
-  // moment the evidence appeared. Cross-frame monotonicity of the phone's
-  // marker is owned by its slew guard (adapter.ts), which this projection
-  // deliberately does NOT model — the guard only delays, and modelling the
-  // delay would under-floor the seam.
-  const datumMs = fixAtMs > track[0].t ? fixAtMs : track[0].t;
-  const capped = base + catchupVMs * Math.max(0, (atMs - datumMs) / 1000);
-  const reach = crossTrack(track, fixS);
-  if (!Number.isFinite(reach)) {
-    if (base >= fixS) return base;
-    return Math.min(capped, fixS);
+  return projectClient(track, fixS, fixAtMs, atMs, catchupVMs);
+}
+
+/** Use the exact client composition, including coast after a wound-forward
+ * horizon. The former handwritten mirror clamped there, under-flooring a
+ * replacement seam even when wall time was still inside the raw horizon.
+ * This allocation runs at emission time on the server, never on a phone frame.
+ */
+function projectClient(
+  track: TrackPoint[], fixS: number, fixAtMs: number, atMs: number, catchupVMs: number,
+): number {
+  if (track.length === 0) return evalTrack(track, atMs);
+  const packed = new Float64Array(track.length * 2);
+  const velocities = new Float64Array(track.length);
+  for (let i = 0; i < track.length; i++) {
+    packed[i * 2] = track[i].t;
+    packed[i * 2 + 1] = track[i].s;
+    velocities[i] = track[i].v ?? Number.NaN;
   }
-  const tau = reach - fixAtMs;
-  if (!(tau > 0)) return base;
-  const shifted = evalTrack(track, atMs + tau);
-  return Math.min(capped, shifted);
+  prepareHermiteTrack(packed, velocities);
+  // Call sites invoke projection only for newer-fix seams. NaN leaves that
+  // already-established gate open, preserving the helper's existing contract.
+  return renderedDistM(packed, atMs, catchupVMs, fixS, fixAtMs, Number.NaN);
 }
 
 /** Instantaneous speed of a kinematic track at t, m/s — exact, because v is
@@ -306,6 +317,14 @@ export function modalReleaseMs(
     return Math.round(t0Ms + Math.min(180, standingS * 0.5) * 1000);
   }
   return Math.round(t0Ms + (mean + Z_MODAL * sd - standingS) * 1000);
+}
+
+/** Published v3 holds share the position observation epoch. Feed receipt and
+ * the frozen legacy engine's latency offset cannot postpone departure. */
+export function modalReleaseForFix(
+  fix: { observedAtMs: number }, standingS: number, mean: number, sd: number,
+): number {
+  return modalReleaseMs(fix.observedAtMs, standingS, mean, sd);
 }
 
 export interface ModalHold {
@@ -554,6 +573,8 @@ export function buildV2Vehicle(args: BuildV2Args): BuiltV2 | null {
     }
   }
 
+  opinion.points = withKnotVelocities(opinion);
+  smooth.points = withKnotVelocities(smooth);
   return {
     vehicle: {
       key: args.key,

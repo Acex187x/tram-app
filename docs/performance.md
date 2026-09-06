@@ -1,185 +1,202 @@
 # Performance & Thermal Playbook
 
-Why this doc: after ~1 h of use the app made an iPad Pro noticeably hot (iteration-4 trigger).
-The fixes below brought steady-state work down sharply. This page records (A) everything we
-did, (B) the **invariants that must not be broken**, and (C) how to verify before shipping.
+This document describes the current physics-v3 working tree. It specifies budgets
+and verification requirements; it does not claim that an uninstalled change has
+passed a physical-device thermal soak. Earlier engine findings are retained in
+the historical section below. See [architecture](architecture.md) for the data
+contracts and [candidate evidence](testing/tracking-candidate.md) for dated results.
 
-## A. What was done (chronological)
+## Current rendering and data flow
 
-### Rendering architecture (foundation)
-- **Direct-native source pushes.** All live GeoJSON flows through the patched
-  `ShapeSource.updateShape(shape)` TurboModule command. It updates Mapbox's GeoJSON source
-  without changing Fabric's ShadowTree; React reconciliation cost remains zero per frame and
-  concurrent UI commits cannot replay an older source frame.
-- **Viewport culling by whole tram** (+300 m margin) — the 3D sections FC contains only
-  what's on screen; typically 3–30 trams × sections, a few KB per push.
-- **Pre-allocation close-zoom culling** (+600 m margin) — off-screen entries never become
-  full public-state objects or point features on 15–30 Hz frames. Selected/followed vehicles
-  remain included for overlays; slow city-scale frames still represent the whole fleet.
-- **Zoom banding** — dots / badges / 3D models are separate layers gated by zoom, so the GPU
-  never draws models that aren't visible.
-- **Bounded debug traces.** The debug map source samples one tram at 10 Hz and
-  retains only 20 seconds of coordinates. Debug mode off unmounts both the
-  source and its frame subscription; its GeoJSON also uses `updateShape`.
+The server computes motion profiles. `RemoteFeed` streams identity and AVL
+observations from Convex; a separate Convex source streams trajectories and
+publication health. Geometry comes from the initial geometry pack and cached
+per-trip requests. The phone evaluates absolute-time curves on demand. It does
+not run the retired `TramEngine` predictor/smoother fleet or integrate catch-up
+substeps after suspension.
 
-### Cadence system (the thermal fix, iterations 2–4)
-| work | cadence | condition |
+Only actual map frames commit the presentation guard. UI, diagnostics and future
+queries are read-only with respect to that guard. Its non-reverse floor, speed
+ceiling and forward catch-up acceleration limit operate on actual frame time;
+curve evaluation uses the independently corrected server clock. Geometry/fix
+coherence is assessed on ingest or geometry changes, never per frame. Strongly
+contradictory geometry and curves are excluded, leaving the raw GPS fallback.
+
+### Cadence budgets
+
+| Work | Cadence | Condition |
 |---|---|---|
-| engine tick + sections push | 30 Hz (33 ms) | zoom ≥ 14.0 **and** app active |
-| follow camera retarget | ~12.5 Hz (80 ms) | following a tram **and** app active |
-| engine tick | 10 Hz | zoom < 13.7 (hysteresis band 13.7–14.0) |
-| points (badges/dots) push | 66 ms / 1 s / 5 s | zoom ≥ 14 / 12.5–14 / < 12.5 |
-| points push in `raw` mode | same due-check **AND** an ingest-set dirty flag | a raw frame changes only when a fix changes — identical frames are never re-pushed; mode/selection switches force one immediate push (`pointsPushWanted`, tramData) |
-| predictor fleet (v2 layer 1; live mode renders it) | full rate in `live` mode, batched 500 ms in `smooth`/`raw` | `TramEngine.setProjectionCadence`; the smoother ticks every substep against an interpolated reference |
-| UI hooks (`useAllTramStates` etc.) | 1 Hz | skipped entirely when no listeners |
-| RouteNetwork/stops refresh | 2 s | cheap fingerprint short-circuit first; no-op when backgrounded |
-| Golemio poll | 5 s | aborted + all timers cleared on background (P0 fix) |
+| Map frame notifications / section due-checks | 33 ms, approximately 30 Hz | Enter detail at zoom ≥ 14.0; leave below 13.7; foreground |
+| Map frame notifications at far zoom | 100 ms | Outside detail band; foreground |
+| Badge/dot pushes | 66 ms / 1 s / 5 s | Zoom ≥ 14 / 12.5–14 / < 12.5 |
+| Follow-camera retarget | Approximately 80 ms | Following a tram, map visible; overlapping native glides |
+| UI hooks | At most 1 Hz for live sampling | No notification work without listeners; explicit user actions may update immediately |
+| Tracking inspector snapshot | 1 Hz | Debug enabled, selected/followed tram, unpaused, outside Help, foreground, model viewer closed |
+| Debug map trace | 100 ms | One selected/followed tram, debug enabled, visible map; bounded 20 s / 201 points per trace |
+| Server-debug request | 3 s after previous completion | Shared per tram by map/panel, foreground subscribers;8 s timeout |
+| Route-network/stop refresh | 2 s | Foreground; fingerprint short-circuit |
+| Snapshot feed | Server pushes | Server poll cadence is reported in feed health, normally 2 s; no phone 5 s Golemio poll |
+| Trajectory feed | Server pushes | Separate subscription; publication age differs from individual profile age |
+| Clock sample | On start, then 60 s after reply | Nonce query, RTT midpoint; cached reactive metadata is not a clock sample |
 
-Key insights behind it:
-- Pushing a full-fleet FC 15×/s at far zoom forced Mapbox to re-render **continuously** while
-  badges moved sub-pixel — pure GPU heat for nothing. Far-zoom pushes are now 1 s / 5 s.
-- 30 Hz work is only justified where 3D models are visible; the cadence boundary must equal
-  the fast-points boundary (14.0) — mismatch caused the iteration-4 jerkiness regression
-  (15 Hz pushes sampling 10 Hz motion). At 30 Hz every point push receives exactly two
-  physics updates, halving whole-fleet work compared with the old 60 Hz loop.
-- Hysteresis (enter 30 Hz at ≥14.0, leave below 13.7) prevents timer thrash at the band edge.
+Both FIXED and SMOOTH animate between publications. There is no raw-mode
+poll-dirty special case. A selection or mode change forces an immediate map
+refresh rather than waiting for the city-scale interval. A frame notification is
+a due-check opportunity, not an instruction to rebuild and push every source.
 
-### GPU knobs
-- `modelCastShadows` / `modelReceiveShadows` **off** (largest single GPU saving at pitch).
-- Mapbox's native render ceiling is **60 fps**, including on 120 Hz ProMotion displays.
-  Fleet geometry changes at no more than 30 Hz, so 120 Metal draws/s spend energy without
-  adding simulation samples; 60 Hz still leaves native gestures and camera animation fluid.
-- Camera retarget loop runs **only while following**; retargets every ~80 ms with ~170 ms
-  overlapping `linearTo` glides — never per-frame (60 native animation restarts/s choked the
-  animator AND kept the map render loop hot).
-- 3D viewer renders at full rate only while touched, ~30 fps idle turntable, full dispose on
-  unmount.
+30 Hz notifications and fast badge pushes share the same detail boundary.
+Hysteresis prevents timer churn. At far zoom, Mapbox should idle between sparse
+pushes instead of redrawing a near-identical fleet continuously.
 
-### CPU / allocation discipline
-- Engine hot path is allocation-light: queue groups cached and rebuilt only on ingest,
-  binary-search anchors cached per poll (`obsSchedDistM`), dt from real clock deltas.
-  Close-zoom bbox rejection interpolates coordinates without allocating point tuples;
-  the monotonic next-stop hint also skips already-served stop prefixes in the braking envelope.
-- Projection queues are constrained only when projection sims actually advance (every tick in
-  `live`, once per 500 ms batch in `smooth`). Applying/sorting an unchanged second fleet on every
-  33 ms smooth-mode tick is forbidden.
-- The engine speed-profile cache is pruned to shapes referenced by live sims on every ingest.
-  Shape/trip ids rotate during the day; retaining departed shapes turns a bounded fleet into an
-  unbounded multi-hour Hermes heap.
-- `buildFrame` is skipped entirely on ticks where no push is due (`skipPoints` and due-checks).
-- `getStates` results cached per UI version; stringify and `updateShape` are skipped while any
-  FC stays empty, including the close-zoom points source after viewport culling.
-- UI rows (fleet browser, lists): memoized row components with primitive props, FlatList
-  `windowSize`/`removeClippedSubviews`, glass-free row internals, single shared 1 Hz clock.
+### GPU and allocation rules
 
-### Network
-- Rate-limited scheduler (16 starts/8 s, 4 concurrent) — bursts are impossible by design.
-- Trip geometries disk-cached (3 days, service-day re-anchored) — steady state fetches only the
-  5 s positions poll (~0.9 MB) and geometry deltas for new trips, and a next-day cold start
-  re-opens warm instead of re-fetching the fleet.
+- Moving GeoJSON uses the patched `ShapeSource.updateShape` direct-native path.
+  Stable React props omit `shape`; Fabric cannot replay stale moving geometry
+  through a concurrent text/menu commit.
+- Sections are viewport-culled with a 300 m margin. Close-zoom pre-allocation
+  rejection uses a 600 m margin so off-screen trams do not become full state or
+  feature objects. Selected/followed vehicles remain available to overlays.
+- Model shadows are off. Mapbox's native render ceiling is 60 fps, including on
+  120 Hz ProMotion devices; fleet geometry changes at no more than 30 Hz.
+- The opaque `/model/` route unsubscribes hidden map frame pushes and follow
+  camera work. Debug traces and panel sampling also suspend. Live data and ride
+  recording retain their own lifecycle; hiding the map is not backgrounding.
+- Skip feature building/stringification/native updates when no push is due.
+  Empty sources should not repeatedly serialize and push another empty frame.
+- Fleet state and diagnostics histories are bounded/pruned. New per-vehicle
+  caches must have departure cleanup; no retained multi-hour history by default.
+- List rows remain memoized, with primitive props, bounded FlatList windows,
+  glass-free row internals and shared 1 Hz time sampling.
 
-## B. Invariants — do not break these
+### Model viewer budget
 
-1. **No React state per frame.** Anything at > 1 Hz lives in refs/imperative pushes.
-   React subscribers use the 1 Hz hooks; `subscribeFrame` is for the map push loop only.
-   **One sanctioned exception:** `DebugLive` in `src/components/debug/DebugOverlay.tsx`
-   samples and `setState`s one engine snapshot at 10 Hz — enough for numeric diagnostics without
-   display-rate React reconciliation. It is gated to debug mode, an expanded panel,
-   a non-guide screen and a followed tram; unmounting clears its timer and releases GPS. This
-   is safe for map motion because live ShapeSources bypass Fabric via `updateShape`.
-   Nothing else may use per-frame `setState`, and shipping UI remains ≤1 Hz.
-2. **New live map layers use direct-native updates** (`updateShape`, stable React props,
-   `slot:'top'`) and are fed at the slowest cadence that looks right. They must mount without
-   a React `shape` prop and must never use `setNativeProps` for moving GeoJSON. On Fabric,
-   `setNativeProps` itself creates a ShadowTree commit; a concurrent menu/text commit based on
-   an older tree may land afterward and replay the previous tram positions. The custom
-   rnmapbox patch intentionally bypasses that tree. Covered by `imperative-shape-source.test`.
-3. **Every timer/subscription registers with the runtime lifecycle** (created in `resume()`,
-   cleared in `pause()`, guarded by the generation counter). Nothing may tick in background.
-   Test: background the app, verify zero log output / network until foregrounded.
-   **One sanctioned exception:** the runtime's `rideBackground` mode while a GPS ride
-   recording is active — see "Sanctioned exception: ride recording in background" below.
-4. **Cadence boundaries stay aligned**: the 30 Hz tick zoom threshold == the fast points
-   cadence threshold (one shared constant). If you change one, change both — or you
-   reintroduce the aliasing stutter.
-5. **Payload ∝ visible.** Never push the full fleet above 1 Hz. Sections FC must remain
-   viewport-culled. If you add per-feature props, check the stringify size at 30 Hz.
-6. **No new continuous camera/style animations at idle.** The map must reach a fully idle
-   state (no pushes due, no animation running) within ~5 s at far zoom.
-7. **Mapbox expensive features (shadows, terrain, extra light passes) stay off** unless
-   profiled on-device with a thermal soak (see below).
-8. **Engine tick must stay allocation-light.** No closures/array literals in the per-tram
-   per-tick path; new per-tram state goes on the sim object.
-9. **Heavy work belongs behind the `TramFeed` boundary** — anything that could run
-   server-side someday (polling, aggregation) must not leak into render-path modules.
+Physical devices use native-size PBR rendering,4×MSAA, approximately 30 fps while
+idle and display-paced interaction. Simulator OpenGL is software rasterized;
+it instead uses Lambert materials, no MSAA and a 640 px maximum-edge render
+target, upscaled once to the native view at approximately 12 fps. These rendering
+paths share geometry and mechanism metadata, but Simulator shading/resolution
+are not evidence of physical-device PBR quality.
 
-## Sanctioned exception: ride recording in background (2026-07-13)
+The next animation frame is scheduled after the Expo GL flush barrier, preventing
+an unbounded native command backlog. Backgrounding cancels frame scheduling;
+foregrounding restarts it. Unmount disposes renderer, targets, geometries and
+materials. Door and indicator controls update refs; animation is imperative.
+The viewport fits above the control card and follows GL drawing-buffer changes.
+The camera uses a model/distance-dependent near/far range to preserve depth
+precision for separate body, glass and display surfaces.
 
-Ride recordings (Record ride) must survive the app being backgrounded — GPS fixes keep
-arriving via the expo-location background task (`UIBackgroundModes: location`), and a ride
-point correlated against a frozen simulation is useless. So while — and ONLY while — a ride
-is actively recording, backgrounding switches `TramRuntime` to **`rideBackground`** mode
-instead of the full pause:
+### Network and geometry
 
-| work | cadence in `rideBackground` |
+Convex subscriptions seed once, consume bounded diff windows and reseed on
+sequence gaps. Seed failures have lifecycle-guarded retry and expose waiting or
+failure state; they must not become a silent permanent empty fleet. Clock replies
+with excessive RTT are rejected, and offset changes are rate-limited to avoid
+fleet-wide jumps. A failed diagnostics endpoint does not imply failed motion
+transport.
+
+Per-trip geometry fetches remain rate-limited, single-flight and disk-cached for
+3 days with service-day re-anchoring. A provisional geometry pack accelerates
+cold start; authoritative trip geometry can replace it. Geometry-landed events
+adopt a burst with a 300 ms debounce, rather than waiting for another AVL fix.
+The phone no longer downloads a full Golemio positions payload every 5 s.
+
+## Invariants — do not break these
+
+1. **No live React state above 1 Hz.** Continuous motion and mechanisms live in
+   refs and imperative paths. The inspector also samples at 1 Hz; the retired
+   `DebugLive` 10 Hz React exception no longer exists. User actions are not a live
+   sampling timer. Use frame subscriptions only for visible imperative work.
+2. **New moving map layers use direct-native updates.** Mount without a React
+   `shape` prop; never use `setNativeProps` for moving GeoJSON. Keep stable props
+   and the established top slot. See `imperative-shape-source.test.ts`.
+3. **Every timer/subscription has lifecycle cleanup and stale-result guards.**
+   Full background pause stops data/render/UI work except an active ride
+   recording's explicitly bounded mode below. Opaque model routes also suppress
+   hidden map work. Final unsubscribe aborts shared debug requests.
+4. **Cadence boundaries stay aligned.** The detail notification threshold and
+   fast point cadence use one shared boundary; preserve hysteresis.
+5. **Payload follows visibility.** High-rate section/point work is culled; never
+   push a full fleet at detail cadence. Check serialized sizes after adding props.
+6. **No continuous idle map camera/style animation.** Only following may retarget
+   continuously. At far zoom, rendering should be event-driven between pushes.
+7. **Mapbox expensive features stay off** unless an on-device thermal soak
+   justifies enabling shadows, terrain or additional light passes.
+8. **Hot paths stay allocation-light and read ownership stays explicit.** Avoid
+   per-tram temporary arrays/closures in every frame. Diagnostics/future queries
+   must not mutate the displayed-position guard or advance its frame clock.
+9. **Heavy feed work stays behind `TramFeed` and the backend boundary.** Inference,
+   aggregation, geometry coherence and cache rebuilding never run per frame.
+
+## Active ride recording in background
+
+An active GPS ride needs current model-side values when a background location
+sample arrives. `TramRuntime` therefore enters `rideBackground` only while the
+ride-activity probe reports a recording. It preserves data access without map or
+React work:
+
+| Work | Background ride budget |
 |---|---|
-| Golemio poll (feed) | 10 s (`RIDE_BG_POLL_MS`, vs 5 s foreground) |
-| trajectory bundle poll | 10 s (same constant, vs 5 s foreground) |
-| tram position evaluation | **no timer** — physics v3 evaluates the curves on demand, at the instant the ride recorder samples a tram |
-| render pushes (`frameListeners`) | **off** |
-| UI notifications (`bumpUi`, 1 Hz hooks) | **off** |
-| geometry warm-up | unchanged (needed for the ride's `gpsDist`/`lagM` fields) |
+| Snapshot feed | Convex subscription retained; local deliveries throttled to 10 s |
+| Trajectory feed | Convex push subscription retained; it is not a 10 s HTTP poll |
+| Position evaluation | On demand at the recorder's sample instant; no frame timer |
+| Map pushes/follow camera | Off |
+| UI notifications | Off |
+| Geometry | Available for route-distance/lag correlation |
 
-Gates that keep invariant #3 meaningful:
+Stopping a ride, including the 90 min auto-stop, immediately transitions to full
+pause. Foregrounding restores normal subscriptions and due-check timers. With no
+ride, backgrounding pauses fully; there is no simulation catch-up integration
+when the app returns. Absolute-time evaluation makes the next visible state
+current. Background network traffic is therefore not accurately described as
+"exactly two 10 s polls": trajectory pushes and the retained source's clock
+queries follow their existing subscription lifecycle.
 
-- **Entry** only from `onAppState(background/inactive)` when the injected ride-activity
-  probe (`TramRuntime.setRideActivity`, wired by `src/lib/motionlog`) reports an active
-  recording. An app without a live ride pauses fully, exactly as before.
-- **Exit**: foregrounding → full `resume()`; the ride stopping in background (user stop or
-  the 90 min auto-stop) → `notifyRideActivity()` → immediate full `pause()`. Nothing may
-  keep ticking once `isRiding()` is false.
-- Budget is minimal by construction — no Mapbox work at all (the map isn't rendered), no
-  React re-renders, no tick timer at all: just the two 10 s polls. This is the floor that
-  keeps the ride log's model-side fields meaningful.
-- The background check in section C still applies to the **no-ride** case verbatim.
+## Verification before shipping performance changes
 
-For the no-ride full-pause path, foregrounding performs one O(n) absolute-time seek via
-`resyncAfterSuspension`. This is not background work and not catch-up integration: it makes
-the first visible frame current without replaying a minute of 250 ms substeps.
+- Run the fixed `city`/`badges`/`models` and long-lived attach scenarios in
+  [performance benchmark](performance-benchmark.md). Comparisons require the
+  same simulator/runtime/build and three runs per scenario. Do not benchmark
+  while Xcode imports multi-gigabyte failure diagnostics or another renderer
+  saturates this Mac.
+- Keep cadence, imperative-source, lifecycle and motion-replay tests current.
+  See [client evidence](testing/client-tracking-2026-09-05.md),
+  [inspector evidence](testing/tracking-inspector.md) and
+  [backend evidence](research/tracking-2026-09-05/README.md). Simulation continuity
+  tests and native control assertions do not establish geographic accuracy.
+- Inspect actual map motion at detail and badge zoom, looking for repeated
+  holds/jumps and checking fix, profile and publication age separately. Pair
+  screenshot/video review with frame/replay metrics rather than inferring
+  micro-jitter from the inspector's 1 Hz chart.
+- Leave city-scale map idle 30 s and check event-driven rendering between 5 s
+  point pushes. Open the model viewer and verify hidden map pushes stop.
+- Perform a physical-device thermal soak of at least 20 min at mid zoom; record
+  CPU, GPU, memory and thermal state. Aim for nominal/fair thermal state and low
+  inter-update CPU/GPU duty. Simulator CPU is not a device energy measurement.
+- Background for 2 min with no ride: no runtime network/render work; foreground
+  restores fresh state. Repeat with an active ride and verify only its retained
+  data budget, no map/UI pushes, and immediate full pause when the ride ends.
+- Use `scripts/testing/` for native inspector/model taps, scrolling, pinch,
+  door/indicator samples and background recovery. Review fresh screenshots and
+  recordings separately. Automatic Xcode failure diagnostics are disabled in
+  this harness; explicit assertion results and attachments remain retained.
 
-## C. How to verify (before shipping perf-touching changes)
+## Historical findings (retired engine, not active v3 invariants)
 
-- **Reproducible simulator CPU benchmark:** run the fixed, mouse-free
-  `city`/`badges`/`models` scenarios and the long-lived `--attach` comparison in
-  [`performance-benchmark.md`](performance-benchmark.md). Commit comparisons
-  require the same simulator/runtime/build kind and three runs per scenario.
-- **Unit guards:** `__tests__/tick-cadence.test.ts` pins the cadence table;
-  extend it when adding cadences.
-- **Smoothness check:** simulator, camera at z16.8 over a moving tram → 8 screenshots at
-  250 ms; consecutive position deltas must be small and uniform (no 0-0-0-jump).
-  Same at z14.2 for badges. (Method used to find/fix the iteration-4 regression.)
-- **Idle check:** far zoom (z12), no interaction 30 s → Mapbox should stop re-rendering
-  between the 5 s points pushes (watch GPU in Xcode gauges; frames should be event-driven).
-- **Thermal soak (device):** 20 min foreground at mid zoom, Xcode Energy gauge / MetricKit:
-  CPU should sit in single digits between polls; GPU duty far below 100%; thermal state
-  should stay `nominal`/`fair`.
-- **Background check:** background 2 min → metro/log silence, then foreground → resumes
-  within one poll (the P0 regression class). With a ride recording active, background
-  activity must be exactly the `rideBackground` budget (10 s polls, no tick timer, zero pushes)
-  and must stop entirely the moment the ride stops.
+The iteration 2–4 thermal work addressed excessive full-fleet pushes and cadence
+aliasing on an iPad Pro. Those findings produced the direct-native path,
+zoom-dependent push budget, shared detail threshold and hysteresis retained
+above. The old implementation also batched a secondary predictor fleet at 500 ms
+and constrained projection queues only when that fleet advanced. `TramEngine`,
+its queue/braking integration and `setProjectionCadence` are retired; those
+instructions do not apply to v3 curve evaluation.
 
-Related: `docs/decisions/map-rendering.md` (rendering decisions),
-`docs/decisions/interpolation-engine.md` (engine hot path), `docs/decisions/backend-plan.md`
-(moving poll/aggregation off-device is the next big win).
+A 2026-07-12 calibration soak showed 99.7% JS CPU after approximately 9 h; restarting
+returned it to 11.6%. The old engine retained speed profiles for departed shapes;
+2026-07-30 ingest pruning fixed that identified structure. This historical result
+is not proof of current native Mapbox/Metal memory stability. Multi-hour device
+soaks still need to track bounded listener/history counts and process memory.
 
-## Long-uptime CPU degradation (found 2026-07-12, engine growth fixed 2026-07-30)
-
-After ~9 h of continuous foreground running (simulator, calibration soak) the app's JS
-thread degraded to 99.7% CPU with periodic (~4 min) sim-integration collapses; a restart
-fully restored it (11.6% CPU). The engine-side unbounded structure was the speed-profile
-cache: stale tram entries were pruned, but the large per-vertex profiles for their departed
-shape ids were retained for the singleton's lifetime. Ingest now prunes profiles to live
-main/projection sims. Motionlog buffers already have hard caps and runtime subscriptions have
-paired teardown guards. A physical-device multi-hour soak is still required to close the
-investigation across native Mapbox/Metal memory; watch `uiListeners`/`frameListeners`, live
-entry/profile counts and RSS in Instruments (Allocations + Time Profiler).
+Related: [map rendering decisions](decisions/map-rendering.md),
+[physics-v3 contract](research/physics-v3-protocol.md),
+[architecture](architecture.md). Earlier interpolation-engine/backend-plan
+papers are historical context, not the current execution plan.

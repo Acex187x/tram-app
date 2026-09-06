@@ -7,12 +7,10 @@
 // two phones — different clocks, different join times, one backgrounded for an
 // hour — render pixel-identical trams from the same bundle.
 //
-// offset = serverNowMs − Date.now() sampled at each fetch, smoothed by an
-// EWMA over the last few fetches so one scheduler hiccup (a fetch decoded
-// 300 ms late behind a busy JS thread) cannot jolt the fleet. The residual
-// bias is one-way network latency (`serverNowMs` is stamped before the
-// response travels), i.e. tens of ms ≈ centimetres of tram — far below the
-// error the offset removes.
+// Production samples a fresh nonce query and uses its request/response
+// midpoint. Reactive Convex query clocks are cached transaction times and are
+// never offset samples. The bounded EWMA target is approached at <=5% clock
+// rate, so a residual latency correction cannot reverse or jump render time.
 
 /** Samples retained by the EWMA (the protocol's "last 3 fetches"). */
 export const CLOCK_WINDOW = 3;
@@ -38,19 +36,40 @@ export class ClockSync {
   /** Most recent samples, newest last; at most CLOCK_WINDOW entries. */
   private samples: number[] = [];
   private cached = 0;
+  private fromOffsetMs = 0;
+  private correctionAtMs = 0;
+  private correctionDurationMs = 0;
 
-  /** Record one fetch: the server's stamp and the local clock at receive. */
-  sample(serverNowMs: number, receivedAtMs: number): void {
-    if (!Number.isFinite(serverNowMs) || !Number.isFinite(receivedAtMs)) return;
+  /** Estimate against the request midpoint, but start applying a correction
+   * only when its reply actually arrives. A midpoint-started ramp is already
+   * partway through at receipt and creates an immediate jump. */
+  sample(serverNowMs: number, receivedAtMs: number, appliedAtMs = receivedAtMs): void {
+    if (
+      !Number.isFinite(serverNowMs) ||
+      !Number.isFinite(receivedAtMs) ||
+      !Number.isFinite(appliedAtMs)
+    )
+      return;
+    const wasSynced = this.synced;
+    const applied = this.offsetAt(appliedAtMs);
     this.samples.push(serverNowMs - receivedAtMs);
     if (this.samples.length > CLOCK_WINDOW) this.samples.shift();
     this.cached = weightedOffset(this.samples);
+    // A clock correction must not move every tram backward in one frame.
+    // Ramp the small network-jitter correction at <=5% clock rate; evaluation
+    // remains a pure function of local time and these receive-time samples.
+    this.fromOffsetMs = wasSynced ? applied : this.cached;
+    this.correctionAtMs = appliedAtMs;
+    this.correctionDurationMs = Math.abs(this.cached - this.fromOffsetMs) / 0.05;
   }
 
   /** Drop all samples (feed restart / teardown) — next fetch re-seeds. */
   reset(): void {
     this.samples = [];
     this.cached = 0;
+    this.fromOffsetMs = 0;
+    this.correctionAtMs = 0;
+    this.correctionDurationMs = 0;
   }
 
   /** True once at least one fetch has been sampled. */
@@ -72,8 +91,17 @@ export class ClockSync {
    * Server-corrected wall clock — the ONLY time any trajectory is evaluated
    * at. `localNowMs` is injectable for tests; production passes Date.now().
    */
+  offsetAt(localNowMs: number): number {
+    if (this.correctionDurationMs === 0) return this.cached;
+    const progress = Math.max(
+      0,
+      Math.min(1, (localNowMs - this.correctionAtMs) / this.correctionDurationMs),
+    );
+    return this.fromOffsetMs + (this.cached - this.fromOffsetMs) * progress;
+  }
+
   now(localNowMs: number): number {
-    return localNowMs + this.cached;
+    return localNowMs + this.offsetAt(localNowMs);
   }
 }
 

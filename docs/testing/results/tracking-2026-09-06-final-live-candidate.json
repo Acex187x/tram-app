@@ -1,0 +1,5147 @@
+{
+  "wirePath": "fixtures/tracking-2026-09-06-final-candidate-wire.jsonl.gz",
+  "fps": 30,
+  "durationS": 297,
+  "frames": 8911,
+  "samples": 1160028,
+  "visibleSamples": 1160028,
+  "lastFixAgeS": 0.077,
+  "sanctionedJumps": 211,
+  "backward": 0,
+  "speedOver25": 0,
+  "maxBackwardM": 0,
+  "maxForwardM": 0.8296973658771094,
+  "guardedHolds": 2469,
+  "holdSeconds": 82.29979907226375,
+  "observations": [
+    {
+      "key": "9522",
+      "tripId": "5_22160_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674643000,
+      "errorM": -615.3819375000003
+    },
+    {
+      "key": "9272",
+      "tripId": "10_15064_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674644000,
+      "errorM": -80.60724695066756
+    },
+    {
+      "key": "9260",
+      "tripId": "24_8763_260829",
+      "state": "at_stop",
+      "observedAtMs": 1788674642000,
+      "errorM": 45.93844951427127
+    },
+    {
+      "key": "9524",
+      "tripId": "8_8072_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674643000,
+      "errorM": -43.42593030805892
+    },
+    {
+      "key": "9060",
+      "tripId": "17_37340_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674643000,
+      "errorM": -87.24783715827425
+    },
+    {
+      "key": "9094",
+      "tripId": "19_11274_260823",
+      "state": "on_track",
+      "observedAtMs": 1788674643000,
+      "errorM": -210.58245432340027
+    },
+    {
+      "key": "9345",
+      "tripId": "18_14452_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674651000,
+      "errorM": -19.376213508120486
+    },
+    {
+      "key": "9086",
+      "tripId": "19_11278_260823",
+      "state": "on_track",
+      "observedAtMs": 1788674653000,
+      "errorM": -16.291510279404292
+    },
+    {
+      "key": "9136",
+      "tripId": "17_23372_260628",
+      "state": "on_track",
+      "observedAtMs": 1788674649000,
+      "errorM": -1.067160511171096
+    },
+    {
+      "key": "9312",
+      "tripId": "18_17244_260823",
+      "state": "on_track",
+      "observedAtMs": 1788674650000,
+      "errorM": -123.9340000000002
+    },
+    {
+      "key": "9450",
+      "tripId": "9_28267_260829",
+      "state": "at_stop",
+      "observedAtMs": 1788674647000,
+      "errorM": -215.0362468229796
+    },
+    {
+      "key": "9418",
+      "tripId": "9_635_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674650000,
+      "errorM": 169.2591355592086
+    },
+    {
+      "key": "8268",
+      "tripId": "2_16424_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674649000,
+      "errorM": 218.7866351427383
+    },
+    {
+      "key": "9282",
+      "tripId": "25_17881_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674647000,
+      "errorM": -123.52437799763196
+    },
+    {
+      "key": "9264",
+      "tripId": "10_15053_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674650000,
+      "errorM": -234.71618574775857
+    },
+    {
+      "key": "9141",
+      "tripId": "17_35622_260809",
+      "state": "on_track",
+      "observedAtMs": 1788674645000,
+      "errorM": 20.068999999999505
+    },
+    {
+      "key": "9417",
+      "tripId": "15_23819_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674650000,
+      "errorM": -49.32189255503846
+    },
+    {
+      "key": "9363",
+      "tripId": "12_21873_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674650000,
+      "errorM": 8.25799999999981
+    },
+    {
+      "key": "8769",
+      "tripId": "13_12100_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674652000,
+      "errorM": 3.449999999999818
+    },
+    {
+      "key": "9342",
+      "tripId": "6_30126_260905",
+      "state": "on_track",
+      "observedAtMs": 1788674649000,
+      "errorM": -1.5400000000008731
+    },
+    {
+      "key": "9419",
+      "tripId": "4_6889_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674649000,
+      "errorM": -141.2228640194603
+    },
+    {
+      "key": "9340",
+      "tripId": "26_22861_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674648000,
+      "errorM": 14.050000000001091
+    },
+    {
+      "key": "9098",
+      "tripId": "17_37837_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674652000,
+      "errorM": -116.70693871831736
+    },
+    {
+      "key": "9505",
+      "tripId": "12_21869_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674649000,
+      "errorM": 0.0020000000004074536
+    },
+    {
+      "key": "9331",
+      "tripId": "22_40968_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674652000,
+      "errorM": -267.12244510959135
+    },
+    {
+      "key": "8754",
+      "tripId": "16_17441_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674645000,
+      "errorM": -4.272417990792746
+    },
+    {
+      "key": "9428",
+      "tripId": "11_13818_260905",
+      "state": "at_stop",
+      "observedAtMs": 1788674650000,
+      "errorM": -116.75554028305578
+    },
+    {
+      "key": "9347",
+      "tripId": "10_15030_260829",
+      "state": "at_stop",
+      "observedAtMs": 1788674656000,
+      "errorM": -217.99114999999802
+    },
+    {
+      "key": "9383",
+      "tripId": "9_28461_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674657000,
+      "errorM": 88.93466815524653
+    },
+    {
+      "key": "9075",
+      "tripId": "19_11270_260712",
+      "state": "on_track",
+      "observedAtMs": 1788674655000,
+      "errorM": -142.64453663610038
+    },
+    {
+      "key": "8750",
+      "tripId": "23_9357_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674655000,
+      "errorM": 166.4333491005218
+    },
+    {
+      "key": "9146",
+      "tripId": "24_7577_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674655000,
+      "errorM": -271.01225138212885
+    },
+    {
+      "key": "9138",
+      "tripId": "3_5493_260418",
+      "state": "at_stop",
+      "observedAtMs": 1788674655000,
+      "errorM": -241.9399999999996
+    },
+    {
+      "key": "9518",
+      "tripId": "12_21871_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674657000,
+      "errorM": -274.1365000000005
+    },
+    {
+      "key": "9139",
+      "tripId": "25_17872_260719",
+      "state": "on_track",
+      "observedAtMs": 1788674660000,
+      "errorM": -1.4700000000002547
+    },
+    {
+      "key": "9094",
+      "tripId": "19_11274_260823",
+      "state": "at_stop",
+      "observedAtMs": 1788674658000,
+      "errorM": 38.789839226867116
+    },
+    {
+      "key": "8265",
+      "tripId": "2_16372_260815",
+      "state": "at_stop",
+      "observedAtMs": 1788674658000,
+      "errorM": 46.039914863576996
+    },
+    {
+      "key": "9522",
+      "tripId": "5_22160_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674664000,
+      "errorM": -27.678780700029165
+    },
+    {
+      "key": "9272",
+      "tripId": "10_15064_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674664000,
+      "errorM": 1.1276350524994996
+    },
+    {
+      "key": "9380",
+      "tripId": "7_18596_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674664000,
+      "errorM": 136.05449999999473
+    },
+    {
+      "key": "9219",
+      "tripId": "3_5594_260418",
+      "state": "on_track",
+      "observedAtMs": 1788674661000,
+      "errorM": -57.058523102270556
+    },
+    {
+      "key": "8757",
+      "tripId": "21_6049_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674662000,
+      "errorM": -298.1501910522893
+    },
+    {
+      "key": "9143",
+      "tripId": "3_16376_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674667000,
+      "errorM": -250.2718342182775
+    },
+    {
+      "key": "9424",
+      "tripId": "9_28475_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674663000,
+      "errorM": -174.60221088383446
+    },
+    {
+      "key": "9430",
+      "tripId": "9_28463_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674661000,
+      "errorM": -79.99608662178377
+    },
+    {
+      "key": "9296",
+      "tripId": "1_14361_260501",
+      "state": "on_track",
+      "observedAtMs": 1788674666000,
+      "errorM": 37.931597305876494
+    },
+    {
+      "key": "9524",
+      "tripId": "8_8072_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674665000,
+      "errorM": -211.24807971018345
+    },
+    {
+      "key": "8431",
+      "tripId": "2_16435_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674662000,
+      "errorM": 77.10154377541494
+    },
+    {
+      "key": "9338",
+      "tripId": "8_1533_260621",
+      "state": "at_stop",
+      "observedAtMs": 1788674663000,
+      "errorM": -125.57576937074555
+    },
+    {
+      "key": "8780",
+      "tripId": "22_40966_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674662000,
+      "errorM": 48.50697798860165
+    },
+    {
+      "key": "9291",
+      "tripId": "22_40108_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674663000,
+      "errorM": 3.7517568265175214
+    },
+    {
+      "key": "9353",
+      "tripId": "9_28485_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674665000,
+      "errorM": -19.841300000001866
+    },
+    {
+      "key": "9368",
+      "tripId": "16_17467_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674664000,
+      "errorM": 22.784499999999753
+    },
+    {
+      "key": "8758",
+      "tripId": "16_17448_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674665000,
+      "errorM": -83.7646708506727
+    },
+    {
+      "key": "9298",
+      "tripId": "22_40958_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674666000,
+      "errorM": -12.890572959717701
+    },
+    {
+      "key": "9331",
+      "tripId": "22_40968_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674664000,
+      "errorM": 75.81786125248618
+    },
+    {
+      "key": "9265",
+      "tripId": "6_30205_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674666000,
+      "errorM": 33.26283806781794
+    },
+    {
+      "key": "9502",
+      "tripId": "7_18600_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674663000,
+      "errorM": -106.89640652599519
+    },
+    {
+      "key": "9285",
+      "tripId": "20_17282_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674670000,
+      "errorM": -25.376712322542517
+    },
+    {
+      "key": "9510",
+      "tripId": "8_13546_260712",
+      "state": "at_stop",
+      "observedAtMs": 1788674670000,
+      "errorM": -208.79147229538103
+    },
+    {
+      "key": "9357",
+      "tripId": "1_14292_260501",
+      "state": "at_stop",
+      "observedAtMs": 1788674668000,
+      "errorM": -142.78272757834384
+    },
+    {
+      "key": "9349",
+      "tripId": "24_7595_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674672000,
+      "errorM": -267.2059427277745
+    },
+    {
+      "key": "8762",
+      "tripId": "26_22858_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674670000,
+      "errorM": -152.4824902313012
+    },
+    {
+      "key": "9366",
+      "tripId": "12_21826_260905",
+      "state": "at_stop",
+      "observedAtMs": 1788674671000,
+      "errorM": -85.84095065866495
+    },
+    {
+      "key": "9323",
+      "tripId": "22_5420_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674668000,
+      "errorM": -158.5743390112168
+    },
+    {
+      "key": "9369",
+      "tripId": "7_18609_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674669000,
+      "errorM": 155.17767396315867
+    },
+    {
+      "key": "8776",
+      "tripId": "22_40121_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674670000,
+      "errorM": -21.296225024833802
+    },
+    {
+      "key": "9515",
+      "tripId": "8_13521_260621",
+      "state": "on_track",
+      "observedAtMs": 1788674670000,
+      "errorM": -96.30051135571011
+    },
+    {
+      "key": "9237",
+      "tripId": "21_6023_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674670000,
+      "errorM": 28.80300000000011
+    },
+    {
+      "key": "8771",
+      "tripId": "16_17477_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674668000,
+      "errorM": -96.25246895806231
+    },
+    {
+      "key": "8754",
+      "tripId": "16_17441_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674668000,
+      "errorM": -107.89350999999988
+    },
+    {
+      "key": "9252",
+      "tripId": "10_15055_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674671000,
+      "errorM": 165.48313432486157
+    },
+    {
+      "key": "9404",
+      "tripId": "9_28471_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674678000,
+      "errorM": -235.27881295082807
+    },
+    {
+      "key": "9219",
+      "tripId": "3_5594_260418",
+      "state": "at_stop",
+      "observedAtMs": 1788674679000,
+      "errorM": -277.3407956296742
+    },
+    {
+      "key": "9075",
+      "tripId": "19_11270_260712",
+      "state": "at_stop",
+      "observedAtMs": 1788674677000,
+      "errorM": -121.45895206903333
+    },
+    {
+      "key": "9450",
+      "tripId": "9_28267_260829",
+      "state": "on_track",
+      "observedAtMs": 1788674675000,
+      "errorM": 1.6610000000000582
+    },
+    {
+      "key": "8755",
+      "tripId": "22_40120_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674673000,
+      "errorM": -180.458234290797
+    },
+    {
+      "key": "9342",
+      "tripId": "6_30126_260905",
+      "state": "at_stop",
+      "observedAtMs": 1788674675000,
+      "errorM": -107.71229580931686
+    },
+    {
+      "key": "9419",
+      "tripId": "4_6889_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674679000,
+      "errorM": -0.2815411188330472
+    },
+    {
+      "key": "9235",
+      "tripId": "3_5535_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674675000,
+      "errorM": -26.8792052092449
+    },
+    {
+      "key": "9255",
+      "tripId": "6_30232_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674679000,
+      "errorM": -303.84526226405114
+    },
+    {
+      "key": "9131",
+      "tripId": "24_8823_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674672000,
+      "errorM": -75.03099999999995
+    },
+    {
+      "key": "8294",
+      "tripId": "7_18598_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674674000,
+      "errorM": -37.12086111394274
+    },
+    {
+      "key": "9168",
+      "tripId": "24_8824_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674673000,
+      "errorM": -209.5073719802395
+    },
+    {
+      "key": "9427",
+      "tripId": "4_6789_260829",
+      "state": "on_track",
+      "observedAtMs": 1788674673000,
+      "errorM": -193.81403105764457
+    },
+    {
+      "key": "8772",
+      "tripId": "22_26557_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674673000,
+      "errorM": 31.49850000000015
+    },
+    {
+      "key": "8753",
+      "tripId": "22_40110_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674674000,
+      "errorM": -22.067246021309984
+    },
+    {
+      "key": "8771",
+      "tripId": "16_17477_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674677000,
+      "errorM": -36.696091121423706
+    },
+    {
+      "key": "9211",
+      "tripId": "20_17275_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674673000,
+      "errorM": -223.46209004595585
+    },
+    {
+      "key": "9073",
+      "tripId": "31_6502_260905",
+      "state": "on_track",
+      "observedAtMs": 1788674674000,
+      "errorM": -103.02623063147075
+    },
+    {
+      "key": "9428",
+      "tripId": "11_13818_260905",
+      "state": "on_track",
+      "observedAtMs": 1788674677000,
+      "errorM": -1.0673629696020726
+    },
+    {
+      "key": "9131",
+      "tripId": "24_8823_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674683000,
+      "errorM": -47.7244059766208
+    },
+    {
+      "key": "9379",
+      "tripId": "9_28456_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674680000,
+      "errorM": -215.59926423820434
+    },
+    {
+      "key": "9321",
+      "tripId": "26_22867_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674680000,
+      "errorM": 72.64895250363043
+    },
+    {
+      "key": "9136",
+      "tripId": "17_23372_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674684000,
+      "errorM": 21.510564371204964
+    },
+    {
+      "key": "9146",
+      "tripId": "24_7577_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674684000,
+      "errorM": 66.77930468438899
+    },
+    {
+      "key": "8762",
+      "tripId": "26_22858_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674684000,
+      "errorM": -137.21807201689808
+    },
+    {
+      "key": "9355",
+      "tripId": "6_30210_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674685000,
+      "errorM": 105.70328002388669
+    },
+    {
+      "key": "9056",
+      "tripId": "17_37338_260628",
+      "state": "on_track",
+      "observedAtMs": 1788674685000,
+      "errorM": -38.61456667276798
+    },
+    {
+      "key": "9405",
+      "tripId": "9_28473_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674683000,
+      "errorM": -129.08473628590582
+    },
+    {
+      "key": "9328",
+      "tripId": "20_17284_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674684000,
+      "errorM": -177.44552434937282
+    },
+    {
+      "key": "9141",
+      "tripId": "17_35622_260809",
+      "state": "at_stop",
+      "observedAtMs": 1788674686000,
+      "errorM": -325.7926480875867
+    },
+    {
+      "key": "9508",
+      "tripId": "7_18605_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674681000,
+      "errorM": -75.11023671734802
+    },
+    {
+      "key": "9395",
+      "tripId": "5_22162_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674682000,
+      "errorM": -82.96401832732954
+    },
+    {
+      "key": "9339",
+      "tripId": "25_17878_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674683000,
+      "errorM": -82.66441366166964
+    },
+    {
+      "key": "9501",
+      "tripId": "12_21878_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674685000,
+      "errorM": -120.68038230712227
+    },
+    {
+      "key": "8773",
+      "tripId": "26_22869_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674689000,
+      "errorM": -145.19485585490565
+    },
+    {
+      "key": "9138",
+      "tripId": "3_5493_260418",
+      "state": "on_track",
+      "observedAtMs": 1788674687000,
+      "errorM": -77.16400000000067
+    },
+    {
+      "key": "8776",
+      "tripId": "22_40121_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674691000,
+      "errorM": 87.44327998465496
+    },
+    {
+      "key": "9354",
+      "tripId": "12_21879_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674690000,
+      "errorM": -350.95643886225207
+    },
+    {
+      "key": "9347",
+      "tripId": "10_15030_260829",
+      "state": "on_track",
+      "observedAtMs": 1788674691000,
+      "errorM": 152.1676860609332
+    },
+    {
+      "key": "9318",
+      "tripId": "20_17280_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674691000,
+      "errorM": -104.82997310977044
+    },
+    {
+      "key": "8757",
+      "tripId": "21_6049_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674689000,
+      "errorM": 38.41063298472909
+    },
+    {
+      "key": "9424",
+      "tripId": "9_28475_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674688000,
+      "errorM": -0.6786808936833495
+    },
+    {
+      "key": "9069",
+      "tripId": "17_37339_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674691000,
+      "errorM": -21.069018323833006
+    },
+    {
+      "key": "9324",
+      "tripId": "26_22865_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674687000,
+      "errorM": -172.29302695691513
+    },
+    {
+      "key": "9427",
+      "tripId": "4_6789_260829",
+      "state": "at_stop",
+      "observedAtMs": 1788674690000,
+      "errorM": -19.616036442567747
+    },
+    {
+      "key": "9502",
+      "tripId": "7_18600_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674692000,
+      "errorM": 22.209000000000287
+    },
+    {
+      "key": "9446",
+      "tripId": "9_28468_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674686000,
+      "errorM": 5.344770203000735
+    },
+    {
+      "key": "9205",
+      "tripId": "11_10779_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674693000,
+      "errorM": -171.1690028114126
+    },
+    {
+      "key": "9285",
+      "tripId": "20_17282_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674693000,
+      "errorM": -52.544238925966056
+    },
+    {
+      "key": "9368",
+      "tripId": "16_17467_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674696000,
+      "errorM": -180.6214136243143
+    },
+    {
+      "key": "9418",
+      "tripId": "9_635_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674695000,
+      "errorM": -69.61655479687101
+    },
+    {
+      "key": "9105",
+      "tripId": "31_3190_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674695000,
+      "errorM": 13.10332569423872
+    },
+    {
+      "key": "9341",
+      "tripId": "17_23375_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674692000,
+      "errorM": -398.9538104906478
+    },
+    {
+      "key": "9056",
+      "tripId": "17_37338_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674696000,
+      "errorM": 24.03925739565966
+    },
+    {
+      "key": "9441",
+      "tripId": "9_28419_260829",
+      "state": "at_stop",
+      "observedAtMs": 1788674697000,
+      "errorM": 89.38946811603091
+    },
+    {
+      "key": "8781",
+      "tripId": "15_23768_260711",
+      "state": "on_track",
+      "observedAtMs": 1788674694000,
+      "errorM": -226.60999999999967
+    },
+    {
+      "key": "9086",
+      "tripId": "19_11278_260823",
+      "state": "at_stop",
+      "observedAtMs": 1788674696000,
+      "errorM": -100.16832411744747
+    },
+    {
+      "key": "9102",
+      "tripId": "17_37836_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674697000,
+      "errorM": -154.26467500000035
+    },
+    {
+      "key": "9248",
+      "tripId": "20_17272_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674692000,
+      "errorM": 68.31820791737846
+    },
+    {
+      "key": "9323",
+      "tripId": "22_5420_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674694000,
+      "errorM": 2.451000000000022
+    },
+    {
+      "key": "9073",
+      "tripId": "31_6502_260905",
+      "state": "at_stop",
+      "observedAtMs": 1788674697000,
+      "errorM": -98.36214999999993
+    },
+    {
+      "key": "8418",
+      "tripId": "2_16340_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674697000,
+      "errorM": 105.42675750795934
+    },
+    {
+      "key": "9096",
+      "tripId": "17_37835_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674694000,
+      "errorM": -157.5881736472802
+    },
+    {
+      "key": "9438",
+      "tripId": "9_28458_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674703000,
+      "errorM": -157.0975745834321
+    },
+    {
+      "key": "9522",
+      "tripId": "5_22160_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674702000,
+      "errorM": -18.906854780592766
+    },
+    {
+      "key": "9334",
+      "tripId": "1_14426_260510",
+      "state": "at_stop",
+      "observedAtMs": 1788674699000,
+      "errorM": -396.11674445062704
+    },
+    {
+      "key": "9272",
+      "tripId": "10_15064_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674698000,
+      "errorM": 12.527057769845669
+    },
+    {
+      "key": "9070",
+      "tripId": "31_6599_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674700000,
+      "errorM": -343.8391237537418
+    },
+    {
+      "key": "8769",
+      "tripId": "13_12100_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674701000,
+      "errorM": -167.45642169621624
+    },
+    {
+      "key": "9524",
+      "tripId": "8_8072_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674700000,
+      "errorM": 3.0362143953907434
+    },
+    {
+      "key": "9111",
+      "tripId": "31_6594_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674698000,
+      "errorM": 185.91208406905298
+    },
+    {
+      "key": "9139",
+      "tripId": "25_17872_260719",
+      "state": "on_track",
+      "observedAtMs": 1788674701000,
+      "errorM": 30.083517335442593
+    },
+    {
+      "key": "8265",
+      "tripId": "2_16372_260815",
+      "state": "on_track",
+      "observedAtMs": 1788674699000,
+      "errorM": -43.84708657099145
+    },
+    {
+      "key": "9252",
+      "tripId": "10_15055_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674702000,
+      "errorM": -202.573129686456
+    },
+    {
+      "key": "9321",
+      "tripId": "26_22867_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674706000,
+      "errorM": 23.076499999999214
+    },
+    {
+      "key": "9343",
+      "tripId": "18_17247_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674705000,
+      "errorM": -218.7105517700311
+    },
+    {
+      "key": "9350",
+      "tripId": "15_23780_260711",
+      "state": "on_track",
+      "observedAtMs": 1788674706000,
+      "errorM": 262.3603702404216
+    },
+    {
+      "key": "9383",
+      "tripId": "9_28461_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674706000,
+      "errorM": 51.44188959935764
+    },
+    {
+      "key": "9394",
+      "tripId": "15_23815_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674706000,
+      "errorM": 154.23449968908972
+    },
+    {
+      "key": "9237",
+      "tripId": "21_6023_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674707000,
+      "errorM": -43.739644960869555
+    },
+    {
+      "key": "9503",
+      "tripId": "7_18603_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674706000,
+      "errorM": 80.69125991830879
+    },
+    {
+      "key": "9340",
+      "tripId": "26_22861_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674705000,
+      "errorM": -163.32586408079442
+    },
+    {
+      "key": "9366",
+      "tripId": "12_21826_260905",
+      "state": "on_track",
+      "observedAtMs": 1788674707000,
+      "errorM": 9.71900000000096
+    },
+    {
+      "key": "9094",
+      "tripId": "19_11274_260823",
+      "state": "on_track",
+      "observedAtMs": 1788674707000,
+      "errorM": 49.33550000000014
+    },
+    {
+      "key": "8780",
+      "tripId": "22_40966_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674707000,
+      "errorM": -208.45989056344297
+    },
+    {
+      "key": "8772",
+      "tripId": "22_26557_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674707000,
+      "errorM": -112.24994721025882
+    },
+    {
+      "key": "9285",
+      "tripId": "20_17282_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674715000,
+      "errorM": 28.07300000000032
+    },
+    {
+      "key": "9417",
+      "tripId": "15_23819_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674709000,
+      "errorM": -3.9749964053966096
+    },
+    {
+      "key": "8053",
+      "tripId": "23_9363_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674711000,
+      "errorM": -208.81205333333344
+    },
+    {
+      "key": "9211",
+      "tripId": "20_17275_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674712000,
+      "errorM": -53.52854529734759
+    },
+    {
+      "key": "9363",
+      "tripId": "12_21873_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674713000,
+      "errorM": 24.07983175775371
+    },
+    {
+      "key": "9264",
+      "tripId": "10_15053_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674714000,
+      "errorM": 119.6037858448708
+    },
+    {
+      "key": "9255",
+      "tripId": "6_30232_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674713000,
+      "errorM": -0.0019999999999527063
+    },
+    {
+      "key": "9168",
+      "tripId": "24_8824_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674715000,
+      "errorM": -96.44880618132288
+    },
+    {
+      "key": "9354",
+      "tripId": "12_21879_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674717000,
+      "errorM": -52.985999999999876
+    },
+    {
+      "key": "9335",
+      "tripId": "10_15062_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674721000,
+      "errorM": -38.33354831838915
+    },
+    {
+      "key": "9349",
+      "tripId": "24_7595_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674721000,
+      "errorM": -176.20113728899196
+    },
+    {
+      "key": "9318",
+      "tripId": "20_17280_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674720000,
+      "errorM": 0.396999999999025
+    },
+    {
+      "key": "9312",
+      "tripId": "18_17244_260823",
+      "state": "on_track",
+      "observedAtMs": 1788674721000,
+      "errorM": -88.6621107838273
+    },
+    {
+      "key": "9205",
+      "tripId": "11_10779_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674716000,
+      "errorM": -8.236126407522534
+    },
+    {
+      "key": "9314",
+      "tripId": "26_22868_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674717000,
+      "errorM": -116.79879382948093
+    },
+    {
+      "key": "9141",
+      "tripId": "17_35622_260809",
+      "state": "on_track",
+      "observedAtMs": 1788674718000,
+      "errorM": -7.014444748649112
+    },
+    {
+      "key": "9296",
+      "tripId": "1_14361_260501",
+      "state": "at_stop",
+      "observedAtMs": 1788674717000,
+      "errorM": -142.882034059136
+    },
+    {
+      "key": "8288",
+      "tripId": "13_12111_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674718000,
+      "errorM": 89.08222618000602
+    },
+    {
+      "key": "9418",
+      "tripId": "9_635_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674720000,
+      "errorM": 27.610000000000014
+    },
+    {
+      "key": "9369",
+      "tripId": "7_18609_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674721000,
+      "errorM": -80.57241787565272
+    },
+    {
+      "key": "9505",
+      "tripId": "12_21869_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674718000,
+      "errorM": -199.28503545628337
+    },
+    {
+      "key": "9235",
+      "tripId": "3_5535_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674721000,
+      "errorM": -74.17270013993948
+    },
+    {
+      "key": "9518",
+      "tripId": "12_21871_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674721000,
+      "errorM": -125.1299999999992
+    },
+    {
+      "key": "9324",
+      "tripId": "26_22865_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674717000,
+      "errorM": 1.9769999999998618
+    },
+    {
+      "key": "9060",
+      "tripId": "17_37340_260628",
+      "state": "on_track",
+      "observedAtMs": 1788674721000,
+      "errorM": -305.37100263531056
+    },
+    {
+      "key": "9094",
+      "tripId": "19_11274_260823",
+      "state": "at_stop",
+      "observedAtMs": 1788674718000,
+      "errorM": -36.57226187032302
+    },
+    {
+      "key": "9353",
+      "tripId": "9_28485_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674718000,
+      "errorM": -78.93720067643335
+    },
+    {
+      "key": "9331",
+      "tripId": "22_40968_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674716000,
+      "errorM": -1.5760000000009313
+    },
+    {
+      "key": "9428",
+      "tripId": "11_13818_260905",
+      "state": "at_stop",
+      "observedAtMs": 1788674716000,
+      "errorM": -211.16673782378348
+    },
+    {
+      "key": "9384",
+      "tripId": "15_23817_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674717000,
+      "errorM": -269.9206953778612
+    },
+    {
+      "key": "9438",
+      "tripId": "9_28458_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674728000,
+      "errorM": -4.485069748076057
+    },
+    {
+      "key": "8773",
+      "tripId": "26_22869_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674724000,
+      "errorM": -81.89104731608677
+    },
+    {
+      "key": "9341",
+      "tripId": "17_23375_260628",
+      "state": "on_track",
+      "observedAtMs": 1788674727000,
+      "errorM": 37.21524596309064
+    },
+    {
+      "key": "9404",
+      "tripId": "9_28471_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674728000,
+      "errorM": 8.990264134396057
+    },
+    {
+      "key": "8288",
+      "tripId": "13_12111_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674726000,
+      "errorM": 108.84088268532774
+    },
+    {
+      "key": "8776",
+      "tripId": "22_40121_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674725000,
+      "errorM": 46.55799999999999
+    },
+    {
+      "key": "9069",
+      "tripId": "17_37339_260628",
+      "state": "on_track",
+      "observedAtMs": 1788674725000,
+      "errorM": 106.42974999999933
+    },
+    {
+      "key": "9338",
+      "tripId": "8_1533_260621",
+      "state": "on_track",
+      "observedAtMs": 1788674728000,
+      "errorM": 91.68692417765669
+    },
+    {
+      "key": "9060",
+      "tripId": "17_37340_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674723000,
+      "errorM": -283.2035000000001
+    },
+    {
+      "key": "9098",
+      "tripId": "17_37837_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674727000,
+      "errorM": -395.800206296999
+    },
+    {
+      "key": "8268",
+      "tripId": "2_16424_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674727000,
+      "errorM": -208.3031280425157
+    },
+    {
+      "key": "9395",
+      "tripId": "5_22162_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674725000,
+      "errorM": -51.525597435291274
+    },
+    {
+      "key": "8771",
+      "tripId": "16_17477_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674724000,
+      "errorM": -71.10999999999967
+    },
+    {
+      "key": "9272",
+      "tripId": "10_15064_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674729000,
+      "errorM": 91.37177225712958
+    },
+    {
+      "key": "9380",
+      "tripId": "7_18596_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674732000,
+      "errorM": -184.1706872235518
+    },
+    {
+      "key": "8750",
+      "tripId": "23_9357_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674733000,
+      "errorM": 11.745006895011102
+    },
+    {
+      "key": "9282",
+      "tripId": "25_17881_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674728000,
+      "errorM": -139.7254811816257
+    },
+    {
+      "key": "9156",
+      "tripId": "3_5507_260621",
+      "state": "on_track",
+      "observedAtMs": 1788674728000,
+      "errorM": 125.69549767388574
+    },
+    {
+      "key": "9098",
+      "tripId": "17_37837_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674733000,
+      "errorM": -311.16932499999984
+    },
+    {
+      "key": "9070",
+      "tripId": "31_6599_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674731000,
+      "errorM": -0.0039999999999054126
+    },
+    {
+      "key": "9323",
+      "tripId": "22_5420_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674728000,
+      "errorM": -157.26988260436747
+    },
+    {
+      "key": "9298",
+      "tripId": "22_40958_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674735000,
+      "errorM": -37.39415420562591
+    },
+    {
+      "key": "9505",
+      "tripId": "12_21869_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674733000,
+      "errorM": 67.19956337740587
+    },
+    {
+      "key": "9510",
+      "tripId": "8_13546_260712",
+      "state": "at_stop",
+      "observedAtMs": 1788674734000,
+      "errorM": 42.21566977834755
+    },
+    {
+      "key": "9105",
+      "tripId": "31_3190_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674734000,
+      "errorM": 128.12175532259334
+    },
+    {
+      "key": "9260",
+      "tripId": "24_8763_260829",
+      "state": "at_stop",
+      "observedAtMs": 1788674734000,
+      "errorM": 35.63637571638537
+    },
+    {
+      "key": "8754",
+      "tripId": "16_17441_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674733000,
+      "errorM": -162.03368449291702
+    },
+    {
+      "key": "9096",
+      "tripId": "17_37835_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674732000,
+      "errorM": 105.59041999697001
+    },
+    {
+      "key": "9168",
+      "tripId": "24_8824_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674737000,
+      "errorM": 30.226143204184382
+    },
+    {
+      "key": "9353",
+      "tripId": "9_28485_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674738000,
+      "errorM": 33.0074375000022
+    },
+    {
+      "key": "9143",
+      "tripId": "3_16376_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674737000,
+      "errorM": -92.64442404982037
+    },
+    {
+      "key": "8431",
+      "tripId": "2_16435_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674738000,
+      "errorM": -275.36749810953734
+    },
+    {
+      "key": "9417",
+      "tripId": "15_23819_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674741000,
+      "errorM": -342.8314991375022
+    },
+    {
+      "key": "9522",
+      "tripId": "5_22160_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674740000,
+      "errorM": -25.030142524568873
+    },
+    {
+      "key": "9357",
+      "tripId": "1_14292_260501",
+      "state": "at_stop",
+      "observedAtMs": 1788674741000,
+      "errorM": -97.68841468695427
+    },
+    {
+      "key": "9237",
+      "tripId": "21_6023_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674738000,
+      "errorM": 29.61500000000001
+    },
+    {
+      "key": "9102",
+      "tripId": "17_37836_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674736000,
+      "errorM": -132.56437672547327
+    },
+    {
+      "key": "9111",
+      "tripId": "31_6594_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674739000,
+      "errorM": -112.35062408506201
+    },
+    {
+      "key": "9340",
+      "tripId": "26_22861_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674741000,
+      "errorM": 15.449137792444162
+    },
+    {
+      "key": "8288",
+      "tripId": "13_12111_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674737000,
+      "errorM": 0
+    },
+    {
+      "key": "8754",
+      "tripId": "16_17441_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674738000,
+      "errorM": -129.74727739905939
+    },
+    {
+      "key": "9426",
+      "tripId": "5_22174_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674737000,
+      "errorM": -182.15141137241517
+    },
+    {
+      "key": "9111",
+      "tripId": "31_6594_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674742000,
+      "errorM": -87.32587695625443
+    },
+    {
+      "key": "9503",
+      "tripId": "7_18603_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674742000,
+      "errorM": -170.10918687960293
+    },
+    {
+      "key": "9345",
+      "tripId": "18_14452_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674743000,
+      "errorM": -73.76668466398507
+    },
+    {
+      "key": "9138",
+      "tripId": "3_5493_260418",
+      "state": "at_stop",
+      "observedAtMs": 1788674742000,
+      "errorM": -26.217763185647527
+    },
+    {
+      "key": "9056",
+      "tripId": "17_37338_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674746000,
+      "errorM": -129.02999999999884
+    },
+    {
+      "key": "9405",
+      "tripId": "9_28473_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674743000,
+      "errorM": -338.9806471600077
+    },
+    {
+      "key": "8781",
+      "tripId": "15_23768_260711",
+      "state": "at_stop",
+      "observedAtMs": 1788674745000,
+      "errorM": 172.90623878967745
+    },
+    {
+      "key": "9075",
+      "tripId": "19_11270_260712",
+      "state": "on_track",
+      "observedAtMs": 1788674745000,
+      "errorM": -160.08351230418384
+    },
+    {
+      "key": "9424",
+      "tripId": "9_28475_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674742000,
+      "errorM": -189.728997006825
+    },
+    {
+      "key": "9444",
+      "tripId": "5_22175_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674742000,
+      "errorM": -50.593191650325025
+    },
+    {
+      "key": "9524",
+      "tripId": "8_8072_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674746000,
+      "errorM": -280.95774767337207
+    },
+    {
+      "key": "9508",
+      "tripId": "7_18605_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674745000,
+      "errorM": -135.80975357920215
+    },
+    {
+      "key": "9515",
+      "tripId": "8_13521_260621",
+      "state": "on_track",
+      "observedAtMs": 1788674745000,
+      "errorM": -23.655482521067825
+    },
+    {
+      "key": "8753",
+      "tripId": "22_40110_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674742000,
+      "errorM": 85.52925805961604
+    },
+    {
+      "key": "8265",
+      "tripId": "2_16372_260815",
+      "state": "at_stop",
+      "observedAtMs": 1788674745000,
+      "errorM": -51.433583108342646
+    },
+    {
+      "key": "9136",
+      "tripId": "17_23372_260628",
+      "state": "on_track",
+      "observedAtMs": 1788674748000,
+      "errorM": -267.2945788577963
+    },
+    {
+      "key": "9448",
+      "tripId": "11_13834_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674749000,
+      "errorM": -166.56353450088022
+    },
+    {
+      "key": "9131",
+      "tripId": "24_8823_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674751000,
+      "errorM": 145.8661963695231
+    },
+    {
+      "key": "9354",
+      "tripId": "12_21879_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674753000,
+      "errorM": -231.4975584532467
+    },
+    {
+      "key": "9441",
+      "tripId": "9_28419_260829",
+      "state": "at_stop",
+      "observedAtMs": 1788674751000,
+      "errorM": -32.598842174551464
+    },
+    {
+      "key": "9347",
+      "tripId": "10_15030_260829",
+      "state": "at_stop",
+      "observedAtMs": 1788674748000,
+      "errorM": -421.25801034461983
+    },
+    {
+      "key": "9335",
+      "tripId": "10_15062_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674751000,
+      "errorM": 32.026999999998225
+    },
+    {
+      "key": "9383",
+      "tripId": "9_28461_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674752000,
+      "errorM": -65.28419964918476
+    },
+    {
+      "key": "9075",
+      "tripId": "19_11270_260712",
+      "state": "at_stop",
+      "observedAtMs": 1788674747000,
+      "errorM": -150.3625420985545
+    },
+    {
+      "key": "9086",
+      "tripId": "19_11278_260823",
+      "state": "at_stop",
+      "observedAtMs": 1788674749000,
+      "errorM": -204.53259087235165
+    },
+    {
+      "key": "8755",
+      "tripId": "22_40120_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674748000,
+      "errorM": -165.12503273256698
+    },
+    {
+      "key": "9424",
+      "tripId": "9_28475_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674752000,
+      "errorM": -251.5444321617158
+    },
+    {
+      "key": "8776",
+      "tripId": "22_40121_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674748000,
+      "errorM": -1.5631483739475698
+    },
+    {
+      "key": "9515",
+      "tripId": "8_13521_260621",
+      "state": "at_stop",
+      "observedAtMs": 1788674750000,
+      "errorM": 10.01911124714752
+    },
+    {
+      "key": "9265",
+      "tripId": "6_30205_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674750000,
+      "errorM": -190.9260474519706
+    },
+    {
+      "key": "8294",
+      "tripId": "7_18598_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674748000,
+      "errorM": -119.04974567541831
+    },
+    {
+      "key": "9225",
+      "tripId": "17_35617_260809",
+      "state": "at_stop",
+      "observedAtMs": 1788674749000,
+      "errorM": 207.0192243076035
+    },
+    {
+      "key": "9501",
+      "tripId": "12_21878_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674750000,
+      "errorM": -1.30300955626808
+    },
+    {
+      "key": "9438",
+      "tripId": "9_28458_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674754000,
+      "errorM": 26.59600000000046
+    },
+    {
+      "key": "9136",
+      "tripId": "17_23372_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674756000,
+      "errorM": -171.66418199119835
+    },
+    {
+      "key": "9328",
+      "tripId": "20_17284_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674755000,
+      "errorM": -115.36312878655053
+    },
+    {
+      "key": "8762",
+      "tripId": "26_22858_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674757000,
+      "errorM": 49.67940627759526
+    },
+    {
+      "key": "9402",
+      "tripId": "21_5333_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674755000,
+      "errorM": -52.940704196687875
+    },
+    {
+      "key": "8755",
+      "tripId": "22_40120_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674757000,
+      "errorM": -113.05120403640422
+    },
+    {
+      "key": "9342",
+      "tripId": "6_30126_260905",
+      "state": "at_stop",
+      "observedAtMs": 1788674758000,
+      "errorM": -155.1109462597442
+    },
+    {
+      "key": "9518",
+      "tripId": "12_21871_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674756000,
+      "errorM": 92.75754569079618
+    },
+    {
+      "key": "9323",
+      "tripId": "22_5420_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674759000,
+      "errorM": 42.51506231152962
+    },
+    {
+      "key": "9415",
+      "tripId": "10_15059_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674755000,
+      "errorM": -249.05780763594157
+    },
+    {
+      "key": "9321",
+      "tripId": "26_22867_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674759000,
+      "errorM": -176.8500066333254
+    },
+    {
+      "key": "9368",
+      "tripId": "16_17467_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674764000,
+      "errorM": -13.862037202285137
+    },
+    {
+      "key": "9146",
+      "tripId": "24_7577_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674760000,
+      "errorM": -87.68939432320894
+    },
+    {
+      "key": "9255",
+      "tripId": "6_30232_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674764000,
+      "errorM": -70.60330388536363
+    },
+    {
+      "key": "9070",
+      "tripId": "31_6599_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674765000,
+      "errorM": -49.717216021727836
+    },
+    {
+      "key": "8750",
+      "tripId": "23_9357_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674761000,
+      "errorM": 85.38539270019464
+    },
+    {
+      "key": "9312",
+      "tripId": "18_17244_260823",
+      "state": "at_stop",
+      "observedAtMs": 1788674761000,
+      "errorM": 27.962610849743214
+    },
+    {
+      "key": "9363",
+      "tripId": "12_21873_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674761000,
+      "errorM": -118.35461593886976
+    },
+    {
+      "key": "9264",
+      "tripId": "10_15053_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674761000,
+      "errorM": 100.35000000000036
+    },
+    {
+      "key": "9395",
+      "tripId": "5_22162_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674761000,
+      "errorM": -61.52497441094965
+    },
+    {
+      "key": "9298",
+      "tripId": "22_40958_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674761000,
+      "errorM": 8.545765547148676
+    },
+    {
+      "key": "9427",
+      "tripId": "4_6789_260829",
+      "state": "on_track",
+      "observedAtMs": 1788674764000,
+      "errorM": -135.29566415172485
+    },
+    {
+      "key": "9502",
+      "tripId": "7_18600_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674760000,
+      "errorM": -102.62896543190209
+    },
+    {
+      "key": "8771",
+      "tripId": "16_17477_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674763000,
+      "errorM": -81.42544911475761
+    },
+    {
+      "key": "9131",
+      "tripId": "24_8823_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674768000,
+      "errorM": 96.98924238151267
+    },
+    {
+      "key": "9272",
+      "tripId": "10_15064_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674770000,
+      "errorM": -30.30343817836092
+    },
+    {
+      "key": "9347",
+      "tripId": "10_15030_260829",
+      "state": "on_track",
+      "observedAtMs": 1788674768000,
+      "errorM": 0
+    },
+    {
+      "key": "9237",
+      "tripId": "21_6023_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674771000,
+      "errorM": -163.29809508229027
+    },
+    {
+      "key": "9314",
+      "tripId": "26_22868_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674765000,
+      "errorM": 1.6672848098842223
+    },
+    {
+      "key": "9418",
+      "tripId": "9_635_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674766000,
+      "errorM": -333.8807023784515
+    },
+    {
+      "key": "9417",
+      "tripId": "15_23819_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674766000,
+      "errorM": 0.005000000000109139
+    },
+    {
+      "key": "8773",
+      "tripId": "26_22869_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674766000,
+      "errorM": 128.2256149259856
+    },
+    {
+      "key": "9510",
+      "tripId": "8_13546_260712",
+      "state": "on_track",
+      "observedAtMs": 1788674767000,
+      "errorM": 29.397785400390603
+    },
+    {
+      "key": "9260",
+      "tripId": "24_8763_260829",
+      "state": "on_track",
+      "observedAtMs": 1788674769000,
+      "errorM": 112.32394725697486
+    },
+    {
+      "key": "9353",
+      "tripId": "9_28485_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674769000,
+      "errorM": -41.14810940153802
+    },
+    {
+      "key": "9427",
+      "tripId": "4_6789_260829",
+      "state": "at_stop",
+      "observedAtMs": 1788674770000,
+      "errorM": -183.67216634776378
+    },
+    {
+      "key": "9219",
+      "tripId": "3_5594_260418",
+      "state": "at_stop",
+      "observedAtMs": 1788674770000,
+      "errorM": -90.56930780966104
+    },
+    {
+      "key": "9334",
+      "tripId": "1_14426_260510",
+      "state": "at_stop",
+      "observedAtMs": 1788674771000,
+      "errorM": -226.79390321065762
+    },
+    {
+      "key": "8268",
+      "tripId": "2_16424_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674771000,
+      "errorM": -38.29218077258247
+    },
+    {
+      "key": "9282",
+      "tripId": "25_17881_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674766000,
+      "errorM": -59.672000000000025
+    },
+    {
+      "key": "9419",
+      "tripId": "4_6889_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674769000,
+      "errorM": -178.39825492378532
+    },
+    {
+      "key": "9235",
+      "tripId": "3_5535_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674766000,
+      "errorM": -19.84814258006736
+    },
+    {
+      "key": "9324",
+      "tripId": "26_22865_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674767000,
+      "errorM": -44.63127413235907
+    },
+    {
+      "key": "8780",
+      "tripId": "22_40966_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674770000,
+      "errorM": -69.09654779247285
+    },
+    {
+      "key": "9388",
+      "tripId": "16_17483_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674767000,
+      "errorM": 0
+    },
+    {
+      "key": "8265",
+      "tripId": "2_16372_260815",
+      "state": "on_track",
+      "observedAtMs": 1788674765000,
+      "errorM": 13.912004769267696
+    },
+    {
+      "key": "9405",
+      "tripId": "9_28473_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674777000,
+      "errorM": 0
+    },
+    {
+      "key": "8769",
+      "tripId": "13_12100_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674774000,
+      "errorM": 14.16533899888691
+    },
+    {
+      "key": "9146",
+      "tripId": "24_7577_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674775000,
+      "errorM": -84.86195145771944
+    },
+    {
+      "key": "9211",
+      "tripId": "20_17275_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674777000,
+      "errorM": -2.654000000000451
+    },
+    {
+      "key": "9260",
+      "tripId": "24_8763_260829",
+      "state": "on_track",
+      "observedAtMs": 1788674776000,
+      "errorM": 40.21458786460971
+    },
+    {
+      "key": "9301",
+      "tripId": "22_40959_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674772000,
+      "errorM": 72.9192774850817
+    },
+    {
+      "key": "9271",
+      "tripId": "18_17245_260823",
+      "state": "on_track",
+      "observedAtMs": 1788674772000,
+      "errorM": 0
+    },
+    {
+      "key": "9503",
+      "tripId": "7_18603_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674774000,
+      "errorM": -41.956656599981216
+    },
+    {
+      "key": "9444",
+      "tripId": "5_22175_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674772000,
+      "errorM": 97.11870754217762
+    },
+    {
+      "key": "9105",
+      "tripId": "31_3190_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674776000,
+      "errorM": 37.21000000000049
+    },
+    {
+      "key": "9141",
+      "tripId": "17_35622_260809",
+      "state": "at_stop",
+      "observedAtMs": 1788674772000,
+      "errorM": -108.64516123938483
+    },
+    {
+      "key": "9508",
+      "tripId": "7_18605_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674775000,
+      "errorM": 0.40200000000004366
+    },
+    {
+      "key": "8783",
+      "tripId": "26_22871_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674775000,
+      "errorM": 81.5203517003511
+    },
+    {
+      "key": "9168",
+      "tripId": "24_8824_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674776000,
+      "errorM": -13.997214599609265
+    },
+    {
+      "key": "9069",
+      "tripId": "17_37339_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674775000,
+      "errorM": 7.649553411447414
+    },
+    {
+      "key": "8294",
+      "tripId": "7_18598_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674772000,
+      "errorM": -65.54928311696858
+    },
+    {
+      "key": "8772",
+      "tripId": "22_26557_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674776000,
+      "errorM": 5.191411120526482
+    },
+    {
+      "key": "9096",
+      "tripId": "17_37835_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674774000,
+      "errorM": -405.75269172666594
+    },
+    {
+      "key": "8431",
+      "tripId": "2_16435_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674778000,
+      "errorM": 0.39788144664271385
+    },
+    {
+      "key": "9343",
+      "tripId": "18_17247_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674778000,
+      "errorM": -109.98770752649943
+    },
+    {
+      "key": "9522",
+      "tripId": "5_22160_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674782000,
+      "errorM": 1.081000000000131
+    },
+    {
+      "key": "8781",
+      "tripId": "15_23768_260711",
+      "state": "on_track",
+      "observedAtMs": 1788674786000,
+      "errorM": -85.50799999999981
+    },
+    {
+      "key": "9335",
+      "tripId": "10_15062_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674783000,
+      "errorM": -248.1817746576071
+    },
+    {
+      "key": "9418",
+      "tripId": "9_635_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674779000,
+      "errorM": 18.280847196344894
+    },
+    {
+      "key": "8053",
+      "tripId": "23_9363_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674781000,
+      "errorM": -58.33895281612058
+    },
+    {
+      "key": "9296",
+      "tripId": "1_14361_260501",
+      "state": "at_stop",
+      "observedAtMs": 1788674782000,
+      "errorM": -1.1522226052920814
+    },
+    {
+      "key": "8783",
+      "tripId": "26_22871_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674778000,
+      "errorM": 95.734772781305
+    },
+    {
+      "key": "9075",
+      "tripId": "19_11270_260712",
+      "state": "on_track",
+      "observedAtMs": 1788674778000,
+      "errorM": -0.04500000000007276
+    },
+    {
+      "key": "9139",
+      "tripId": "25_17872_260719",
+      "state": "at_stop",
+      "observedAtMs": 1788674779000,
+      "errorM": 64.84739822165102
+    },
+    {
+      "key": "9394",
+      "tripId": "15_23815_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674779000,
+      "errorM": -13.469176234619226
+    },
+    {
+      "key": "9505",
+      "tripId": "12_21869_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674780000,
+      "errorM": -65.97121459960908
+    },
+    {
+      "key": "9272",
+      "tripId": "10_15064_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674781000,
+      "errorM": -69.01938264807359
+    },
+    {
+      "key": "9248",
+      "tripId": "20_17272_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674781000,
+      "errorM": 66.15910745927249
+    },
+    {
+      "key": "9056",
+      "tripId": "17_37338_260628",
+      "state": "on_track",
+      "observedAtMs": 1788674781000,
+      "errorM": -108.54794536682675
+    },
+    {
+      "key": "8288",
+      "tripId": "13_12111_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674782000,
+      "errorM": 91.61478540039063
+    },
+    {
+      "key": "9060",
+      "tripId": "17_37340_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674785000,
+      "errorM": -415.1800000000003
+    },
+    {
+      "key": "9231",
+      "tripId": "20_17278_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674782000,
+      "errorM": 92.31310151611328
+    },
+    {
+      "key": "9265",
+      "tripId": "6_30205_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674781000,
+      "errorM": -1.915516878391827
+    },
+    {
+      "key": "8265",
+      "tripId": "2_16372_260815",
+      "state": "at_stop",
+      "observedAtMs": 1788674784000,
+      "errorM": -61.841630680710296
+    },
+    {
+      "key": "9225",
+      "tripId": "17_35617_260809",
+      "state": "on_track",
+      "observedAtMs": 1788674779000,
+      "errorM": 0.0029999999997016857
+    },
+    {
+      "key": "9339",
+      "tripId": "25_17878_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674786000,
+      "errorM": -125.22564918024636
+    },
+    {
+      "key": "9426",
+      "tripId": "5_22174_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674781000,
+      "errorM": 5.447860449567088
+    },
+    {
+      "key": "9501",
+      "tripId": "12_21878_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674784000,
+      "errorM": 90.50439270019706
+    },
+    {
+      "key": "9438",
+      "tripId": "9_28458_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674787000,
+      "errorM": -146.47625035643523
+    },
+    {
+      "key": "9136",
+      "tripId": "17_23372_260628",
+      "state": "on_track",
+      "observedAtMs": 1788674790000,
+      "errorM": -76.37037238193443
+    },
+    {
+      "key": "9341",
+      "tripId": "17_23375_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674792000,
+      "errorM": -160.6456464338571
+    },
+    {
+      "key": "9354",
+      "tripId": "12_21879_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674791000,
+      "errorM": 5.480513745625103
+    },
+    {
+      "key": "9404",
+      "tripId": "9_28471_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674791000,
+      "errorM": -11.68792887465679
+    },
+    {
+      "key": "9349",
+      "tripId": "24_7595_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674791000,
+      "errorM": -195.6161360033675
+    },
+    {
+      "key": "8755",
+      "tripId": "22_40120_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674787000,
+      "errorM": 0.33259554350433973
+    },
+    {
+      "key": "9342",
+      "tripId": "6_30126_260905",
+      "state": "on_track",
+      "observedAtMs": 1788674789000,
+      "errorM": -61.590000000000146
+    },
+    {
+      "key": "9102",
+      "tripId": "17_37836_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674786000,
+      "errorM": -78.31936494754518
+    },
+    {
+      "key": "9075",
+      "tripId": "19_11270_260712",
+      "state": "on_track",
+      "observedAtMs": 1788674786000,
+      "errorM": 6.3137854003907705
+    },
+    {
+      "key": "9366",
+      "tripId": "12_21826_260905",
+      "state": "at_stop",
+      "observedAtMs": 1788674791000,
+      "errorM": -352.1296943115267
+    },
+    {
+      "key": "8753",
+      "tripId": "22_40110_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674787000,
+      "errorM": -2.230999999997948
+    },
+    {
+      "key": "9255",
+      "tripId": "6_30232_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674789000,
+      "errorM": 0.525000000000091
+    },
+    {
+      "key": "9323",
+      "tripId": "22_5420_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674789000,
+      "errorM": -144.68252704092538
+    },
+    {
+      "key": "9505",
+      "tripId": "12_21869_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674790000,
+      "errorM": -141.8484616072492
+    },
+    {
+      "key": "9331",
+      "tripId": "22_40968_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674787000,
+      "errorM": -223.53763013271782
+    },
+    {
+      "key": "9428",
+      "tripId": "11_13818_260905",
+      "state": "at_stop",
+      "observedAtMs": 1788674789000,
+      "errorM": -41.7809565320058
+    },
+    {
+      "key": "9350",
+      "tripId": "15_23780_260711",
+      "state": "at_stop",
+      "observedAtMs": 1788674798000,
+      "errorM": 110.05691759863248
+    },
+    {
+      "key": "7122",
+      "tripId": "23_9370_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674796000,
+      "errorM": -247.85349770459183
+    },
+    {
+      "key": "9237",
+      "tripId": "21_6023_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674796000,
+      "errorM": 0.18699999999989814
+    },
+    {
+      "key": "9424",
+      "tripId": "9_28475_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674798000,
+      "errorM": -297.3837639233607
+    },
+    {
+      "key": "9301",
+      "tripId": "22_40959_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674798000,
+      "errorM": 48.01734078778645
+    },
+    {
+      "key": "9430",
+      "tripId": "9_28463_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674798000,
+      "errorM": 214.59885423351784
+    },
+    {
+      "key": "9340",
+      "tripId": "26_22861_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674796000,
+      "errorM": -79.68057564494666
+    },
+    {
+      "key": "9324",
+      "tripId": "26_22865_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674793000,
+      "errorM": -212.8504409390398
+    },
+    {
+      "key": "9094",
+      "tripId": "19_11274_260823",
+      "state": "on_track",
+      "observedAtMs": 1788674793000,
+      "errorM": -12.57820998231
+    },
+    {
+      "key": "9291",
+      "tripId": "22_40108_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674793000,
+      "errorM": -167.61673238964795
+    },
+    {
+      "key": "9168",
+      "tripId": "24_8824_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674795000,
+      "errorM": -49.3170336400492
+    },
+    {
+      "key": "9446",
+      "tripId": "9_28468_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674794000,
+      "errorM": -176.54770430032477
+    },
+    {
+      "key": "9156",
+      "tripId": "3_5507_260621",
+      "state": "at_stop",
+      "observedAtMs": 1788674796000,
+      "errorM": 89.18630106626074
+    },
+    {
+      "key": "9448",
+      "tripId": "11_13834_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674797000,
+      "errorM": -157.21200785611722
+    },
+    {
+      "key": "9235",
+      "tripId": "3_5535_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674799000,
+      "errorM": -174.22109497305792
+    },
+    {
+      "key": "9510",
+      "tripId": "8_13546_260712",
+      "state": "at_stop",
+      "observedAtMs": 1788674799000,
+      "errorM": -195.31940067874484
+    },
+    {
+      "key": "9417",
+      "tripId": "15_23819_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674799000,
+      "errorM": -222.2216574633087
+    },
+    {
+      "key": "8773",
+      "tripId": "26_22869_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674800000,
+      "errorM": -53.16882259504746
+    },
+    {
+      "key": "9231",
+      "tripId": "20_17278_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674801000,
+      "errorM": -82.52642956162211
+    },
+    {
+      "key": "9379",
+      "tripId": "9_28456_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674802000,
+      "errorM": 59.249456887680935
+    },
+    {
+      "key": "9312",
+      "tripId": "18_17244_260823",
+      "state": "on_track",
+      "observedAtMs": 1788674800000,
+      "errorM": 3.140785400390996
+    },
+    {
+      "key": "8757",
+      "tripId": "21_6049_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674799000,
+      "errorM": -137.48083905564454
+    },
+    {
+      "key": "9353",
+      "tripId": "9_28485_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674801000,
+      "errorM": 102.17382746689509
+    },
+    {
+      "key": "9282",
+      "tripId": "25_17881_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674804000,
+      "errorM": -396.6735531625138
+    },
+    {
+      "key": "9141",
+      "tripId": "17_35622_260809",
+      "state": "on_track",
+      "observedAtMs": 1788674803000,
+      "errorM": -28.143813383037923
+    },
+    {
+      "key": "9524",
+      "tripId": "8_8072_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674800000,
+      "errorM": -127.07073490383482
+    },
+    {
+      "key": "9098",
+      "tripId": "17_37837_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674802000,
+      "errorM": -177.07999410827415
+    },
+    {
+      "key": "9388",
+      "tripId": "16_17483_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674800000,
+      "errorM": -187.0162920188954
+    },
+    {
+      "key": "8294",
+      "tripId": "7_18598_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674802000,
+      "errorM": 26.156487128753724
+    },
+    {
+      "key": "8265",
+      "tripId": "2_16372_260815",
+      "state": "on_track",
+      "observedAtMs": 1788674802000,
+      "errorM": -67.66491345971008
+    },
+    {
+      "key": "9271",
+      "tripId": "18_17245_260823",
+      "state": "at_stop",
+      "observedAtMs": 1788674808000,
+      "errorM": -187.24418314797143
+    },
+    {
+      "key": "9131",
+      "tripId": "24_8823_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674806000,
+      "errorM": -25.99499999999989
+    },
+    {
+      "key": "9069",
+      "tripId": "17_37339_260628",
+      "state": "on_track",
+      "observedAtMs": 1788674808000,
+      "errorM": -32.90011108288854
+    },
+    {
+      "key": "9138",
+      "tripId": "3_5493_260418",
+      "state": "on_track",
+      "observedAtMs": 1788674808000,
+      "errorM": -102.69206524597394
+    },
+    {
+      "key": "8754",
+      "tripId": "16_17441_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674808000,
+      "errorM": -275.9368117207341
+    },
+    {
+      "key": "9143",
+      "tripId": "3_16376_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674811000,
+      "errorM": 30.101305451312328
+    },
+    {
+      "key": "9314",
+      "tripId": "26_22868_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674807000,
+      "errorM": -174.71116236542548
+    },
+    {
+      "key": "8750",
+      "tripId": "23_9357_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674807000,
+      "errorM": -120.34264144956887
+    },
+    {
+      "key": "8053",
+      "tripId": "23_9363_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674805000,
+      "errorM": 14.25
+    },
+    {
+      "key": "9508",
+      "tripId": "7_18605_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674808000,
+      "errorM": 1.2261987133806542
+    },
+    {
+      "key": "9419",
+      "tripId": "4_6889_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674805000,
+      "errorM": -0.13038023521312425
+    },
+    {
+      "key": "8758",
+      "tripId": "16_17448_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674809000,
+      "errorM": 54.6820221415519
+    },
+    {
+      "key": "9415",
+      "tripId": "10_15059_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674805000,
+      "errorM": -46.69934119138634
+    },
+    {
+      "key": "9343",
+      "tripId": "18_17247_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674812000,
+      "errorM": -76.29800000000068
+    },
+    {
+      "key": "9272",
+      "tripId": "10_15064_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674813000,
+      "errorM": -282.3033943115224
+    },
+    {
+      "key": "9285",
+      "tripId": "20_17282_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674814000,
+      "errorM": -182.1590802393348
+    },
+    {
+      "key": "9347",
+      "tripId": "10_15030_260829",
+      "state": "at_stop",
+      "observedAtMs": 1788674818000,
+      "errorM": -244.45015300298837
+    },
+    {
+      "key": "8769",
+      "tripId": "13_12100_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674813000,
+      "errorM": -23.15080020865389
+    },
+    {
+      "key": "9323",
+      "tripId": "22_5420_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674815000,
+      "errorM": 7.207647067015387
+    },
+    {
+      "key": "9402",
+      "tripId": "21_5333_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674813000,
+      "errorM": -300.6076154911043
+    },
+    {
+      "key": "9338",
+      "tripId": "8_1533_260621",
+      "state": "at_stop",
+      "observedAtMs": 1788674818000,
+      "errorM": 28.6885436375469
+    },
+    {
+      "key": "9328",
+      "tripId": "20_17284_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674818000,
+      "errorM": -267.3021417656432
+    },
+    {
+      "key": "9318",
+      "tripId": "20_17280_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674815000,
+      "errorM": -21.020359071882922
+    },
+    {
+      "key": "9522",
+      "tripId": "5_22160_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674817000,
+      "errorM": -214.5592753064211
+    },
+    {
+      "key": "9441",
+      "tripId": "9_28419_260829",
+      "state": "on_track",
+      "observedAtMs": 1788674817000,
+      "errorM": -147.5676010186453
+    },
+    {
+      "key": "9086",
+      "tripId": "19_11278_260823",
+      "state": "at_stop",
+      "observedAtMs": 1788674813000,
+      "errorM": -165.01175960268984
+    },
+    {
+      "key": "9248",
+      "tripId": "20_17272_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674812000,
+      "errorM": 4.581785400394438
+    },
+    {
+      "key": "8418",
+      "tripId": "2_16340_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674816000,
+      "errorM": 57.62949104920881
+    },
+    {
+      "key": "9252",
+      "tripId": "10_15055_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674812000,
+      "errorM": -337.94109510520866
+    },
+    {
+      "key": "9341",
+      "tripId": "17_23375_260628",
+      "state": "on_track",
+      "observedAtMs": 1788674819000,
+      "errorM": 1.0092876342878299
+    },
+    {
+      "key": "9241",
+      "tripId": "10_15057_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674824000,
+      "errorM": 44.696244095727785
+    },
+    {
+      "key": "9305",
+      "tripId": "25_17874_260719",
+      "state": "at_stop",
+      "observedAtMs": 1788674819000,
+      "errorM": -409.51646485792173
+    },
+    {
+      "key": "8783",
+      "tripId": "26_22871_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674821000,
+      "errorM": -132.14942235448967
+    },
+    {
+      "key": "9503",
+      "tripId": "7_18603_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674823000,
+      "errorM": -139.73558573515038
+    },
+    {
+      "key": "8773",
+      "tripId": "26_22869_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674824000,
+      "errorM": -116.66284817412816
+    },
+    {
+      "key": "8755",
+      "tripId": "22_40120_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674820000,
+      "errorM": -45.58299999999963
+    },
+    {
+      "key": "9363",
+      "tripId": "12_21873_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674823000,
+      "errorM": -171.62490496414648
+    },
+    {
+      "key": "9296",
+      "tripId": "1_14361_260501",
+      "state": "on_track",
+      "observedAtMs": 1788674819000,
+      "errorM": 11.609000000000378
+    },
+    {
+      "key": "8776",
+      "tripId": "22_40121_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674824000,
+      "errorM": -34.47001051592861
+    },
+    {
+      "key": "9324",
+      "tripId": "26_22865_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674820000,
+      "errorM": 38.47899999999936
+    },
+    {
+      "key": "9515",
+      "tripId": "8_13521_260621",
+      "state": "on_track",
+      "observedAtMs": 1788674820000,
+      "errorM": -70.14630926793143
+    },
+    {
+      "key": "9505",
+      "tripId": "12_21869_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674819000,
+      "errorM": -77.81431140146742
+    },
+    {
+      "key": "9331",
+      "tripId": "22_40968_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674824000,
+      "errorM": 121.0238776967708
+    },
+    {
+      "key": "9265",
+      "tripId": "6_30205_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674823000,
+      "errorM": 84.33591419899403
+    },
+    {
+      "key": "8786",
+      "tripId": "21_5336_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674827000,
+      "errorM": 0
+    },
+    {
+      "key": "9417",
+      "tripId": "15_23819_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674825000,
+      "errorM": -12.738424652827007
+    },
+    {
+      "key": "9285",
+      "tripId": "20_17282_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674833000,
+      "errorM": 37.60450455248974
+    },
+    {
+      "key": "9335",
+      "tripId": "10_15062_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674829000,
+      "errorM": -124.66601710682698
+    },
+    {
+      "key": "9357",
+      "tripId": "1_14292_260501",
+      "state": "at_stop",
+      "observedAtMs": 1788674830000,
+      "errorM": -7.271265685063554
+    },
+    {
+      "key": "9102",
+      "tripId": "17_37836_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674825000,
+      "errorM": -17.019428466797763
+    },
+    {
+      "key": "9264",
+      "tripId": "10_15053_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674826000,
+      "errorM": -65.12628243446852
+    },
+    {
+      "key": "9424",
+      "tripId": "9_28475_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674825000,
+      "errorM": -7.784916476588933
+    },
+    {
+      "key": "9427",
+      "tripId": "4_6789_260829",
+      "state": "on_track",
+      "observedAtMs": 1788674826000,
+      "errorM": 12.46174969502772
+    },
+    {
+      "key": "9291",
+      "tripId": "22_40108_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674827000,
+      "errorM": 21.622999999999593
+    },
+    {
+      "key": "9220",
+      "tripId": "17_35618_260802",
+      "state": "on_track",
+      "observedAtMs": 1788674827000,
+      "errorM": 0
+    },
+    {
+      "key": "8268",
+      "tripId": "2_16424_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674829000,
+      "errorM": -88.91561012428338
+    },
+    {
+      "key": "9518",
+      "tripId": "12_21871_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674831000,
+      "errorM": 11.305709471504088
+    },
+    {
+      "key": "8771",
+      "tripId": "16_17477_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674832000,
+      "errorM": -315.9877568646298
+    },
+    {
+      "key": "9444",
+      "tripId": "5_22175_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674832000,
+      "errorM": -140.21288522637587
+    },
+    {
+      "key": "9321",
+      "tripId": "26_22867_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674833000,
+      "errorM": -104.12920825683614
+    },
+    {
+      "key": "9060",
+      "tripId": "17_37340_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674826000,
+      "errorM": -381.2913989206081
+    },
+    {
+      "key": "9075",
+      "tripId": "19_11270_260712",
+      "state": "at_stop",
+      "observedAtMs": 1788674831000,
+      "errorM": -24.8283052667216
+    },
+    {
+      "key": "8780",
+      "tripId": "22_40966_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674827000,
+      "errorM": 41.64837345499109
+    },
+    {
+      "key": "9388",
+      "tripId": "16_17483_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674833000,
+      "errorM": 4.57222146407878
+    },
+    {
+      "key": "9501",
+      "tripId": "12_21878_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674832000,
+      "errorM": 193.9404884177402
+    },
+    {
+      "key": "9426",
+      "tripId": "5_22174_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674834000,
+      "errorM": -32.02023858138091
+    },
+    {
+      "key": "9379",
+      "tripId": "9_28456_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674839000,
+      "errorM": -0.0030000000006111804
+    },
+    {
+      "key": "9343",
+      "tripId": "18_17247_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674837000,
+      "errorM": -83.53093330514912
+    },
+    {
+      "key": "9350",
+      "tripId": "15_23780_260711",
+      "state": "on_track",
+      "observedAtMs": 1788674835000,
+      "errorM": -0.8043432599160951
+    },
+    {
+      "key": "9345",
+      "tripId": "18_14452_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674835000,
+      "errorM": 13.546996052088843
+    },
+    {
+      "key": "8754",
+      "tripId": "16_17441_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674839000,
+      "errorM": 172.46268364042407
+    },
+    {
+      "key": "8762",
+      "tripId": "26_22858_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674835000,
+      "errorM": -182.42043549341543
+    },
+    {
+      "key": "9070",
+      "tripId": "31_6599_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674839000,
+      "errorM": -184.9955368498372
+    },
+    {
+      "key": "9318",
+      "tripId": "20_17280_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674840000,
+      "errorM": 15.994000000000597
+    },
+    {
+      "key": "9282",
+      "tripId": "25_17881_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674840000,
+      "errorM": 0.5386568925507618
+    },
+    {
+      "key": "9141",
+      "tripId": "17_35622_260809",
+      "state": "at_stop",
+      "observedAtMs": 1788674839000,
+      "errorM": -271.44121834008
+    },
+    {
+      "key": "9296",
+      "tripId": "1_14361_260501",
+      "state": "at_stop",
+      "observedAtMs": 1788674840000,
+      "errorM": -52.22479983886751
+    },
+    {
+      "key": "9301",
+      "tripId": "22_40959_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674835000,
+      "errorM": -3.472000000000662
+    },
+    {
+      "key": "9056",
+      "tripId": "17_37338_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674835000,
+      "errorM": 76.17306837484284
+    },
+    {
+      "key": "9138",
+      "tripId": "3_5493_260418",
+      "state": "at_stop",
+      "observedAtMs": 1788674837000,
+      "errorM": 127.12011867529418
+    },
+    {
+      "key": "9353",
+      "tripId": "9_28485_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674836000,
+      "errorM": -14.66456452928469
+    },
+    {
+      "key": "9231",
+      "tripId": "20_17278_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674838000,
+      "errorM": -178.11842846679696
+    },
+    {
+      "key": "9438",
+      "tripId": "9_28458_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674836000,
+      "errorM": -225.7490000000007
+    },
+    {
+      "key": "9418",
+      "tripId": "9_635_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674837000,
+      "errorM": -345.3437140639887
+    },
+    {
+      "key": "9271",
+      "tripId": "18_17245_260823",
+      "state": "on_track",
+      "observedAtMs": 1788674837000,
+      "errorM": -1.5780626459315386
+    },
+    {
+      "key": "9237",
+      "tripId": "21_6023_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674838000,
+      "errorM": -184.31768115273007
+    },
+    {
+      "key": "9248",
+      "tripId": "20_17272_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674839000,
+      "errorM": -187.24551820020497
+    },
+    {
+      "key": "9340",
+      "tripId": "26_22861_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674835000,
+      "errorM": 62.524307749243235
+    },
+    {
+      "key": "9298",
+      "tripId": "22_40958_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674839000,
+      "errorM": 20.69365621142697
+    },
+    {
+      "key": "8294",
+      "tripId": "7_18598_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674839000,
+      "errorM": -166.9889433575372
+    },
+    {
+      "key": "9502",
+      "tripId": "7_18600_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674837000,
+      "errorM": -165.11033597780488
+    },
+    {
+      "key": "9415",
+      "tripId": "10_15059_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674836000,
+      "errorM": 47.085000000002765
+    },
+    {
+      "key": "9096",
+      "tripId": "17_37835_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674839000,
+      "errorM": -292.5148975537559
+    },
+    {
+      "key": "9347",
+      "tripId": "10_15030_260829",
+      "state": "on_track",
+      "observedAtMs": 1788674846000,
+      "errorM": -0.0010000000002037268
+    },
+    {
+      "key": "8781",
+      "tripId": "15_23768_260711",
+      "state": "at_stop",
+      "observedAtMs": 1788674845000,
+      "errorM": 56.61999183746957
+    },
+    {
+      "key": "9380",
+      "tripId": "7_18596_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674844000,
+      "errorM": -28.09324533355175
+    },
+    {
+      "key": "9404",
+      "tripId": "9_28471_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674840000,
+      "errorM": -103.69000000000051
+    },
+    {
+      "key": "9402",
+      "tripId": "21_5333_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674841000,
+      "errorM": 1.2643966414052557
+    },
+    {
+      "key": "9086",
+      "tripId": "19_11278_260823",
+      "state": "on_track",
+      "observedAtMs": 1788674844000,
+      "errorM": -30.893479004301298
+    },
+    {
+      "key": "9342",
+      "tripId": "6_30126_260905",
+      "state": "at_stop",
+      "observedAtMs": 1788674843000,
+      "errorM": -237.1047282091813
+    },
+    {
+      "key": "9139",
+      "tripId": "25_17872_260719",
+      "state": "at_stop",
+      "observedAtMs": 1788674841000,
+      "errorM": -144.15966847403797
+    },
+    {
+      "key": "9205",
+      "tripId": "11_10779_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674843000,
+      "errorM": -177.60278357654988
+    },
+    {
+      "key": "9098",
+      "tripId": "17_37837_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674842000,
+      "errorM": -48.56743893211842
+    },
+    {
+      "key": "8753",
+      "tripId": "22_40110_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674844000,
+      "errorM": -62.031957362294634
+    },
+    {
+      "key": "9430",
+      "tripId": "9_28463_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674841000,
+      "errorM": 38.14015340124149
+    },
+    {
+      "key": "9394",
+      "tripId": "15_23815_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674844000,
+      "errorM": -21.9937620311739
+    },
+    {
+      "key": "8758",
+      "tripId": "16_17448_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674844000,
+      "errorM": -13.259344251468974
+    },
+    {
+      "key": "9225",
+      "tripId": "17_35617_260809",
+      "state": "at_stop",
+      "observedAtMs": 1788674846000,
+      "errorM": -11.75329551928371
+    },
+    {
+      "key": "9522",
+      "tripId": "5_22160_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674849000,
+      "errorM": -0.13652080279462098
+    },
+    {
+      "key": "8783",
+      "tripId": "26_22871_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674852000,
+      "errorM": 59.78386467886378
+    },
+    {
+      "key": "9211",
+      "tripId": "20_17275_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674847000,
+      "errorM": -4.982613354173736
+    },
+    {
+      "key": "9363",
+      "tripId": "12_21873_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674847000,
+      "errorM": -54.3547855224615
+    },
+    {
+      "key": "9220",
+      "tripId": "17_35618_260802",
+      "state": "at_stop",
+      "observedAtMs": 1788674852000,
+      "errorM": 15.583233609875407
+    },
+    {
+      "key": "9334",
+      "tripId": "1_14426_260510",
+      "state": "at_stop",
+      "observedAtMs": 1788674848000,
+      "errorM": -305.0621345397508
+    },
+    {
+      "key": "9105",
+      "tripId": "31_3190_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674851000,
+      "errorM": -23.47976382505476
+    },
+    {
+      "key": "9146",
+      "tripId": "24_7577_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674850000,
+      "errorM": -246.97539124767718
+    },
+    {
+      "key": "9515",
+      "tripId": "8_13521_260621",
+      "state": "at_stop",
+      "observedAtMs": 1788674850000,
+      "errorM": -93.00082908687546
+    },
+    {
+      "key": "8268",
+      "tripId": "2_16424_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674847000,
+      "errorM": -71.61435313274887
+    },
+    {
+      "key": "8771",
+      "tripId": "16_17477_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674848000,
+      "errorM": -23.878140309363516
+    },
+    {
+      "key": "8418",
+      "tripId": "2_16340_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674850000,
+      "errorM": 81.75417805283723
+    },
+    {
+      "key": "9428",
+      "tripId": "11_13818_260905",
+      "state": "at_stop",
+      "observedAtMs": 1788674848000,
+      "errorM": -148.83344975142245
+    },
+    {
+      "key": "8265",
+      "tripId": "2_16372_260815",
+      "state": "at_stop",
+      "observedAtMs": 1788674848000,
+      "errorM": -151.4735234685886
+    },
+    {
+      "key": "9252",
+      "tripId": "10_15055_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674848000,
+      "errorM": -47.00700503120697
+    },
+    {
+      "key": "9503",
+      "tripId": "7_18603_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674858000,
+      "errorM": 0.3739999999961583
+    },
+    {
+      "key": "9056",
+      "tripId": "17_37338_260628",
+      "state": "on_track",
+      "observedAtMs": 1788674859000,
+      "errorM": 0.005000000001018634
+    },
+    {
+      "key": "9510",
+      "tripId": "8_13546_260712",
+      "state": "at_stop",
+      "observedAtMs": 1788674854000,
+      "errorM": -210.8909171641626
+    },
+    {
+      "key": "9136",
+      "tripId": "17_23372_260628",
+      "state": "on_track",
+      "observedAtMs": 1788674853000,
+      "errorM": 93.18110074016658
+    },
+    {
+      "key": "9405",
+      "tripId": "9_28473_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674853000,
+      "errorM": -257.78392468121456
+    },
+    {
+      "key": "9143",
+      "tripId": "3_16376_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674859000,
+      "errorM": 8.563457485306117
+    },
+    {
+      "key": "8773",
+      "tripId": "26_22869_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674861000,
+      "errorM": -45.203882407012316
+    },
+    {
+      "key": "9102",
+      "tripId": "17_37836_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674857000,
+      "errorM": -70.25080856546083
+    },
+    {
+      "key": "9353",
+      "tripId": "9_28485_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674856000,
+      "errorM": -27.010999999998603
+    },
+    {
+      "key": "9395",
+      "tripId": "5_22162_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674855000,
+      "errorM": 78.65159815710194
+    },
+    {
+      "key": "9272",
+      "tripId": "10_15064_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674853000,
+      "errorM": -0.6848689178723362
+    },
+    {
+      "key": "8288",
+      "tripId": "13_12111_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674853000,
+      "errorM": -307.72
+    },
+    {
+      "key": "9418",
+      "tripId": "9_635_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674856000,
+      "errorM": -0.0009999999999763531
+    },
+    {
+      "key": "9156",
+      "tripId": "3_5507_260621",
+      "state": "at_stop",
+      "observedAtMs": 1788674859000,
+      "errorM": -344.20991086916115
+    },
+    {
+      "key": "8755",
+      "tripId": "22_40120_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674857000,
+      "errorM": 70.81952386470311
+    },
+    {
+      "key": "9384",
+      "tripId": "15_23817_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674854000,
+      "errorM": -68.51040766399092
+    },
+    {
+      "key": "8431",
+      "tripId": "2_16435_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674862000,
+      "errorM": 218.59097238201048
+    },
+    {
+      "key": "9441",
+      "tripId": "9_28419_260829",
+      "state": "at_stop",
+      "observedAtMs": 1788674863000,
+      "errorM": -12.722356532922277
+    },
+    {
+      "key": "9357",
+      "tripId": "1_14292_260501",
+      "state": "on_track",
+      "observedAtMs": 1788674863000,
+      "errorM": 43.788000000000466
+    },
+    {
+      "key": "9291",
+      "tripId": "22_40108_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674864000,
+      "errorM": 4.627888948054533
+    },
+    {
+      "key": "9248",
+      "tripId": "20_17272_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674864000,
+      "errorM": -1.1785622803326987
+    },
+    {
+      "key": "9235",
+      "tripId": "3_5535_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674865000,
+      "errorM": -164.30572497409594
+    },
+    {
+      "key": "9368",
+      "tripId": "16_17467_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674865000,
+      "errorM": -1.4380000000001019
+    },
+    {
+      "key": "8769",
+      "tripId": "13_12100_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674867000,
+      "errorM": -70.1701745997243
+    },
+    {
+      "key": "9349",
+      "tripId": "24_7595_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674866000,
+      "errorM": -150.80694691899407
+    },
+    {
+      "key": "9314",
+      "tripId": "26_22868_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674862000,
+      "errorM": -159.350791209421
+    },
+    {
+      "key": "8053",
+      "tripId": "23_9363_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674867000,
+      "errorM": -48.681075569078985
+    },
+    {
+      "key": "9260",
+      "tripId": "24_8763_260829",
+      "state": "at_stop",
+      "observedAtMs": 1788674863000,
+      "errorM": -49.43030084552993
+    },
+    {
+      "key": "9518",
+      "tripId": "12_21871_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674867000,
+      "errorM": -311.38876116961
+    },
+    {
+      "key": "9419",
+      "tripId": "4_6889_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674866000,
+      "errorM": -87.8226660907194
+    },
+    {
+      "key": "9075",
+      "tripId": "19_11270_260712",
+      "state": "on_track",
+      "observedAtMs": 1788674863000,
+      "errorM": -40.99285290250191
+    },
+    {
+      "key": "9331",
+      "tripId": "22_40968_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674863000,
+      "errorM": -95.29420198151638
+    },
+    {
+      "key": "9502",
+      "tripId": "7_18600_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674864000,
+      "errorM": -31.696617701051764
+    },
+    {
+      "key": "7122",
+      "tripId": "23_9370_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674870000,
+      "errorM": 99.14733784942757
+    },
+    {
+      "key": "9369",
+      "tripId": "7_18609_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674870000,
+      "errorM": 457.0580908597776
+    },
+    {
+      "key": "9241",
+      "tripId": "10_15057_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674870000,
+      "errorM": -24.82695616706576
+    },
+    {
+      "key": "8786",
+      "tripId": "21_5336_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674871000,
+      "errorM": -249.46418522949216
+    },
+    {
+      "key": "9131",
+      "tripId": "24_8823_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674875000,
+      "errorM": 1.1115423879728041
+    },
+    {
+      "key": "9524",
+      "tripId": "8_8072_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674872000,
+      "errorM": -75.63693370919827
+    },
+    {
+      "key": "9069",
+      "tripId": "17_37339_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674872000,
+      "errorM": 93.06657898836238
+    },
+    {
+      "key": "9285",
+      "tripId": "20_17282_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674876000,
+      "errorM": -28.77100000000064
+    },
+    {
+      "key": "8762",
+      "tripId": "26_22858_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674869000,
+      "errorM": 127.54755903254045
+    },
+    {
+      "key": "9056",
+      "tripId": "17_37338_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674875000,
+      "errorM": -69.29436838522815
+    },
+    {
+      "key": "9323",
+      "tripId": "22_5420_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674873000,
+      "errorM": -265.8554449889284
+    },
+    {
+      "key": "9312",
+      "tripId": "18_17244_260823",
+      "state": "at_stop",
+      "observedAtMs": 1788674872000,
+      "errorM": 132.73312622653248
+    },
+    {
+      "key": "8757",
+      "tripId": "21_6049_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674874000,
+      "errorM": 59.34431041785683
+    },
+    {
+      "key": "9424",
+      "tripId": "9_28475_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674872000,
+      "errorM": -9.545794667411428
+    },
+    {
+      "key": "9138",
+      "tripId": "3_5493_260418",
+      "state": "on_track",
+      "observedAtMs": 1788674871000,
+      "errorM": -0.5630000000010114
+    },
+    {
+      "key": "9340",
+      "tripId": "26_22861_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674871000,
+      "errorM": -2.355999999999767
+    },
+    {
+      "key": "9205",
+      "tripId": "11_10779_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674872000,
+      "errorM": -18.204285537109172
+    },
+    {
+      "key": "9324",
+      "tripId": "26_22865_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674870000,
+      "errorM": -222.8394265381803
+    },
+    {
+      "key": "9255",
+      "tripId": "6_30232_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674873000,
+      "errorM": -66.66509136397872
+    },
+    {
+      "key": "9298",
+      "tripId": "22_40958_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674871000,
+      "errorM": 46.26000000000022
+    },
+    {
+      "key": "8268",
+      "tripId": "2_16424_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674875000,
+      "errorM": 73.22978576660171
+    },
+    {
+      "key": "8294",
+      "tripId": "7_18598_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674871000,
+      "errorM": -95.04500000000007
+    },
+    {
+      "key": "9415",
+      "tripId": "10_15059_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674871000,
+      "errorM": -287.75363050306987
+    },
+    {
+      "key": "9428",
+      "tripId": "11_13818_260905",
+      "state": "on_track",
+      "observedAtMs": 1788674871000,
+      "errorM": -62.31500000000051
+    },
+    {
+      "key": "9136",
+      "tripId": "17_23372_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674881000,
+      "errorM": 9.171324999997523
+    },
+    {
+      "key": "8754",
+      "tripId": "16_17441_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674881000,
+      "errorM": -216.51646545354743
+    },
+    {
+      "key": "9347",
+      "tripId": "10_15030_260829",
+      "state": "at_stop",
+      "observedAtMs": 1788674883000,
+      "errorM": -229.3899303167891
+    },
+    {
+      "key": "9383",
+      "tripId": "9_28461_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674881000,
+      "errorM": -51.935127394564915
+    },
+    {
+      "key": "9271",
+      "tripId": "18_17245_260823",
+      "state": "at_stop",
+      "observedAtMs": 1788674877000,
+      "errorM": -78.08715482666207
+    },
+    {
+      "key": "9430",
+      "tripId": "9_28463_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674878000,
+      "errorM": -125.17909280093772
+    },
+    {
+      "key": "8757",
+      "tripId": "21_6049_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674880000,
+      "errorM": 94.9982945254942
+    },
+    {
+      "key": "9402",
+      "tripId": "21_5333_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674878000,
+      "errorM": -30.29678499425063
+    },
+    {
+      "key": "9380",
+      "tripId": "7_18596_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674881000,
+      "errorM": 17.60599999999613
+    },
+    {
+      "key": "9522",
+      "tripId": "5_22160_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674880000,
+      "errorM": -2.893136150791179
+    },
+    {
+      "key": "8771",
+      "tripId": "16_17477_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674882000,
+      "errorM": 35.95000000000073
+    },
+    {
+      "key": "8783",
+      "tripId": "26_22871_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674877000,
+      "errorM": -54.488835905336714
+    },
+    {
+      "key": "8750",
+      "tripId": "23_9357_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674880000,
+      "errorM": 202.39393485323853
+    },
+    {
+      "key": "9438",
+      "tripId": "9_28458_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674878000,
+      "errorM": 48.07171490996643
+    },
+    {
+      "key": "9395",
+      "tripId": "5_22162_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674878000,
+      "errorM": -1.675000000000182
+    },
+    {
+      "key": "9225",
+      "tripId": "17_35617_260809",
+      "state": "on_track",
+      "observedAtMs": 1788674877000,
+      "errorM": 13.100999999999658
+    },
+    {
+      "key": "9503",
+      "tripId": "7_18603_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674895000,
+      "errorM": -94.60238361597658
+    },
+    {
+      "key": "9111",
+      "tripId": "31_6594_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674885000,
+      "errorM": -64.47989888883785
+    },
+    {
+      "key": "9343",
+      "tripId": "18_17247_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674889000,
+      "errorM": -122.7963781428316
+    },
+    {
+      "key": "9341",
+      "tripId": "17_23375_260628",
+      "state": "at_stop",
+      "observedAtMs": 1788674891000,
+      "errorM": -181.32368270360894
+    },
+    {
+      "key": "9354",
+      "tripId": "12_21879_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674888000,
+      "errorM": 4.192521708225286
+    },
+    {
+      "key": "9335",
+      "tripId": "10_15062_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674889000,
+      "errorM": -163.40060886443098
+    },
+    {
+      "key": "9349",
+      "tripId": "24_7595_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674895000,
+      "errorM": 2.5792884840175248
+    },
+    {
+      "key": "9328",
+      "tripId": "20_17284_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674893000,
+      "errorM": -297.6962086667959
+    },
+    {
+      "key": "8773",
+      "tripId": "26_22869_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674891000,
+      "errorM": -127.43244415744448
+    },
+    {
+      "key": "9321",
+      "tripId": "26_22867_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674884000,
+      "errorM": -155.22717184922658
+    },
+    {
+      "key": "9318",
+      "tripId": "20_17280_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674885000,
+      "errorM": -247.92701492473498
+    },
+    {
+      "key": "9102",
+      "tripId": "17_37836_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674886000,
+      "errorM": -29.919211668207936
+    },
+    {
+      "key": "9510",
+      "tripId": "8_13546_260712",
+      "state": "on_track",
+      "observedAtMs": 1788674886000,
+      "errorM": 0
+    },
+    {
+      "key": "9448",
+      "tripId": "11_13834_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674886000,
+      "errorM": -274.6209112215306
+    },
+    {
+      "key": "9508",
+      "tripId": "7_18605_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674886000,
+      "errorM": -102.12523619634521
+    },
+    {
+      "key": "9424",
+      "tripId": "9_28475_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674891000,
+      "errorM": 87.89214501124252
+    },
+    {
+      "key": "9505",
+      "tripId": "12_21869_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674889000,
+      "errorM": 326.18737011654594
+    },
+    {
+      "key": "8755",
+      "tripId": "22_40120_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674889000,
+      "errorM": -16.170999999999367
+    },
+    {
+      "key": "9305",
+      "tripId": "25_17874_260719",
+      "state": "at_stop",
+      "observedAtMs": 1788674890000,
+      "errorM": -223.61817917834014
+    },
+    {
+      "key": "9282",
+      "tripId": "25_17881_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674885000,
+      "errorM": -259.9541914139984
+    },
+    {
+      "key": "7122",
+      "tripId": "23_9370_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674894000,
+      "errorM": -1.1190000000000282
+    },
+    {
+      "key": "9139",
+      "tripId": "25_17872_260719",
+      "state": "on_track",
+      "observedAtMs": 1788674883000,
+      "errorM": -46.47339891719457
+    },
+    {
+      "key": "9353",
+      "tripId": "9_28485_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674893000,
+      "errorM": -113.89582528708343
+    },
+    {
+      "key": "8776",
+      "tripId": "22_40121_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674891000,
+      "errorM": -91.9692848655809
+    },
+    {
+      "key": "9098",
+      "tripId": "17_37837_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674886000,
+      "errorM": -0.623000000000502
+    },
+    {
+      "key": "9389",
+      "tripId": "16_17454_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674893000,
+      "errorM": 61.70651503171072
+    },
+    {
+      "key": "9502",
+      "tripId": "7_18600_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674890000,
+      "errorM": -230.70114428629404
+    },
+    {
+      "key": "9446",
+      "tripId": "9_28468_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674886000,
+      "errorM": -33.28425121658984
+    },
+    {
+      "key": "8265",
+      "tripId": "2_16372_260815",
+      "state": "on_track",
+      "observedAtMs": 1788674885000,
+      "errorM": -14.003031250000276
+    },
+    {
+      "key": "9339",
+      "tripId": "25_17878_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674891000,
+      "errorM": -202.88028050973026
+    },
+    {
+      "key": "9384",
+      "tripId": "15_23817_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674889000,
+      "errorM": 41.251000000000204
+    },
+    {
+      "key": "9501",
+      "tripId": "12_21878_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674887000,
+      "errorM": -75.92026919313321
+    },
+    {
+      "key": "9252",
+      "tripId": "10_15055_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674890000,
+      "errorM": -196.99008448611312
+    },
+    {
+      "key": "9345",
+      "tripId": "18_14452_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674899000,
+      "errorM": -126.0242013448028
+    },
+    {
+      "key": "9405",
+      "tripId": "9_28473_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674901000,
+      "errorM": 0.14699999999993452
+    },
+    {
+      "key": "9404",
+      "tripId": "9_28471_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674897000,
+      "errorM": -329.20470752168876
+    },
+    {
+      "key": "9338",
+      "tripId": "8_1533_260621",
+      "state": "at_stop",
+      "observedAtMs": 1788674901000,
+      "errorM": -293.95017218816974
+    },
+    {
+      "key": "9318",
+      "tripId": "20_17280_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674898000,
+      "errorM": -260.31135173924486
+    },
+    {
+      "key": "8053",
+      "tripId": "23_9363_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674901000,
+      "errorM": -27.653628879665803
+    },
+    {
+      "key": "9427",
+      "tripId": "4_6789_260829",
+      "state": "on_track",
+      "observedAtMs": 1788674898000,
+      "errorM": 52.73917124581021
+    },
+    {
+      "key": "9334",
+      "tripId": "1_14426_260510",
+      "state": "at_stop",
+      "observedAtMs": 1788674898000,
+      "errorM": -218.4699999999998
+    },
+    {
+      "key": "9237",
+      "tripId": "21_6023_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674895000,
+      "errorM": -37.51358102223321
+    },
+    {
+      "key": "9408",
+      "tripId": "7_18614_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674896000,
+      "errorM": 13.58733816559737
+    },
+    {
+      "key": "9060",
+      "tripId": "17_37340_260628",
+      "state": "on_track",
+      "observedAtMs": 1788674901000,
+      "errorM": -255.74264733809105
+    },
+    {
+      "key": "9366",
+      "tripId": "12_21826_260905",
+      "state": "at_stop",
+      "observedAtMs": 1788674898000,
+      "errorM": -240.18701789292754
+    },
+    {
+      "key": "9323",
+      "tripId": "22_5420_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674899000,
+      "errorM": -36.65647433023014
+    },
+    {
+      "key": "9139",
+      "tripId": "25_17872_260719",
+      "state": "at_stop",
+      "observedAtMs": 1788674901000,
+      "errorM": -224.29999999999927
+    },
+    {
+      "key": "8780",
+      "tripId": "22_40966_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674901000,
+      "errorM": 105.27526715690692
+    },
+    {
+      "key": "9272",
+      "tripId": "10_15064_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674896000,
+      "errorM": -95.31405694711884
+    },
+    {
+      "key": "8288",
+      "tripId": "13_12111_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674902000,
+      "errorM": -286.4788451725408
+    },
+    {
+      "key": "9350",
+      "tripId": "15_23780_260711",
+      "state": "at_stop",
+      "observedAtMs": 1788674908000,
+      "errorM": -23.801485513263742
+    },
+    {
+      "key": "9357",
+      "tripId": "1_14292_260501",
+      "state": "at_stop",
+      "observedAtMs": 1788674905000,
+      "errorM": -155.9490674043991
+    },
+    {
+      "key": "9369",
+      "tripId": "7_18609_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674905000,
+      "errorM": 5.784861364004428
+    },
+    {
+      "key": "9522",
+      "tripId": "5_22160_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674905000,
+      "errorM": -17.918187010409383
+    },
+    {
+      "key": "9296",
+      "tripId": "1_14361_260501",
+      "state": "at_stop",
+      "observedAtMs": 1788674904000,
+      "errorM": -51.453627582711306
+    },
+    {
+      "key": "9231",
+      "tripId": "20_17278_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674902000,
+      "errorM": -65.69652149374565
+    },
+    {
+      "key": "9075",
+      "tripId": "19_11270_260712",
+      "state": "at_stop",
+      "observedAtMs": 1788674905000,
+      "errorM": -209.58112283807077
+    },
+    {
+      "key": "9265",
+      "tripId": "6_30205_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674902000,
+      "errorM": 64.75966248531131
+    },
+    {
+      "key": "8758",
+      "tripId": "16_17448_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674904000,
+      "errorM": -369.7360000000008
+    },
+    {
+      "key": "9324",
+      "tripId": "26_22865_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674905000,
+      "errorM": 63.50550514191036
+    },
+    {
+      "key": "9141",
+      "tripId": "17_35622_260809",
+      "state": "on_track",
+      "observedAtMs": 1788674905000,
+      "errorM": -73.31409658009761
+    },
+    {
+      "key": "9419",
+      "tripId": "4_6889_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674907000,
+      "errorM": 0.38000000000010914
+    },
+    {
+      "key": "9331",
+      "tripId": "22_40968_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674907000,
+      "errorM": -93.56289499172453
+    },
+    {
+      "key": "9428",
+      "tripId": "11_13818_260905",
+      "state": "at_stop",
+      "observedAtMs": 1788674903000,
+      "errorM": 106.09165980729631
+    },
+    {
+      "key": "8754",
+      "tripId": "16_17441_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674914000,
+      "errorM": -8.854971435661355
+    },
+    {
+      "key": "9347",
+      "tripId": "10_15030_260829",
+      "state": "on_track",
+      "observedAtMs": 1788674912000,
+      "errorM": 1.2990090589082683
+    },
+    {
+      "key": "8753",
+      "tripId": "22_40110_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674910000,
+      "errorM": -12.085306241562648
+    },
+    {
+      "key": "9321",
+      "tripId": "26_22867_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674909000,
+      "errorM": -72.01203242872725
+    },
+    {
+      "key": "9220",
+      "tripId": "17_35618_260802",
+      "state": "at_stop",
+      "observedAtMs": 1788674908000,
+      "errorM": -26.371037440982263
+    },
+    {
+      "key": "9264",
+      "tripId": "10_15053_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674910000,
+      "errorM": -67.39753522825958
+    },
+    {
+      "key": "9248",
+      "tripId": "20_17272_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674911000,
+      "errorM": -252.93977819683278
+    },
+    {
+      "key": "9131",
+      "tripId": "24_8823_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674913000,
+      "errorM": -58.54699999999957
+    },
+    {
+      "key": "9426",
+      "tripId": "5_22174_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674911000,
+      "errorM": -131.81144790823237
+    },
+    {
+      "key": "9368",
+      "tripId": "16_17467_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674919000,
+      "errorM": -42.96745711810581
+    },
+    {
+      "key": "9241",
+      "tripId": "10_15057_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674917000,
+      "errorM": -24.09349999999995
+    },
+    {
+      "key": "9354",
+      "tripId": "12_21879_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674916000,
+      "errorM": -8.608293805721587
+    },
+    {
+      "key": "8781",
+      "tripId": "15_23768_260711",
+      "state": "on_track",
+      "observedAtMs": 1788674919000,
+      "errorM": -186.12827277725773
+    },
+    {
+      "key": "8762",
+      "tripId": "26_22858_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674918000,
+      "errorM": -85.52476522159486
+    },
+    {
+      "key": "8757",
+      "tripId": "21_6049_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674916000,
+      "errorM": -63.12907053082017
+    },
+    {
+      "key": "9402",
+      "tripId": "21_5333_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674916000,
+      "errorM": 37.70366945901151
+    },
+    {
+      "key": "9070",
+      "tripId": "31_6599_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674916000,
+      "errorM": 66.60672864575281
+    },
+    {
+      "key": "9448",
+      "tripId": "11_13834_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674914000,
+      "errorM": 55.83645680956579
+    },
+    {
+      "key": "9438",
+      "tripId": "9_28458_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674915000,
+      "errorM": -67.57047126454017
+    },
+    {
+      "key": "9098",
+      "tripId": "17_37837_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674919000,
+      "errorM": 184.12477659991237
+    },
+    {
+      "key": "9146",
+      "tripId": "24_7577_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674917000,
+      "errorM": 29.83210530845645
+    },
+    {
+      "key": "9515",
+      "tripId": "8_13521_260621",
+      "state": "at_stop",
+      "observedAtMs": 1788674918000,
+      "errorM": 6.172386030179041
+    },
+    {
+      "key": "9388",
+      "tripId": "16_17483_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674918000,
+      "errorM": 74.99780918131341
+    },
+    {
+      "key": "8294",
+      "tripId": "7_18598_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674915000,
+      "errorM": -179.00061878217457
+    },
+    {
+      "key": "9086",
+      "tripId": "19_11278_260823",
+      "state": "on_track",
+      "observedAtMs": 1788674916000,
+      "errorM": 8.224080979236987
+    },
+    {
+      "key": "9168",
+      "tripId": "24_8824_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674917000,
+      "errorM": -49.27384740784191
+    },
+    {
+      "key": "9384",
+      "tripId": "15_23817_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674915000,
+      "errorM": -31.433792193884074
+    },
+    {
+      "key": "9086",
+      "tripId": "19_11278_260823",
+      "state": "at_stop",
+      "observedAtMs": 1788674922000,
+      "errorM": -91.95936194612705
+    },
+    {
+      "key": "9342",
+      "tripId": "6_30126_260905",
+      "state": "at_stop",
+      "observedAtMs": 1788674921000,
+      "errorM": -51.956047394032794
+    },
+    {
+      "key": "8053",
+      "tripId": "23_9363_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674922000,
+      "errorM": -80.04182623590714
+    },
+    {
+      "key": "8786",
+      "tripId": "21_5336_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674923000,
+      "errorM": -126.1388634680701
+    },
+    {
+      "key": "8781",
+      "tripId": "15_23768_260711",
+      "state": "at_stop",
+      "observedAtMs": 1788674923000,
+      "errorM": -158.91207273941473
+    },
+    {
+      "key": "9363",
+      "tripId": "12_21873_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674920000,
+      "errorM": -175.25249369784524
+    },
+    {
+      "key": "9508",
+      "tripId": "7_18605_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674920000,
+      "errorM": -64.03659385249011
+    },
+    {
+      "key": "9505",
+      "tripId": "12_21869_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674920000,
+      "errorM": -55.931000000000495
+    },
+    {
+      "key": "9518",
+      "tripId": "12_21871_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674925000,
+      "errorM": 26.256496936020994
+    },
+    {
+      "key": "9138",
+      "tripId": "3_5493_260418",
+      "state": "at_stop",
+      "observedAtMs": 1788674923000,
+      "errorM": -27.0405696998032
+    },
+    {
+      "key": "9353",
+      "tripId": "9_28485_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674924000,
+      "errorM": 6.697863853731178
+    },
+    {
+      "key": "8776",
+      "tripId": "22_40121_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674920000,
+      "errorM": -68.55779550377247
+    },
+    {
+      "key": "9323",
+      "tripId": "22_5420_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674925000,
+      "errorM": -67.92245036173745
+    },
+    {
+      "key": "9324",
+      "tripId": "26_22865_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674925000,
+      "errorM": -65.98801935618576
+    },
+    {
+      "key": "9272",
+      "tripId": "10_15064_260830",
+      "state": "on_track",
+      "observedAtMs": 1788674925000,
+      "errorM": -33.648191305499495
+    },
+    {
+      "key": "9418",
+      "tripId": "9_635_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674923000,
+      "errorM": -286.2131978213706
+    },
+    {
+      "key": "9225",
+      "tripId": "17_35617_260809",
+      "state": "at_stop",
+      "observedAtMs": 1788674923000,
+      "errorM": -54.692055616042126
+    },
+    {
+      "key": "9444",
+      "tripId": "5_22175_260906",
+      "state": "at_stop",
+      "observedAtMs": 1788674929000,
+      "errorM": -3.3787327317959353
+    },
+    {
+      "key": "8780",
+      "tripId": "22_40966_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674930000,
+      "errorM": -179.45165913439996
+    },
+    {
+      "key": "9143",
+      "tripId": "3_16376_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674929000,
+      "errorM": -111.9705270114573
+    },
+    {
+      "key": "8783",
+      "tripId": "26_22871_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674928000,
+      "errorM": -192.3536090356249
+    },
+    {
+      "key": "9424",
+      "tripId": "9_28475_260830",
+      "state": "at_stop",
+      "observedAtMs": 1788674932000,
+      "errorM": 145.44905263771352
+    },
+    {
+      "key": "8755",
+      "tripId": "22_40120_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674931000,
+      "errorM": -100.04390725544454
+    },
+    {
+      "key": "9105",
+      "tripId": "31_3190_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674928000,
+      "errorM": -58.915865992285944
+    },
+    {
+      "key": "9301",
+      "tripId": "22_40959_260816",
+      "state": "at_stop",
+      "observedAtMs": 1788674927000,
+      "errorM": -42.769791629678366
+    },
+    {
+      "key": "8753",
+      "tripId": "22_40110_260816",
+      "state": "on_track",
+      "observedAtMs": 1788674926000,
+      "errorM": 62.11855999999898
+    },
+    {
+      "key": "8288",
+      "tripId": "13_12111_260906",
+      "state": "on_track",
+      "observedAtMs": 1788674931000,
+      "errorM": -55.37500000000023
+    },
+    {
+      "key": "9156",
+      "tripId": "3_5507_260621",
+      "state": "on_track",
+      "observedAtMs": 1788674928000,
+      "errorM": -287.9237525000001
+    }
+  ],
+  "longHolds": [
+    {
+      "key": "9368",
+      "state": "at_stop",
+      "start": 1788674771253.3464,
+      "end": 1788674802319.9373,
+      "position": 14339.348549804688,
+      "target": 14338.58,
+      "fix": 14325.127999999999,
+      "fixAt": 1788674764000,
+      "durationS": 31.0665908203125
+    }
+  ],
+  "guardHeldSecondsByReason": {
+    "on_track/old-avl-over45s": 5.533319824218738,
+    "at_stop/low-speed-catchup": 3.733324218749995,
+    "at_stop/target-revised-backward": 0.46666552734374983,
+    "at_stop/moving-target-behind-rendered-floor": 1.0999973144531248,
+    "on_track/low-speed-catchup": 1.1999970703125,
+    "on_track/past-effective-horizon": 0.033333251953125,
+    "at_stop/old-avl-over45s": 18.333288574218837,
+    "at_stop/flat-target": 51.899873291014686
+  },
+  "byReportedFixState": {
+    "on_track": {
+      "vehicleSeconds": 13927.96599607633,
+      "aheadTarget10Seconds": 0,
+      "aheadTarget30Seconds": 0,
+      "targetMinusDisplayM": {
+        "1": 54.029971738048744,
+        "0.5": 0,
+        "0.9": 0,
+        "0.99": 21.295784871799697
+      },
+      "aheadOfRecentReportedStopFixM": {
+        "1": 0,
+        "0.5": 0,
+        "0.9": 0,
+        "0.99": 0
+      },
+      "guardHoldEpisodes": 65,
+      "guardHoldDurationS": {
+        "1": 1.899995361328125,
+        "0.5": 0.033333251953125,
+        "0.9": 0.166666259765625,
+        "0.99": 1.899995361328125
+      },
+      "accelerationOver1_3": 36688,
+      "brakingOver1_4": 1722,
+      "historicalAvlCount": 298,
+      "historicalAvlBiasM": -25.296131010415785,
+      "historicalAvlMaeM": 64.08967568874816,
+      "historicalAvlAbsErrorM": {
+        "1": 615.3819375000003,
+        "0.5": 38.29218077258247,
+        "0.9": 165.48313432486157,
+        "0.99": 315.9877568646298
+      }
+    },
+    "at_stop": {
+      "vehicleSeconds": 24727.772963070238,
+      "aheadTarget10Seconds": 0,
+      "aheadTarget30Seconds": 0,
+      "targetMinusDisplayM": {
+        "1": 38.49896124237239,
+        "0.5": 0,
+        "0.9": 0,
+        "0.99": 20.22273977992063
+      },
+      "aheadOfRecentReportedStopFixM": {
+        "1": 545.1398235973138,
+        "0.5": 53.06932453495756,
+        "0.9": 168.95359809523006,
+        "0.99": 280.9330575702588
+      },
+      "guardHoldEpisodes": 73,
+      "guardHoldDurationS": {
+        "1": 31.0665908203125,
+        "0.5": 0.06666650390625,
+        "0.9": 0.3999990234375,
+        "0.99": 31.0665908203125
+      },
+      "accelerationOver1_3": 55440,
+      "brakingOver1_4": 2734,
+      "historicalAvlCount": 416,
+      "historicalAvlBiasM": -95.81659056249009,
+      "historicalAvlMaeM": 130.92784762783566,
+      "historicalAvlAbsErrorM": {
+        "1": 457.0580908597776,
+        "0.5": 108.64516123938483,
+        "0.9": 274.1365000000005,
+        "0.99": 405.75269172666594
+      }
+    }
+  },
+  "positiveOutliers": [],
+  "positiveSpeedStepMs": {
+    "1": 0.08333312988331265,
+    "0.5": 0,
+    "0.9": 0.04222465615925941,
+    "0.99": 0.08333312988331087
+  },
+  "brakingSpeedStepMs": {
+    "1": 14.701942912777213,
+    "0.5": 0,
+    "0.9": 0.006717420272885022,
+    "0.99": 0.04305670139679285
+  },
+  "launchesOver1": 0,
+  "positiveStepsOver1": 0,
+  "actualSpeedMs": {
+    "1": 24.890981745311684,
+    "0.5": 4.801527191795151,
+    "0.9": 9.452565486915109,
+    "0.99": 14.0685437707358
+  },
+  "speedStepMs": {
+    "1": 14.701942912777213,
+    "0.5": 0.0003645030105463576,
+    "0.9": 0.043333227524041895,
+    "0.99": 0.08333312988331087
+  },
+  "fullFleetFrameCpuMs": {
+    "1": 8.373167000000024,
+    "0.5": 0.0852909999999838,
+    "0.9": 0.10387499999995953,
+    "0.99": 0.2136250000000075
+  },
+  "clockOffsetMs": 13.857142857142858,
+  "clockSynced": true,
+  "caveat": "Sampled captured inputs, known geometry-pack trips only. No rider ground truth; source timestamps and delivery timing preserved. CPU is Node on host, not Hermes/native rendering."
+}

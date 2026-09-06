@@ -1,0 +1,57 @@
+{
+  "devicesAndConfigurations" : [
+    {
+      "device" : {
+        "architecture" : "arm64",
+        "deviceId" : "758B3A6C-34BB-449D-8960-E50A6FC80504",
+        "deviceName" : "iPhone 17 Pro Max",
+        "modelName" : "iPhone 17 Pro Max",
+        "osBuildNumber" : "23F77",
+        "osVersion" : "26.5",
+        "platform" : "iOS Simulator"
+      },
+      "expectedFailures" : 0,
+      "failedTests" : 2,
+      "passedTests" : 1,
+      "skippedTests" : 0,
+      "testPlanConfiguration" : {
+        "configurationId" : "1",
+        "configurationName" : "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription" : "TramSpotterUITests · Built with macOS 26.5.1",
+  "expectedFailures" : 0,
+  "failedTests" : 2,
+  "finishTime" : 1788675448.546,
+  "passedTests" : 1,
+  "result" : "Failed",
+  "skippedTests" : 0,
+  "startTime" : 1788675121.77,
+  "statistics" : [
+
+  ],
+  "testFailures" : [
+    {
+      "failureText" : "Failed to failed to scroll to visible (by AX action) Button, {{38.0, 1270.0}, {364.0, 59.0}}, label: 'Browse the fleet, Every live tram, by line or model', error: Error kAXErrorCannotComplete performing AXAction kAXScrollToVisibleAction on element AX element pid: 86723, elementOrHash.elementID: 4964156160.77. (Underlying Error: Error kAXErrorCannotComplete performing AXAction kAXScrollToVisibleAction on element AX element pid: 86723, elementOrHash.elementID: 4964156160.77)",
+      "targetName" : "TramSpotterUITests",
+      "testIdentifier" : 1,
+      "testIdentifierString" : "TramSpotterUITests/test01Inspector()",
+      "testIdentifierURL" : "test://com.apple.xcode/TramSpotterUITests/TramSpotterUITests/TramSpotterUITests/test01Inspector",
+      "testName" : "test01Inspector()"
+    },
+    {
+      "failureText" : "Failed to failed to scroll to visible (by AX action) Button, {{38.0, 1270.0}, {364.0, 59.0}}, label: 'Browse the fleet, Every live tram, by line or model', error: Error kAXErrorCannotComplete performing AXAction kAXScrollToVisibleAction on element AX element pid: 87868, elementOrHash.elementID: 4925650432.88. (Underlying Error: Error kAXErrorCannotComplete performing AXAction kAXScrollToVisibleAction on element AX element pid: 87868, elementOrHash.elementID: 4925650432.88)",
+      "targetName" : "TramSpotterUITests",
+      "testIdentifier" : 3,
+      "testIdentifierString" : "TramSpotterUITests/test03MapGeometry()",
+      "testIdentifierURL" : "test://com.apple.xcode/TramSpotterUITests/TramSpotterUITests/TramSpotterUITests/test03MapGeometry",
+      "testName" : "test03MapGeometry()"
+    }
+  ],
+  "title" : "Test - TramSpotterUITests",
+  "topInsights" : [
+
+  ],
+  "totalTestCount" : 3
+}

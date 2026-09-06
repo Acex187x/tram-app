@@ -51,7 +51,7 @@ const r1 = (x: number): string => x.toFixed(1);
 const seen = new Set<string>();
 let events = 0;
 const tally = new Map<string, number>();
-const bump = (k: string): void => tally.set(k, (tally.get(k) ?? 0) + 1);
+const bump = (k: string): void => { tally.set(k, (tally.get(k) ?? 0) + 1); };
 
 function scan(sb: { serverNowMs: number; vehicles: SV[] }, live: LV[]): void {
   const L = new Map(live.map((l) => [l.key, l]));

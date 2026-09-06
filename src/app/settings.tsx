@@ -470,7 +470,7 @@ function DeveloperSection() {
         />
       </InsetGroup>
       <Footnote>
-        Debug mode overlays a live technical readout of the simulation on the followed tram.
+        Inspect the selected tram’s data freshness, movement, future path and server updates. Following is optional.
       </Footnote>
     </View>
   );

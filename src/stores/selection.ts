@@ -83,6 +83,7 @@ export const useSelectionStore = create<SelectionState>((set) => ({
       selectedTramKey: key,
       followTramKey: key,
       followPaused: false,
+      flyToTarget: null,
     }),
   closeTram: () =>
     set({
@@ -94,10 +95,18 @@ export const useSelectionStore = create<SelectionState>((set) => ({
   // Switching (or clearing) the follow target always resets the paused flag:
   // a newly acquired/handed-off follow is live, and clearing follow hides both
   // follow chips.
-  setFollowTramKey: (followTramKey) => set({ followTramKey, followPaused: false }),
+  setFollowTramKey: (followTramKey) => set({
+    followTramKey, followPaused: false,
+    ...(followTramKey ? { flyToTarget: null } : {}),
+  }),
   setFollowPaused: (followPaused) => set({ followPaused }),
   setSelectedLineId: (selectedLineId) => set({ selectedLineId }),
-  requestFlyTo: (flyToTarget) => set({ flyToTarget }),
+  requestFlyTo: (flyToTarget) => set({
+    flyToTarget,
+    // Camera ownership changes atomically at the user's request. Deferring
+    // this until index.tsx consumes it could cancel a newer openTram action.
+    ...(flyToTarget ? { followTramKey: null, followPaused: false } : {}),
+  }),
   clear: () =>
     set({
       presentedTramKey: null,
@@ -105,5 +114,6 @@ export const useSelectionStore = create<SelectionState>((set) => ({
       followTramKey: null,
       followPaused: false,
       selectedLineId: null,
+      flyToTarget: null,
     }),
 }));

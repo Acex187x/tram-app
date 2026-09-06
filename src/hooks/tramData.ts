@@ -313,7 +313,7 @@ export class TramRuntime {
   private applyRenderMode(mode: RenderMode): void {
     if (this.fleet.renderMode === mode) return;
     this.fleet.setMode(mode);
-    this.bumpUi();
+    this.bumpUi(true);
   }
 
   private readonly onBundle = (): void => {
@@ -627,7 +627,9 @@ export class TramRuntime {
 
   // — React (1 Hz) subscriptions —
 
-  private bumpUi(): void {
+  private lastUiNotifyAtMs = Number.NEGATIVE_INFINITY;
+
+  private bumpUi(force = false): void {
     // rideBackground: ALL UI notifications are off by contract (the app is
     // backgrounded; subscribers would re-render an invisible tree).
     if (this.runMode === 'rideBackground') return;
@@ -635,6 +637,12 @@ export class TramRuntime {
     // invalidate the states cache and force a full getStates() allocation for
     // nobody (1 Hz background churn, thermal).
     if (this.uiListeners.size === 0) return;
+    const nowMs = Date.now();
+    // ML publications arrive in bursts, independently of the 1 Hz UI timer.
+    // Every publication used to invalidate the whole-fleet cache and wake all
+    // sheets/lists again, silently turning a 1 Hz hook into a stream-rate hook.
+    if (!force && nowMs - this.lastUiNotifyAtMs < UI_NOTIFY_MS) return;
+    this.lastUiNotifyAtMs = nowMs;
     this.uiVersion += 1;
     this.uiListeners.forEach((l) => l());
   }

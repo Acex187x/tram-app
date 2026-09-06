@@ -113,3 +113,28 @@ describe('ClockSync', () => {
     expect(c.offsetMs).toBeCloseTo(skew, 6);
   });
 });
+
+it('residual synchronization corrections never step or reverse the render clock', () => {
+  const c = new ClockSync();
+  c.sample(100000, 100000);
+  const before = c.now(110000);
+  c.sample(109000, 110000);
+  expect(c.now(110000)).toBe(before);
+  let prev = before;
+  for (let t = 110033; t <= 140000; t += 33) {
+    const now = c.now(t);
+    expect(now - prev).toBeGreaterThanOrEqual(33 * 0.95 - 1e-6);
+    expect(now - prev).toBeLessThanOrEqual(33 * 1.05 + 1e-6);
+    prev = now;
+  }
+});
+
+it('uses RTT midpoint for estimation but starts the ramp at actual receipt', () => {
+  const c = new ClockSync();
+  c.sample(10000, 10000);
+  const before = c.now(11000);
+  c.sample(11200, 10500, 11000);
+  expect(c.now(11000)).toBe(before);
+  expect(c.offsetAt(11001)).toBeGreaterThan(0);
+  expect(c.offsetAt(11001)).toBeLessThanOrEqual(0.05 + 1e-8);
+});

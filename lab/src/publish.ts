@@ -16,7 +16,7 @@
 // `lastPublished` untouched, so the next cycle retries exactly the missed
 // delta — an engine restart republishes the whole chain by construction.
 
-import { CONVEX_URL, ENGINE_PUSH_TOKEN, TRAJ_POINTS, TRAJ_STEP_MS } from './config';
+import { PUBLISH_CONVEX_URL, ENGINE_PUSH_TOKEN, TRAJ_POINTS, TRAJ_STEP_MS } from './config';
 import type { V2Vehicle } from './trajectory';
 
 /** Vehicles per mutation call — keeps a full-fleet republish inside Convex's
@@ -41,9 +41,20 @@ export interface PublishGauges {
   lastOkAtMs: number;
 }
 
+/** A configured publisher with zero successful pushes is unavailable too.
+ * The old health gate skipped lastOkAtMs=0, making bad credentials on a fresh
+ * boot report healthy forever although no phone could receive a curve.
+ */
+export function isPublisherHealthy(
+  state: Pick<PublishGauges, 'enabled' | 'lastOkAtMs'>, nowMs: number,
+): boolean {
+  return !state.enabled || (state.lastOkAtMs > 0 && nowMs - state.lastOkAtMs < 60_000);
+}
+
 export class ConvexPublisher {
   readonly enabled = ENGINE_PUSH_TOKEN.length > 0;
   private lastPublished = new Map<string, number>();
+  private requestedRemovals = new Set<string>();
   private inFlight = false;
   private pushes = 0;
   private vehiclesPushed = 0;
@@ -52,6 +63,10 @@ export class ConvexPublisher {
   private failures = 0;
   private lastError: string | null = null;
   private lastOkAtMs = 0;
+
+  /** An invalid axis may be discovered immediately after a predictor restart,
+   * before this process has seen the old persisted Convex row. */
+  requestRemoval(key: string): void { this.requestedRemovals.add(key); }
 
   /**
    * One publication cycle, called after every `refreshTrajectories`. Never
@@ -68,14 +83,16 @@ export class ConvexPublisher {
     try {
       const changed: Array<V2Vehicle & { source: 'ml' | 'naive'; anchorS: number }> = [];
       for (const [key, e] of entries) {
+        this.requestedRemovals.delete(key); // coherent recovery supersedes withdrawal
         if (this.lastPublished.get(key) !== e.v2.emittedAtMs) {
           changed.push({ ...e.v2, source: e.source, anchorS: e.anchorFixS });
         }
       }
-      const removed: string[] = [];
+      const removedKeys = new Set(this.requestedRemovals);
       for (const key of this.lastPublished.keys()) {
-        if (!entries.has(key)) removed.push(key);
+        if (!entries.has(key)) removedKeys.add(key);
       }
+      const removed = [...removedKeys];
       const horizonS = ((TRAJ_POINTS - 1) * TRAJ_STEP_MS) / 1000;
       let idx = 0;
       do {
@@ -90,7 +107,10 @@ export class ConvexPublisher {
           removed: rm,
         });
         for (const vehicle of chunk) this.lastPublished.set(vehicle.key, vehicle.emittedAtMs);
-        for (const key of rm) this.lastPublished.delete(key);
+        for (const key of rm) {
+          this.lastPublished.delete(key);
+          this.requestedRemovals.delete(key);
+        }
         this.pushes++;
         this.vehiclesPushed += chunk.length;
         this.removalsPushed += rm.length;
@@ -187,7 +207,7 @@ export class ConvexPublisher {
   }
 
   private async call<T = unknown>(path: string, args: Record<string, unknown>): Promise<T> {
-    const res = await fetch(`${CONVEX_URL}/api/mutation`, {
+    const res = await fetch(`${PUBLISH_CONVEX_URL}/api/mutation`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path, args, format: 'json' }),

@@ -1,0 +1,67 @@
+{
+  "built": 404,
+  "failed": 0,
+  "realism": {
+    "tracksChecked": 1616,
+    "segmentsChecked": 31654,
+    "violations": 0,
+    "speedViolations": 0,
+    "accelViolations": 0,
+    "limits": {
+      "vMaxMs": 17,
+      "aAccMs2": 1.35,
+      "aBrkMs2": -1.45
+    },
+    "g10behindFix": {
+      "checked": 0,
+      "violations": 0,
+      "maxBehindM": 0,
+      "worst": []
+    },
+    "observed": {
+      "maxSpeedMs": 14.15,
+      "maxAccelMs2": 1.296,
+      "minAccelMs2": -1.387,
+      "speedP50": 4.85,
+      "speedP90": 8.15,
+      "speedP99": 11.75,
+      "accelP01": -1.25,
+      "accelP50": -0.01,
+      "accelP99": 1.23
+    },
+    "worst": []
+  },
+  "note": "Case-enriched sample; identical inherited seams; queue leadership not captured. Experimental flag remains off.",
+  "stats": {
+    "actual": {
+      "n": 211,
+      "mae": 106.03242387815021,
+      "bias": -75.20351446156545,
+      "p90Abs": 249.47850000000108
+    },
+    "baseline": {
+      "n": 211,
+      "mae": 106.8977546979431,
+      "bias": -74.81019307020415,
+      "p90Abs": 249.47850000000108
+    },
+    "candidate": {
+      "n": 211,
+      "mae": 106.4697582227845,
+      "bias": -74.28139398984662,
+      "p90Abs": 259.42827526315796
+    },
+    "reconstruction": {
+      "n": 211,
+      "mae": 1.0735400619687092,
+      "bias": 0.39332139136129485,
+      "p90Abs": 0.06979000000001179
+    },
+    "change": {
+      "n": 211,
+      "mae": 2.252059526154394,
+      "bias": 0.5287990803575495,
+      "p90Abs": 6.637663937708567
+    }
+  }
+}

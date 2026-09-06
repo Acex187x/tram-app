@@ -36,6 +36,7 @@ import {
   TRAJ_OVERRUN_DISC_M,
 } from './config';
 import { round2 } from './db';
+import {consumedPlatform, type ServedPlatformEvidence} from './servedPlatform';
 import {
   accelAt,
   clientProjectionM,
@@ -43,6 +44,7 @@ import {
   evalTrack,
   seamJustifiedM,
   speedAt,
+  withKnotVelocities,
   type KinTrack,
   type PrevTrack,
   type TrackPoint,
@@ -101,7 +103,7 @@ export const SKIP_TRIM_FEATHER_MS = 10_000;
 export const AGE_INNOV_GATE_M = 25;
 /** §14.3 jam holds (descend from tramSim stuck-hold, constants verbatim):
  *  two genuinely-new fixes within this are standing evidence, m. */
-export const STUCK_FIX_EPS_M = 8;
+export { STUCK_FIX_EPS_M } from './jamEvidence';
 /** ...suppressed within this of a platform (platform semantics win), m. */
 export const STUCK_NEAR_STOP_M = 40;
 /** §14.3 staleness release: an observed-stuck hold outlives the evidence by
@@ -452,6 +454,24 @@ export function legKinFloorS(legLenM: number, vStartMs: number, vEndMs: number, 
   return r.t + cruise;
 }
 
+/** Cruise speed for a travel-time budget, including accel/brake overhead.
+ * Experimental adapter; the existing physical pace band remains authoritative.
+ */
+export function cruiseForTravelTime(
+  distanceM: number, startSpeedMs: number, travelS: number, paceRef: number,
+): number {
+  let lo = PACE_CLAMP_LO * paceRef;
+  let hi = PACE_CLAMP_HI * paceRef;
+  if (legKinFloorS(distanceM, startSpeedMs, 0, lo) <= travelS) return lo;
+  if (legKinFloorS(distanceM, startSpeedMs, 0, hi) >= travelS) return hi;
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    if (legKinFloorS(distanceM, startSpeedMs, 0, mid) > travelS) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
 // ── the drive ────────────────────────────────────────────────────────────────
 
 export interface DriveSurfaces {
@@ -479,6 +499,8 @@ export function dwellQuantiles(stats: { mean: number; sd: number }): {
 }
 
 export interface DriveArgs {
+  /** Offline counterfactual only until paired future-fix replay is accepted. */
+  kinematicLegTiming?: boolean;
   key: string;
   tripId: string;
   line: string;
@@ -490,6 +512,8 @@ export interface DriveArgs {
   raw: TrackPoint[];
   /** Modal anchor hold (unchanged rule); the drive needs only stopS + release. */
   modal: { stopS: number; releaseAtMs: number } | null;
+  /** Exact current/next identities from this AT_STOP anchor, if available. */
+  servedPlatform?: ServedPlatformEvidence | null;
   geom: RouteGeometry;
   surfaces: DriveSurfaces;
   /** Previous emission of the SAME chain (published or shadow), for seams. */
@@ -656,6 +680,8 @@ export interface DriveBuilt {
     seamFloorApplied: boolean;
     /** §14.2: request stops excluded from this emission's plan (telemetry). */
     requestSkips: { stopId: string; distM: number }[];
+    /** Modal dwell already accounts for this platform occurrence. */
+    consumedPlatform: {stopId: string; sequence: number; distM: number} | null;
     /** §14.3: the emission holds at an evidence-backed jam position. */
     jamHolding: boolean;
     /** Standing evidence at the seam (asserted modal hold OR jam hold) — the
@@ -792,6 +818,7 @@ function makeGrid(t0: number, tEnd: number): number[] {
  *   'regimes' — smooth: smoother.ts regime table against the opinion run.
  */
 function runDrive(args: {
+  kinematicLegTiming?: boolean;
   grid: number[];
   geom: RouteGeometry;
   profile: DriveProfile;
@@ -912,10 +939,14 @@ function runDrive(args: {
     // ±20 % pace band. Kinematic floors and the envelope always win in-sim.
     const tKin = legKinFloorS(legLen, vAtDep, 0);
     const tLegS = (tau - tDepMs) / 1000;
-    const nominalTravelS = Math.max(tKin, legLen / Math.max(0.5, paceRef));
+    const nominalTravelS = args.kinematicLegTiming
+      ? legKinFloorS(legLen, vAtDep, 0, Math.max(0.5, paceRef))
+      : Math.max(tKin, legLen / Math.max(0.5, paceRef));
     legDwellS = clamp(2 * (tLegS - nominalTravelS), dq.p10, dq.p90);
     const tAvail = Math.max(tKin, tLegS - 0.5 * legDwellS);
-    legPace = clamp(legLen / Math.max(1e-3, tAvail), PACE_CLAMP_LO * paceRef, PACE_CLAMP_HI * paceRef);
+    legPace = args.kinematicLegTiming
+      ? cruiseForTravelTime(legLen, vAtDep, tAvail, paceRef)
+      : clamp(legLen / Math.max(1e-3, tAvail), PACE_CLAMP_LO * paceRef, PACE_CLAMP_HI * paceRef);
   };
   if (mode2 === 'drive') startLeg(s[0], t0, v[0]);
 
@@ -1900,9 +1931,11 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
   const modalS = modal !== null ? clamp(modal.stopS, 0, geom.totalM) : null;
 
   // ── stop plan: every platform ahead is SERVED (§4.2) — except §14.2
-  // request stops the evidence says the real tram passes without holding.
+  // request stops the evidence says the real tram passes without holding, and
+  // the exact platform already served by the modal anchor (2026-09-06).
   // s0 ≥ modal.stopS in every branch (incl. the age-floored hold), so the
   // plan starts from wherever the drive actually stands.
+  const consumed = consumedPlatform(args.servedPlatform, modal, geom);
   const planFrom = s0;
   const plan: PlanStop[] = [];
   const requestSkips: { stopId: string; distM: number }[] = [];
@@ -1912,6 +1945,13 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     if (st.distM <= planFrom + STOP_REACH_M) continue;
     const distM = Math.min(st.distM, geom.totalM);
     const isTerminal = st.isTerminal || st === lastStop;
+    if (st === consumed) {
+      // The ML can still smear a second dwell here. Reuse the same bounded
+      // trim blind as a skipped request stop; no pace or envelope changes.
+      const tauSkip = mlCrossingMs(raw, distM);
+      if (tauSkip !== null) skipTauMs.push(tauSkip);
+      continue;
+    }
     if (!isTerminal && requestStopSkippable(raw, surfaces, st.stopId, distM)) {
       requestSkips.push({ stopId: st.stopId, distM });
       const tauSkip = mlCrossingMs(raw, distM);
@@ -1960,6 +2000,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
 
   // ── opinion: the drive ───────────────────────────────────────────────────
   const oFine = runDrive({
+    kinematicLegTiming: args.kinematicLegTiming,
     grid,
     geom,
     profile,
@@ -2060,6 +2101,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
       const vSmCap = seamSpeedCap(profile, geom, sSm, aSmRaw);
       const vSmInherit = speedAt(prev.smooth, t0);
       const fitted = runDrive({
+        kinematicLegTiming: args.kinematicLegTiming,
         grid,
         geom,
         profile,
@@ -2093,6 +2135,8 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
     }
   }
 
+  oEmit.track.points = withKnotVelocities(oEmit.track);
+  sEmit.track.points = withKnotVelocities(sEmit.track);
   return {
     vehicle: {
       key: args.key,
@@ -2113,6 +2157,7 @@ export function buildDriveVehicle(args: DriveArgs): DriveBuilt | null {
       ageFloorApplied,
       seamFloorApplied,
       requestSkips,
+      consumedPlatform: consumed ? {stopId: consumed.stopId, sequence: consumed.sequence, distM: consumed.distM} : null,
       jamHolding,
       standingStart,
       leaderKey: args.leader?.key ?? null,

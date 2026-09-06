@@ -24,7 +24,13 @@
 // dead-reckoned projectedObservedDistM) are GONE rather than faked.
 
 import { bearingAt, pointAt } from '@/lib/geo/polyline';
-import type { RouteGeometry, RouteStop, TramModelSpec, TramPublicState, TramSnapshot } from '@/lib/types';
+import type {
+  RouteGeometry,
+  RouteStop,
+  TramModelSpec,
+  TramPublicState,
+  TramSnapshot,
+} from '@/lib/types';
 import type { ParsedVehicle } from './bundle';
 import { crossingTimeMs, evalTrajectory } from './evaluator';
 import { SMOOTH_CATCHUP_V_MS } from './fixForward';
@@ -86,6 +92,9 @@ export interface AdaptInput {
   vehicle: ParsedVehicle | undefined;
   /** SERVER-corrected wall clock — every evaluation uses this, never Date.now(). */
   serverNowMs: number;
+  /** Actual local frame time; clock synchronization only retimes the raw
+   * curve, never the presentation guard's velocity/acceleration interval. */
+  presentationNowMs?: number;
   mode: RenderMode;
   /**
    * Observed fix-over-fix pace, m/s (fleet.ts bookkeeping). Powers the NAIVE
@@ -101,13 +110,28 @@ export interface AdaptInput {
    * is never guarded. The hard, last-line guarantee the bench demanded: no
    * composition bug upstream can teleport the smooth marker again.
    */
-  guard?: { prevS: number; prevAtMs: number; allowJump: boolean };
+  guard?: RenderGuard;
+}
+
+export interface RenderGuard {
+  prevS: number;
+  prevAtMs: number;
+  prevSpeedKmh?: number;
+  allowJump: boolean;
+}
+
+export interface AdaptedTramState extends TramPublicState {
+  /** Pure curve/fix target before the presentation safety limit. */
+  renderTargetDistM: number;
+  renderGuardActive: boolean;
 }
 
 /** Max forward slew of the guarded smooth marker, m/s (V_MAX 16.7 + headroom). */
 export const SLEW_MAX_MS = 25;
-/** Backward slack for numeric noise, m. */
-export const SLEW_BACK_TOL_M = 0.5;
+/** Presentation catch-up acceleration; the server curve physics bounds are unchanged. */
+export const SLEW_CATCHUP_ACCEL_MS2 = 2.5;
+/** Never permit cumulative backward movement: a per-frame tolerance is a velocity. */
+export const SLEW_BACK_TOL_M = 0;
 /** Frame gaps beyond this are a resume/seek, not an animation frame. */
 export const SLEW_MAX_FRAME_GAP_MS = 5_000;
 
@@ -122,15 +146,39 @@ export const NAIVE_HORIZON_S = 60;
 /**
  * Build the public state one tram renders and reads from.
  *
- * Without curves (vehicle absent, or its trip changed under us) the tram falls
- * back to its RAW AVL fix and is marked `pastHorizon`: the fix is real
- * observed data, so showing it is honest — but it is frozen, so it renders
- * dimmed exactly like a tram that ran off the end of its curve. With no curve
- * there is no velocity profile to translate and nothing but the fix to stand
- * on, so this stays a freeze; the fix-forward shim only ever moves a tram
- * along motion the server did predict.
+ * Without a matching curve, use the bounded observed-pace fallback on the
+ * loaded shape and mark it `pastHorizon`. Unknown geometry stays at the raw
+ * coordinates with zero rendered speed. The presentation guard is supplied
+ * explicitly by the frame owner; evaluating this function never mutates it.
  */
-export function adaptTram(input: AdaptInput): TramPublicState {
+/** Shared with viewport culling, so the tested location is the location drawn. */
+export function guardedDistM(
+  s: number,
+  nowMs: number,
+  prevS: number,
+  prevAtMs: number,
+  allowJump: boolean,
+  prevSpeedMs = 0,
+): number {
+  if (allowJump) return s;
+  const dtMs = nowMs - prevAtMs;
+  if (dtMs < 0 || dtMs > SLEW_MAX_FRAME_GAP_MS) return s;
+  const dtS = dtMs / 1000;
+  const previousSpeed = Number.isFinite(prevSpeedMs) ? Math.max(0, prevSpeedMs) : 0;
+  const reachableSpeed = Math.min(SLEW_MAX_MS, previousSpeed + SLEW_CATCHUP_ACCEL_MS2 * dtS);
+  // Never coast past a revised target just to satisfy a braking bound: that
+  // lengthens false stops. The raw target and diagnostics remain independent.
+  return Math.max(prevS, Math.min(s, prevS + reachableSpeed * dtS));
+}
+
+/** Bounded no-curve position, also used by the allocation-free viewport cull. */
+export function naiveDistM(fixS: number, fixAtMs: number, nowMs: number, paceMs: number): number {
+  return (
+    fixS + Math.max(0, paceMs) * Math.max(0, Math.min(NAIVE_HORIZON_S, (nowMs - fixAtMs) / 1000))
+  );
+}
+
+export function adaptTram(input: AdaptInput): AdaptedTramState {
   const { snapshot, model, geometry, serverNowMs, mode } = input;
   // A trajectory computed for a different trip is stale the instant the tram
   // turns at a terminus — drop it rather than render the old shape's meters.
@@ -214,26 +262,40 @@ export function adaptTram(input: AdaptInput): TramPublicState {
     pastHorizon = true;
   }
 
-  // The per-frame slew guard — smooth mode only, before any position math.
-  const guard = input.guard;
+  const renderTargetDistM = simDistM;
+  const guard = mode === 'smooth' ? input.guard : undefined;
+  const presentationNowMs = input.presentationNowMs ?? serverNowMs;
+  if (guard)
+    simDistM = clampToShape(
+      guardedDistM(
+        simDistM,
+        presentationNowMs,
+        guard.prevS,
+        guard.prevAtMs,
+        guard.allowJump,
+        (guard.prevSpeedKmh ?? 0) / 3.6,
+      ),
+      geometry,
+    );
+  const renderGuardActive = Math.abs(simDistM - renderTargetDistM) > 1e-6;
+  // Every contiguous frame records its actual interval speed, even when the
+  // target is reachable. Mixing raw curve speed with displayed interval speed
+  // would reintroduce launch jumps on the following constrained frame.
   if (
-    mode === 'smooth' &&
     guard &&
     !guard.allowJump &&
-    serverNowMs > guard.prevAtMs &&
-    serverNowMs - guard.prevAtMs <= SLEW_MAX_FRAME_GAP_MS
+    presentationNowMs >= guard.prevAtMs &&
+    presentationNowMs - guard.prevAtMs <= SLEW_MAX_FRAME_GAP_MS
   ) {
-    const dtS = (serverNowMs - guard.prevAtMs) / 1000;
-    const floor = guard.prevS - SLEW_BACK_TOL_M;
-    const ceil = guard.prevS + SLEW_MAX_MS * dtS;
-    if (simDistM < floor) simDistM = floor;
-    else if (simDistM > ceil) simDistM = ceil;
-    simDistM = clampToShape(simDistM, geometry);
+    const dtMs = presentationNowMs - guard.prevAtMs;
+    simSpeedKmh =
+      dtMs > 0 ? Math.max(0, ((simDistM - guard.prevS) * 3600) / dtMs) : (guard.prevSpeedKmh ?? 0);
   }
+  if (!geometry || simDistM >= geometry.totalM) simSpeedKmh = 0;
 
   const position = geometry
     ? pointAt(geometry.coordinates, geometry.cumDistM, simDistM)
-    : [snapshot.coordinates[0], snapshot.coordinates[1]] as [number, number];
+    : ([snapshot.coordinates[0], snapshot.coordinates[1]] as [number, number]);
   const bearing = geometry
     ? bearingAt(geometry.coordinates, geometry.cumDistM, simDistM)
     : (snapshot.bearing ?? 0);
@@ -300,6 +362,8 @@ export function adaptTram(input: AdaptInput): TramPublicState {
   }
 
   return {
+    renderTargetDistM,
+    renderGuardActive,
     key: snapshot.key,
     snapshot,
     model,

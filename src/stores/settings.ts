@@ -80,8 +80,8 @@ export interface SettingsState {
   iconPack: IconPackId;
   /**
    * Developer debug mode: mounts the live physics/GPS debug overlay over the
-   * map (utilitarian, 10 Hz while expanded, followed-tram only). Off by default; when off the
-   * overlay is never mounted and costs nothing.
+   * map for the selected tram (1 Hz snapshots; following is optional).
+   * Off by default; when off the overlay is never mounted and costs nothing.
    */
   debugMode: boolean;
   setLightPreset: (preset: LightPreset) => void;

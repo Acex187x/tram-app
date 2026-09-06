@@ -11,6 +11,73 @@
 // (perf invariants #1/#8) — and what makes two clients render pixel-identical
 // trams from the same bundle at the same instant (statelessness → determinism).
 
+/** Optional decoder-prepared cubic coefficients per segment, [a,b,c].
+ * Typed positions retain their legacy [t,s] layout; absent/NaN coefficients
+ * mean exact legacy linear interpolation. Preparation occurs once per wire
+ * decode, never per frame. The server uses the same preparation for seams.
+ */
+export type PreparedTrack = Float64Array & { hermite?: Float64Array };
+
+export const TRACK_MAX_SPEED_MS = 16.7;
+export const TRACK_MAX_ACCEL_MS2 = 1.3;
+export const TRACK_MAX_BRAKE_MS2 = 1.4;
+
+/** Prepare only cubics whose *whole span* satisfies the wire limits. */
+export function prepareHermiteTrack(track: Float64Array, velocities: Float64Array): Float64Array {
+  const n = track.length >> 1;
+  const out = track as PreparedTrack;
+  delete out.hermite;
+  if (n < 2 || velocities.length !== n) return track;
+  const coefficients = new Float64Array((n - 1) * 3);
+  coefficients.fill(Number.NaN);
+  let eligible = false;
+  for (let i = 0; i < n - 1; i++) {
+    const dt = (track[(i + 1) * 2] - track[i * 2]) / 1000;
+    const ds = track[(i + 1) * 2 + 1] - track[i * 2 + 1];
+    const v0 = velocities[i],
+      v1 = velocities[i + 1];
+    if (
+      !Number.isFinite(dt) ||
+      dt <= 0 ||
+      !Number.isFinite(ds) ||
+      ds < 0 ||
+      !Number.isFinite(v0) ||
+      !Number.isFinite(v1) ||
+      v0 < 0 ||
+      v1 < 0 ||
+      v0 > TRACK_MAX_SPEED_MS ||
+      v1 > TRACK_MAX_SPEED_MS
+    )
+      continue;
+    if (ds === 0 && (v0 !== 0 || v1 !== 0)) continue;
+    const a = dt * v0;
+    const b = 3 * ds - dt * (2 * v0 + v1);
+    const c = -2 * ds + dt * (v0 + v1);
+    const accel0 = (2 * b) / (dt * dt),
+      accel1 = (2 * b + 6 * c) / (dt * dt);
+    if (
+      accel0 < -TRACK_MAX_BRAKE_MS2 - 1e-8 ||
+      accel0 > TRACK_MAX_ACCEL_MS2 + 1e-8 ||
+      accel1 < -TRACK_MAX_BRAKE_MS2 - 1e-8 ||
+      accel1 > TRACK_MAX_ACCEL_MS2 + 1e-8
+    )
+      continue;
+    // Velocity is quadratic; only its interior vertex can exceed endpoints.
+    const vertex = c !== 0 ? -b / (3 * c) : -1;
+    if (vertex > 0 && vertex < 1) {
+      const v = (a + vertex * (2 * b + 3 * c * vertex)) / dt;
+      if (v < -1e-8 || v > TRACK_MAX_SPEED_MS + 1e-8) continue;
+    }
+    const j = i * 3;
+    coefficients[j] = a;
+    coefficients[j + 1] = b;
+    coefficients[j + 2] = c;
+    eligible = true;
+  }
+  if (eligible) out.hermite = coefficients;
+  return track;
+}
+
 /** Number of keyframes in an interleaved track. */
 export function knotCount(track: Float64Array): number {
   return track.length >> 1;
@@ -67,7 +134,12 @@ export function evalTrajectory(track: Float64Array, tMs: number): number {
   // Guarded for safety; parseBundle already rejects non-ascending stamps.
   if (span <= 0) return track[b + 1];
   const s0 = track[a + 1];
-  return s0 + ((track[b + 1] - s0) * (tMs - t0)) / span;
+  const u = (tMs - t0) / span;
+  const h = (track as PreparedTrack).hermite;
+  const j = lo * 3;
+  return h && Number.isFinite(h[j])
+    ? s0 + u * (h[j] + u * (h[j + 1] + u * h[j + 2]))
+    : s0 + (track[b + 1] - s0) * u;
 }
 
 /**
@@ -99,6 +171,23 @@ export function crossingTimeMs(track: Float64Array, sTarget: number): number {
   const ds = track[b + 1] - s0;
   const t0 = track[a];
   if (ds <= 0) return track[b];
+  const h = (track as PreparedTrack).hermite;
+  const j = (hi - 1) * 3;
+  if (h && Number.isFinite(h[j])) {
+    // Monotonicity is checked at decode, so bounded bisection is unambiguous
+    // even at a zero-speed stop boundary. 24 rounds give <0.01 ms error on
+    // a 120 s span; no Newton singularity and no per-call allocation.
+    let left = 0,
+      right = 1;
+    const target = sTarget - s0;
+    for (let iteration = 0; iteration < 24; iteration++) {
+      const mid = (left + right) / 2;
+      const value = mid * (h[j] + mid * (h[j + 1] + mid * h[j + 2]));
+      if (value < target) left = mid;
+      else right = mid;
+    }
+    return t0 + ((track[b] - t0) * (left + right)) / 2;
+  }
   return t0 + ((track[b] - t0) * (sTarget - s0)) / ds;
 }
 

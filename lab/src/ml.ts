@@ -6,7 +6,7 @@
 // the SAME features online. The two implementations are kept in sync by hand;
 // FEATURE_VERSION must match or predictions are refused (safe skip).
 //
-// FEATURES v1 (order matters, mirror in service.py):
+// FEATURES v3 (order unchanged; target/evidence clocks corrected):
 //   0 gapS            seconds from anchor observation to evaluation instant
 //   1 atStop          1 if the anchor fix was at_stop
 //   2 delayS          reported schedule delay at anchor, clamped [-600, 900]
@@ -23,6 +23,8 @@
 //                     signal; falls back to learnedPace when no fresh sample
 //  12 corridorTrust   v2: decayed weight of that signal, clamp [0, 5]
 //
+// v3: target horizon uses observation time; arrival is transport telemetry.
+// Offline corridor evidence must be available by anchor receipt.
 // Target: dsM = actualNext.shapeDistM − anchor.shapeDistM. The stacked
 // learned features make the models residual learners over the statistical
 // layer (the DeepETA lesson) — their win condition is "found signal the
@@ -33,7 +35,7 @@ import type { RouteGeometry, TramSnapshot } from '@/lib/types';
 import { ML_URL, pragueContext } from './config';
 import type { LearnedModel } from './learned';
 
-export const FEATURE_VERSION = 2;
+export const FEATURE_VERSION = 3;
 
 export function buildMlFeatures(
   prev: TramSnapshot,
@@ -94,9 +96,16 @@ export class MlClient {
   lastOkMs = 0;
   lastError: string | null = null;
   modelsReady = false;
+  lastRequestMs = 0;
+  lastLatencyMs: number | null = null;
+  private pendingRequests = 0;
+  get inFlight(): boolean { return this.pendingRequests > 0; }
 
   async predictBatch(rows: number[][]): Promise<MlPredictions | null> {
     if (rows.length === 0) return { gbdt: [], mlp: [] };
+    const startedAtMs = Date.now();
+    this.lastRequestMs = startedAtMs;
+    this.pendingRequests++;
     try {
       const res = await fetch(`${ML_URL}/predict`, {
         method: 'POST',
@@ -107,6 +116,10 @@ export class MlClient {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = (await res.json()) as { version: number; ready: boolean; gbdt: (number | null)[]; mlp: (number | null)[] };
       if (body.version !== FEATURE_VERSION) throw new Error(`feature version ${body.version} != ${FEATURE_VERSION}`);
+      if (body.ready && (!Array.isArray(body.gbdt) || body.gbdt.length !== rows.length ||
+          !Array.isArray(body.mlp) || body.mlp.length !== rows.length)) {
+        throw new Error('ML response row count does not match request');
+      }
       this.lastOkMs = Date.now();
       this.lastError = null;
       this.modelsReady = body.ready;
@@ -115,6 +128,9 @@ export class MlClient {
     } catch (e) {
       this.lastError = e instanceof Error ? e.message : String(e);
       return null;
+    } finally {
+      this.lastLatencyMs = Date.now() - startedAtMs;
+      this.pendingRequests--;
     }
   }
 }

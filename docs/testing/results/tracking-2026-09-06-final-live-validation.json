@@ -1,0 +1,261 @@
+{
+  "capturedAt": "2026-09-06",
+  "startAtMs": 1788674640087,
+  "captureDurationS": 310,
+  "replayDurationS": 297,
+  "note": "Same shipping client and byte-identical production AVL messages, respective actual trajectory WS arrivals. Replay window ends before the earlier final stream event. Candidate post-recovery, no motion-policy change. No native/GPS rider ground-truth claim.",
+  "matchedKnownFrameSamples": 1160028,
+  "matchedHistoricalObservations": 714,
+  "production": {
+    "holdSeconds": 1759.6957038559365,
+    "backward": 0,
+    "speedOver25": 0,
+    "positiveStepsOver1": 0,
+    "clockSynced": false,
+    "clockOffsetMs": 0,
+    "fullFleetFrameCpuMs": {
+      "1": 28.925166999999988,
+      "0.5": 0.06337499999995089,
+      "0.9": 0.0782090000000153,
+      "0.99": 0.17720799999995052
+    },
+    "guardHeldSecondsByReason": {
+      "at_stop/low-speed-catchup": 22.833277587890574,
+      "at_stop/target-revised-backward": 4.066656738281244,
+      "at_stop/old-avl-over45s": 206.76616186526226,
+      "at_stop/moving-target-behind-rendered-floor": 363.7657785645431,
+      "at_stop/flat-target": 1087.6640112298635,
+      "on_track/low-speed-catchup": 6.1999848632812355,
+      "on_track/target-revised-backward": 0.7333315429687497,
+      "on_track/old-avl-over45s": 19.59995214843755,
+      "on_track/moving-target-behind-rendered-floor": 43.53322705078057,
+      "on_track/flat-target": 4.499989013671867,
+      "at_stop/past-effective-horizon": 0.033333251953125
+    },
+    "maxPublicationAgeAtReceiptS": 9.591,
+    "sequenceStartEnd": [
+      567403,
+      567510
+    ],
+    "captureErrors": [
+      "clock:now",
+      "clock:now",
+      "clock:now",
+      "clock:now",
+      "clock:now",
+      "clock:now"
+    ]
+  },
+  "candidate": {
+    "holdSeconds": 82.29979907226375,
+    "backward": 0,
+    "speedOver25": 0,
+    "positiveStepsOver1": 0,
+    "clockSynced": true,
+    "clockOffsetMs": 13.857142857142858,
+    "fullFleetFrameCpuMs": {
+      "1": 8.373167000000024,
+      "0.5": 0.0852909999999838,
+      "0.9": 0.10387499999995953,
+      "0.99": 0.2136250000000075
+    },
+    "guardHeldSecondsByReason": {
+      "on_track/old-avl-over45s": 5.533319824218738,
+      "at_stop/low-speed-catchup": 3.733324218749995,
+      "at_stop/target-revised-backward": 0.46666552734374983,
+      "at_stop/moving-target-behind-rendered-floor": 1.0999973144531248,
+      "on_track/low-speed-catchup": 1.1999970703125,
+      "on_track/past-effective-horizon": 0.033333251953125,
+      "at_stop/old-avl-over45s": 18.333288574218837,
+      "at_stop/flat-target": 51.899873291014686
+    },
+    "maxPublicationAgeAtReceiptS": 0.566,
+    "sequenceStartEnd": [
+      112,
+      203
+    ],
+    "captureErrors": []
+  },
+  "avlMaeM": {
+    "production": {
+      "on_track": 67.10058530706041,
+      "at_stop": 153.76109556471164
+    },
+    "candidate": {
+      "on_track": 64.08967568874816,
+      "at_stop": 130.92784762783566
+    }
+  },
+  "liveSourceLifecycle": [
+    {
+      "stage": "live-before-background",
+      "atMs": 1788674694971,
+      "health": {
+        "connection": "live",
+        "bundleAgeS": 1.785,
+        "clockOffsetMs": -58,
+        "clockSynced": true,
+        "clockImplausible": false,
+        "consecutiveFailures": 0,
+        "lastError": null,
+        "vehicleCount": 127,
+        "serverGen": "drive-v3",
+        "lastSeq": 131,
+        "discontinuities": 35,
+        "lastBundleAtMs": 1788674691469
+      }
+    },
+    {
+      "stage": "source-stopped",
+      "atMs": 1788674694974,
+      "health": {
+        "connection": "live",
+        "bundleAgeS": 1.788,
+        "clockOffsetMs": -58,
+        "clockSynced": true,
+        "clockImplausible": false,
+        "consecutiveFailures": 0,
+        "lastError": null,
+        "vehicleCount": 127,
+        "serverGen": "drive-v3",
+        "lastSeq": 131,
+        "discontinuities": 35,
+        "lastBundleAtMs": 1788674691469
+      }
+    },
+    {
+      "stage": "background-no-new-receipt",
+      "atMs": 1788674697977,
+      "health": {
+        "connection": "live",
+        "bundleAgeS": 4.791,
+        "clockOffsetMs": -58,
+        "clockSynced": true,
+        "clockImplausible": false,
+        "consecutiveFailures": 0,
+        "lastError": null,
+        "vehicleCount": 127,
+        "serverGen": "drive-v3",
+        "lastSeq": 131,
+        "discontinuities": 35,
+        "lastBundleAtMs": 1788674691469
+      }
+    },
+    {
+      "stage": "resumed",
+      "atMs": 1788674703982,
+      "health": {
+        "connection": "live",
+        "bundleAgeS": 0.802,
+        "clockOffsetMs": -50,
+        "clockSynced": true,
+        "clockImplausible": false,
+        "consecutiveFailures": 0,
+        "lastError": null,
+        "vehicleCount": 127,
+        "serverGen": "drive-v3",
+        "lastSeq": 133,
+        "discontinuities": 37,
+        "lastBundleAtMs": 1788674700914
+      }
+    },
+    {
+      "stage": "advancing-after-resume",
+      "atMs": 1788674709984,
+      "health": {
+        "connection": "live",
+        "bundleAgeS": 0.524,
+        "clockOffsetMs": -50,
+        "clockSynced": true,
+        "clockImplausible": false,
+        "consecutiveFailures": 0,
+        "lastError": null,
+        "vehicleCount": 126,
+        "serverGen": "drive-v3",
+        "lastSeq": 136,
+        "discontinuities": 41,
+        "lastBundleAtMs": 1788674709943
+      }
+    },
+    {
+      "stage": "clean-stop",
+      "atMs": 1788674709985,
+      "health": {
+        "connection": "live",
+        "bundleAgeS": 0.525,
+        "clockOffsetMs": -50,
+        "clockSynced": true,
+        "clockImplausible": false,
+        "consecutiveFailures": 0,
+        "lastError": null,
+        "vehicleCount": 126,
+        "serverGen": "drive-v3",
+        "lastSeq": 136,
+        "discontinuities": 41,
+        "lastBundleAtMs": 1788674709943
+      }
+    }
+  ],
+  "expiry": {
+    "current": {
+      "atMs": 1788674944317,
+      "health": {
+        "connection": "live",
+        "bundleAgeS": 0.074857177734375,
+        "clockOffsetMs": 13.857142857142858,
+        "clockSynced": true,
+        "clockImplausible": false,
+        "consecutiveFailures": 0,
+        "lastError": null,
+        "vehicleCount": 133,
+        "serverGen": "drive-v3",
+        "lastSeq": 203,
+        "discontinuities": 245,
+        "lastBundleAtMs": 1788674937985
+      },
+      "fleet": 133,
+      "withGeometry": 133,
+      "pastHorizon": 0,
+      "moving": 113
+    },
+    "withoutNewInputsAfter180s": {
+      "atMs": 1788675124317,
+      "health": {
+        "connection": "offline",
+        "bundleAgeS": 180.07485717773437,
+        "clockOffsetMs": 13.857142857142858,
+        "clockSynced": true,
+        "clockImplausible": false,
+        "consecutiveFailures": 0,
+        "lastError": null,
+        "vehicleCount": 133,
+        "serverGen": "drive-v3",
+        "lastSeq": 203,
+        "discontinuities": 245,
+        "lastBundleAtMs": 1788674937985
+      },
+      "fleet": 133,
+      "withGeometry": 133,
+      "pastHorizon": 133,
+      "moving": 0
+    },
+    "note": "Offline expiry probe from captured final input; no new inputs applied, pure future read does not move presentation state."
+  },
+  "fixtures": [
+    {
+      "path": "docs/testing/fixtures/tracking-2026-09-06-final-production-wire.jsonl.gz",
+      "uncompressedSha256": "2f1705ff314baab87a819c4bf50c5a82b9f7ca0c70d194772cf9d147316ef301",
+      "gzipBytes": 380445
+    },
+    {
+      "path": "docs/testing/fixtures/tracking-2026-09-06-final-candidate-wire.jsonl.gz",
+      "uncompressedSha256": "08b23a96e99b3b392b72225cd650214df37cc9b00f103863d8daba3d126f14f6",
+      "gzipBytes": 565126
+    },
+    {
+      "path": "docs/testing/fixtures/tracking-2026-09-06-final-geometry.json.gz",
+      "uncompressedSha256": "25ab0966ca3c7158b0348e7862d9efb643fd5d4d1f42d2666b45679119d7b776",
+      "gzipBytes": 418773
+    }
+  ]
+}

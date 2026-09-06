@@ -4,14 +4,29 @@ Goal: the sim should match real Prague tram behavior across the whole day. Real 
 strongly time-dependent (user observation, to be quantified): rush hours = long boarding +
 car traffic slows trams; nights = they run fast ("хасанят как ебанутые"); midday in between.
 
+**Current implementation (September 2026):** prediction is server-owned in
+`lab/`, while `src/lib/physics/` evaluates published trajectories. The old
+`TramSim`/TOD-table descriptions below retain historical calibration context;
+they are not instructions to reintroduce client-side prediction. Start current
+changes with [the physics-v3 contract](../research/physics-v3-protocol.md), the
+[client replay investigation](../testing/client-tracking-2026-09-05.md) and
+the current server configuration. The collection, time-of-day stratification
+and replay gates still apply.
+
 ## Pipeline (self-collecting, closed loop)
 
 1. **Collection** — the app runs continuously on the simulator (foreground = the passive
    motion logger records every poll for the whole fleet: ~150–450 trams × 12 records/min).
-   A detached harvester (`scratchpad/harvest.sh`, PID in session) copies
+   A bounded harvester (`scripts/calibration/harvest.sh`, PID in session) copies
    `Documents/tramspotter-motion/motionlogs/*.jsonl` from the sim container into
-   `docs/calibration/sim-sessions/sim-<date>.jsonl` every 10 min and relaunches the app if
-   it died. Device sessions (user exports) land next to them as `session-<date>.jsonl`.
+   a caller-selected output directory every 30 seconds. Acquire the simulator lease
+   first, then run `HARVEST_UDID=<exact-leased-udid> scripts/calibration/harvest.sh
+   --out <session-directory> --duration 3600`. Keep that lease during collection.
+   The harvester never deletes active logs or relaunches the app: lifecycle tests
+   must retain control of foreground/background state. It copies complete lines,
+   tracks byte offsets and records container availability in `harvest-status.jsonl`.
+   Use a fresh output directory for each run. Device exports land next to simulator
+   sessions as `session-<date>.jsonl`.
 2. **Analysis rounds** — rerunnable scripts in `docs/calibration/` (first set authored by
    the analysis agent) compute, per **hour-of-day bucket × zone (center bbox / outskirts)
    × model family**: real speed distributions (Δobs/Δt), realized dwell times at stops,
@@ -157,24 +172,33 @@ the fleet/simulator AVL loop.
 
 You are picking up the calibration loop. Everything you need:
 
-1. **Ensure collection is running.**
-   - Simulator UDID `2AB8E802-E82C-4020-957B-27ACD6D56D73` (iPhone 17 Pro), app
-     `cz.zabolotny.tramspotter` (dev build; if missing: `npx expo run:ios`, Metro on 8081 —
-     `npx expo start --dev-client`). The app collects motion logs whenever foregrounded.
-   - Start the harvester if not running: `nohup scripts/calibration/harvest.sh &`
-     (idempotent; copies sim logs → `docs/calibration/sim-sessions/` every 10 min,
-     relaunches the app if it died; check `sim-sessions/harvest.log`).
+1. **Ensure collection is running.** Acquire a simulator lease and use that exact
+   UDID for the current app, `cz.zabolotny.tramspotter`; never reuse a historical
+   device ID. Acquire the build slot before a build/install flow. Keep the
+   simulator lease throughout collection. Run `HARVEST_UDID=<leased-UDID>
+   scripts/calibration/harvest.sh --out <fresh-directory> --duration 3900`.
+   The harvester copies complete lines every 30 seconds, preserves rotation and
+   records availability; it neither deletes logs nor relaunches the app.
+   Filter out pre-existing records before the first `atMs` in its status file.
+   For v3, also capture actual received trajectory/fix messages and the geometry
+   pack: public-state logs alone cannot reproduce per-frame display behavior.
 2. **Accumulate** ≥1 h of new data per round (a full day before touching the TOD tables
    seriously; night hours 22–05 need real night collection).
 3. **Analyze**: run/extend the scripts in `docs/calibration/` (see `analysis-*.md` for the
    established methodology + record schema). Split everything by hour-of-day × zone
    (center bbox lng 14.395–14.46, lat 50.068–50.096) × model.
-4. **Apply**: learned values go into `TOD_PACE_TABLE` / `TOD_DWELL_TABLE`
-   (`src/lib/engine/speedProfile.ts`) and, if evidenced, zone caps / default dwell /
-   TRAIL_M / paceBias clamps (`tramSim.ts`). NEVER defeat the braking envelope.
-5. **Validate before committing**: 1D replay of the newest session against old vs new
-   constants (scripts show how) — median |signed error| must drop; full jest suite +
-   `npx tsc --noEmit` green; note the replay numbers in the commit message and append a
-   round summary to `analysis-<date>.md`.
+4. **Apply** server-side learned changes in the current Lab/ML implementation.
+   Put time-of-day effects in learned time-of-day features/surfaces, not a fixed
+   client speed or dwell hack. Preserve modal-stop and kinematic invariants;
+   amend the frozen protocol explicitly before changing its semantics.
+5. **Validate before committing**: replay identical captured inputs through the
+   shipping client (`bench/src/replay-wire.ts`, command in the linked client
+   investigation). Compare accuracy proxies, backward motion, acceleration,
+   held time, stop overshoot and catch-up gap together. Server changes need
+   causal observation-time scoring and a chronological holdout with night data;
+   a next-fix target must not leak into its own features. Require full Jest and
+   `npx tsc --noEmit`; record baseline, candidate, sample scope and limitations
+   alongside the result. Native simulator and device checks remain separate
+   gates: Node replay does not measure Hermes, Mapbox GPU or phone temperature.
 6. Repeat. Device ride recordings (`session-*.jsonl`, exported by the user) outrank sim
    data on conflicts.

@@ -1,0 +1,83 @@
+{
+  "fix": {
+    "airConditioned": false,
+    "bearing": 158,
+    "coordinates": [
+      14.48744,
+      50.0763
+    ],
+    "delaySeconds": 67246,
+    "headsign": "Kotlářka",
+    "isCanceled": false,
+    "key": "8772",
+    "lastStopId": "U848Z1P",
+    "lastStopSequence": 1,
+    "line": "7",
+    "nextStopArrivalMs": 1788577500000,
+    "nextStopId": "U713Z1P",
+    "nextStopSequence": 2,
+    "observedAtMs": 1788644626000,
+    "registrationNumber": 8772,
+    "routeId": "L7",
+    "shapeDistM": 0,
+    "statePosition": "at_stop",
+    "tripId": "7_18427_260801",
+    "usbChargers": false,
+    "wheelchairAccessible": true
+  },
+  "projection": {
+    "distM": 11891.527274061946,
+    "offsetM": 78.04159574629652
+  },
+  "reportedDistancePoint": [
+    14.346666,
+    50.068066
+  ],
+  "distanceFromReportedPointM": 10088.313264104838,
+  "nearbyStops": [
+    {
+      "arrivalMs": 1788644280000,
+      "coordinates": [
+        14.489841,
+        50.075432
+      ],
+      "departureMs": 1788644280000,
+      "distM": 11617.488,
+      "dwellSeconds": 0,
+      "isTerminal": false,
+      "name": "Vozovna Strašnice",
+      "sequence": 24,
+      "stopId": "U848Z2P"
+    },
+    {
+      "arrivalMs": 1788644340000,
+      "coordinates": [
+        14.487597,
+        50.077026
+      ],
+      "departureMs": 1788644340000,
+      "distM": 11892.534,
+      "dwellSeconds": 0,
+      "isTerminal": false,
+      "name": "Vinice",
+      "sequence": 25,
+      "stopId": "U1108Z1P"
+    },
+    {
+      "arrivalMs": 1788644400000,
+      "coordinates": [
+        14.48472,
+        50.07732
+      ],
+      "departureMs": 1788644400000,
+      "distM": 12101.136999999999,
+      "dwellSeconds": 0,
+      "isTerminal": false,
+      "name": "Krematorium Strašnice",
+      "sequence": 26,
+      "stopId": "U299Z1P"
+    }
+  ],
+  "lastStop": [],
+  "nextStop": []
+}

@@ -9,150 +9,152 @@ Read `docs/research/*.md` first — all API facts, versions and gotchas live the
 
 ```
 src/
-  lib/
-    golemio/client.ts      # fetch wrapper: base URL + X-Access-Token, rate-limit queue (≤18 req/8s)
-    golemio/types.ts       # raw API response types (vehiclepositions, gtfs trips/shapes/stops/routes)
-    golemio/vehicles.ts    # fetchTramPositions(): poll + filter route_type===0 → TramSnapshot[]
-    golemio/gtfs.ts        # fetchTripDetail(tripId) → RouteGeometry source data; stops/routes helpers
-    golemio/shapeCache.ts  # disk-persisted (expo-file-system) shape_id → RouteGeometry, in-mem LRU on top
-    feed/types.ts          # TramFeed boundary contract + CalibrationRecord (what a future backend implements)
-    feed/localGolemioFeed.ts # TramFeed impl on-client: the 5 s poll loop + shapeCache/motionlog delegation
-    feed/calibration.ts    # TramPublicState → CalibrationRecord (field order/rounding = JSONL + API contract)
-    fleet/registry.ts      # regNumberToModel(), MODEL_SPECS (sections, lengths, livery), coupled-pair heuristic
-    geo/polyline.ts        # Polyline: cumulative dists, pointAt(s), bearingAt(s), curvature profile
-    physics/evaluator.ts   # evalTrajectory(track, tMs): binary search + lerp — the whole client physics
-    physics/fixForward.ts  # the newest AVL fix translates the curve; the client's only correction
-    physics/bundle.ts      # /api/trajectories/v2 → typed arrays, once per fetch; clock.ts = server-time offset
-    physics/fleet.ts       # curves → TramPublicState behind the seam TramEngine used to occupy
-    render/featureBuilder.ts # fleet states → GeoJSON FCs (points FC + 3D sections FC), viewport culling
-  components/map/          # MapScreen composition: layers, camera controller, glass chrome
-  components/ui/           # GlassPanel (guarded expo-glass-effect w/ blur fallback), badges, rows
-  stores/                  # zustand: favorites (persisted), selection/follow, settings (persisted)
-  hooks/tramData.ts        # TramRuntime singleton: consumes an injected TramFeed (default
-                           #   LocalGolemioFeed) + thermal-adaptive tick loop + frame/UI
-                           #   subscriptions (useTramRuntime/useAllTramStates/useTramState)
-  lib/motionlog/           # opt-in ride/motion recorder (settings) — stores the feed's calibration
-                           #   records + device GPS, persisted via expo-file-system; decoupled
-                           #   behind a require() guard
-  app/                     # expo-router routes (see UI section)
-scripts/generate-tram-models.mjs  → assets/models/*.glb
+  lib/feed/remoteFeed.ts       Convex AVL snapshot seed/diff stream
+  lib/feed/types.ts            TramFeed snapshots, geometry, health and telemetry seam
+  lib/golemio/gtfs.ts          served trip geometry and stop-time conversion
+  lib/golemio/geometryPack.ts  provisional bulk geometry for cold starts
+  lib/golemio/shapeCache.ts    memory/disk geometry cache and authoritative replacement
+  lib/physics/convexSource.ts  separate Convex trajectory seed/diffs/meta + nonce clock
+  lib/physics/trajectoryStore.ts typed curves, trip matching and connection health
+  lib/physics/evaluator.ts     pure linear/validated Hermite curve evaluation
+  lib/physics/fixForward.ts    newer-fix correction and terminal coast
+  lib/physics/adapter.ts       evaluated target, presentation guard and public state
+  lib/physics/fleet.ts         snapshots, geometry, observed pace and frame-owned state
+  lib/render/featureBuilder.ts viewport culling, points and articulated section GeoJSON
+  lib/fleet/modelSpecs.ts      physical section lengths, gaps and static model keys
+  lib/fleet/registry.ts        registration → type and coupled-pair heuristic
+  lib/motionlog/              bounded passive fleet logs and opt-in ride recordings
+  hooks/tramData.ts           shared runtime, lifecycle, map cadence and 1 Hz React updates
+  components/debug/          selected-tram inspector and imperative map traces
+  components/model/          viewer assets, orbit and door/indicator mechanisms
+  components/map/            native Mapbox sources, camera, selection and glass chrome
+  components/ui/             native controls and guarded Liquid Glass surfaces
+  stores/                    persisted settings/favorites and selection/follow ownership
+  app/model/[id].tsx         Expo GL / three.js interactive tram viewer
+lab/                         server predictor, ML integration, publication and diagnostics
+convex/                      public fix/trajectory streams, geometry serving and clock query
+scripts/tram-models/blender_fleet.py  editable Blender model authoring
+scripts/generate-tram-models.mjs     generation and GLB validation entry point
 ```
 
-Shared contracts: `src/lib/types.ts` — single source of truth, all modules import from it.
+Shared app contracts live in `src/lib/types.ts`. The protocol and rollout notes
+are in [physics v3](research/physics-v3-protocol.md); read the dated amendments
+as well as the original contract. This document describes the working tree,
+including the September 2026 candidate changes; it does not assert production
+promotion or device verification.
 
-## Feed boundary (TramFeed)
+## Data flow and ownership
 
-All live data crosses ONE seam: the `TramFeed` interface (`src/lib/feed/types.ts`)
-— push-style snapshot batches (`subscribeSnapshots`), trip-geometry resolution
-(`getGeometry`/`requestGeometry`/`promoteGeometry`), a calibration-telemetry sink
-(`reportCalibration`, `CalibrationRecord`), and feed health (`status()` → status
-chip). `TramRuntime` consumes an injected feed and owns only the simulation;
-`LocalGolemioFeed` is today's sole implementation — the "backend" running on the
-client (5 s Golemio poll loop, shapeCache, motionlog storage). A future
-`RemoteFeed` (server polls Golemio at ~1–2 s, pushes diffs, precomputes geometry,
-aggregates calibration fleet-wide) replaces it 1:1 with the engine and UI
-untouched — see `decisions/backend-plan.md`.
+1. **AVL fixes:** the server polls Golemio. `RemoteFeed` seeds from
+   `stream:fullFleet`, folds `stream:batchesSince` and emits the merged full
+   fleet. A retention gap re-seeds; subscriptions periodically advance their
+   cursor. `TramRuntime` constructs `RemoteFeed` unconditionally. The retired
+   local Golemio feed is not the shipping path; an unavailable client stack
+   yields `NullFeed`, never invented positions. Entity keys are registration
+   numbers, with trip ID fallback.
+2. **Geometry:** served `/geometry/{tripId}` data resolves through `shapeCache`.
+   A cold-start `/geometry-pack` request seeds provisional shapes while the
+   per-trip queue obtains authoritative stop epochs. Pack failure leaves the
+   ordinary per-trip path intact. Replacing a provisional shape resets the
+   presentation state for that geometry, avoiding mixed distance axes.
+3. **Prediction:** `lab/` combines observations, route/stop geometry and ML
+   outputs into `smooth` and `opinion` trajectories. Continuity/seam construction,
+   dwell prediction and ML fallback belong to the server. Publication is
+   asynchronous: newer fixes remain in `lastFix` for the next refresh, and
+   superseded inference is discarded. A configured ML outage rebuilds when a
+   curve is missing, belongs to the wrong trip/anchor, or has expired; failure
+   diagnostics remain explicit. See [backend evidence and rollout limits](research/tracking-2026-09-05/README.md)
+   and the [client replay investigation](testing/client-tracking-2026-09-05.md).
+4. **Trajectories:** `ConvexTrajectorySource` seeds `trajectories:fullSet`, folds
+   `trajectories:batchesSince`, and listens to `trajectories:meta` for publisher
+   freshness. The metadata cursor does not replace the applied diff cursor.
+   Retention gaps or a newer publication with a reset stream head re-seed;
+   generation guards reject callbacks from obsolete subscriptions. This is a
+   separate stream from AVL fixes: either may be fresh while the other is old.
+5. **Presentation:** the runtime evaluates the active mode at corrected server
+   time, applies explicit newer-fix/presentation rules, and emits native map
+   data. Only actual map/bench frame producers commit the displayed position
+   and interval velocity. UI, logging, camera look-ahead and diagnostics reads
+   cannot advance that guard. Culling uses the same guarded/fallback distance
+   as rendering before allocating public state.
+6. **Cadence/lifecycle:** map due-checks run at 30 Hz near the glide band (enter
+   zoom ≥14.0, exit <13.7), about 10 Hz farther out. Native source pushes have
+   their own zoom-dependent budgets. React notifications share a 1 Hz gate,
+   including trajectory publications; explicit mode changes are immediate.
+   Ordinary background stops sources and timers. An active ride recording may
+   retain data subscriptions and its slow logging path, with no map/UI frame
+   loop. Resume evaluates current wall time rather than replaying missed ticks.
 
-## Data flow
+`EXPO_PUBLIC_CONVEX_URL` selects the fix backend; `EXPO_PUBLIC_CONVEX_SITE_URL`
+selects served geometry. `EXPO_PUBLIC_TRAJECTORY_CONVEX_URL`, when set, isolates
+only trajectories and their clock for candidate testing. No retired feed/engine
+setting silently changes the production source.
 
-1. The feed (`LocalGolemioFeed`) polls `GET /v2/vehiclepositions?limit=10000`
-   every **5s** (foreground only) and pushes each batch into the runtime.
-   Filter `trip.gtfs.route_type === 0`.
-   NEVER pass `includeNotTracking=true`. `shape_dist_traveled` is a **string in km** → meters.
-2. Entity key: `vehicle_registration_number` (stable across trips), fallback `trip_id`.
-3. Unseen `trip_id` → shape queue: `GET /v2/gtfs/trips/{id}?includeShapes=true&includeStopTimes=true&includeStops=true`,
-   ≤2 concurrent, priority: followed > viewport > rest. Result → `RouteGeometry`
-   (coords, cumulative meters, per-vertex curvature, stops with dist-along-shape from
-   stop_times.shape_dist_traveled (number, km) + arrival/departure + dwell). Disk-cache by
-   `shape_id`; stop-times cache by `trip_id` (TTL 24h — trip_ids roll over ~12 days).
-4. `TramEngine.ingest(snapshots, tripDetails)` updates per-tram anchors; `tick(now)` advances
-   physics; `featureBuilder` emits GeoJSON → the patched direct-native
-   `ShapeSource.updateShape` command (outside Fabric). **Thermal-adaptive
-   cadence** (`tramData.ts`, iteration 4 — iPad ran hot after an hour): the sim ticks at 30 Hz
-   (`TICK_MS` 33) ONLY while the 3D model band is on screen (`setDetailZoom` from camera events),
-   ~10 Hz (`TICK_IDLE_MS` 100) otherwise. The points FC is pushed at a zoom-dependent
-   rate (`pointsPushIntervalMs`: ~15 Hz close, 1 s mid, 5 s far) and is culled before public-state
-   allocation at close zoom; the sections FC only while the
-   band is visible; empty FCs skip stringify+push entirely. Live sources omit the
-   React `shape` prop and never use `setNativeProps`, so unrelated Fabric commits cannot replay
-   an older source frame.
-5. A true background pause records wall time and stops all work. Foregrounding calls
-   `TramEngine.resyncAfterSuspension(now)` once: sims seek forward to bounded absolute
-   timetable/AVL anchors before rendering resumes, rather than restarting at their old
-   position or synchronously replaying every missed physics step.
+## Client physics and displayed motion
 
-## Client physics (physics v3)
-
-**One pure function over server-published curves.** The client simulates
-nothing any more: prediction, smoothing and all per-tram state live in the
-predictor service, which publishes ready-made trajectories; the app only
-evaluates them. The wire format, the continuity / modal-stop invariants the
-server must honour, and the connection-honesty table are FROZEN in
-[`research/physics-v3-protocol.md`](research/physics-v3-protocol.md) — read it
-before touching either side. `src/lib/physics/` is the whole engine:
+The pure evaluator is small, but the complete client is **not stateless**.
+Prediction remains server-owned; the client retains observation/geometry state,
+newer-fix correction and the last frame actually displayed. Therefore two
+clients can share the same raw curve while temporarily having different
+presentation histories. Do not claim pixel identity for the guarded marker.
 
 ```
-GET /api/trajectories/v2   two curves per tram, built server-side
-  ├─ smooth   continuity track, blended across emissions → default
-  └─ opinion  raw model opinion, re-anchors on each fix  → "fixed" mode
-       ↓ evaluated at Date.now() + clockOffset
-  s (meters along shape) → polyline.pointAt/bearingAt → position + bearing
+AVL fixes ───────────────┐
+                        ↓
+Convex smooth/opinion → pure evaluator → fix-forward target → frame guard
+                        ↑                                  ↓
+nonce RTT clock ────────┘                       shape point/bearing → Mapbox
 ```
 
-- **`evaluator.ts`** — `evalTrajectory(track, tMs)`: binary search + lerp over a
-  `Float64Array` of `t,s` knots, clamped at both ends, so the app can never
-  animate past the data it has. No state, no allocation (100k calls ≈ 4–10 ms).
-- **`bundle.ts`** — decodes one fetch into typed arrays once (≤ 24 knots/track);
-  nothing per frame. **`trajectoryStore.ts`** is the single network call: one
-  bundle per 5 s for the whole fleet.
-- **`clock.ts`** — `serverNowMs − Date.now()` offset (EWMA over the last 3
-  fetches). Every evaluation uses server time, which is what makes two devices
-  render the same tram in the same place at the same instant.
-- **`render.ts`** — picks the track: `smooth` (default) or `fixed`
-  («Более точное положение»). Switching is FREE — it changes which curve the
-  next evaluation reads, and nothing else.
-- **`fixForward.ts`** — the client's ONE correction, and the only place it adds
-  anything to the server's physics. Curves cost an ML round trip before they
-  can be emitted, so they reach the phone ~7–11 s after the tram was there,
-  while Convex pushes the raw fix in ~2 s: at 48 % of fix arrivals the served
-  curve is already behind the dot (lab M2, p90 142 m). The curve is therefore
-  wound forward **in time** until it is where the newest fix proves the tram
-  is — the curve is not wrong about how the tram drives, it is late — and read
-  from there. Forward only, gated on the curve's own `anchorMs`, rate-limited
-  to 2 m/s in `smooth`, whole and immediate in `fixed`. Past the horizon a tram
-  coasts to a halt over 20 s instead of stopping dead, and stays dimmed the
-  entire time. The lab mirrors the rule in `clientProjectionM` so the §14.7
-  seam floor is set where the phone actually draws; without that the bundle
-  swap steps backward (796 of 809 measured backward steps). Protocol
-  §Fix-forward has the rationale and the invariants;
-  `__tests__/physics-fix-forward.test.ts` pins them.
-- **`connection.ts`** — live / degraded / offline derived from BUNDLE AGE
-  (< 15 s, 15–45 s, > 45 s), not from fetch outcomes; drives the explicit
-  offline banner and the dimmed `stale` render prop.
-- **`adapter.ts` / `fleet.ts`** — curves → `TramPublicState` behind the exact
-  seam `TramEngine` used to occupy (`ingest()` / `getStates*`), so the ~40 UI
-  consumers stayed untouched across the replacement.
+- **Evaluation:** binary search over decoded `[t,s]` typed arrays. Optional knot
+  velocities prepare cubic Hermite coefficients once at decode. A segment is
+  accepted only when its whole span stays monotonic, within 0–16.7 m/s and
+  −1.4…+1.3 m/s². Missing/infeasible velocity metadata retains exact linear
+  interpolation; holds remain flat. The pure curve clamps outside its range.
+  Position, inverse crossing and backend seam projection use compatible math.
+- **Clock:** `clock:now` receives a nonce, avoiding cached reactive-query
+  timestamps. RTT midpoint samples with RTT ≤2 s feed a three-sample weighted
+  estimator. The applied offset approaches its target at at most 5% clock-rate
+  correction, preventing fleet-wide jumps from latency jitter. The estimate uses
+  the request midpoint; its ramp starts at actual reply receipt. Sampling runs at
+  start/resume and once per minute. Missing clock support remains explicitly
+  unsynchronized; cached metadata is not used as a substitute.
+- **Newer fixes:** `fixForward.ts` advances the curve in time when a newer AVL
+  fix establishes a forward anchor. Smooth mode rate-limits catch-up; fixed
+  mode applies the correction directly. A terminal coast is bounded to 20 s
+  and remains marked stale. A matching trip and coherent geometry are required.
+- **Frame guard:** smooth mode cannot reverse between ordinary frames and has
+  a 25 m/s presentation ceiling. Forward catch-up acceleration is capped at
+  2.5 m/s² using the last displayed interval speed and local actual-frame elapsed
+  time, independently of the corrected clock used to evaluate the curve. The marker never coasts past
+  a revised target merely to satisfy a braking bound. Explicit discontinuities,
+  trip/geometry changes and long suspension have separate reset/seek handling.
+  This is a presentation safeguard, not a claim of physically measured motion.
+- **Fallback:** without a matching trajectory but with geometry, bounded
+  observed pace may advance the marker and is labeled stale. Short fix
+  intervals accumulate to estimate pace; stops reset it. Unknown geometry stays
+  at the raw fix with zero displayed speed. Ordinary getters remain read-only.
+- **Honesty:** fleet publication age drives live/degraded/offline (<15 s,
+  15–45 s, >45 s), but individual fix age, curve age, effective horizon and
+  local receipt age remain separate diagnostic values. A fresh fleet heartbeat
+  does not establish a fresh curve for every tram. Fixed is the model's current
+  opinion, not ground-truth accuracy.
 
-There is no tick loop and no per-tram state left: `TICK_MS` now only paces the
-map's push due-checks, and resuming after any suspension is correct by
-construction (evaluate at `now`) — no seek, no catch-up integration.
+The retired on-client predictor/smoother, pace calibration and queue controller
+remain documented as history in `decisions/engine-v2.md` and
+`calibration/baselines/gate-v2.md`.
 
-The v2 engine — predictor (`tramSim`), smoother, `speedProfile`, the
-`paceBias`/TOD calibration surface and the client queue/junction constraints —
-is retired. Its design record and gate results survive as history in
-`decisions/engine-v2.md` and `calibration/baselines/gate-v2.md`; the physics
-they encoded now belongs to the server.
-
-Sections (articulated bending): model spec gives section lengths `L_i` and gaps. Head at `s`;
-section i center at `s − (Σ previous lengths + gaps) − L_i/2`; its position/bearing from
-`polyline.pointAt/bearingAt`. Each section = one GeoJSON feature `{modelKey: '15t-b', bearing}`.
-Coupled T3 pairs (T3R.P/PLF on day lines except 23): render second car 14.5 m behind.
+Articulation uses physical rigid lengths and gaps from `modelSpecs.ts`. For a
+head at route distance `s`, section centers subtract preceding lengths/gaps and
+half the section length; each center gets its own shape position and bearing.
+Pair spacing is 15.104 m for standard T3 bodies and 16.2 m for PLF. Registration
+and line-based pairing is still a heuristic, not a live coupling sensor.
 
 ## Fleet registry (live-verified 2026-07 + docs/research/prague-fleet.md)
 
 | reg range | model | sections |
 |---|---|---|
-| ≤ 8014 (6004, 7269, 7290…) | `t3` historic → t3 model | 1 (14.1 m) |
+| ≤ 8014 (6004, 7269, 7290…) | `t3` historic → t3 model | 1 (14.0 m body) |
 | 8015–8249 | `t3rp` (T3R.P) | 1 |
 | 8251–8299 | `t3rplf` (T3R.PLF) | 1 |
 | 8300–8579 | `t3rp` | 1 |
@@ -160,7 +162,7 @@ Coupled T3 pairs (T3R.P/PLF on day lines except 23): render second car 14.5 m be
 | 9051–9113 | `kt8d5` (KT8D5.RN2P) | 3 (30.3 m) |
 | 9114–9199 | `14t` (Škoda 14T) | 5 (30.25 m) |
 | 9200–9499 | `15t` (Škoda 15T ForCity Alfa) | 3 (31.4 m) |
-| 9500–9599 | `52t` (Škoda 52T ForCity Plus) | 5 (~32 m) |
+| 9500–9599 | `52t` (Škoda 52T ForCity Plus) | 5 (31.99 m) |
 
 (NOTE: research doc's "14T = 9404–9629" is wrong — live data confirms 14T cluster 9115–9172,
 15T 9201–9459. T6A5 retired 2021 — not in table.)
@@ -257,28 +259,46 @@ and placement: it retains the same peek → medium → large detents, grabber an
 pan/scroll hand-off. It opens large on iPad and can be pulled down to the compact
 search capsule; replacing it with a tram sheet slides the home sheet offstage.
 
-Debug mode adds a compact horizontal command deck over the top of the app and
-an in-world comparison for the selected/followed tram: raw AVL fix (magenta),
-projected live position (lime), and smooth physics position (cyan), with
-20-second trails and a live↔smooth delta. The active render mode is marked with
-`*`; the trace GeoJSON uses direct-native `ShapeSource.updateShape` updates.
+Debug mode adds a collapsed selection inspector with native Overview/History/
+Server/Help segments, bounded 60 s history and foreground-only 1 Hz sampling.
+Following is optional. Separate raw fix, displayed smooth/fixed and ML target
+traces use imperative native source updates. A held curve is not labeled a
+real stop without evidence; GPS comparison is opt-in for a rider aboard that
+tram. See [inspector contract and QA](testing/tracking-inspector.md).
+
+The model viewer loads 19 viewer-specific GLBs with named door/indicator nodes,
+separate from the 34 static map assets. Front/rear presets and accessible orbit
+actions accompany gestures. Door demos interpolate leaf transforms over 1.6 s;
+selected-side indicators blink with an 800 ms period. Reduce Motion makes doors
+instant and lamps steady. The viewer uses native PBR on devices and a bounded
+640 px Lambert render target on Simulator, schedules frames after the Expo GL
+flush barrier and preserves depth precision with a model-aware camera range.
+Native build-31 iPad controls and rendered mechanism changes passed; the dated
+QA note separates those checks from earlier failures and physical-device tests. Asset geometry,
+authoritative references and budgets are in [3D model decisions](decisions/3d-models.md).
 
 Routes (expo-router Stack, map = root):
-- `/` map + glass chrome: top-right button stack (locate me, pitch 2D/3D, style), bottom glass
-  pill: search (line #, reg #, stop) + Lines / Favorites / Planner buttons.
-- `/tram/[key]` formSheet (detents [0.35, 0.9], largestUndimmed so map stays live): model name +
-  type info, line badge, headsign, delay, sim speed, next stops timeline, AC/USB badges,
-  Follow + Favorite buttons.
-- `/line/[id]` formSheet: stops list w/ live tram positions, active tram count, tap-to-fly.
-- `/favorites` formSheet: favorite trams (live status: line/not in service) + favorite lines.
-- `/planner` formSheet: stop A → stop B over tram network graph (built from cached trip stop
-  sequences): direct + 1-transfer BFS, results drawn on map.
-- `/settings` formSheet: light preset override, about, Golemio/PID attribution.
+
+- `/` owns the map, adaptive home/tram sheets and floating map controls. The tram
+  card contains its stop timeline, ride recording and model information; its
+  action capsule exposes favorites, information and photos.
+- `/tram/[key]` is an invisible deep-link bridge. It opens the owned tram card,
+  selects and follows the vehicle, then dismisses navigation back to the map.
+- `/search` presents live fleet/stop search; `/line/[id]` and `/stop/[key]` show
+  line stops and live station arrivals, with explicit fly-to actions.
+- `/favorites`, `/planner`, `/settings` and `/rides` use the shared native sheet
+  configuration. Settings includes render mode, appearance and developer tools.
+- `/model-info/[id]` and `/tram-photos/[reg]` present details and reference photos.
+  `/model/[id]` is the opaque interactive GL viewer, with its own close control.
 
 Persistence: zustand/persist over expo-file-system adapter (favorites, settings, shape cache index).
 
 ## Testing
 
-- jest-expo unit tests: polyline math, speed profile, braking envelope, dwell, pace controller,
-  fleet registry ranges, feature builder.
-- Simulator E2E: Codex drives the app, screenshots each zoom mode + screens.
+- jest-expo unit tests: curve evaluation and malformed velocity fallback, clock/transport
+  recovery, frame ownership, geometry/culling, fleet registry, mechanisms and diagnostics.
+- Fixed-input wire replay: compare baseline/candidate at identical receive times; separate
+  sanctioned discontinuities, stale coverage and positional accuracy from frame smoothness.
+- Native Simulator E2E: `scripts/testing/` drives real XCTest gestures and controls,
+  exports state screenshots and checks live publication advancement. Visual review
+  and physical-device delivery remain separate from assertion success.

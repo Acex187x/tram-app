@@ -15,6 +15,16 @@ import { RIDE_BG_POLL_MS, TramRuntime } from '@/hooks/tramData';
 import type { CalibrationRecord, FeedPriority, FeedStatus, TramFeed } from '@/lib/feed/types';
 import type { RouteGeometry, TramSnapshot } from '@/lib/types';
 
+// Lifecycle tests own fake transports. Real WebSocket startup under fake
+// timers can leave TLS handshakes pending after close and contact production.
+// The trajectory transport has dedicated seeded/reconnect/clock tests.
+jest.mock('@/lib/physics/convexSource', () => ({
+  ConvexTrajectorySource: class {
+    start() {}
+    stop() {}
+  },
+}));
+
 class FakeFeed implements TramFeed {
   startCalls: (number | undefined)[] = [];
   stopCalls = 0;
@@ -52,9 +62,12 @@ interface RuntimePrivate {
   onAppState(status: string): void;
 }
 
+const runtimes: TramRuntime[] = [];
+
 function makeRuntime(riding: () => boolean) {
   const feed = new FakeFeed();
   const rt = new TramRuntime(feed);
+  runtimes.push(rt);
   const p = rt as unknown as RuntimePrivate;
   p.refCount = 1; // as if retained by a mounted screen
   rt.setRideActivity(riding);
@@ -62,6 +75,7 @@ function makeRuntime(riding: () => boolean) {
 }
 
 afterEach(() => {
+  for (const rt of runtimes.splice(0)) rt.release();
   jest.useRealTimers();
 });
 
@@ -215,4 +229,24 @@ describe('data sources follow the run mode', () => {
     expect(p.runMode).toBe('paused');
     expect(trajStop).toHaveBeenCalled();
   });
+});
+
+it('bursty ML publications cannot turn 1 Hz UI hooks into publication-rate fleet allocations', () => {
+  jest.useFakeTimers();
+  const { rt, p } = makeRuntime(() => false);
+  p.runMode = 'active';
+  const published = rt as unknown as { onBundle(): void };
+  const build = jest.spyOn(rt.fleet, 'getStates');
+  let notifications = 0;
+  const off = rt.subscribeUi(() => { notifications++; rt.getStatesCached(); });
+  for (let i = 0; i < 100; i++) {
+    published.onBundle();
+    jest.advanceTimersByTime(10);
+  }
+  expect(notifications).toBe(1);
+  expect(build).toHaveBeenCalledTimes(1);
+  published.onBundle();
+  expect(notifications).toBe(2);
+  expect(build).toHaveBeenCalledTimes(2);
+  off(); build.mockRestore();
 });

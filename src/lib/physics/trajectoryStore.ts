@@ -17,7 +17,13 @@
 // payload path for tests and tooling — the wire shape of a vehicle is the same
 // on both transports, and parseBundle/parseVehicle are the single decoders.
 
-import { parseBundle, parseVehicle, PROTOCOL_VERSION, type ParsedBundle, type ParsedVehicle } from './bundle';
+import {
+  parseBundle,
+  parseVehicle,
+  PROTOCOL_VERSION,
+  type ParsedBundle,
+  type ParsedVehicle,
+} from './bundle';
 import { ClockSync } from './clock';
 import { connectionState, type ConnectionState } from './connection';
 import type {
@@ -103,10 +109,13 @@ export class TrajectoryStore implements TrajectorySink {
         // Lazy require: keeps the convex client stack out of the module graph
         // until a real runtime starts (same discipline as constructFeed()).
         // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { ConvexTrajectorySource } = require('./convexSource') as typeof import('./convexSource');
-        const env = process.env.EXPO_PUBLIC_CONVEX_URL;
-        const url =
-          typeof env === 'string' && env.length > 0 ? env : 'https://tram-api.acex.sh';
+        const { ConvexTrajectorySource } =
+          require('./convexSource') as typeof import('./convexSource');
+        // An isolated trajectory deployment can share the production public fix
+        // feed. This override routes curves and their clock together only.
+        const trajectoryEnv = process.env.EXPO_PUBLIC_TRAJECTORY_CONVEX_URL;
+        const env = trajectoryEnv || process.env.EXPO_PUBLIC_CONVEX_URL;
+        const url = typeof env === 'string' && env.length > 0 ? env : 'https://tram-api.acex.sh';
         this.convexSource = new ConvexTrajectorySource(this, { url });
       }
       this.convexSource.start();
@@ -154,7 +163,7 @@ export class TrajectoryStore implements TrajectorySink {
     return {
       connection: this.connection(localNowMs),
       bundleAgeS: this.bundleAgeS(localNowMs),
-      clockOffsetMs: this.clock.offsetMs,
+      clockOffsetMs: this.clock.offsetAt(localNowMs),
       clockSynced: this.clock.synced,
       clockImplausible: this.clock.implausible,
       consecutiveFailures: this.failures,
@@ -224,7 +233,7 @@ export class TrajectoryStore implements TrajectorySink {
       generator: meta?.generator ?? null,
       receivedAtMs,
     };
-    this.clock.sample(serverNowMs, receivedAtMs);
+
     this.lastSeqSeen = meta?.lastSeq ?? this.lastSeqSeen;
     this.failures = 0;
     this.lastError = null;
@@ -235,11 +244,12 @@ export class TrajectoryStore implements TrajectorySink {
   /** Fold one diff batch into the live bundle (mutates the vehicle map). */
   foldConvex(batch: TrajectoryBatchWire, serverNowMs: number, receivedAtMs: number): void {
     const cur = this.current;
-    if (!cur) return; // seed lands first by protocol; a stray push is ignored
+    if (!cur || batch.seq <= this.lastSeqSeen) return; // seed first; old/replayed diffs cannot roll back the fleet
     for (const raw of batch.changed) {
       const parsed = parseVehicle(raw);
       if (!parsed) continue;
       const before = cur.vehicles.get(parsed.key);
+      if (before && parsed.emittedAtMs < before.emittedAtMs) continue;
       if (parsed.discontinuity && (!before || before.emittedAtMs !== parsed.emittedAtMs)) {
         this.discontinuities += 1;
       }
@@ -251,7 +261,7 @@ export class TrajectoryStore implements TrajectorySink {
     if (batch.atMs > cur.atMs) cur.atMs = batch.atMs;
     if (serverNowMs > cur.serverNowMs) cur.serverNowMs = serverNowMs;
     if (batch.seq > this.lastSeqSeen) this.lastSeqSeen = batch.seq;
-    this.clock.sample(serverNowMs, receivedAtMs);
+
     this.failures = 0;
     this.lastError = null;
     this.lastBundleAtMs = receivedAtMs;
@@ -265,8 +275,7 @@ export class TrajectoryStore implements TrajectorySink {
    * failing seed must keep reporting the seed failure.
    */
   noteConvexMeta(meta: TrajectoryMetaWire, receivedAtMs: number): void {
-    this.clock.sample(meta.serverNowMs, receivedAtMs);
-    if (meta.lastSeq > this.lastSeqSeen) this.lastSeqSeen = meta.lastSeq;
+    // A heartbeat head is not an applied diff cursor: metadata can beat the batch.
     const cur = this.current;
     if (cur) {
       if (meta.atMs > cur.atMs) cur.atMs = meta.atMs;
@@ -274,6 +283,13 @@ export class TrajectoryStore implements TrajectorySink {
       cur.generator = meta.generator;
       this.listeners.forEach((l) => l());
     }
+  }
+
+  /** Only a nonce query is a clock sample: reactive query results may be cached. */
+  noteConvexClock(serverNowMs: number, sentAtMs: number, receivedAtMs: number): void {
+    const rttMs = receivedAtMs - sentAtMs;
+    if (rttMs < 0 || rttMs > 2_000) return;
+    this.clock.sample(serverNowMs, sentAtMs + rttMs / 2, receivedAtMs);
   }
 
   noteConvexFailure(message: string): void {

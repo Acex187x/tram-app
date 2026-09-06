@@ -11,6 +11,8 @@
 // connection state ages into `degraded`/`offline` honestly rather than the
 // fleet snapping to garbage).
 
+import { prepareHermiteTrack } from './evaluator';
+
 export const PROTOCOL_VERSION = 2;
 
 /** Hard cap per track, mirroring the protocol's "≤ 24 points per track". */
@@ -88,21 +90,28 @@ export function packTrack(points: unknown): Float64Array {
   if (!Array.isArray(points) || points.length === 0) return EMPTY_TRACK;
   const limit = Math.min(points.length, MAX_KNOTS);
   const buf = new Float64Array(limit * 2);
+  const velocities = new Float64Array(limit);
+  velocities.fill(Number.NaN);
+  let hasVelocity = false;
   let n = 0;
   let lastT = Number.NEGATIVE_INFINITY;
   for (let i = 0; i < limit; i++) {
-    const p = points[i] as { t?: unknown; s?: unknown } | null;
+    const p = points[i] as { t?: unknown; s?: unknown; v?: unknown } | null;
     if (p == null) continue;
     const t = num(p.t);
     const s = num(p.s);
     if (Number.isNaN(t) || Number.isNaN(s) || t <= lastT) continue;
     buf[n << 1] = t;
     buf[(n << 1) + 1] = s;
+    const velocity = num(p.v);
+    velocities[n] = velocity;
+    if (Number.isFinite(velocity)) hasVelocity = true;
     lastT = t;
     n += 1;
   }
   if (n === 0) return EMPTY_TRACK;
-  return n * 2 === buf.length ? buf : buf.subarray(0, n * 2);
+  const packed = n * 2 === buf.length ? buf : buf.subarray(0, n * 2);
+  return hasVelocity ? prepareHermiteTrack(packed, velocities.subarray(0, n)) : packed;
 }
 
 /**

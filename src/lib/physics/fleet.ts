@@ -4,8 +4,9 @@
 // per poll, `getState(s)` per push — so the map, sheets, lists, follow camera
 // and motion log kept their call sites. What is GONE is everything in between:
 // no tick(), no substeps, no per-tram sims, no smoother, no speed profile, no
-// queue/junction constraints, no clock to reset, nothing to resync after a
-// suspension. A frame is: look up a vehicle's curves, evaluate them at the
+// queue/junction constraints. The existing map presentation safety guard keeps
+// ONLY the last displayed frame. Readers never advance it; a suspension over
+// five seconds seeks directly. A frame is: look up a vehicle's curves, evaluate them at the
 // server-corrected instant, place the result on the trip polyline.
 //
 // Snapshots (identity, line, headsign, delay, AVL fix) still come from the
@@ -19,12 +20,19 @@ import type {
   TramSnapshot,
   PhysicsDebugInfo,
 } from '@/lib/types';
+import { assessGeometryCoherence, type GeometryCoherence } from './geometryCoherence';
 import { segmentIndexAt } from '@/lib/geo/polyline';
 import { projectDistanceOnPolyline } from '@/lib/golemio/gtfs';
-import { adaptTram, NAIVE_HORIZON_S } from './adapter';
+import { adaptTram, guardedDistM, naiveDistM, NAIVE_HORIZON_S } from './adapter';
 import { evalSpeedMs, evalTrajectory, trackEndMs } from './evaluator';
 import { fixForwardTauMs } from './fixForward';
-import { catchupVMsFor, fixForwardAppliedM, renderDistM, trackFor, type RenderMode } from './render';
+import {
+  catchupVMsFor,
+  fixForwardAppliedM,
+  renderDistM,
+  trackFor,
+  type RenderMode,
+} from './render';
 import type { TrajectoryStore } from './trajectoryStore';
 
 export interface TramFleetOptions {
@@ -70,6 +78,10 @@ export class TramFleet {
   /** Live fleet, rebuilt each ingest — departed vehicles drop out by construction. */
   private snapshots = new Map<string, TramSnapshot>();
   private geometries = new Map<string, RouteGeometry>();
+  private coherence = new Map<
+    string,
+    { fix: TramSnapshot; geometry: RouteGeometry | undefined; result: GeometryCoherence }
+  >();
   private models = new Map<string, TramModelSpec>();
   /**
    * Observed pace per vehicle, from consecutive AVL fixes — the input of the
@@ -81,13 +93,23 @@ export class TramFleet {
   /**
    * Teleport watch: last rendered position per vehicle (in the active render
    * mode) + the last jump that no plausible motion explains. Updated in-place
-   * on every build() — allocation-free after the first sighting (perf #8).
+   * only for explicit displayed frames. UI/diagnostics reads do not advance it.
    * Mode switches and trip changes legitimately move the marker, so both
    * reset the tracking instead of recording a phantom teleport.
    */
   private jumps = new Map<
     string,
-    { tripId: string; s: number; atMs: number; jumpM: number; jumpAtMs: number }
+    {
+      tripId: string;
+      geometry: RouteGeometry | undefined;
+      emissionMs: number;
+      speedKmh: number;
+      s: number;
+      atMs: number;
+      frameAtMs: number;
+      jumpM: number;
+      jumpAtMs: number;
+    }
   >();
   /**
    * Profile-emission log per vehicle (devtools): which source produced each
@@ -156,31 +178,77 @@ export class TramFleet {
   ): void {
     const nextSnapshots = new Map<string, TramSnapshot>();
     const nextGeometries = new Map<string, RouteGeometry>();
+    const nextCoherence = new Map<
+      string,
+      { fix: TramSnapshot; geometry: RouteGeometry | undefined; result: GeometryCoherence }
+    >();
     const nextModels = new Map<string, TramModelSpec>();
     const nextPaces = new Map<string, { tripId: string; s: number; atMs: number; vMs: number }>();
-    for (const s of snapshots) {
+    for (const incoming of snapshots) {
+      const prior = this.snapshots.get(incoming.key);
+      const s =
+        prior && prior.tripId === incoming.tripId && incoming.observedAtMs < prior.observedAtMs
+          ? prior
+          : incoming;
       nextSnapshots.set(s.key, s);
       const geometry = getGeometry(s.tripId);
-      if (geometry) nextGeometries.set(s.key, geometry);
+      const cached = this.coherence.get(s.key);
+      const old = cached?.fix;
+      const unchanged =
+        old &&
+        cached?.geometry === geometry &&
+        old.tripId === s.tripId &&
+        old.observedAtMs === s.observedAtMs &&
+        old.shapeDistM === s.shapeDistM &&
+        old.coordinates[0] === s.coordinates[0] &&
+        old.coordinates[1] === s.coordinates[1] &&
+        old.lastStopId === s.lastStopId &&
+        old.nextStopId === s.nextStopId;
+      const coherence = unchanged ? cached.result : assessGeometryCoherence(s, geometry);
+      nextCoherence.set(s.key, { fix: s, geometry, result: coherence });
+      if (geometry && coherence.status !== 'invalid') nextGeometries.set(s.key, geometry);
       const known = this.models.get(s.key);
       nextModels.set(s.key, known ?? this.resolveModel(s));
       // Fold the fix pair into the observed pace. A trip change moves the
       // s-axis under the pair, so it resets rather than producing a garbage Δ.
       const prevPace = this.paces.get(s.key);
-      if (!prevPace || prevPace.tripId !== s.tripId) {
-        nextPaces.set(s.key, { tripId: s.tripId, s: s.shapeDistM, atMs: s.observedAtMs, vMs: 0 });
+      if (
+        !prevPace ||
+        prevPace.tripId !== s.tripId ||
+        coherence.status === 'invalid' ||
+        cached?.result.status === 'invalid'
+      ) {
+        nextPaces.set(s.key, {
+          tripId: s.tripId,
+          s: s.shapeDistM,
+          atMs: s.observedAtMs,
+          vMs: 0,
+        });
       } else if (s.observedAtMs > prevPace.atMs) {
         const dtS = (s.observedAtMs - prevPace.atMs) / 1000;
         const dsM = s.shapeDistM - prevPace.s;
-        const vMs =
-          dtS >= 4 && dtS <= 300 && dsM >= 0 ? Math.min(16.7, dsM / dtS) : prevPace.vMs;
-        nextPaces.set(s.key, { tripId: s.tripId, s: s.shapeDistM, atMs: s.observedAtMs, vMs });
+        if (dtS < 4 && dsM >= 0 && s.statePosition !== 'at_stop') {
+          // Accumulate short fix intervals: replacing the baseline every 2 s
+          // while requiring dt>=4 meant a fresh high-rate feed never learned
+          // any pace and no-curve trams stayed frozen forever.
+          nextPaces.set(s.key, prevPace);
+        } else {
+          const vMs =
+            dtS <= 300 && dsM >= 0 && s.statePosition !== 'at_stop' ? Math.min(16.7, dsM / dtS) : 0;
+          nextPaces.set(s.key, {
+            tripId: s.tripId,
+            s: s.shapeDistM,
+            atMs: s.observedAtMs,
+            vMs,
+          });
+        }
       } else {
         nextPaces.set(s.key, prevPace);
       }
     }
     this.snapshots = nextSnapshots;
     this.geometries = nextGeometries;
+    this.coherence = nextCoherence;
     this.models = nextModels;
     this.paces = nextPaces;
     for (const key of this.jumps.keys()) {
@@ -213,18 +281,24 @@ export class TramFleet {
     key: string,
     localNowMs: number = Date.now(),
     mode: RenderMode = this.mode,
+    recordFrame = false,
   ): TramPublicState | undefined {
     const snapshot = this.snapshots.get(key);
     if (!snapshot) return undefined;
-    return this.build(snapshot, this.trajectories.nowMs(localNowMs), mode);
+    return this.build(snapshot, this.trajectories.nowMs(localNowMs), mode, recordFrame, localNowMs);
   }
 
-  /** The whole live fleet (calibration + far-zoom pushes + 1 Hz UI hooks). */
-  getStates(localNowMs: number = Date.now(), mode: RenderMode = this.mode): TramPublicState[] {
+  /** The whole fleet. Only Mapbox/bench frame producers pass recordFrame=true;
+   * UI, calibration and future probes keep the default read-only behavior. */
+  getStates(
+    localNowMs: number = Date.now(),
+    mode: RenderMode = this.mode,
+    recordFrame = false,
+  ): TramPublicState[] {
     const serverNow = this.trajectories.nowMs(localNowMs);
     const out: TramPublicState[] = [];
     for (const snapshot of this.snapshots.values()) {
-      out.push(this.build(snapshot, serverNow, mode));
+      out.push(this.build(snapshot, serverNow, mode, recordFrame, localNowMs));
     }
     return out;
   }
@@ -253,59 +327,105 @@ export class TramFleet {
           // Same fix-forward composition the adapter renders with — culling on
           // the raw curve would test a position up to hundreds of meters away
           // from the marker (fixForward.ts) and pop trams at the bbox edge.
-          const d = vehicle
+          const target = vehicle
             ? renderDistM(vehicle, serverNow, mode, snapshot.shapeDistM, snapshot.observedAtMs)
-            : snapshot.shapeDistM;
+            : naiveDistM(
+                snapshot.shapeDistM,
+                snapshot.observedAtMs,
+                serverNow,
+                this.paces.get(key)?.vMs ?? 0,
+              );
+          const d = this.guardedDistance(snapshot, mode, localNowMs, target);
           if (!distInBbox(geometry, d, bbox)) continue;
         } else {
           const c = snapshot.coordinates;
           if (c[0] < bbox[0] || c[0] > bbox[2] || c[1] < bbox[1] || c[1] > bbox[3]) continue;
         }
       }
-      out.push(this.build(snapshot, serverNow, mode));
+      out.push(this.build(snapshot, serverNow, mode, true, localNowMs));
     }
     return out;
   }
 
   /** Curves for a snapshot, or undefined when none apply to its current trip. */
   private vehicleFor(snapshot: TramSnapshot) {
+    if (this.coherence.get(snapshot.key)?.result.status === 'invalid') return undefined;
     const v = this.trajectories.getVehicle(snapshot.key);
     return v !== undefined && v.tripId === snapshot.tripId ? v : undefined;
+  }
+
+  /** The fleet-wide pre-allocation cull must not create a guard object. */
+  private guardedDistance(
+    snapshot: TramSnapshot,
+    mode: RenderMode,
+    nowMs: number,
+    target: number,
+  ): number {
+    const j = this.jumps.get(snapshot.key);
+    if (
+      mode !== 'smooth' ||
+      mode !== this.mode ||
+      !j ||
+      j.tripId !== snapshot.tripId ||
+      j.geometry !== this.geometries.get(snapshot.key)
+    )
+      return target;
+    const vehicle = this.vehicleFor(snapshot);
+    const allowJump = vehicle?.discontinuity === true && j.emissionMs !== vehicle.emittedAtMs;
+    return guardedDistM(target, nowMs, j.s, j.frameAtMs, allowJump, j.speedKmh / 3.6);
+  }
+
+  /** Reads never advance this state: only a frame actually sent to Mapbox does. */
+  private renderGuard(snapshot: TramSnapshot, mode: RenderMode) {
+    const j = this.jumps.get(snapshot.key);
+    if (
+      mode !== this.mode ||
+      !j ||
+      j.tripId !== snapshot.tripId ||
+      j.geometry !== this.geometries.get(snapshot.key)
+    )
+      return undefined;
+    const vehicle = this.vehicleFor(snapshot);
+    return {
+      prevS: j.s,
+      prevAtMs: j.frameAtMs,
+      prevSpeedKmh: j.speedKmh,
+      allowJump: vehicle?.discontinuity === true && j.emissionMs !== vehicle.emittedAtMs,
+    };
   }
 
   private build(
     snapshot: TramSnapshot,
     serverNowMs: number,
     mode: RenderMode,
-  ): TramPublicState {
-    const vehicle = this.trajectories.getVehicle(snapshot.key);
-    // A server-sanctioned break: the FIRST frame rendering a new emission
-    // flagged `discontinuity` may jump (trip change / proven desync). The
-    // slew guard steps aside and the teleport watch grants amnesty — a
-    // sanctioned break is the protocol working, not a defect.
-    const logEntry = this.profileLog.get(snapshot.key);
-    const allowJump =
-      vehicle?.discontinuity === true &&
-      Number.isFinite(vehicle.emittedAtMs) &&
-      logEntry?.lastEmittedAtMs !== vehicle.emittedAtMs;
-    const j = this.jumps.get(snapshot.key);
+    recordFrame = false,
+    localNowMs = serverNowMs,
+  ) {
+    const vehicle = this.vehicleFor(snapshot);
+    const guard = this.renderGuard(snapshot, mode);
+    const allowJump = guard?.allowJump ?? false;
     const state = adaptTram({
       snapshot,
       model: this.models.get(snapshot.key) ?? this.resolveModel(snapshot),
       geometry: this.geometries.get(snapshot.key),
       vehicle,
       serverNowMs,
+      presentationNowMs: localNowMs,
       mode,
       observedPaceMs: this.paces.get(snapshot.key)?.vMs ?? 0,
-      // The per-frame slew guard (adapter.ts): smooth may not teleport, ever.
-      guard:
-        mode === this.mode && j && j.tripId === snapshot.tripId
-          ? { prevS: j.s, prevAtMs: j.atMs, allowJump }
-          : undefined,
+      guard,
     });
     // Teleport watch — active render mode only, so a diagnostics read in the
     // other mode cannot record a phantom jump.
-    if (mode === this.mode) this.watchJump(snapshot, state.simDistM, serverNowMs, allowJump);
+    if (recordFrame && mode === this.mode)
+      this.watchJump(
+        snapshot,
+        state.simDistM,
+        state.simSpeedKmh,
+        serverNowMs,
+        localNowMs,
+        allowJump,
+      );
     // Profile-emission log: one entry per adopted emission (emittedAtMs edge).
     if (vehicle && Number.isFinite(vehicle.emittedAtMs)) {
       const entry = this.profileLog.get(snapshot.key);
@@ -316,7 +436,10 @@ export class TramFleet {
         });
       } else if (entry.lastEmittedAtMs !== vehicle.emittedAtMs) {
         entry.lastEmittedAtMs = vehicle.emittedAtMs;
-        entry.log.push({ source: vehicle.source ?? 'ml', atMs: vehicle.emittedAtMs });
+        entry.log.push({
+          source: vehicle.source ?? 'ml',
+          atMs: vehicle.emittedAtMs,
+        });
         if (entry.log.length > 5) entry.log.shift();
       }
     }
@@ -331,25 +454,41 @@ export class TramFleet {
    * bug class). Gaps over 5 s (background, culled stretch) reset instead of
    * judging — across a long gap any displacement is legitimate motion.
    */
-  private watchJump(snapshot: TramSnapshot, s: number, atMs: number, allowJump = false): void {
+  private watchJump(
+    snapshot: TramSnapshot,
+    s: number,
+    speedKmh: number,
+    atMs: number,
+    frameAtMs: number,
+    allowJump = false,
+  ): void {
     const j = this.jumps.get(snapshot.key);
-    if (!j || j.tripId !== snapshot.tripId) {
+    const geometry = this.geometries.get(snapshot.key);
+    const emissionMs = this.vehicleFor(snapshot)?.emittedAtMs ?? 0;
+    if (!j || j.tripId !== snapshot.tripId || j.geometry !== geometry) {
       this.jumps.set(snapshot.key, {
         tripId: snapshot.tripId,
+        geometry,
+        emissionMs,
+        speedKmh,
         s,
         atMs,
+        frameAtMs,
         jumpM: 0,
         jumpAtMs: 0,
       });
       return;
     }
+    j.emissionMs = emissionMs;
+    j.speedKmh = speedKmh;
     if (allowJump) {
       // Sanctioned discontinuity: rebase without judging (amnesty).
       j.s = s;
       j.atMs = atMs;
+      j.frameAtMs = frameAtMs;
       return;
     }
-    const dtMs = atMs - j.atMs;
+    const dtMs = frameAtMs - j.frameAtMs;
     if (dtMs <= 0) return; // same or out-of-order instant — nothing to judge
     if (dtMs <= 5_000) {
       const ds = s - j.s;
@@ -360,6 +499,7 @@ export class TramFleet {
     }
     j.s = s;
     j.atMs = atMs;
+    j.frameAtMs = frameAtMs;
   }
 
   /**
@@ -378,12 +518,13 @@ export class TramFleet {
     if (!snapshot) return undefined;
     const serverNowMs = this.trajectories.nowMs(localNowMs);
     const vehicle = this.vehicleFor(snapshot);
-    const state = this.build(snapshot, serverNowMs, mode);
+    const state = this.build(snapshot, serverNowMs, mode, false, localNowMs);
     const health = this.trajectories.health(localNowMs);
 
     let smoothDistM: number | null = null;
     let fixedDistM: number | null = null;
     let horizonLeftS: number | null = null;
+    let effectiveHorizonLeftS: number | null = null;
     let fixForwardM: number | null = null;
     // — the shim's own state, read off the RENDERED track (devtools truth) —
     let shimBranch: PhysicsDebugInfo['shimBranch'] = 'off';
@@ -397,6 +538,9 @@ export class TramFleet {
       if (vehicle.opinion.length > 0) fixedDistM = evalTrajectory(vehicle.opinion, serverNowMs);
       const track = trackFor(vehicle, mode);
       horizonLeftS = (trackEndMs(track) - serverNowMs) / 1000;
+      effectiveHorizonLeftS =
+        horizonLeftS -
+        fixForwardTauMs(track, snapshot.shapeDistM, snapshot.observedAtMs, vehicle.anchorMs) / 1000;
       // …and the meters the shim is currently adding on top, which is the one
       // number that says "the served curve is this far behind the newest fix".
       // Reading it in the field is how a complaint becomes a measurement.
@@ -504,11 +648,18 @@ export class TramFleet {
     }
     // Смена рейса.
     if (snapshot.tripId !== elog.prevTripId) {
-      push('рейс', `новый рейс (${elog.prevTripId.slice(0, 12)}… → ${snapshot.tripId.slice(0, 12)}…)`);
+      push(
+        'рейс',
+        `новый рейс (${elog.prevTripId.slice(0, 12)}… → ${snapshot.tripId.slice(0, 12)}…)`,
+      );
       elog.prevTripId = snapshot.tripId;
     }
     // Пересчёт прогноза (принята новая эмиссия).
-    if (vehicle && Number.isFinite(vehicle.emittedAtMs) && vehicle.emittedAtMs !== elog.prevEmittedAtMs) {
+    if (
+      vehicle &&
+      Number.isFinite(vehicle.emittedAtMs) &&
+      vehicle.emittedAtMs !== elog.prevEmittedAtMs
+    ) {
       elog.prevEmittedAtMs = vehicle.emittedAtMs;
       const anchorAge = Number.isFinite(vehicle.anchorMs)
         ? ((serverNowMs - vehicle.anchorMs) / 1000).toFixed(0)
@@ -571,7 +722,9 @@ export class TramFleet {
           }
         }
         const where =
-          nearest <= 40 ? `у ${nearestName}` : `посреди перегона (${nearest.toFixed(0)}м от остановки)`;
+          nearest <= 40
+            ? `у ${nearestName}`
+            : `посреди перегона (${nearest.toFixed(0)}м от остановки)`;
         push('стоянка', `стоял ${durS.toFixed(0)}с ${where}`, nearest > 40 && durS >= 10);
       }
       elog.standSinceMs = 0;
@@ -585,6 +738,9 @@ export class TramFleet {
       events,
       profileHistory,
       fixCoordVsAxisM,
+      geometryCoherence: this.coherence.get(key)?.result.status ?? 'unknown',
+      geometryCoherenceReason: this.coherence.get(key)?.result.reason ?? null,
+      geometryAxisCoordinateErrorM: this.coherence.get(key)?.result.axisCoordinateErrorM ?? null,
       hasTrajectory: vehicle !== undefined,
       hasGeometry: state.hasGeometry,
       mode,
@@ -614,12 +770,18 @@ export class TramFleet {
       phase: state.phase,
       pastHorizon: state.pastHorizon,
       horizonLeftS,
-      anchorAgeS: vehicle && Number.isFinite(vehicle.anchorMs)
-        ? (serverNowMs - vehicle.anchorMs) / 1000
-        : null,
-      emissionAgeS: vehicle && Number.isFinite(vehicle.emittedAtMs)
-        ? (serverNowMs - vehicle.emittedAtMs) / 1000
-        : null,
+      effectiveHorizonLeftS,
+      renderTargetDistM: state.renderTargetDistM,
+      renderGuardGapM: state.renderTargetDistM - state.simDistM,
+      renderGuardActive: state.renderGuardActive,
+      anchorAgeS:
+        vehicle && Number.isFinite(vehicle.anchorMs)
+          ? (serverNowMs - vehicle.anchorMs) / 1000
+          : null,
+      emissionAgeS:
+        vehicle && Number.isFinite(vehicle.emittedAtMs)
+          ? (serverNowMs - vehicle.emittedAtMs) / 1000
+          : null,
       discontinuity: vehicle?.discontinuity ?? false,
       obsDistM: snapshot.shapeDistM,
       obsAtMs: snapshot.observedAtMs,

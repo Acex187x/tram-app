@@ -25,6 +25,7 @@
 //   ml-drive-smooth — curvegen-v3 SHADOW smooth (regime-based continuity)
 
 import zlib from 'zlib';
+import { ObservationHistory } from './observationScore';
 
 import type { RouteGeometry, TramSnapshot } from '@/lib/types';
 import {
@@ -45,9 +46,7 @@ import {
   TRAJ_STEP_MS,
   TRAJ_STAND_ASSERT_MS,
   TRAJ_V3_PUBLISH,
-  INSTANT_NAIVE_GAP_M,
   NAIVE_LATENCY_CAP_S,
-  STUCK_COORD_EPS_M,
   FUSE_FIX_AXIS,
   FUSE_COORD_DISAGREE_M,
   FUSE_OFFTRACK_MAX_M,
@@ -65,20 +64,24 @@ import {
   STUCK_FIX_EPS_M,
   STUCK_NEAR_STOP_M,
   type DriveBuilt,
+  type DriveArgs,
 } from './drive';
 import { haversineM, pointAt } from '@/lib/geo/polyline';
 import { projectDistanceOnPolyline, projectNearOnPolyline } from '@/lib/golemio/gtfs';
 import { GeometryStore } from './geometry';
 import { LearnedModel } from './learned';
 import { buildMlFeatures, MlClient } from './ml';
-import { ConvexPublisher } from './publish';
+import { ConvexPublisher, isPublisherHealthy } from './publish';
+import { needsTrajectoryFallback, isCurrentTrajectoryFix } from './trajectoryFallback';
+import { isJamEvidence } from './jamEvidence';
+import { SourceValidity, isOlderSameTripFix } from './sourceValidity';
 import { FreshnessCounters, PerceptualCounters, RealismCounters, SeamCounters } from './realism';
 import { schedulePosition } from './schedule';
 import { startServer } from './server';
 import {
   buildV2Vehicle,
   evalTrack,
-  modalReleaseMs,
+  modalReleaseForFix,
   type KinTrack,
   type ModalHold,
   type TrajectoryGen,
@@ -161,6 +164,11 @@ interface TrajectoryEntry {
    *  /physics page draws the true v(t) rather than a staircase. */
   opinionK: KinTrack;
   smoothK: KinTrack;
+  /** Bounded one-generation diagnostic inputs, never a predecessor chain. */
+  driveDebug?: {
+    inputs: Omit<DriveArgs, 'geom' | 'surfaces'>;
+    meta: DriveBuilt['meta'];
+  };
 }
 
 /** One curvegen-v3 SHADOW emission (design §12 phase A): built from the same
@@ -196,6 +204,9 @@ export function start(): void {
   const learned = new LearnedModel(store);
   const ml = new MlClient();
   const publisher = new ConvexPublisher();
+  const observationHistory = new ObservationHistory();
+  const sourceValidity = new SourceValidity();
+  let supersededInferenceSkips = 0;
   const engine = new TramEngine({
     resolveModel: (s: TramSnapshot) => getModelSpec(regNumberToModelId(s.registrationNumber)),
   });
@@ -329,10 +340,12 @@ export function start(): void {
    *  sails through the 22 m/s displacement gate — every NaN comparison is
    *  false — so the guard lives here, where all variants pass. */
   let nonFiniteScores = 0;
+  const nonFiniteByVariant: Record<string, number> = {};
 
   function writeScore(row: Omit<ScoreRow, 'absErrM'>): void {
     if (!Number.isFinite(row.errM)) {
       nonFiniteScores++;
+      nonFiniteByVariant[row.variant] = (nonFiniteByVariant[row.variant] ?? 0) + 1;
       if (nonFiniteScores <= 5 || nonFiniteScores % 1000 === 0) {
         log(`non-finite score skipped: ${row.variant} for ${row.key} (total ${nonFiniteScores})`);
       }
@@ -402,7 +415,22 @@ export function start(): void {
     return { ...snap, shapeDistM: round2(Math.max(0, Math.min(geom.totalM, fused))) };
   }
 
+  function withdrawInvalidAxis(key: string): void {
+    publisher.requestRemoval(key);
+    lastFix.delete(key);
+    learned.forget(key);
+    observationHistory.forget(key);
+    if (trajectories.delete(key)) publishedChainBroken.add(key);
+    if (shadowTrajectories.delete(key)) shadowChainBroken.add(key);
+  }
+
   function processSnapshot(rawSnap: TramSnapshot, batchAtMs: number, events: ScoringEvent[]): void {
+    if (isOlderSameTripFix(rawSnap, fleet.get(rawSnap.key))) return;
+    if (sourceValidity.assess(rawSnap, geometry.resolve(rawSnap.tripId)).status === 'invalid') {
+      fleet.set(rawSnap.key, rawSnap);
+      withdrawInvalidAxis(rawSnap.key);
+      return;
+    }
     const snap = fuseSnap(rawSnap);
     const prev = lastFix.get(snap.key);
     const isNew = !prev || snap.observedAtMs > prev.snap.observedAtMs;
@@ -470,6 +498,23 @@ export function start(): void {
       gapSum += gapS;
       gapN++;
       const preds: { variant: string; value: number }[] = [];
+
+      // New primary series: issued curves against observation-time truth.
+      // Legacy unsuffixed series below retain their arrival-time semantics.
+      // Keeping names distinct prevents silently mixing incompatible scores.
+      const historical = observationHistory.predict(snap.key, snap);
+      if (historical) {
+        const observed = historical.prediction;
+        const base = { atMs: nowMs, key: snap.key, line: snap.line,
+            routeId: snap.routeId, tripId: snap.tripId,
+            horizonS: round2((snap.observedAtMs - historical.anchorMs) / 1000), latencyS };
+          for (const [variant, value] of [
+            ['ml-mode-obs-v3', observed.opinion], ['ml-smooth-obs-v3', observed.smooth],
+            ['ml-gbdt-obs-v3', observed.raw],
+          ] as const) {
+            if (value !== null) writeScore({ ...base, variant, errM: value - actual });
+          }
+      }
 
       preds.push({ variant: 'naive', value: prev.snap.shapeDistM });
 
@@ -552,7 +597,8 @@ export function start(): void {
       prev &&
       sameTrip &&
       geom &&
-      snap.statePosition !== 'at_stop' &&
+      prev.snap.statePosition === 'on_track' &&
+      snap.statePosition === 'on_track' &&
       Math.abs(snap.shapeDistM - prev.snap.shapeDistM) <= STUCK_FIX_EPS_M
     ) {
       let nearStop = geom.totalM - snap.shapeDistM <= STUCK_NEAR_STOP_M;
@@ -573,7 +619,13 @@ export function start(): void {
         const coordAdvanceM =
           projectDistanceOnPolyline(snap.coordinates, geom.coordinates, geom.cumDistM) -
           projectDistanceOnPolyline(prev.snap.coordinates, geom.coordinates, geom.cumDistM);
-        if (Math.abs(coordAdvanceM) <= STUCK_COORD_EPS_M) stuckAtM = snap.shapeDistM;
+        if (isJamEvidence({
+          previousState: prev.snap.statePosition,
+          currentState: snap.statePosition,
+          axisAdvanceM: snap.shapeDistM - prev.snap.shapeDistM,
+          coordinateAdvanceM: coordAdvanceM,
+          nearStop,
+        })) stuckAtM = snap.shapeDistM;
       }
     }
     lastFix.set(snap.key, { snap, cycle, fixGapS: gapS > 0 ? round2(gapS) : 0, stuckAtM, rawShapeDistM: rawSnap.shapeDistM });
@@ -637,6 +689,12 @@ export function start(): void {
       clientFixS: number;
     }[] = [];
     for (const [key, lf] of lastFix) {
+      // Geometry can arrive after the initial fleet seed. Recheck before any
+      // ML work rather than treating an earlier unknown axis as validated.
+      if (sourceValidity.assess(lf.snap, geometry.resolve(lf.snap.tripId)).status === 'invalid') {
+        withdrawInvalidAxis(key);
+        continue;
+      }
       const entry = trajectories.get(key);
       // Recompute when the fix changed OR the trajectory itself is aging out:
       // long AVL gaps (p90 ~79 s, max >160 s) would otherwise leave all 13
@@ -922,6 +980,10 @@ export function start(): void {
       source: 'ml' | 'naive',
       includeShadow: boolean,
     ): void => {
+      if (!isCurrentTrajectoryFix(lastFix.get(v.key)?.snap, v.snap)) {
+        supersededInferenceSkips++;
+        return;
+      }
       const tEmit = Date.now();
       const anchorS = Math.min(v.geom.totalM, Math.max(0, v.snap.shapeDistM));
       // The target grid is anchored at tCompute, but THIS emission is born at
@@ -945,7 +1007,7 @@ export function start(): void {
         // "the curve holds" and "P(departed) < 0.6" can never drift apart.
         let modal: ModalHold | null = null;
         if (v.snap.statePosition === 'at_stop' && v.snap.nextStopId != null) {
-          const t0Ms = v.snap.observedAtMs + FEED_LATENCY_MS;
+          const t0Ms = v.snap.observedAtMs;
           const a = learned.anchorOf(v.key);
           const standingS =
             a && a.tripId === v.snap.tripId && a.nextStopId === v.snap.nextStopId && a.atStop
@@ -953,7 +1015,7 @@ export function start(): void {
               : 0;
           const { mean, sd } = learned.releaseStats(v.snap.nextStopId, t0Ms);
           const stopS = v.snap.shapeDistM;
-          const releaseAtMs = modalReleaseMs(t0Ms, standingS, mean, sd);
+          const releaseAtMs = modalReleaseForFix(v.snap, standingS, mean, sd);
           modal = {
             stopS,
             releaseAtMs,
@@ -1128,12 +1190,13 @@ export function start(): void {
               opinion: prevEntry.opinionK,
             }
           : null;
-        const built = TRAJ_V3_PUBLISH
-          ? buildDriveVehicle({
+        const driveInputs: Omit<DriveArgs, 'geom' | 'surfaces'> = {
               ...baseArgs,
+              servedPlatform: v.snap.statePosition === 'at_stop' ? {
+                stopId: v.snap.lastStopId, sequence: v.snap.lastStopSequence,
+                nextStopId: v.snap.nextStopId, nextSequence: v.snap.nextStopSequence,
+              } : null,
               modal: modal ? { stopS: modal.stopS, releaseAtMs: modal.releaseAtMs } : null,
-              geom: v.geom,
-              surfaces,
               fixGapS: v.fixGapS,
               ageFloorS: ageFloorPubS,
               anchorFixS: v.snap.shapeDistM,
@@ -1143,7 +1206,9 @@ export function start(): void {
               leader: leaderFor(trajectories, v.key, v.geom.shapeId, v.snap.shapeDistM),
               chainBroken: publishedChainBroken.has(v.key),
               prev: prevPub,
-            })
+            };
+        const built = TRAJ_V3_PUBLISH
+          ? buildDriveVehicle({...driveInputs, geom: v.geom, surfaces})
           : buildV2Vehicle({
               ...baseArgs,
               modal,
@@ -1223,6 +1288,7 @@ export function start(): void {
           v2,
           opinionK: built.opinion,
           smoothK: built.smooth,
+          driveDebug: 'meta' in built ? {inputs: driveInputs, meta: built.meta} : undefined,
         });
     };
 
@@ -1253,14 +1319,7 @@ export function start(): void {
         // описывает трамвай; наивный резерв — только когда она доказуемо
         // неправа (нет/чужой рейс/перегнана/промах > INSTANT_NAIVE_GAP_M).
         const entry = trajectories.get(v.key);
-        const o = entry?.v2.opinion;
-        const wrong =
-          entry === undefined ||
-          entry.v2.tripId !== v.snap.tripId ||
-          o === undefined ||
-          o.length === 0 ||
-          v.snap.shapeDistM > o[o.length - 1].s + 1 ||
-          Math.abs(v.snap.shapeDistM - evalTrack(o, v.snap.observedAtMs)) > INSTANT_NAIVE_GAP_M;
+        const wrong = needsTrajectoryFallback(entry?.v2, v.snap, Date.now());
         if (!wrong) {
           trajMlHeld++;
           return;
@@ -1287,6 +1346,16 @@ export function start(): void {
           TRAJ_V3_PUBLISH ? 'drive-v3' : 'current',
         ),
       )
+      .then(() => {
+        const availableAtMs = Date.now();
+        for (const [key, entry] of trajectories) {
+          if (!publisher.enabled || publisher.publishedEmittedAtMs(key) === entry.v2.emittedAtMs) {
+            observationHistory.record(key, entry.v2, availableAtMs,
+              entry.source === 'ml' ? entry.vehicle.points : undefined);
+          }
+        }
+        observationHistory.prune(availableAtMs);
+      })
       .catch((e) => log(`trajectory refresh error: ${e instanceof Error ? e.message : e}`))
       .finally(() => {
         trajRefreshing = false;
@@ -1469,8 +1538,28 @@ export function start(): void {
 
     if (cursor === null) {
       const full = await fetchFullFleet();
+      const previousFleet = new Map(fleet);
       fleet.clear();
+      const activeKeys = new Set(full.vehicles.map((v) => v.key));
+      sourceValidity.retain(activeKeys);
+      for (const key of lastFix.keys()) {
+        if (!activeKeys.has(key)) {
+          lastFix.delete(key);
+          learned.forget(key);
+          sourceValidity.drop(key);
+        }
+      }
       for (const raw of full.vehicles) {
+        const previous = previousFleet.get(raw.key);
+        if (isOlderSameTripFix(raw, previous)) {
+          fleet.set(raw.key, previous!);
+          continue;
+        }
+        if (sourceValidity.assess(raw, geometry.resolve(raw.tripId)).status === 'invalid') {
+          fleet.set(raw.key, raw);
+          withdrawInvalidAxis(raw.key);
+          continue;
+        }
         const v = fuseSnap(raw);
         fleet.set(v.key, v);
         learned.reseed(v);
@@ -1486,7 +1575,7 @@ export function start(): void {
         res.batches.length > 0
           ? res.batches[0].seq > cursor + 1
           : res.oldestSeq > cursor + 1;
-      if (gap) {
+      if (gap || res.latestSeq < cursor) {
         log(`seq gap at cursor ${cursor} (oldest ${res.oldestSeq}) — reseeding`);
         cursor = null;
         return pollOnce();
@@ -1499,17 +1588,22 @@ export function start(): void {
           fleet.delete(key);
           lastFix.delete(key);
           learned.forget(key);
+          sourceValidity.drop(key);
         }
         cursor = batch.seq;
       }
     }
 
+    // A corrected geometry can restore a quarantined vehicle even if its AVL
+    // timestamp has not advanced. Its next coherent fix also follows this
+    // ordinary ingestion path, with no previous invalid learning anchor.
+    for (const raw of sourceValidity.recoverable(geometry.resolve)) processSnapshot(raw, nowMs, events);
     await resolveEvents(events);
     kickTrajectoryRefresh(); // detached: scoring has already been written
 
     // Production RemoteFeed semantics: the engine always ingests the MERGED
     // full array (keeps lastSeenMs fresh; the 90 s stale sweep stays sane).
-    engine.ingest([...fleet.values()], geometry.resolve, Date.now());
+    engine.ingest([...fleet.values()].filter(v => !sourceValidity.get(v.key)), geometry.resolve, Date.now());
     geometry.ensure(new Set([...fleet.values()].map((v) => v.tripId)));
 
     // Prague service-day rollover → re-anchor cached stop epochs.
@@ -1664,8 +1758,16 @@ export function start(): void {
       poller: pollerHealth,
       lastHour: store.summarySince(Date.now() - 3_600_000),
       learning: learned.gauges(),
-      ml: { ready: ml.modelsReady, lastOkMs: ml.lastOkMs, lastError: ml.lastError },
-      scoring: { nonFiniteSkipped: nonFiniteScores },
+      ml: {
+        ready: ml.modelsReady, lastOkMs: ml.lastOkMs, lastError: ml.lastError,
+        lastRequestMs: ml.lastRequestMs, lastLatencyMs: ml.lastLatencyMs, inFlight: ml.inFlight,
+      },
+      pipeline: {
+        refreshing: trajRefreshing,
+        builtAtMs: trajBuiltAtMs,
+        supersededInferenceSkips,
+      },
+      scoring: { nonFiniteSkipped: nonFiniteScores, nonFiniteByVariant: {...nonFiniteByVariant}, primaryClock: 'observation', primarySuffix: '-obs-v3', legacyClock: 'arrival', observation: { ...observationHistory.counts, retainedCurves: observationHistory.size }, sourceValidity: { invalidVehicles: sourceValidity.size, rejectedObservations: sourceValidity.rejectedObservations } },
       trajectories: {
         vehicles: trajectories.size,
         builtAtMs: trajBuiltAtMs,
@@ -1733,7 +1835,9 @@ export function start(): void {
         : (trajectories.get(key) ?? null);
     const fixes = store.recentFixes(key, 10);
     if (!entry) {
-      return { key, atMs: Date.now(), found: false, source, fixes, limits: LIMITS };
+      const invalid = sourceValidity.get(key);
+      return { key, atMs: Date.now(), found: false, source, fixes, limits: LIMITS,
+        sourceValidity: invalid?.result ?? null, invalidObservation: invalid?.snapshot ?? null };
     }
     const snap = fleet.get(key);
     const target =
@@ -1750,6 +1854,7 @@ export function start(): void {
       key,
       atMs: Date.now(),
       found: true,
+      sourceValidity: sourceValidity.get(key)?.result ?? null,
       source,
       line: entry.v2.line,
       tripId: entry.v2.tripId,
@@ -1778,17 +1883,33 @@ export function start(): void {
           }
         : null,
       /** ML service health as this engine sees it. */
-      ml: { ready: ml.modelsReady, lastOkMs: ml.lastOkMs, lastError: ml.lastError },
+      ml: {
+        ready: ml.modelsReady, lastOkMs: ml.lastOkMs, lastError: ml.lastError,
+        lastRequestMs: ml.lastRequestMs, lastLatencyMs: ml.lastLatencyMs, inFlight: ml.inFlight,
+      },
+      pipeline: {
+        refreshing: trajRefreshing,
+        builtAtMs: trajBuiltAtMs,
+        pendingFix: lf != null && (lf.snap.tripId !== entry.v2.tripId || lf.snap.observedAtMs > entry.v2.anchorMs),
+        horizonRemainingS: ((entry.v2.smooth.at(-1)?.t ?? 0) - Date.now()) / 1000,
+      },
       /** Convex publication state of THIS vehicle's current emission. */
       publish: {
         enabled: publisher.enabled,
         emittedAtMs: pubEmitted,
         synced: pubEmitted !== null && pubEmitted === entry.v2.emittedAtMs,
+        lastOkAtMs: publisher.gauges().lastOkAtMs,
+        failures: publisher.gauges().failures,
+        lastError: publisher.gauges().lastError,
       },
       opinion: { points: entry.v2.opinion, v: entry.opinionK.v },
       smooth: { points: entry.v2.smooth, v: entry.smoothK.v },
       /** The raw ml-gbdt TARGET positions both generators consume. */
       target,
+      /** Internal diagnosis only: inputs and limiter metadata of THIS emission.
+       * Previous tracks are one generation of point arrays, not recursive
+       * TrajectoryEntry references. Public Convex payload remains unchanged. */
+      policy: source === 'published' ? (entry as TrajectoryEntry).driveDebug ?? null : null,
       fixes,
       limits: LIMITS,
     };
@@ -1809,7 +1930,7 @@ export function start(): void {
       const now = Date.now();
       if (now - lastBatchAtMs >= 120_000) return false;
       const pub = publisher.gauges();
-      if (pub.enabled && pub.lastOkAtMs > 0 && now - pub.lastOkAtMs >= 60_000) return false;
+      if (!isPublisherHealthy(pub, now)) return false;
       return true;
     },
   });

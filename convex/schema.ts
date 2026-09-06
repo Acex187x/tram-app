@@ -127,8 +127,8 @@ export const trajectoryVehicleValidator = v.object({
   anchorS: v.optional(v.number()),
   emittedAtMs: v.number(),
   discontinuity: v.boolean(),
-  opinion: v.array(v.object({ t: v.number(), s: v.number() })),
-  smooth: v.array(v.object({ t: v.number(), s: v.number() })),
+  opinion: v.array(v.object({ t: v.number(), s: v.number(), v: v.optional(v.number()) })),
+  smooth: v.array(v.object({ t: v.number(), s: v.number(), v: v.optional(v.number()) })),
   source: v.union(v.literal('ml'), v.literal('naive')),
 });
 
@@ -296,13 +296,15 @@ export default defineSchema({
     vehicle: trajectoryVehicleValidator,
     /** `trajectoryBatches.seq` that last wrote this row. */
     updatedSeq: v.number(),
-  }).index('by_key', ['key']),
+  }).index('by_key', ['key']).index('by_emitted', ['vehicle.emittedAtMs']),
 
   /** Trajectory diff stream (same pattern as `batches`; swept by crons.ts). */
   trajectoryBatches: defineTable({
     seq: v.number(),
     /** Predictor build instant of this publication (bundle `atMs`). */
     atMs: v.number(),
+    /** Retention clock, independent of predictor freshness (also for sweeps). */
+    publishedAtMs: v.optional(v.number()),
     changed: v.array(trajectoryVehicleValidator),
     removed: v.optional(v.array(v.string())),
   }).index('by_seq', ['seq']),

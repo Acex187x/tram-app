@@ -30,7 +30,8 @@ describe('TrajectoryStore as the Convex sink', () => {
     expect(store.bundle?.atMs).toBe(T0);
     expect(store.bundle?.generator).toBe('drive-v3');
     expect(store.getVehicle('9201')?.tripId).toBeDefined();
-    expect(store.health(T0 + 700).clockSynced).toBe(true);
+    // Reactive fullSet clocks can be several seconds old; only clock:now syncs.
+    expect(store.health(T0 + 700).clockSynced).toBe(false);
   });
 
   it('folds changed rows, applies removals, and advances the bundle clock', () => {
@@ -71,4 +72,25 @@ describe('TrajectoryStore as the Convex sink', () => {
     store.foldConvex({ seq: 43, atMs: T0 + 4_300, changed: [flagged], removed: undefined }, T0 + 4_400, T0 + 4_500);
     expect(store.health(T0 + 5_000).discontinuities).toBe(1);
   });
+});
+
+it('metadata arriving before a diff does not advance the applied cursor or suppress that diff', () => {
+  const store = seededStore();
+  store.noteConvexMeta({ ...META, lastSeq: 42 }, T0 + 1000);
+  expect(store.health(T0).lastSeq).toBe(41);
+  store.foldConvex({ seq: 42, atMs: T0 + 1000, changed: [wireVehicle({ key: '9203' })] }, T0 + 1000, T0 + 1100);
+  expect(store.getVehicle('9203')).toBeDefined();
+  store.foldConvex({ seq: 41, atMs: T0, changed: [], removed: ['9203'] }, T0, T0 + 1200);
+  expect(store.getVehicle('9203')).toBeDefined();
+});
+
+it('cached seed/meta/batch timestamps cannot rewind the clock; only nonce clock replies synchronize it', () => {
+  const store = seededStore();
+  store.noteConvexClock(T0 + 50, T0, T0 + 100);
+  expect(store.nowMs(T0 + 10000)).toBe(T0 + 10000);
+  store.noteConvexMeta(META, T0 + 10000);
+  store.foldConvex({ seq: 42, atMs: T0, changed: [] }, T0, T0 + 15000);
+  expect(store.nowMs(T0 + 15000)).toBe(T0 + 15000);
+  store.noteConvexClock(T0 + 20000, T0 + 17000, T0 + 20001); // reject slow RTT
+  expect(store.nowMs(T0 + 20001)).toBe(T0 + 20001);
 });

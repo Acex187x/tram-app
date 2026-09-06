@@ -110,3 +110,23 @@ describe('selection store — follow pause / target transitions', () => {
     expect(after.selectedTramKey).toBeNull();
   });
 });
+
+it('opening any tram supersedes a pending stop/search fly-to atomically', () => {
+  const s = useSelectionStore.getState();
+  s.requestFlyTo({ coordinates: [14.4, 50.1] });
+  s.openTram('9318');
+  expect(useSelectionStore.getState().followTramKey).toBe('9318');
+  expect(useSelectionStore.getState().flyToTarget).toBeNull();
+  s.clear();
+});
+
+it('a new place fly-to ends prior follow immediately, and consuming it cannot end a newer follow', () => {
+  const s = useSelectionStore.getState();
+  s.openTram('9318');
+  s.requestFlyTo({ coordinates: [14.4, 50.1] });
+  expect(useSelectionStore.getState().followTramKey).toBeNull();
+  s.openTram('9319');
+  s.requestFlyTo(null);
+  expect(useSelectionStore.getState().followTramKey).toBe('9319');
+  s.clear();
+});

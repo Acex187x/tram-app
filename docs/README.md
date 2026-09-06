@@ -11,7 +11,7 @@ version gotchas live there). `history.md` explains how the code got this way.
 
 | Doc | What it is |
 |---|---|
-| [`architecture.md`](architecture.md) | The current system: module map, data flow, the interpolation engine, zoom-mode/map rendering, fleet registry, UI, and the on-device-verified rnmapbox quirks. Start here. |
+| [`architecture.md`](architecture.md) | Current working-tree ownership: separate Convex fix/trajectory streams, clock, guarded rendering, native map cadence, fleet assets and UI. Start here. |
 | [`history.md`](history.md) | Chronological project narrative (~20 commits) grouped into phases, with the debugging sagas (black basemap, invisible route lines, WebGL1 viewer chain, iPad thermals, follow-cam flooding). |
 
 ## Decision records (`decisions/`)
@@ -28,23 +28,24 @@ and HOW (with `src/…` references) for one subsystem.
 | [`decisions/backend-plan.md`](decisions/backend-plan.md) | The original backend design record (generic WS/HTTP sketch) — motivation and the `TramFeed` seam; transport superseded by backend-convex.md. |
 | [`performance.md`](performance.md) | Performance & thermal playbook: everything done for perf (cadence system, GPU knobs, allocation discipline), the invariants that must not be broken, and the pre-ship verification checklist. |
 | [`decisions/map-rendering.md`](decisions/map-rendering.md) | Zoom bands, ModelLayer scaling, the imperative-push source pattern, the follow camera (80 ms retarget / 170 ms overlapping glide, persistent gestures), thermal cadences. |
-| [`decisions/3d-models.md`](decisions/3d-models.md) | Programmatic GLB authoring (`@gltf-transform/core`), the −Z front convention, per-type sections, and the expo-gl + three interactive viewer (WebGL1 chain). |
+| [`decisions/3d-models.md`](decisions/3d-models.md) | Blender authoring from primary drawings/photos, physical section geometry, 34 static map + 19 articulated viewer assets, validation budgets and Expo GL viewer. |
 | [`decisions/ux-screens.md`](decisions/ux-screens.md) | The Liquid Glass shell and the form-sheet screens (tram / line / search / favorites / planner / stop / settings), follow/selection UX. |
 | [`decisions/process-and-tooling.md`](decisions/process-and-tooling.md) | Testing strategy, EAS build config, model-generation scripts, and the review/QA loop. |
 | [`decisions/ride-recording.md`](decisions/ride-recording.md) | Ride recording (schema v4): 25 Hz DeviceMotion batches, the GPS outlier filter, background-recording mechanics + researched options (Live Activity, CMSensorRecorder, why not audio). |
 
 ## Research (`research/`)
 
-Empirical notes, all verified on 2026-07-11 against live systems / installed
-`node_modules`. Source-of-truth for API facts and versions.
+Dated empirical notes and protocol amendments. Check each document’s date and
+its current-code applicability; older research records are not a deployment inventory.
 
 | Doc | Covers |
 |---|---|
-| [`research/physics-v3-protocol.md`](research/physics-v3-protocol.md) | **The frozen physics-v3 contract (2026-08-16) — start here for physics.** The `/api/trajectories/v2` wire format, the server-owned continuity + modal-stop invariants, the client's one pure evaluator, the connection-honesty states, and the client excision list. |
+| [`research/tracking-2026-09-05/README.md`](research/tracking-2026-09-05/README.md) | Backend investigation, live-capture evidence, candidate rollout and explicitly local-only fixes. |
+| [`research/physics-v3-protocol.md`](research/physics-v3-protocol.md) | **Physics-v3 contract and amendments — start here for physics.** Server continuity/modal stops, optional velocity knots, client projection and honesty invariants. Runtime transport is now Convex; see architecture for current clock/frame ownership. |
 | [`research/prediction-architecture.md`](research/prediction-architecture.md) | **Prediction v3 research (2026-08-08)**: options analysis (ML monolith vs deterministic vs hybrid) for a server-side, self-calibrating, multi-city prediction system; recommended target architecture (trajectory protocol, two-timescale learned surfaces, evaluation flywheel) + phased roadmap. No decision executed yet. |
 | [`research/golemio-api.md`](research/golemio-api.md) | Golemio PID API: auth, endpoints, rate limits, `vehiclepositions`/GTFS response shapes, and the gotchas (km-as-string distances, `includeNotTracking`). |
 | [`research/mapbox-rn.md`](research/mapbox-rn.md) | `@rnmapbox/maps` 10.3.2 on Expo SDK 57 / RN 0.86 / Fabric: Standard style, `ModelLayer` + `Models`, version facts. |
-| [`research/glb-authoring.md`](research/glb-authoring.md) | Authoring tram GLBs from primitives in Node with `@gltf-transform/core` (no Blender) — materials, file size, validation. |
+| [`research/glb-authoring.md`](research/glb-authoring.md) | Historical Node authoring research; the current generator is Blender. See `decisions/3d-models.md` and primary `model-references/` for current assets. |
 | [`research/prague-fleet.md`](research/prague-fleet.md) | The active DPP tram fleet, type-by-type, with registration ranges — and what is retired (T6A5, classic T3) and must NOT be mapped. |
 | [`research/expo-ui-digest.md`](research/expo-ui-digest.md) | Expo SDK 57 iOS-native / Liquid Glass UI cheat-sheet: installed versions and the real API surface of `@expo/ui`, `expo-glass-effect`, router, symbols. |
 
@@ -52,6 +53,10 @@ Empirical notes, all verified on 2026-07-11 against live systems / installed
 
 | Doc | Covers |
 |---|---|
+| [`testing/client-tracking-2026-09-05.md`](testing/client-tracking-2026-09-05.md) | Reproduced client defects, compatible Hermite extension, fixed-input wire replays and limits of accuracy/performance evidence. |
+| [`testing/tracking-inspector.md`](testing/tracking-inspector.md) | Diagnostic field semantics, bounded collection/cadence, lifecycle tests and current iPad runtime QA. |
+| [`testing/ipad-network-discovery.md`](testing/ipad-network-discovery.md) | Physical iPad discovery evidence, pairing distinction and durable reconnect instructions. |
+| [`../scripts/testing/README.md`](../scripts/testing/README.md) | Reusable native XCTest harness for the already installed app; exact leased simulator and build queue contract. |
 | [`testing/codex-review-1.md`](testing/codex-review-1.md) | Correctness review of all `src/` code — 21 findings (1 P0, several P1) that drove the `77e193f` fix wave. |
 | [`testing/codex-report-1.md`](testing/codex-report-1.md) | Simulator E2E QA pass 1 (Codex drives the app): severity summary + evidence. |
 | [`testing/codex-report-2.md`](testing/codex-report-2.md) | Focused re-test of the pass-1 fixes, incl. the planner-geometry false positive later adjudicated in `7ab527e`. |
@@ -60,9 +65,9 @@ Empirical notes, all verified on 2026-07-11 against live systems / installed
 
 | Doc | Covers |
 |---|---|
-| [`model-previews/README.md`](model-previews/README.md) | How to regenerate a model's GLBs and its contact-sheet preview; the `<modelId>.png` naming + −Z-front convention. |
+| [`model-previews/README.md`](model-previews/README.md) | Regeneration, six-view contact sheets and separate static/viewer validation reports; technical checks are not runtime visual proof. |
+| [`model-references/README.md`](model-references/README.md) | Operator/manufacturer drawings/photos, exact vs scale-derived dimensions, section/door/bogie tables and source attribution. |
 
 Contact-sheet PNGs (`t3`, `t3rp`, `t3rplf`, `kt8d5`, `14t`, `15t`, `52t`) sit
 alongside — dev aids so you can SEE a model without launching the app; not
 shipped in the bundle.
-</content>

@@ -262,6 +262,10 @@ export class Store {
     return this.db.prepare('SELECT tripId, json, fetchedAtMs FROM geometries').all() as never;
   }
 
+  loadGeometry(tripId: string): { tripId: string; json: string; fetchedAtMs: number } | undefined {
+    return this.db.prepare('SELECT tripId, json, fetchedAtMs FROM geometries WHERE tripId = ?').get(tripId) as never;
+  }
+
   writeRollup(rows: { tsMin: number; variant: string; hbucket: string; n: number; meanAbs: number; p50Abs: number; p90Abs: number; signedMean: number }[]): void {
     const tx = this.db.transaction((rs: typeof rows) => rs.forEach((r) => this.insRollup.run(r)));
     tx(rows);

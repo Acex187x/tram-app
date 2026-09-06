@@ -110,9 +110,9 @@ export class Bench {
     key: string,
     localNowMs: number,
   ): { diag: PhysicsDebugInfo | undefined; state: TramPublicState | undefined } {
-    return {
-      diag: this.fleet.getDiagnostics(key, localNowMs),
-      state: this.fleet.getState(key, localNowMs),
-    };
+    // One explicit displayed sample; the diagnostics/UI read must not advance
+    // the presentation guard again (same ownership rule as TramLayers).
+    const state = this.fleet.getState(key, localNowMs, this.fleet.renderMode, true);
+    return { diag: this.fleet.getDiagnostics(key, localNowMs), state };
   }
 }

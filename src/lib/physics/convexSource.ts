@@ -85,12 +85,19 @@ export interface ConvexTrajectoryClient {
   close(): Promise<void>;
 }
 
+export const TRAJ_CLOCK_QUERY = makeFunctionReference<
+  'query',
+  { nonce: string },
+  { serverNowMs: number }
+>('clock:now');
+
 /** What the source needs from TrajectoryStore (implemented there). */
 export interface TrajectorySink {
   seedConvex(vehicles: unknown[], meta: TrajectoryMetaWire | null, receivedAtMs: number): void;
   foldConvex(batch: TrajectoryBatchWire, serverNowMs: number, receivedAtMs: number): void;
   noteConvexMeta(meta: TrajectoryMetaWire, receivedAtMs: number): void;
   noteConvexFailure(message: string): void;
+  noteConvexClock(serverNowMs: number, sentAtMs: number, receivedAtMs: number): void;
 }
 
 /** Batches folded at one cursor before re-subscribing at the advanced cursor. */
@@ -99,6 +106,9 @@ export const RESUBSCRIBE_AFTER_BATCHES = 8;
 /** Backoff for seed retries, ms (doubling, capped). */
 const SEED_RETRY_MIN_MS = 2_000;
 const SEED_RETRY_MAX_MS = 30_000;
+/** A disconnected Convex query can stay pending indefinitely. Report the
+ * initial wait honestly without multiplying pending requests. */
+export const SEED_WAIT_TIMEOUT_MS = 15_000;
 
 export interface ConvexTrajectorySourceOptions {
   url: string;
@@ -117,6 +127,12 @@ export class ConvexTrajectorySource {
   private batchesAtCursor = 0;
   private seedRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private seedRetryMs = SEED_RETRY_MIN_MS;
+  private seedWaitTimer: ReturnType<typeof setTimeout> | null = null;
+  private clockTimer: ReturnType<typeof setTimeout> | null = null;
+  private clockRequest = 0;
+  private subscriptionGeneration = 0;
+  private seeding = false;
+  private lastPublicationMs = 0;
 
   constructor(
     private readonly sink: TrajectorySink,
@@ -131,6 +147,7 @@ export class ConvexTrajectorySource {
     this.generation += 1;
     this.client = this.createClient(this.options.url);
     this.subscribeMeta();
+    void this.sampleClock();
     void this.seed();
   }
 
@@ -138,6 +155,11 @@ export class ConvexTrajectorySource {
     if (!this.running && this.client === null) return;
     this.running = false;
     this.generation += 1;
+    this.seeding = false;
+    if (this.seedWaitTimer) clearTimeout(this.seedWaitTimer);
+    this.seedWaitTimer = null;
+    if (this.clockTimer) clearTimeout(this.clockTimer);
+    this.clockTimer = null;
     if (this.seedRetryTimer) {
       clearTimeout(this.seedRetryTimer);
       this.seedRetryTimer = null;
@@ -155,26 +177,66 @@ export class ConvexTrajectorySource {
     return this.running;
   }
 
-  private async seed(): Promise<void> {
+  private async sampleClock(): Promise<void> {
     const gen = this.generation;
     const client = this.client;
     if (!client) return;
+    const sentAtMs = Date.now();
+    try {
+      const result = await client.query(TRAJ_CLOCK_QUERY, {
+        nonce: `${sentAtMs}-${++this.clockRequest}-${Math.random().toString(36).slice(2)}`,
+      });
+      if (gen !== this.generation) return;
+      this.sink.noteConvexClock(result.serverNowMs, sentAtMs, Date.now());
+    } catch {
+      // Older deployments may not expose clock:now yet. Retain the previous
+      // estimate/device time; stale cached metadata is never a fallback clock.
+    }
+    if (gen === this.generation)
+      this.clockTimer = setTimeout(() => {
+        this.clockTimer = null;
+        void this.sampleClock();
+      }, 60_000);
+  }
+
+  private async seed(): Promise<void> {
+    const gen = this.generation;
+    const client = this.client;
+    if (!client || this.seeding) return;
+    this.seeding = true;
+    const waitTimer = setTimeout(() => {
+      if (gen === this.generation && this.seeding)
+        this.sink.noteConvexFailure('Trajectory seed timed out waiting for the server');
+      if (this.seedWaitTimer === waitTimer) this.seedWaitTimer = null;
+    }, SEED_WAIT_TIMEOUT_MS);
+    this.seedWaitTimer = waitTimer;
     try {
       const result = await client.query(TRAJ_FULL_SET_QUERY, {});
       if (gen !== this.generation) return;
+      this.seeding = false;
       this.sink.seedConvex(result.vehicles, result.meta, Date.now());
       this.lastSeq = result.seq;
+      this.lastPublicationMs = result.meta?.publishedAtMs ?? 0;
       this.seedRetryMs = SEED_RETRY_MIN_MS;
       this.subscribeBatches();
     } catch (e) {
       if (gen !== this.generation) return;
+      this.seeding = false;
       this.sink.noteConvexFailure(e instanceof Error ? e.message : String(e));
-      this.seedRetryTimer = setTimeout(() => {
-        this.seedRetryTimer = null;
-        if (gen === this.generation) void this.seed();
-      }, this.seedRetryMs);
-      this.seedRetryMs = Math.min(SEED_RETRY_MAX_MS, this.seedRetryMs * 2);
+      this.scheduleSeedRetry(gen);
+    } finally {
+      clearTimeout(waitTimer);
+      if (this.seedWaitTimer === waitTimer) this.seedWaitTimer = null;
     }
+  }
+
+  private scheduleSeedRetry(gen: number): void {
+    if (this.seedRetryTimer || gen !== this.generation) return;
+    this.seedRetryTimer = setTimeout(() => {
+      this.seedRetryTimer = null;
+      if (gen === this.generation) void this.seed();
+    }, this.seedRetryMs);
+    this.seedRetryMs = Math.min(SEED_RETRY_MAX_MS, this.seedRetryMs * 2);
   }
 
   private subscribeBatches(): void {
@@ -183,17 +245,24 @@ export class ConvexTrajectorySource {
     if (!client) return;
     this.unsubscribeBatches?.();
     this.batchesAtCursor = 0;
+    const subGen = ++this.subscriptionGeneration;
     const sinceSeq = this.lastSeq;
     this.unsubscribeBatches = client.onUpdate(
       TRAJ_BATCHES_QUERY,
       { sinceSeq },
       (result) => {
-        if (gen !== this.generation) return;
+        if (gen !== this.generation || subGen !== this.subscriptionGeneration) return;
         this.onBatches(result);
       },
       (e) => {
-        if (gen !== this.generation) return;
+        if (gen !== this.generation || subGen !== this.subscriptionGeneration) return;
         this.sink.noteConvexFailure(e.message);
+        // onUpdate query errors can terminate that subscription. A healthy
+        // metadata socket is not proof that vehicle diffs are still flowing.
+        this.subscriptionGeneration += 1;
+        this.unsubscribeBatches?.();
+        this.unsubscribeBatches = null;
+        this.scheduleSeedRetry(gen);
       },
     );
   }
@@ -223,6 +292,7 @@ export class ConvexTrajectorySource {
   }
 
   private reseed(): void {
+    this.subscriptionGeneration += 1;
     this.unsubscribeBatches?.();
     this.unsubscribeBatches = null;
     void this.seed();
@@ -237,6 +307,16 @@ export class ConvexTrajectorySource {
       {},
       (result) => {
         if (gen !== this.generation || result === null) return;
+        // A lower head after backend reset cannot be resumed with the old
+        // cursor (every new batch would otherwise be filtered out forever).
+        if (
+          !this.seeding &&
+          this.lastSeq >= 0 &&
+          result.lastSeq < this.lastSeq &&
+          result.publishedAtMs >= this.lastPublicationMs
+        )
+          this.reseed();
+        this.lastPublicationMs = Math.max(this.lastPublicationMs, result.publishedAtMs);
         this.sink.noteConvexMeta(result, Date.now());
       },
       () => {

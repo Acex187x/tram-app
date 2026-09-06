@@ -392,7 +392,9 @@ export default function MapScreen() {
   useEffect(() => {
     if (!flyToTarget) return;
     const selection = useSelectionStore.getState();
-    if (selection.followTramKey) selection.setFollowTramKey(null);
+    // A new tram selection may have superseded this request since React
+    // rendered the effect. Never let the stale fly-to take camera ownership.
+    if (selection.flyToTarget !== flyToTarget) return;
     cameraRef.current?.setCamera({
       centerCoordinate: flyToTarget.coordinates,
       zoomLevel: flyToTarget.zoom ?? 15.5,

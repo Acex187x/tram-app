@@ -79,7 +79,10 @@ export const publish = mutation({
       throw new Error('trajectories.publish: bad or unconfigured token');
     }
     const meta = await readMeta(ctx);
-    const seq = (meta?.lastSeq ?? 0) + 1;
+    // Sequences identify persisted deltas. Heartbeat-only holes otherwise
+    // look like lost history when a quiet client resumes after retention.
+    const hasDelta = args.changed.length > 0 || args.removed.length > 0;
+    const seq = (meta?.lastSeq ?? 0) + (hasDelta ? 1 : 0);
 
     for (const vehicle of args.changed) {
       const row = await ctx.db
@@ -96,10 +99,11 @@ export const publish = mutation({
         .first();
       if (row) await ctx.db.delete(row._id);
     }
-    if (args.changed.length > 0 || args.removed.length > 0) {
+    if (hasDelta) {
       await ctx.db.insert('trajectoryBatches', {
         seq,
         atMs: args.atMs,
+        publishedAtMs: Date.now(),
         changed: args.changed,
         removed: args.removed.length > 0 ? args.removed : undefined,
       });
@@ -229,7 +233,7 @@ export const sweepBatches = internalMutation({
       .take(SWEEP_BATCH);
     let deleted = 0;
     for (const row of rows) {
-      if (row.atMs >= cutoff) break; // by_seq is chronological — the rest is fresh
+      if ((row.publishedAtMs ?? row.atMs) >= cutoff) break;
       await ctx.db.delete(row._id);
       deleted += 1;
     }
@@ -245,14 +249,24 @@ export const sweepStaleVehicles = internalMutation({
     const meta = await readMeta(ctx);
     if (!meta) return { deleted: 0 };
     const cutoff = meta.atMs - TRAJ_VEHICLE_STALE_MS;
-    const rows = await ctx.db.query('trajectoryVehicles').take(SWEEP_BATCH);
-    let deleted = 0;
+    // The first 256 fresh rows must not starve older abandoned vehicles.
+    const rows = await ctx.db.query('trajectoryVehicles')
+      .withIndex('by_emitted', (q) => q.lt('vehicle.emittedAtMs', cutoff))
+      .take(SWEEP_BATCH);
+    const removed: string[] = [];
     for (const row of rows) {
-      if (row.vehicle.emittedAtMs < cutoff) {
-        await ctx.db.delete(row._id);
-        deleted += 1;
-      }
+      await ctx.db.delete(row._id);
+      removed.push(row.key);
     }
-    return { deleted };
+    if (removed.length > 0) {
+      const seq = meta.lastSeq + 1;
+      // Clients subscribe to deltas; row deletion alone leaves their ghosts.
+      await ctx.db.insert('trajectoryBatches', {
+        seq, atMs: meta.atMs, publishedAtMs: Date.now(), changed: [], removed,
+      });
+      // Cleanup is not predictor liveness: retain its original heartbeat.
+      await ctx.db.patch(meta._id, { lastSeq: seq });
+    }
+    return { deleted: removed.length };
   },
 });

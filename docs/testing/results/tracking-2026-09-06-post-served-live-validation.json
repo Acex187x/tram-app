@@ -1,0 +1,335 @@
+{
+  "candidateBackendVersionSha256": "4c6ac240245688496da2cd66551adab3abb8ea761ed29bbf9724a52c446d6d77",
+  "candidateDeployedAtUtc": "2026-09-06T06:39:01Z",
+  "capture": {
+    "startedAtMs": 1788676897107,
+    "pid": 92962,
+    "boundedDurationS": 430,
+    "production": "https://tram-api.acex.sh",
+    "candidate": "http://10.10.10.1:13210",
+    "commonFixes": "Identical production fix messages copied to both files with identical receivedAtMs",
+    "geometry": "Union refreshed every60s from public production pack"
+  },
+  "measurement": {
+    "startAtMs": 1788677017107,
+    "endAtMs": 1788677317107,
+    "startUtc": "2026-09-06T06:43:37.107000+00:00",
+    "endUtc": "2026-09-06T06:48:37.107000+00:00",
+    "durationS": 300,
+    "warmupS": 120,
+    "fps": 30,
+    "frameCountEach": 9000,
+    "coherentVehicleFrameSamplesEach": 1234103,
+    "identicalHistoricalAvlPairs": 747,
+    "warmupMethod": "Advance actual shipping TramFleet frames for120s, retain bounded causal frame history, exclude all warmup aggregates and observations before measurementstart. Both streams use identical local frame times and byte-identical AVL messages. This differs from earlier cold-join replays."
+  },
+  "warmupZeroRegression": {
+    "fixture": "tracking-2026-09-06-final-candidate-wire.jsonl.gz",
+    "durationS": 297,
+    "startAtMs": 1788674640087,
+    "allNonCpuMetricsExactlyEqual": true,
+    "excludedFields": [
+      "wirePath",
+      "new warmupSeconds",
+      "fullFleetFrameCpuMs"
+    ]
+  },
+  "metrics": {
+    "production": {
+      "holdSeconds": 1061.5307416986477,
+      "guardHeldSecondsByReason": {
+        "at_stop/flat-target": 575.5319282227217,
+        "on_track/flat-target": 28.299930908202906,
+        "at_stop/low-speed-catchup": 18.53328808593758,
+        "at_stop/moving-target-behind-rendered-floor": 168.79958789063787,
+        "at_stop/target-revised-backward": 2.5999936523437497,
+        "on_track/target-revised-backward": 0.6999982910156247,
+        "on_track/low-speed-catchup": 5.633319580078113,
+        "at_stop/old-avl-over45s": 145.1663122558629,
+        "on_track/old-avl-over45s": 86.73312158202924,
+        "on_track/moving-target-behind-rendered-floor": 29.43326147460912,
+        "at_stop/past-effective-horizon": 0.09999975585937498
+      },
+      "backward": 0,
+      "speedOver25": 0,
+      "positiveStepsOver1": 0,
+      "launchesOver1": 0,
+      "positiveSpeedStepMs": {
+        "1": 0.08333312988331265,
+        "0.5": 0,
+        "0.9": 0.08333312985602537,
+        "0.99": 0.08333312988331087
+      },
+      "brakingSpeedStepMs": {
+        "1": 19.974970092846032,
+        "0.5": 0,
+        "0.9": 2.7284841053187847e-11,
+        "0.99": 0.050433961007578354
+      },
+      "actualSpeedMs": {
+        "1": 25.00000000002183,
+        "0.5": 4.606000000018961,
+        "0.9": 9.066000000001115,
+        "0.99": 15.410391845776417
+      },
+      "fullFleetFrameCpuMs": {
+        "1": 4.654790999999932,
+        "0.5": 0.0595000000000141,
+        "0.9": 0.0659170000000131,
+        "0.99": 0.1346250000000282
+      },
+      "clockOffsetMs": 0,
+      "clockSynced": false,
+      "holdDefinition": "renderGuardActive and rendered speed<0.1m/s; vehicle-seconds, not all stationary time"
+    },
+    "candidate": {
+      "holdSeconds": 29.033262451171634,
+      "guardHeldSecondsByReason": {
+        "at_stop/old-avl-over45s": 12.999968261718841,
+        "on_track/low-speed-catchup": 0.6999982910156247,
+        "at_stop/low-speed-catchup": 3.1666589355468724,
+        "at_stop/target-revised-backward": 0.46666552734374983,
+        "on_track/old-avl-over45s": 11.59997167968756,
+        "at_stop/past-effective-horizon": 0.033333251953125,
+        "at_stop/moving-target-behind-rendered-floor": 0.033333251953125,
+        "on_track/flat-target": 0.033333251953125
+      },
+      "backward": 0,
+      "speedOver25": 0,
+      "positiveStepsOver1": 0,
+      "launchesOver1": 0,
+      "positiveSpeedStepMs": {
+        "1": 0.08333312991059572,
+        "0.5": 0,
+        "0.9": 0.034999914598466075,
+        "0.99": 0.08333312988331087
+      },
+      "brakingSpeedStepMs": {
+        "1": 16.320945054159353,
+        "0.5": 0,
+        "0.9": 0.00480405598481326,
+        "0.99": 0.041019370028637425
+      },
+      "actualSpeedMs": {
+        "1": 25.000000000001368,
+        "0.5": 4.936773479085241,
+        "0.9": 9.560854864167235,
+        "0.99": 14.136231313802446
+      },
+      "fullFleetFrameCpuMs": {
+        "1": 20.98558300000002,
+        "0.5": 0.08150000000000546,
+        "0.9": 0.08979199999998855,
+        "0.99": 0.13612499999999272
+      },
+      "clockOffsetMs": 22.642857142857142,
+      "clockSynced": true,
+      "holdDefinition": "renderGuardActive and rendered speed<0.1m/s; vehicle-seconds, not all stationary time"
+    }
+  },
+  "historicalAvlTradeoff": {
+    "on_track": {
+      "pairs": 325,
+      "productionMaeM": 67.1737550112144,
+      "candidateMaeM": 63.995663886768384,
+      "productionBiasM": -30.07489907230944,
+      "candidateBiasM": -0.699731876996582,
+      "productionAbsErrorQuantilesM": {
+        "1": 522.9347961428571,
+        "0.5": 41.34284313232274,
+        "0.9": 172.69438124999988,
+        "0.99": 412.61514125942085
+      },
+      "candidateAbsErrorQuantilesM": {
+        "1": 454.0527866311895,
+        "0.5": 44.627519042964195,
+        "0.9": 152.24989270019432,
+        "0.99": 375.09530146019915
+      },
+      "worseAbsoluteErrorOver30m": 66,
+      "betterAbsoluteErrorOver30m": 70,
+      "newSignedAheadOver30m": 47,
+      "resolvedSignedAheadOver30m": 9
+    },
+    "at_stop": {
+      "pairs": 422,
+      "productionMaeM": 155.96170359533852,
+      "candidateMaeM": 120.02331861213018,
+      "productionBiasM": -135.60489362557254,
+      "candidateBiasM": -88.01493037992219,
+      "productionAbsErrorQuantilesM": {
+        "1": 1451.5765463867192,
+        "0.5": 137.31772,
+        "0.9": 295.0956292929603,
+        "0.99": 463.96905363970745
+      },
+      "candidateAbsErrorQuantilesM": {
+        "1": 867.5152560528222,
+        "0.5": 100.03836018373659,
+        "0.9": 258.89778568010206,
+        "0.99": 425.9383494886224
+      },
+      "worseAbsoluteErrorOver30m": 51,
+      "betterAbsoluteErrorOver30m": 204,
+      "newSignedAheadOver30m": 28,
+      "resolvedSignedAheadOver30m": 7
+    }
+  },
+  "freshness": {
+    "production": {
+      "sequence": {
+        "first": 568248,
+        "last": 568356,
+        "updates": 109
+      },
+      "publicationAgeAtReceiptS": {
+        "n": 109,
+        "median": 0.777,
+        "p95": 4.653,
+        "max": 8.314
+      },
+      "upstreamBatchAgeAtReceiptS": {
+        "n": 49,
+        "median": 1.977,
+        "p95": 7.208,
+        "max": 9.623
+      },
+      "upstreamLastBatchAgeAtSampleS": {
+        "n": 301,
+        "median": 5.836,
+        "p95": 12.647,
+        "max": 18.203
+      },
+      "maxUpstreamArrivalGapS": 18.218,
+      "rawVehicleSecondsAt1Hz": {
+        "at_stop/0-45s": 15246,
+        "on_track/90+s": 1025,
+        "at_stop/45-90s": 8574,
+        "on_track/0-45s": 10055,
+        "on_track/45-90s": 4761,
+        "at_stop/90+s": 1616
+      },
+      "rawSamples": 41277,
+      "errors": [
+        {
+          "receivedAtMs": 1788677018257,
+          "path": "capture:error",
+          "value": {
+            "query": "clock:now",
+            "error": "Error: [CONVEX Q(clock:now)] [Request ID: 7dbbb92736cb1de0] Server Error\nCould not find public function for 'clock:now'.\n\n  Called by client"
+          }
+        },
+        {
+          "receivedAtMs": 1788677078273,
+          "path": "capture:error",
+          "value": {
+            "query": "clock:now",
+            "error": "Error: [CONVEX Q(clock:now)] [Request ID: 7265ef65d53b733f] Server Error\nCould not find public function for 'clock:now'.\n\n  Called by client"
+          }
+        },
+        {
+          "receivedAtMs": 1788677138290,
+          "path": "capture:error",
+          "value": {
+            "query": "clock:now",
+            "error": "Error: [CONVEX Q(clock:now)] [Request ID: 08673d49c7a452b9] Server Error\nCould not find public function for 'clock:now'.\n\n  Called by client"
+          }
+        },
+        {
+          "receivedAtMs": 1788677199795,
+          "path": "capture:error",
+          "value": {
+            "query": "clock:now",
+            "error": "Error: [CONVEX Q(clock:now)] [Request ID: d815d34dec1afacf] Server Error\nCould not find public function for 'clock:now'.\n\n  Called by client"
+          }
+        },
+        {
+          "receivedAtMs": 1788677259811,
+          "path": "capture:error",
+          "value": {
+            "query": "clock:now",
+            "error": "Error: [CONVEX Q(clock:now)] [Request ID: b2cc8b8355b96aed] Server Error\nCould not find public function for 'clock:now'.\n\n  Called by client"
+          }
+        }
+      ]
+    },
+    "candidate": {
+      "sequence": {
+        "first": 776,
+        "last": 859,
+        "updates": 149
+      },
+      "publicationAgeAtReceiptS": {
+        "n": 149,
+        "median": 0.13,
+        "p95": 0.302,
+        "max": 0.389
+      },
+      "upstreamBatchAgeAtReceiptS": {
+        "n": 49,
+        "median": 1.977,
+        "p95": 7.208,
+        "max": 9.623
+      },
+      "upstreamLastBatchAgeAtSampleS": {
+        "n": 301,
+        "median": 5.836,
+        "p95": 12.647,
+        "max": 18.203
+      },
+      "maxUpstreamArrivalGapS": 18.218,
+      "rawVehicleSecondsAt1Hz": {
+        "at_stop/0-45s": 15246,
+        "on_track/90+s": 1025,
+        "at_stop/45-90s": 8574,
+        "on_track/0-45s": 10055,
+        "on_track/45-90s": 4761,
+        "at_stop/90+s": 1616
+      },
+      "rawSamples": 41277,
+      "errors": []
+    }
+  },
+  "duplicateHoldDetection": {
+    "method": "Descriptive emitted-profile prevalence, not observed physical stops or realized hold time. Exact key/trip/anchor timestamp; lastStopId must identify exactly one platform. Candidate range anchor 5..150m before that platform. Flat spans >=2s and <=0.05m, second span within3m of same platform, separate levels by>5m. Geometry capture may be later; physical stop axis only, no schedule timing used. Future within emitted curves is inspected; no predictive-accuracy claim. Revisions deduplicated; anchor counts avoid repeated revision inflation.",
+    "commonExactAnchors": 224,
+    "opinion": {
+      "production": 142,
+      "candidate": 0
+    },
+    "smooth": {
+      "production": 82,
+      "candidate": 0
+    }
+  },
+  "limits": [
+    "Historical AVL is a delayed source-axis proxy, not rider ground truth.",
+    "Full new candidate backend is compared with production using the same current client; differences include all candidate model/policy/clock changes, so this is not an isolated causal estimate of the last served-platform patch.",
+    "Future duplicate holds in served profiles are distinct from realized renderer guard-held time. Later revisions can replace future holds.",
+    "No ordinary reverse or positive velocity step violation was observed; truth-driven braking remains allowed to stop abruptly, with measured braking jumps reported below. Do not claim globally bounded physical acceleration from these results.",
+    "Node full-fleet CPU timing excludes Hermes, native Mapbox, GPU, and physical-device rendering.",
+    "Sample is one5-minute morning window with continuously chained real server emissions, after120s actualclientwarmup."
+  ],
+  "artifacts": [
+    {
+      "path": "docs/testing/fixtures/tracking-2026-09-06-post-served-production-wire.jsonl.gz",
+      "bytes": 544939,
+      "sha256": "c9f593aae2975c7ef47b547de30f44ff652e04857bec93c2b2dd93c80566a14e"
+    },
+    {
+      "path": "docs/testing/fixtures/tracking-2026-09-06-post-served-candidate-wire.jsonl.gz",
+      "bytes": 789693,
+      "sha256": "19e7851530bc95e7e36d3931aee91065d010330815664412cb2b84db1d2beb00"
+    },
+    {
+      "path": "docs/testing/fixtures/tracking-2026-09-06-post-served-geometry.json.gz",
+      "bytes": 413399,
+      "sha256": "46bbe426ac98d0d43d6119b0ab3132fa1dfb6a4bf342058ce220284d7f42a514"
+    },
+    {
+      "path": "docs/testing/fixtures/tracking-2026-09-06-post-served-profile-analysis.json.gz",
+      "bytes": 51181,
+      "sha256": "e4a538ea5eb1117b41e4539b1c2258ea9740ecdfb6233b151fdc4a9d6fc04bfe"
+    }
+  ]
+}

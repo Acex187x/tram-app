@@ -3,6 +3,8 @@
 // (CONVEX_URL=http://tram-convex-backend:3210).
 
 export const CONVEX_URL = process.env.CONVEX_URL ?? 'https://tram-api.acex.sh';
+/** Optional isolated output plane; public input feed stays on CONVEX_URL. */
+export const PUBLISH_CONVEX_URL = process.env.PUBLISH_CONVEX_URL ?? CONVEX_URL;
 /** Shared secret for `trajectories:publish` (convex/trajectories.ts). Empty ⇒
  * Convex publishing is disabled and the service serves HTTP only (lab mode). */
 export const ENGINE_PUSH_TOKEN = process.env.ENGINE_PUSH_TOKEN ?? '';

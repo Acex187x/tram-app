@@ -1,0 +1,308 @@
+{
+  "vehicleKey": "9128",
+  "tripId": "1_14422_260816",
+  "classification": "served-flat-stop-profile; not evidence of client freeze",
+  "screenshot": "/tmp/tram-ui-tests-candidate-20260906-r9/attachments/named/map-selected-detail.png",
+  "screenshotInferredAtMs": 1788675543800,
+  "screenshotTimeBasis": "Stored observedAt06:18:35Z plus visible fix age28.8s; exact screenshot frame clock unavailable",
+  "publishedSequence": 365,
+  "publishedVehicle": {
+    "anchorMs": 1788675515000,
+    "anchorS": 1891.35,
+    "discontinuity": false,
+    "emittedAtMs": 1788675528226,
+    "key": "9128",
+    "line": "1",
+    "opinion": [
+      {
+        "s": 1891.35,
+        "t": 1788675528226,
+        "v": 0
+      },
+      {
+        "s": 1891.35,
+        "t": 1788675546226,
+        "v": 0
+      },
+      {
+        "s": 1891.75,
+        "t": 1788675547226,
+        "v": 0.8
+      },
+      {
+        "s": 1900,
+        "t": 1788675550226,
+        "v": 4.7
+      },
+      {
+        "s": 1904.95,
+        "t": 1788675551226,
+        "v": 5.2
+      },
+      {
+        "s": 1910.03,
+        "t": 1788675552226,
+        "v": 4.964049
+      },
+      {
+        "s": 1934.02,
+        "t": 1788675557226,
+        "v": 4.632109
+      },
+      {
+        "s": 1938.53,
+        "t": 1788675558226,
+        "v": 4.382813
+      },
+      {
+        "s": 1942.39,
+        "t": 1788675559226,
+        "v": 3.333516
+      },
+      {
+        "s": 1945.02,
+        "t": 1788675560226,
+        "v": 1.933516
+      },
+      {
+        "s": 1946.66,
+        "t": 1788675561226,
+        "v": 1.333516
+      },
+      {
+        "s": 1947.86,
+        "t": 1788675562226,
+        "v": 1.074811
+      },
+      {
+        "s": 1948.4,
+        "t": 1788675563226,
+        "v": 0.016105
+      },
+      {
+        "s": 1948.41,
+        "t": 1788675564226,
+        "v": 0
+      },
+      {
+        "s": 1948.41,
+        "t": 1788675573226,
+        "v": 0
+      },
+      {
+        "s": 1948.81,
+        "t": 1788675574226,
+        "v": 0.8
+      },
+      {
+        "s": 1953.01,
+        "t": 1788675576226,
+        "v": 3.4
+      },
+      {
+        "s": 1956.93,
+        "t": 1788675577226,
+        "v": 4.42587
+      },
+      {
+        "s": 1961.46,
+        "t": 1788675578226,
+        "v": 4.65174
+      },
+      {
+        "s": 1966,
+        "t": 1788675579226,
+        "v": 4.42587
+      },
+      {
+        "s": 2125.33,
+        "t": 1788675615226,
+        "v": 4.42587
+      },
+      {
+        "s": 2172.88,
+        "t": 1788675625226,
+        "v": 5.082676
+      },
+      {
+        "s": 2244.06,
+        "t": 1788675639226,
+        "v": 5.086066
+      },
+      {
+        "s": 2334.7,
+        "t": 1788675658226,
+        "v": 4.45538
+      }
+    ],
+    "smooth": [
+      {
+        "s": 1907.89,
+        "t": 1788675528226,
+        "v": 6.888258
+      },
+      {
+        "s": 1914.36,
+        "t": 1788675529226,
+        "v": 6.056069
+      },
+      {
+        "s": 1927.39,
+        "t": 1788675533226,
+        "v": 0.456069
+      },
+      {
+        "s": 1927.62,
+        "t": 1788675534226,
+        "v": 0
+      },
+      {
+        "s": 1927.62,
+        "t": 1788675547226,
+        "v": 0
+      },
+      {
+        "s": 1927.9,
+        "t": 1788675548226,
+        "v": 0.560895
+      },
+      {
+        "s": 1933.97,
+        "t": 1788675551226,
+        "v": 3.489656
+      },
+      {
+        "s": 1937.57,
+        "t": 1788675552226,
+        "v": 3.71355
+      },
+      {
+        "s": 1941.1,
+        "t": 1788675553226,
+        "v": 3.347049
+      },
+      {
+        "s": 1946.02,
+        "t": 1788675555226,
+        "v": 1.570866
+      },
+      {
+        "s": 1947.47,
+        "t": 1788675556226,
+        "v": 1.322718
+      },
+      {
+        "s": 1948.27,
+        "t": 1788675557226,
+        "v": 0.27457
+      },
+      {
+        "s": 1948.4,
+        "t": 1788675558226,
+        "v": 0
+      },
+      {
+        "s": 1948.4,
+        "t": 1788675573226,
+        "v": 0
+      },
+      {
+        "s": 1948.52,
+        "t": 1788675574226,
+        "v": 0.230924
+      },
+      {
+        "s": 1949.04,
+        "t": 1788675575226,
+        "v": 0.802024
+      },
+      {
+        "s": 1957.08,
+        "t": 1788675578226,
+        "v": 4.562187
+      },
+      {
+        "s": 1961.83,
+        "t": 1788675579226,
+        "v": 4.92235
+      },
+      {
+        "s": 1966.57,
+        "t": 1788675580226,
+        "v": 4.575215
+      },
+      {
+        "s": 2057.25,
+        "t": 1788675600226,
+        "v": 4.492157
+      },
+      {
+        "s": 2128.88,
+        "t": 1788675616226,
+        "v": 4.46177
+      },
+      {
+        "s": 2176.85,
+        "t": 1788675626226,
+        "v": 5.132826
+      },
+      {
+        "s": 2248.58,
+        "t": 1788675640226,
+        "v": 5.113995
+      },
+      {
+        "s": 2334.96,
+        "t": 1788675658226,
+        "v": 4.483964
+      }
+    ],
+    "source": "ml",
+    "tripId": "1_14422_260816"
+  },
+  "flatSmooth": {
+    "fromMs": 1788675534226,
+    "toMs": 1788675547226,
+    "s": 1927.62,
+    "seconds": 13
+  },
+  "fixedAtScreenshotM": 1891.35,
+  "smoothAtScreenshotM": 1927.62,
+  "exactDeltaM": 36.27,
+  "predictedDepartureAfterScreenshotS": 3.426,
+  "additionalFlatSmooth": {
+    "fromMs": 1788675558226,
+    "toMs": 1788675573226,
+    "s": 1948.4,
+    "seconds": 15
+  },
+  "platform": {
+    "arrivalMs": 1788674220000,
+    "coordinates": [
+      14.449817,
+      50.103657
+    ],
+    "departureMs": 1788674220000,
+    "distM": 1949.568,
+    "dwellSeconds": 0,
+    "isTerminal": false,
+    "name": "D\u011blnick\u00e1",
+    "sequence": 5,
+    "stopId": "U81Z1P"
+  },
+  "limitations": [
+    "No recorded native frame history for this exact moment, so inferred time uses visible fix age. Matching plateau and36.27m delta strongly identifies the served revision.",
+    "Cannot prove actual physical stop duration from delayed AVL.",
+    "Two served holds around one platform are a remaining generator policy case; this investigation does not label both actual real stops.",
+    "Fresh geometry pack preserves physical axis/stop positions but may represent another timetable instance; do not infer screenshot schedule from its arrival/departure fields."
+  ],
+  "laterLiveCapture": {
+    "startMs": 1788675665667,
+    "endMs": 1788675726076,
+    "samples": 22,
+    "uniqueEmissions": 4,
+    "allPublishedSynced": true,
+    "maxPublishFailures": 0
+  },
+  "sourceEdits": false
+}

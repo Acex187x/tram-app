@@ -700,7 +700,7 @@ const mkDrive = (over: Partial<Parameters<typeof buildDriveVehicle>[0]> &
   const slowUntil = sSeam + 120;
   const surfaces: DriveSurfaces = {
     paceAt: (sM: number) => (sM < slowUntil ? 1.6 : 6),
-    dwellAt: () => 20,
+    dwellStats: () => ({ mean: 20, sd: 5, trusted: true }),
   };
   const b = mkDrive({
     raw: raw(sSeam + 100, 6), geom, surfaces, fixGapS: 40,

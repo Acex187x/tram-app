@@ -6,18 +6,16 @@ tram travel in the next gapS seconds":
   gbdt — LightGBM regressor (trees; the tabular workhorse)
   mlp  — small neural net (sklearn MLPRegressor; the honest "нейронка" probe)
 
-FEATURE CONTRACT v1 lives in lab/src/ml.ts — the TS side builds the same
+FEATURE CONTRACT v3 lives in lab/src/ml.ts — the TS side builds the same
 features online; keep the two in sync BY HAND and bump FEATURE_VERSION on any
 change (mismatched versions refuse predictions, which the lab treats as a
 safe skip). Offline parity notes:
-  - evaluation instant tEval := next.seenAtMs (the batch arrival ≈ the wall
-    instant the online scorer runs at);
+  - evaluation instant tEval := next.obsAtMs (the position timestamp);
   - gapS := (tEval - prev.obsAtMs)/1000;
   - target ds := next.shapeDistM - prev.shapeDistM, same trip, gap 4..300 s;
   - learnedPace/learnedRelease are read from the CURRENT learned_cells (the
-    surfaces evolve, so old pairs see today's surface — mild leakage toward
-    the statistical layer, i.e. it makes the ML models' win condition
-    HARDER, not easier; documented, acceptable).
+    surfaces evolve, so old pairs see today's surface: a disclosed holdout
+    limitation, not a claim of strictly causal replay).
 
 Holdout: last 20% of pairs by time. MAE per model (plus the naive ds=0
 baseline) is appended to ml_train_log for the Grafana panel, and the full
@@ -44,15 +42,15 @@ from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-FEATURE_VERSION = 2
+FEATURE_VERSION = 3
 FEATURES = [
     "gapS", "atStop", "delayS", "hourSin", "hourCos", "weekend",
     "distToNextStopM", "stopsNext1km", "learnedPace", "learnedRelease", "posFrac",
     # v2 (2026-08-12): the corridor/leader signal — recent measured pace of
     # this km of track by any vehicle. Added after v1 plateaued at ~58.6 m
-    # across a ×1.8 data growth. Offline: time-decayed mean of prior samples
-    # (30-min window, 12-min half-life, STRICTLY before t_eval — no leakage);
-    # online mirror: LearnedModel.corridorPaceAt (same half-life EWMA).
+    # across a ×1.8 data growth. Version 3 replays only samples received by
+    # prediction issue time, using LearnedModel's 12-min half-life EWMA.
+    # Version 2 incorrectly included target-pair speed before target arrival.
     "corridorPace", "corridorTrust",
 ]
 
@@ -113,15 +111,28 @@ def release_at(cells, stop_id, band, day):
 
 # ── dataset ──────────────────────────────────────────────────────────────────
 
-def build_dataset():
+def build_dataset(*, since_ms=None, until_ms=None, target_clock="observation", causal_corridor=True, metadata=False):
+    """Build version-3 rows; legacy options exist only for paired offline evaluation.
+
+    No writes occur here. Metadata contains numeric timestamps, not raw fixes.
+    """
     c = connect()
+    filters, parameters = [], []
+    if since_ms is not None:
+        filters.append("obsAtMs >= ?"); parameters.append(since_ms)
+    if until_ms is not None:
+        filters.append("obsAtMs <= ?"); parameters.append(until_ms)
+    where = " WHERE " + " AND ".join(filters) if filters else ""
     fixes = pd.read_sql_query(
         "SELECT key, tripId, routeId, obsAtMs, seenAtMs, shapeDistM, statePos, delayS, nextStopId"
-        " FROM fixes ORDER BY key, obsAtMs",
-        c,
+        " FROM fixes" + where + " ORDER BY key, obsAtMs",
+        c, params=parameters,
     )
     geoms = {}
-    for trip_id, shape_id, js in c.execute("SELECT tripId, shapeId, json FROM geometries"):
+    geom_sql = "SELECT tripId, shapeId, json FROM geometries"
+    if since_ms is not None:
+        geom_sql += " WHERE tripId IN (SELECT DISTINCT tripId FROM fixes WHERE obsAtMs >= ?)"
+    for trip_id, shape_id, js in c.execute(geom_sql, [since_ms] if since_ms is not None else []):
         try:
             g = json.loads(js)
         except json.JSONDecodeError:
@@ -144,45 +155,81 @@ def build_dataset():
         & (d_dist >= 15) & ((d_dist / gap_obs) <= 22)
     )
     corr_raw = {}
-    for trip_id, p_dist, t_ms, dd, gp in zip(
+    for trip_id, p_dist, t_ms, seen_ms, dd, gp in zip(
         fixes.loc[mv, "tripId"], fixes.loc[mv, "shapeDistM"],
-        nxt.loc[mv, "obsAtMs"], d_dist[mv], gap_obs[mv],
+        nxt.loc[mv, "obsAtMs"], nxt.loc[mv, "seenAtMs"], d_dist[mv], gap_obs[mv],
     ):
         g = geoms.get(trip_id)
         if g is None:
             continue
         corr_raw.setdefault((g[0], int((p_dist + dd / 2) // 1000)), []).append(
-            (float(t_ms), float(dd / gp))
+            (float(t_ms), float(seen_ms), float(dd / gp))
         )
     corr = {
-        k: (np.array([t for t, _ in sorted(v)]), np.array([s for _, s in sorted(v)]))
+        k: tuple(np.asarray(a, dtype=np.float64) for a in zip(*sorted(v)))
         for k, v in corr_raw.items()
     }
 
-    def corridor_at(shape_id, s0, t_eval, fallback):
+    # Mirror LearnedModel.foldSample in actual availability order. Each
+    # prefix is the state a live predictor could have held at that receipt.
+    # Unlike v2's 30-minute scan, online EWMA retains decaying older evidence.
+    causal = {}
+    if causal_corridor:
+        for key, samples in corr_raw.items():
+            receipts, means, weights, updated = [], [], [], []
+            mean, weight, last = 0.0, 0.0, None
+            for obs, arrival, speed in sorted(samples, key=lambda row: (row[1], row[0])):
+                decay = 0.5 ** (max(0, obs-last)/CORRIDOR_HL_MS) if last is not None else 1.0
+                weight = weight*decay + 1.0
+                mean += (speed-mean)/weight
+                last = obs
+                receipts.append(arrival); means.append(mean); weights.append(weight); updated.append(obs)
+            causal[key] = tuple(np.asarray(a) for a in [receipts, means, weights, updated])
+
+    def corridor_at(shape_id, s0, t_eval, available_ms, fallback):
+        if causal_corridor:
+            state = causal.get((shape_id, int(s0 // 1000)))
+            if state is None:
+                return fallback, 0.0
+            arrivals, means, weights, updated = state
+            index = int(np.searchsorted(arrivals, available_ms, side="right")) - 1
+            if index < 0:
+                return fallback, 0.0
+            trust = float(weights[index] * 0.5 ** (max(0, t_eval-updated[index])/CORRIDOR_HL_MS))
+            return (float(means[index]) if trust >= 0.5 else fallback), min(5.0, trust)
+
         e = corr.get((shape_id, int(s0 // 1000)))
         if e is None:
             return fallback, 0.0
-        times, speeds = e
+        times, arrivals, speeds = e
         hi = int(np.searchsorted(times, t_eval, side="left"))  # strictly before
         lo = int(np.searchsorted(times, t_eval - CORRIDOR_WIN_MS, side="left"))
         if hi <= lo:
             return fallback, 0.0
-        w = 0.5 ** ((t_eval - times[lo:hi]) / CORRIDOR_HL_MS)
+        known = np.ones(hi - lo, dtype=bool)
+        w = 0.5 ** ((t_eval - times[lo:hi][known]) / CORRIDOR_HL_MS)
         sw = float(w.sum())
         trust = min(5.0, sw)
         if sw < 0.5:
             return fallback, trust
-        return float((w * speeds[lo:hi]).sum() / sw), trust
+        return float((w * speeds[lo:hi][known]).sum() / sw), trust
 
-    mask = same & (gap_obs >= 4) & (gap_obs <= 300) & nxt["seenAtMs"].notna()
+    # A forecast can only be issued after its anchor arrives and before the
+    # target observation. Reject shape resets and invalid transport clocks.
+    arrival_gap = (nxt["seenAtMs"] - fixes["obsAtMs"]) / 1000.0
+    mask = (same & (gap_obs >= 4) & (gap_obs <= 300)
+            & (arrival_gap > 0) & (arrival_gap <= 400)
+            & (nxt["seenAtMs"] >= nxt["obsAtMs"])
+            & (fixes["seenAtMs"] < nxt["obsAtMs"])
+            & (d_dist.abs() / gap_obs <= 22))
     prev = fixes[mask].reset_index(drop=True)
     nxt = nxt[mask].reset_index(drop=True)
     if len(prev) < MIN_PAIRS:
-        return None, None, len(prev)
+        return (None, None, len(prev), None) if metadata else (None, None, len(prev))
 
     rows = []
     targets = []
+    target_times, arrival_times, issue_times = [], [], []
     for p, n_obs_at, n_seen, n_dist in zip(
         prev.itertuples(index=False), nxt["obsAtMs"], nxt["seenAtMs"], nxt["shapeDistM"]
     ):
@@ -190,7 +237,7 @@ def build_dataset():
         if geom is None:
             continue
         shape_id, total_m, stops = geom
-        t_eval_ms = float(n_seen)
+        t_eval_ms = float(n_obs_at if target_clock == "observation" else n_seen)
         dt = datetime.fromtimestamp(t_eval_ms / 1000.0, PRAGUE)
         hour = dt.hour
         weekend = 1.0 if dt.weekday() >= 5 else 0.0
@@ -221,7 +268,7 @@ def build_dataset():
         ds = float(n_dist) - s0
         if not (-100 <= ds <= 3500):
             continue
-        cp, ct = corridor_at(shape_id, s0, t_eval_ms, lp)
+        cp, ct = corridor_at(shape_id, s0, t_eval_ms, float(p.seenAtMs), lp)
         rows.append([
             gap_s, at_stop, delay_s,
             np.sin(2 * np.pi * hour / 24), np.cos(2 * np.pi * hour / 24), weekend,
@@ -229,22 +276,39 @@ def build_dataset():
             cp, ct,
         ])
         targets.append(ds)
+        target_times.append(float(n_obs_at))
+        arrival_times.append(float(n_seen))
+        issue_times.append(float(p.seenAtMs))
 
     if len(rows) < MIN_PAIRS:
-        return None, None, len(rows)
-    return np.asarray(rows, dtype=np.float64), np.asarray(targets, dtype=np.float64), len(rows)
+        return (None, None, len(rows), None) if metadata else (None, None, len(rows))
+    order = np.argsort(target_times, kind="stable")
+    result = (np.asarray(rows, dtype=np.float64)[order], np.asarray(targets, dtype=np.float64)[order], len(rows))
+    if metadata:
+        return (*result, {"targetMs": np.asarray(target_times)[order], "arrivalMs": np.asarray(arrival_times)[order],
+                          "issueMs": np.asarray(issue_times)[order]})
+    return result
 
 
 # ── training ─────────────────────────────────────────────────────────────────
 
 def train_once():
     t0 = time.time()
-    X, y, n = build_dataset()
+    X, y, n, timing = build_dataset(metadata=True)
     if X is None:
         log(f"not enough pairs yet ({n} < {MIN_PAIRS}) — skipping train")
         return False
-    split = int(len(X) * 0.8)
-    X_tr, X_te, y_tr, y_te = X[:split], X[split:], y[:split], y[split:]
+    split_at = timing["targetMs"][int(len(X) * 0.8)]
+    split = int(np.searchsorted(timing["targetMs"], split_at, side="left"))
+    if split == 0 or split == len(X):
+        log("no chronological holdout boundary — skipping train")
+        return False
+    train_mask = (timing["targetMs"] < split_at) & (timing["arrivalMs"] < split_at)
+    test_mask = (timing["targetMs"] >= split_at) & (timing["issueMs"] >= split_at)
+    if not train_mask.any() or not test_mask.any():
+        log("no causally separated training/holdout rows — skipping train")
+        return False
+    X_tr, X_te, y_tr, y_te = X[train_mask], X[test_mask], y[train_mask], y[test_mask]
 
     gbdt = lgb.LGBMRegressor(
         n_estimators=400, learning_rate=0.05, num_leaves=63,
@@ -275,8 +339,14 @@ def train_once():
         f.write(str(FEATURE_VERSION))
     report = {
         "featureVersion": FEATURE_VERSION,
+        "targetClock": "observation",
+        "holdoutOrder": "fleet-global-observation-time",
+        "corridorAvailability": "anchor-receipt",
         "trainedAt": datetime.now(timezone.utc).isoformat(),
         "nPairs": n,
+        "holdoutStartsAtMs": float(split_at),
+        "trainPairs": len(X_tr),
+        "holdoutPairs": len(X_te),
         "holdout": {"gbdt": round(mae_gbdt, 1), "mlp": round(mae_mlp, 1), "naive_ds0": round(mae_naive, 1)},
         "trainSeconds": train_s,
         "featureImportances": dict(
@@ -392,7 +462,12 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    threading.Thread(target=trainer_loop, daemon=True).start()
+    if os.environ.get("ML_TRAIN_ENABLED", "1") == "1":
+        threading.Thread(target=trainer_loop, daemon=True).start()
+    else:
+        # Isolated evaluation deployment: load explicitly reviewed artifacts;
+        # never open or train against any archive from the serving process.
+        load_persisted()
     log(f"inference server on :{PORT} (db={DB})")
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 

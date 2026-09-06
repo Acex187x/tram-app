@@ -169,6 +169,14 @@ export interface TramPublicState {
  * everything is. Distances are along-shape meters; speeds km/h.
  */
 export interface PhysicsDebugInfo {
+  /** Target before the map-frame presentation limit, meters along the shape. */
+  renderTargetDistM: number;
+  /** Target minus displayed position: negative means waiting for the curve. */
+  renderGuardGapM: number;
+  renderGuardActive: boolean;
+  /** Remaining horizon after fix-forward consumes part of it; -Infinity for overrun. */
+  effectiveHorizonLeftS: number | null;
+
   /** False when the server published no usable curves for this tram. */
   hasTrajectory: boolean;
   hasGeometry: boolean;
@@ -246,6 +254,9 @@ export interface PhysicsDebugInfo {
    * number instead of a mystery. Null without geometry.
    */
   fixCoordVsAxisM: number | null;
+  geometryCoherence?: 'valid' | 'invalid' | 'unknown';
+  geometryCoherenceReason?: string | null;
+  geometryAxisCoordinateErrorM?: number | null;
   /** Rendered distance in the active mode, m. */
   simDistM: number;
   /** Continuity-curve distance, m (null without a trajectory). */

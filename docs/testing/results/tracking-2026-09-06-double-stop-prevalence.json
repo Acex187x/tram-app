@@ -1,0 +1,197 @@
+{
+  "method": "Descriptive emitted-profile prevalence, not observed physical stops or realized hold time. Exact key/trip/anchor timestamp; lastStopId must identify exactly one platform. Candidate range anchor 5..150m before that platform. Flat spans >=2s and <=0.05m, second span within3m of same platform, separate levels by>5m. Geometry capture may be later; physical stop axis only, no schedule timing used. Future within emitted curves is inspected; no predictive-accuracy claim. Revisions deduplicated; anchor counts avoid repeated revision inflation.",
+  "script": "lab/scripts/analyze-double-stop.py",
+  "findings": {
+    "morning-candidate": {
+      "window": {
+        "firstReceivedAtMs": 1788674635503,
+        "lastReceivedAtMs": 1788674944317,
+        "cutoffMs": 0
+      },
+      "coverage": {
+        "allUniqueEmissions": 1157,
+        "atStopAnchorEmissions": 732,
+        "anchorFeedReceivedAfterCurve": 140,
+        "exactLastStopIdEmissions": 732,
+        "anchor5to150mBeforeLastPlatform": 352,
+        "opinionDoubleHoldEmissions": 151,
+        "opinionNoOtherPlatformEmissions": 151,
+        "smoothDoubleHoldEmissions": 95,
+        "smoothNoOtherPlatformEmissions": 95
+      },
+      "uniqueAnchors": {
+        "atStopAnchor": 545,
+        "exactLastStopId": 545,
+        "anchor5to150mBeforeLastPlatform": 265,
+        "opinionDoubleHold": 151,
+        "opinionNoOtherPlatform": 151,
+        "smoothDoubleHold": 95,
+        "smoothNoOtherPlatform": 95
+      },
+      "uniqueAtStopFixOffsetBands": {
+        "behind-50-150": 265,
+        "within5": 280
+      },
+      "secondHoldDurationS": {
+        "opinion": {
+          "n": 151,
+          "median": 9.0,
+          "p95": 40.0,
+          "max": 40.0
+        },
+        "smooth": {
+          "n": 95,
+          "median": 10.0,
+          "p95": 40.0,
+          "max": 49.0
+        }
+      }
+    },
+    "morning-production": {
+      "window": {
+        "firstReceivedAtMs": 1788674636102,
+        "lastReceivedAtMs": 1788674937560,
+        "cutoffMs": 0
+      },
+      "coverage": {
+        "allUniqueEmissions": 1152,
+        "atStopAnchorEmissions": 717,
+        "exactLastStopIdEmissions": 717,
+        "anchor5to150mBeforeLastPlatform": 347,
+        "opinionDoubleHoldEmissions": 186,
+        "opinionNoOtherPlatformEmissions": 186,
+        "missingExactAnchor": 17,
+        "smoothDoubleHoldEmissions": 125,
+        "smoothNoOtherPlatformEmissions": 125
+      },
+      "uniqueAnchors": {
+        "atStopAnchor": 538,
+        "exactLastStopId": 538,
+        "anchor5to150mBeforeLastPlatform": 260,
+        "opinionDoubleHold": 186,
+        "opinionNoOtherPlatform": 186,
+        "smoothDoubleHold": 125,
+        "smoothNoOtherPlatform": 125
+      },
+      "uniqueAtStopFixOffsetBands": {
+        "behind-50-150": 265,
+        "within5": 280
+      },
+      "secondHoldDurationS": {
+        "opinion": {
+          "n": 186,
+          "median": 9.0,
+          "p95": 40.0,
+          "max": 41.0
+        },
+        "smooth": {
+          "n": 125,
+          "median": 9.0,
+          "p95": 40.0,
+          "max": 55.0
+        }
+      }
+    },
+    "night-candidate": {
+      "window": {
+        "firstReceivedAtMs": 1788642595113,
+        "lastReceivedAtMs": 1788646294214,
+        "cutoffMs": 1788645000000
+      },
+      "coverage": {
+        "allUniqueEmissions": 4536,
+        "atStopAnchorEmissions": 2735,
+        "exactLastStopIdEmissions": 2700,
+        "anchor5to150mBeforeLastPlatform": 1336,
+        "opinionDoubleHoldEmissions": 538,
+        "opinionNoOtherPlatformEmissions": 538,
+        "smoothDoubleHoldEmissions": 297,
+        "smoothNoOtherPlatformEmissions": 297,
+        "missingOrAmbiguousLastStopId": 35,
+        "anchorFeedReceivedAfterCurve": 35
+      },
+      "uniqueAnchors": {
+        "atStopAnchor": 1910,
+        "exactLastStopId": 1885,
+        "anchor5to150mBeforeLastPlatform": 939,
+        "opinionDoubleHold": 538,
+        "opinionNoOtherPlatform": 538,
+        "smoothDoubleHold": 297,
+        "smoothNoOtherPlatform": 297
+      },
+      "uniqueAtStopFixOffsetBands": {
+        "behind-50-150": 930,
+        "within5": 908,
+        "behind-150+": 14
+      },
+      "secondHoldDurationS": {
+        "opinion": {
+          "n": 538,
+          "median": 9.0,
+          "p95": 40.0,
+          "max": 41.0
+        },
+        "smooth": {
+          "n": 297,
+          "median": 10.0,
+          "p95": 41.0,
+          "max": 56.0
+        }
+      }
+    }
+  },
+  "safetyAudit": {
+    "morningDuplicateEmissionCases": 152,
+    "nightDuplicateEmissionCases": 540,
+    "terminalOccurrences": 0,
+    "repeatedLastStopIdsInShape": 0,
+    "missingExactNextStopIdAndSequence": 0,
+    "nonincreasingNextStopSequence": 0,
+    "lastStopSequenceMatchesPlatformSequence": "all",
+    "differentPlatformBetweenHoldLevels": 0,
+    "gpsToPlatformM": {
+      "morning": {
+        "median": 74.85888303245098,
+        "p95": 106.84489579819571,
+        "max": 144.0461234010206
+      },
+      "night": {
+        "median": 74.00224774231403,
+        "p95": 116.18884132599446,
+        "max": 158.6405186559641
+      }
+    }
+  },
+  "recommendation": "Evaluate narrow consumed-modal-stop rule using exact lastStopId+sequence, valid subsequent nextStopId+sequence, unambiguous nonterminal occurrence, bounded axis gap and no intervening different platform. Preserve speed/acceleration/braking/end-of-shape behavior. Do not suppress stops by distance alone. Not adopted by this research.",
+  "limitations": [
+    "Counts describe future holds in emitted profiles, not holds necessarily realized on screen; later revisions may replace them.",
+    "Raw GPS itself is typically about75m before GTFS platform, so this is not just a shape-distance numerical error. AT_STOP is source state, not independently verified physical boarding.",
+    "Published-curve and AVL arrival streams are independent; exact anchor matches can be received later by this recorder. This is retrospective descriptive attribution, not a causal forecast-accuracy benchmark.",
+    "Geometry is an accumulated pack and may reflect another timetable instance; only stable axis/stop positions and identity are used.",
+    "Night sample starts21:50Z after last intentional restart; no motion policy changed during selected night or morning window."
+  ],
+  "sourceEdits": "research script only; no runtime changes",
+  "morningCommonAnchors": {
+    "n": 260,
+    "opinion": {
+      "production": 186,
+      "candidate": 147,
+      "both": 141,
+      "productionOnly": 45,
+      "candidateOnly": 6
+    },
+    "smooth": {
+      "production": 125,
+      "candidate": 92,
+      "both": 77,
+      "productionOnly": 48,
+      "candidateOnly": 15
+    }
+  },
+  "fixture": {
+    "path": "docs/testing/fixtures/tracking-2026-09-06-double-stop-analysis.json.gz",
+    "bytes": 458042,
+    "sha256": "12d9becaa00c8397f155e754b566b9562b4eef56a8b2c86264874ccfacdf39d9",
+    "exactPolicyInputMatches": 101
+  }
+}

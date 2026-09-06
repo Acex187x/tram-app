@@ -1,0 +1,207 @@
+{
+  "note": "Exact captured raw/modal/leader/previous chain inputs; learned surfaces sampled separately in250m bins, retain only reconstruction<=2m for faithful comparison. One-emission intervention, not chained candidate history or native/client final error. Only duplicate served current-platform plan removal changes, exact ID+sequence, modal anchor within150m before platform, terminal and intervening platform excluded. All physical limits remain.",
+  "skippedInputs": 139,
+  "emissions": 513,
+  "all": {
+    "n": 381,
+    "raw": {
+      "mae": 54.41521739370089,
+      "bias": 17.47995887926507
+    },
+    "actualOpinion": {
+      "mae": 108.78177827769458,
+      "bias": -29.319855482898515
+    },
+    "actualSmooth": {
+      "mae": 120.73208886669025,
+      "bias": -39.87639864903059
+    },
+    "baseOpinion": {
+      "mae": 108.56094721918889,
+      "bias": -31.517336330459614
+    },
+    "baseSmooth": {
+      "mae": 120.67595156799803,
+      "bias": -41.54136608730066
+    },
+    "candidateOpinion": {
+      "mae": 102.73751781345918,
+      "bias": -23.870345632230077
+    },
+    "candidateSmooth": {
+      "mae": 115.23793957216675,
+      "bias": -33.93850614316883
+    },
+    "opinionReconstruction": {
+      "mae": 4.004758816950255,
+      "bias": -2.197480847561098
+    },
+    "smoothReconstruction": {
+      "mae": 3.792046620327597,
+      "bias": -1.664967438270073
+    }
+  },
+  "faithful": {
+    "n": 326,
+    "raw": {
+      "mae": 49.33356676993874,
+      "bias": 18.89652752453987
+    },
+    "actualOpinion": {
+      "mae": 96.93092221648018,
+      "bias": -37.369691009981246
+    },
+    "actualSmooth": {
+      "mae": 111.71933753334429,
+      "bias": -46.90007937765928
+    },
+    "baseOpinion": {
+      "mae": 96.94672408257601,
+      "bias": -37.4113894935767
+    },
+    "baseSmooth": {
+      "mae": 111.72499131029036,
+      "bias": -46.9208527034209
+    },
+    "candidateOpinion": {
+      "mae": 91.8538131207908,
+      "bias": -30.187261193011018
+    },
+    "candidateSmooth": {
+      "mae": 106.77925716400584,
+      "bias": -39.44503552553364
+    },
+    "opinionReconstruction": {
+      "mae": 0.05432710457520488,
+      "bias": -0.0416984835954482
+    },
+    "smoothReconstruction": {
+      "mae": 0.06960936346216773,
+      "bias": -0.020773325761603387
+    }
+  },
+  "onTrack": {
+    "n": 153,
+    "raw": {
+      "mae": 37.78989372549018,
+      "bias": 25.832610457516346
+    },
+    "actualOpinion": {
+      "mae": 70.0007027209015,
+      "bias": -20.364347961714277
+    },
+    "actualSmooth": {
+      "mae": 83.049163931696,
+      "bias": -15.239052788514195
+    },
+    "baseOpinion": {
+      "mae": 70.04028634642414,
+      "bias": -20.405643508543093
+    },
+    "baseSmooth": {
+      "mae": 83.0521130805713,
+      "bias": -15.241441445490036
+    },
+    "candidateOpinion": {
+      "mae": 65.90204650847232,
+      "bias": -11.726378491228944
+    },
+    "candidateSmooth": {
+      "mae": 79.30539772450251,
+      "bias": -6.103830218163155
+    },
+    "opinionReconstruction": {
+      "mae": 0.04962432908896249,
+      "bias": -0.04129554682881343
+    },
+    "smoothReconstruction": {
+      "mae": 0.05465496879006881,
+      "bias": -0.0023886569758414067
+    }
+  },
+  "atStop": {
+    "n": 173,
+    "raw": {
+      "mae": 59.54271113872851,
+      "bias": 12.7623038901734
+    },
+    "actualOpinion": {
+      "mae": 120.74782153915943,
+      "bias": -52.40909844573181
+    },
+    "actualSmooth": {
+      "mae": 137.0750401983858,
+      "bias": -74.90087167904194
+    },
+    "baseOpinion": {
+      "mae": 120.7425909821784,
+      "bias": -52.45115328380872
+    },
+    "baseSmooth": {
+      "mae": 137.08308592963718,
+      "bias": -74.93790427835394
+    },
+    "candidateOpinion": {
+      "mae": 114.80537550047123,
+      "bias": -46.51393780210154
+    },
+    "candidateSmooth": {
+      "mae": 131.07694788217918,
+      "bias": -68.93176623089597
+    },
+    "opinionReconstruction": {
+      "mae": 0.05848620659482964,
+      "bias": -0.04205483807692288
+    },
+    "smoothReconstruction": {
+      "mae": 0.08283492638026678,
+      "bias": -0.03703259931201716
+    }
+  },
+  "gates": {
+    "baselineMeta": {
+      "opinion": {
+        "curveViolations": 0,
+        "collisionViolations": 0,
+        "midSegmentStops": 0,
+        "phantomDips": 2,
+        "infeasibleSkips": 5
+      },
+      "smooth": {
+        "curveViolations": 0,
+        "collisionViolations": 0,
+        "midSegmentStops": 0,
+        "phantomDips": 10,
+        "infeasibleSkips": 10
+      }
+    },
+    "candidateMeta": {
+      "opinion": {
+        "curveViolations": 0,
+        "collisionViolations": 0,
+        "midSegmentStops": 0,
+        "phantomDips": 2,
+        "infeasibleSkips": 3
+      },
+      "smooth": {
+        "curveViolations": 0,
+        "collisionViolations": 0,
+        "midSegmentStops": 0,
+        "phantomDips": 9,
+        "infeasibleSkips": 4
+      }
+    }
+  },
+  "largeChanges": {
+    "at_stop": {
+      "newSmoothOvershoot30m": 0,
+      "absErrorRegressions30m": 0,
+      "absErrorImprovements30m": 8
+    },
+    "on_track": {
+      "newSmoothOvershoot30m": 4,
+      "absErrorRegressions30m": 5,
+      "absErrorImprovements30m": 7
+    }
+  }
+}

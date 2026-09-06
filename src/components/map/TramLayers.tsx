@@ -57,6 +57,7 @@ import {
   SymbolLayer,
 } from '@rnmapbox/maps';
 import { Asset } from 'expo-asset';
+import { usePathname } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import {
   useCallback,
@@ -260,9 +261,7 @@ function faceBadgeStyle(pack: IconPackId, dataDrivenOffsets: boolean): BadgeSymb
   return {
     iconImage: faceIcon(pack),
     iconAnchor: 'bottom',
-    iconOffset: dataDrivenOffsets
-      ? (['get', 'off'] as unknown as number[])
-      : [0, -FACE_GAP_PX],
+    iconOffset: dataDrivenOffsets ? (['get', 'off'] as unknown as number[]) : [0, -FACE_GAP_PX],
     iconSize: [
       'interpolate',
       ['linear'],
@@ -315,9 +314,7 @@ function faceBadgeStyle(pack: IconPackId, dataDrivenOffsets: boolean): BadgeSymb
  * layer and are skipped.
  */
 function useMapIcons(): Record<string, { url: string; scale: number }> | null {
-  const [icons, setIcons] = useState<Record<string, { url: string; scale: number }> | null>(
-    null,
-  );
+  const [icons, setIcons] = useState<Record<string, { url: string; scale: number }> | null>(null);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -326,11 +323,13 @@ function useMapIcons(): Record<string, { url: string; scale: number }> | null {
           .filter(([key]) => !key.startsWith('cap-'))
           .map(([key, moduleId]): [string, number, number] => [key, moduleId, MAP_ICON_SCALE]),
         ...ICON_PACK_IDS.flatMap((packId) =>
-          Object.entries(ICON_PACKS[packId].sprites).map(([modelId, moduleId]): [
-            string,
-            number,
-            number,
-          ] => [`face-${packId}-${modelId}`, moduleId, FACE_SPRITE_SCALE]),
+          Object.entries(ICON_PACKS[packId].sprites).map(
+            ([modelId, moduleId]): [string, number, number] => [
+              `face-${packId}-${modelId}`,
+              moduleId,
+              FACE_SPRITE_SCALE,
+            ],
+          ),
         ),
       ].filter(([, moduleId]) => !!moduleId);
       const pairs = await Promise.all(
@@ -366,6 +365,7 @@ export function TramLayers({
   followGestureRef,
   modelUris,
 }: TramLayersProps) {
+  const coveredByModel = usePathname().startsWith('/model/');
   const iconImages = useMapIcons();
   // Selected icon pack: a SETTING (changes rarely, from the settings sheet).
   // Subscribing via React is deliberate — one re-render per change rebuilds
@@ -413,6 +413,9 @@ export function TramLayers({
 
   // Per-frame push: engine states → GeoJSON → direct native update. Refs only.
   useEffect(() => {
+    // The opaque model route needs the GPU; keep live data/recordings running,
+    // but do not build or send hidden native map frames or follow-camera moves.
+    if (coveredByModel) return;
     const rt = getRuntime();
     const getGeometry = (key: string) => rt.fleet.getGeometry(key);
 
@@ -486,7 +489,7 @@ export function TramLayers({
                 selection.followTramKey,
                 positionMode,
               )
-            : rt.fleet.getStates(nowMs, positionMode);
+            : rt.fleet.getStates(nowMs, positionMode, true);
         const frame = buildFrame(states, viewport, {
           selectedKey: selection.selectedTramKey,
           // The follow target gets selected:1 too — the declutter solve pins
@@ -617,7 +620,7 @@ export function TramLayers({
         center: leadTarget(anchor, bearing, state.simSpeedKmh),
         zoom: orientation?.zoom ?? FOLLOW_ZOOM,
         pitch: orientation?.pitch ?? FOLLOW_PITCH,
-        heading: orientation?.heading ?? (((bearing % 360) + 360) % 360),
+        heading: orientation?.heading ?? ((bearing % 360) + 360) % 360,
       };
       if (resuming) {
         // Return to follow: gently ease the center back onto the tram under the
@@ -668,7 +671,7 @@ export function TramLayers({
       rt.setViewportProvider(null);
       unsubscribe();
     };
-  }, [cameraRef, viewportRef, followGestureRef]);
+  }, [cameraRef, viewportRef, followGestureRef, coveredByModel]);
 
   // Tap ANY tram feature (badge/dot or any 3D body section): light haptic, then
   // present the tram card. `openTram` is ONE store write that selects (gold

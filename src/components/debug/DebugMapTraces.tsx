@@ -4,13 +4,12 @@
 //
 // Three positions, always visible together:
 //   FIX    magenta — the latest raw AVL coordinate received from the feed;
-//   FIXED  lime    — the server's raw model OPINION curve («более точное
-//                    положение») evaluated now;
-//   SMOOTH cyan    — the server's continuity curve evaluated now.
+//   FIXED  lime    — the fixed-mode marker, including its client correction;
+//   SMOOTH cyan    — the smooth-mode marker, including correction + guard.
 //
 // Both curves are evaluated at the SAME server-corrected instant, so the white
-// dashed connector between them is exactly `deviationM` — the number the tram
-// sheet and the debug overlay report, drawn to scale on the map.
+// dashed connector compares actual mode positions. This differs from raw
+// server-curve deviationM whenever client correction/continuity is active.
 //
 // Histories are sampled at 10 Hz and retained for 20 seconds. They are pushed
 // through ShapeSource.updateShape, never a declarative shape prop, so enabling
@@ -18,6 +17,7 @@
 // diagnose.
 
 import { CircleLayer, LineLayer, ShapeSource, SymbolLayer } from '@rnmapbox/maps';
+import { usePathname } from 'expo-router';
 import { useEffect, useRef } from 'react';
 
 import { getRuntime } from '@/hooks/tramData';
@@ -49,6 +49,7 @@ interface TracePoint {
 
 interface TraceHistory {
   key: string | null;
+  tripId: string | null;
   fixAtMs: number;
   fix: TracePoint[];
   fixed: TracePoint[];
@@ -61,7 +62,7 @@ function appendTrace(trace: TracePoint[], coordinate: LngLat, nowMs: number): vo
     trace.push({ atMs: nowMs, coordinate });
   }
   const cutoff = nowMs - TRACE_MS;
-  while (trace.length > 0 && trace[0].atMs < cutoff) trace.shift();
+  while (trace.length > 201 || (trace.length > 0 && trace[0].atMs < cutoff)) trace.shift();
 }
 
 function pointFeature(
@@ -122,7 +123,7 @@ function makeFrame(
       'debug-fixed',
       positions.fixed,
       'fixed',
-      deltaM == null ? 'FIXED' : `FIXED · ${deltaM.toFixed(1)}m`,
+      deltaM == null ? 'FIXED' : `FIXED · Δ${deltaM.toFixed(1)}м`,
       activeMode === 'fixed',
     ),
     pointFeature('debug-smooth', positions.smooth, 'smooth', 'SMOOTH', activeMode === 'smooth'),
@@ -131,6 +132,7 @@ function makeFrame(
 }
 
 export function DebugMapTraces() {
+  const mapVisible = !usePathname().startsWith('/model/');
   const followKey = useSelectionStore((s) => s.followTramKey);
   const selectedKey = useSelectionStore((s) => s.selectedTramKey);
   const positionMode = useSettingsStore((s) => s.positionMode);
@@ -138,11 +140,12 @@ export function DebugMapTraces() {
   const sourceRef = useRef<ShapeSource>(null);
   // ДАННЫЕ С БД для карты: сырые ML-таргеты + опорный фикс + архивные фиксы
   // движка (3 с поллинг, только пока смонтированы дебаг-трассы).
-  const { data: serverData } = useServerDebug(key);
+  const { data: serverData } = useServerDebug(mapVisible ? key : null);
   const serverRef = useRef<ServerVehicleDebug | null>(null);
   serverRef.current = serverData;
   const historyRef = useRef<TraceHistory>({
     key: null,
+    tripId: null,
     fixAtMs: 0,
     fix: [],
     fixed: [],
@@ -150,9 +153,12 @@ export function DebugMapTraces() {
   });
 
   useEffect(() => {
+    // A full-screen GL viewer owns the visible surface; retain source state,
+    // but never push native map frames behind it.
+    if (!mapVisible) return;
     const runtime = getRuntime();
     if (!key) {
-      historyRef.current = { key: null, fixAtMs: 0, fix: [], fixed: [], smooth: [] };
+      historyRef.current = { key: null, tripId: null, fixAtMs: 0, fix: [], fixed: [], smooth: [] };
       void sourceRef.current?.updateShape({ type: 'FeatureCollection', features: [] });
       return;
     }
@@ -162,16 +168,17 @@ export function DebugMapTraces() {
       if (nowMs - lastSampleMs < SAMPLE_MS) return;
       lastSampleMs = nowMs;
       // Read the SMOOTH state explicitly (not whichever mode is selected), so
-      // both curves are always sampled and the comparison never depends on the
-      // user's current setting: simDistM is then the smooth curve AS DRAWN
-      // (fix-forward included) and fixedDistM its raw opinion partner at the
-      // same instant. The gap between the smooth trace and the fix trace is
-      // therefore the shim doing its job, not an error.
+      // both actual mode positions can be compared at the same instant.
+      // These read-only getters cannot advance the live presentation guard.
       const state = runtime.fleet.getState(key, nowMs, 'smooth');
-      if (!state) return;
+      if (!state) {
+        void sourceRef.current?.updateShape({ type: 'FeatureCollection', features: [] });
+        return;
+      }
       const history = historyRef.current;
-      if (history.key !== key) {
+      if (history.key !== key || history.tripId !== state.snapshot.tripId) {
         history.key = key;
+        history.tripId = state.snapshot.tripId;
         history.fixAtMs = 0;
         history.fix = [];
         history.fixed = [];
@@ -180,10 +187,8 @@ export function DebugMapTraces() {
 
       const geometry = runtime.fleet.getGeometry(key);
       const smooth: LngLat = state.position;
-      const fixed: LngLat =
-        geometry && state.fixedDistM != null
-          ? pointAt(geometry.coordinates, geometry.cumDistM, state.fixedDistM)
-          : state.observedPosition;
+      const fixedState = runtime.fleet.getState(key, nowMs, 'fixed');
+      const fixed: LngLat = fixedState?.position ?? state.observedPosition;
       const fix: LngLat = [state.snapshot.coordinates[0], state.snapshot.coordinates[1]];
 
       appendTrace(history.smooth, smooth, nowMs);
@@ -191,20 +196,29 @@ export function DebugMapTraces() {
       if (history.fixAtMs !== state.snapshot.observedAtMs) {
         history.fixAtMs = state.snapshot.observedAtMs;
         appendTrace(history.fix, fix, nowMs);
+      } else {
+        // No new observation must not leave its trail on the map forever.
+        while (history.fix.length && history.fix[0].atMs < nowMs - TRACE_MS) history.fix.shift();
       }
 
       const frame = makeFrame(
         history,
         { fix, fixed, smooth },
-        Math.max(0, nowMs - state.snapshot.observedAtMs) / 1_000,
-        state.deviationM,
+        Math.max(0, runtime.trajectories.nowMs(nowMs) - state.snapshot.observedAtMs) / 1_000,
+        fixedState ? state.simDistM - fixedState.simDistM : null,
         positionMode,
       );
+      // A missing model is not a FIXED opinion at the raw fix. Only the raw
+      // observation remains until a matching usable trajectory arrives.
+      if (state.fixedDistM == null || !geometry) {
+        frame.features = frame.features.filter((f) => f.properties?.role === 'fix');
+      }
       // ML-слой (данные с БД): таргет-точки прогноза, опорный фикс и архивные
       // фиксы движка — визуальная оценка «насколько модель адекватна и
       // обновляется ли профиль». Рисуем только для ТЕКУЩЕГО рейса — таргеты
       // чужого trip лежали бы на чужой оси.
       const sd = serverRef.current;
+      const serverNowMs = runtime.trajectories.nowMs(nowMs);
       if (sd?.found && geometry && sd.tripId === state.snapshot.tripId) {
         const at = (sVal: number): LngLat =>
           pointAt(
@@ -212,7 +226,7 @@ export function DebugMapTraces() {
             geometry.cumDistM,
             Math.max(0, Math.min(geometry.totalM, sVal)),
           );
-        const target = sd.target ?? [];
+        const target = (sd.target ?? []).filter((p) => Number.isFinite(p.t) && Number.isFinite(p.s)).slice(0, 24);
         target.forEach((pt, i) => {
           frame.features.push({
             type: 'Feature',
@@ -220,10 +234,10 @@ export function DebugMapTraces() {
             geometry: { type: 'Point', coordinates: at(pt.s) },
             properties: {
               role: 'mltarget',
-              past: pt.t < nowMs ? 1 : 0,
+              past: pt.t < serverNowMs ? 1 : 0,
               label:
                 i === target.length - 1
-                  ? `ML +${Math.max(0, Math.round((pt.t - nowMs) / 1000))}с`
+                  ? `ML +${Math.max(0, Math.round((pt.t - serverNowMs) / 1000))}с`
                   : '',
             },
           });
@@ -252,7 +266,7 @@ export function DebugMapTraces() {
               role: 'mlanchor',
               past: 0,
               label:
-                `ОПОРА ${Math.round((nowMs - sd.anchorFix.obsAtMs) / 1000)}с` +
+                `ОПОРА ${Math.round((serverNowMs - sd.anchorFix.obsAtMs) / 1000)}с` +
                 (sameObservation && deltaM > 15 ? `·Δ${Math.round(deltaM)}м` : ''),
             },
           });
@@ -273,14 +287,14 @@ export function DebugMapTraces() {
 
     push(Date.now());
     return runtime.subscribeFrame(push);
-  }, [key, positionMode]);
+  }, [key, positionMode, mapVisible]);
 
   return (
     <ShapeSource id="debug-traces" ref={sourceRef}>
       <LineLayer
         id="debug-trace-lines"
         slot="top"
-        filter={['!=', ['get', 'role'], 'delta']}
+        filter={['all', ['==', ['geometry-type'], 'LineString'], ['in', ['get', 'role'], ['literal', ['fix', 'fixed', 'smooth']]]] as never}
         style={{
           lineColor: [
             'match',
