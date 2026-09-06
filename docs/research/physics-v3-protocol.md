@@ -53,6 +53,48 @@ frames from the headline metric. Compare accuracy, prolonged holds, actual
 platform crossings, both acceleration signs, jerk, hidden time and native map
 cadence on identical inputs; a source `at_stop` label alone is not stop truth.
 
+## Causal trip-pace feature contract version 4 (2026-09-06)
+
+The isolated candidate may promote an independently validated version-4 ML
+artifact with twenty numerical columns. The first thirteen columns retain the
+version-3 meanings and ordering; append, in order: `lastLegPace`, `motionTrust`,
+`motionAgeS`, `tripPaceRatio`, `currentPlatformOffsetM`, `platformKnown`, and
+`stationaryEvidenceS`. Artifact version, inference version, training builder and
+runtime builder must agree. Mismatch fails closed to the existing bounded outage
+policy, never a silent padding/truncation of a version-3 model.
+
+Motion history advances only in source receipt order, per vehicle and trip, with
+no target-pair information. A changed trip resets it; non-new observation epochs
+do not advance it or become training inputs. A usable pace pair is on the same
+next-stop leg, both source states `on_track`, 5–120 seconds apart, at least 15 m
+forward along the raw source axis, and speed in [0.5,22] m/s. Keep an exponentially
+weighted pace and the ratio to the learned pace at the pair's midpoint and Prague
+observation time. History weight has a 180-second half-life; ratio samples are
+clipped to [0.4,2]. At each evaluation horizon decay weight again, suppress pace
+below weight 0.25, clamp trust to 5 and age to 300 seconds, shrink the pace ratio
+toward 1 with a unit prior, and constrain its output to [0.5,1.6].
+
+The archived source lacks exact last-platform identity. For training/runtime
+parity, the platform feature uses only the unique occurrence of `nextStopId` in
+ordered geometry and its preceding platform. Its signed raw-axis offset is
+clipped to ±200 m. `platformKnown = 1` means this geometric inference is available,
+not that GPS verified a platform or doors are open. Expose its inferred provenance
+separately from the exact-ID projection used for approach admission. Do not quietly
+change this feature's definition when richer runtime metadata is present.
+
+Stationary evidence accumulates only across same-leg, consecutive raw `at_stop`
+observations 5–120 seconds apart with ≤8 m raw-axis change and ≤12 m GPS movement;
+a contrary pair clears it. Cap elapsed evidence at 120 seconds. It is evidence of
+little observed movement, not proof of boarding. Unknown feature defaults are
+`[0,0,300,1,0,0,0]`. Histories must be bounded and pruned when vehicles depart.
+
+Python training and TypeScript runtime require common golden sequences covering
+receipt reordering, trip changes, midnight/weekend contexts, missing/ambiguous
+platforms, stop/traffic motion and expiry. Promotion additionally requires the
+chronological matched holdout (including night) and a paired served-trajectory
+replay; raw-anchor and GPS-projected position errors remain separately labeled.
+A version-4 model does not remove platform service or physical-envelope gates.
+
 ## Continuous producer and approach-phase amendment (2026-09-06)
 
 A version-2 vehicle may advertise `motionPolicy: "continuous-v1"`. Absence or an
