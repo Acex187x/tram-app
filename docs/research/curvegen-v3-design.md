@@ -203,6 +203,14 @@ From the anchor forward, the drive owns an explicit stop plan (descends from
 - **Terminal**: geometry end is a permanent hold (envelope → 0, then stand) —
   `tramSim` terminal latch semantics.
 
+The 2026-09-06 [served-platform identity amendment](physics-v3-protocol.md#served-platform-identity-amendment-2026-09-06)
+adds one bounded exception: an exact current platform occurrence already
+accounted for by the anchor modal hold is consumed, even when its station-zone
+fix is up to 150 m before the platform. Ordered current/next identities and
+sequences, no intervening platform, and a nonterminal occurrence are required.
+Its ML crossing uses the existing skipped-stop trim blinding window. The
+initial dwell and every later distinct occurrence retain their normal rules.
+
 ### 4.3 Guidance — leg-pace ladder + bounded trim
 
 Between consecutive plan events (release → stop i → stop i+1 → … → horizon):

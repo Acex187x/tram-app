@@ -94,6 +94,42 @@ while the v2 training/scoring implementation used the later ingest clock.
 Public AVL timestamps are still a proxy for vehicle observation time; rider
 GPS remains the higher-quality calibration source when available.
 
+## Served-platform identity amendment (2026-09-06)
+
+An `at_stop` observation can identify the current served platform while its
+reported axis and GPS remain inside the approach station zone. The initial
+modal hold already accounts for that stop. A distance-only future stop plan
+must not schedule another dwell for the **same occurrence** after release.
+This is a narrow exception to §4.2's serve-every-platform-ahead rule:
+
+- The captured anchor is `at_stop` and supplies a modal hold plus non-null
+  last/next stop IDs and finite, ordered last/next stop sequences.
+- Exactly one geometry occurrence matches each ID/sequence pair, the next
+  occurrence is farther along the axis, and the current occurrence is neither
+  terminal nor the final geometry stop.
+- The current platform is strictly ahead of the modal anchor by at most 150 m,
+  and no different platform occurs between them. Missing or contradictory
+  evidence retains the existing plan. Repeated IDs never suppress later laps;
+  only the exact identified sequence may be consumed. The initial rollout
+  conservatively retains the ordinary plan when the current stop ID repeats
+  anywhere in the geometry.
+
+The generator omits that one occurrence from the future stop plan while
+preserving the initial modal hold/release and its position. If the ML crosses
+that consumed platform, its crossing enters the existing request-stop trim
+blinding list, with the same bounded timing window. This prevents residual
+ML dwell smear from manufacturing a speed dip for a stop already accounted
+for. It changes no cruise pace, speed/acceleration/jerk limits, curve envelope,
+leader clearance, route-end clamp, subsequent stop, client controller or wire.
+The evidence is scoped to each captured anchor, not a sticky served-stop flag;
+new observations and trip changes rebuild the decision.
+
+Validation includes exact-input replay with unchanged learned surfaces and
+previous chains, truthful future-observation scoring, duplicate hold counts,
+physical gates and speed dips. Exclude ambiguous identities, reversed/missing
+sequences, intervening platforms, terminal cases and offsets beyond the bound;
+check recovery to the ordinary plan on the next moving/different anchor.
+
 ## Geometry coherence amendment — contradictory route axes (2026-09-05)
 
 A reported shape distance is usable only on a compatible route geometry. A
