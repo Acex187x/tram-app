@@ -53,6 +53,29 @@ frames from the headline metric. Compare accuracy, prolonged holds, actual
 platform crossings, both acceleration signs, jerk, hidden time and native map
 cadence on identical inputs; a source `at_stop` label alone is not stop truth.
 
+## Observation freshness is independent of publication (2026-09-06)
+
+A new bundle, heartbeat or receipt must never renew the age of an AVL
+observation. The client exposes observation age against its measured server
+clock separately from transport health and curve horizon. Before a clock
+sample is available, or for an invalid timestamp or one more than five seconds
+in the future, freshness is unknown; smaller clock skew clamps age to zero.
+
+For presentation, age through 60 seconds is fresh, 60–120 seconds is aging,
+and over 120 seconds is stale. These are uncertainty bands, not assertions
+that a tram stopped or the connection failed: observed same-trip fix gaps have
+median 48 seconds and p95 102 seconds in the audited hour. Opacity decreases
+linearly from 1 to 0.55 over the aging band and remains 0.55 while stale or
+unknown. Multiply this independent factor by transition opacity. It must not
+advance, acknowledge, restart or bypass a hidden transition, alter motion, or
+make a vehicle disappear. Preserve the existing horizon indicator separately.
+
+Repeated fresh observations at the same coordinate are not detected by age;
+stationarity and origin layovers require their own causal evidence. This
+amendment does not authorize an additional predictor, an expiry hold, or a
+source switch for a common upstream outage. Any bound on server renewal must
+be specified and validated separately.
+
 ## Learned modal-release trust parity (2026-09-06)
 
 The same 14-day effective-weight threshold applies to `releaseStats` modal
