@@ -4,6 +4,55 @@ Status: FROZEN 2026-08-16 for the final-physics program (owner directive).
 Both workstreams build against THIS file; change it only by editing this file
 first, in its own commit.
 
+## Visible continuity amendment — every displayed correction counts (2026-09-06)
+
+The build31 field review and a replay of its previously accepted capture expose
+a validation error: server `discontinuity` frames were excluded from motion
+statistics while the client used that flag to bypass its presentation guard.
+The same five-minute capture contains 208 over-budget visible jumps, including
+a 744 m world displacement. A discontinuity is evidence that a prediction needs
+correction; it is not permission to teleport a fully visible smooth marker.
+
+This amendment supersedes earlier client-stateless/deterministic-pixel claims
+and automatic smooth-reset handling for same-axis discontinuities. Prediction,
+platform selection, traffic constraints and trip pace remain server-owned.
+The client owns one bounded presentation state: last displayed position,
+velocity and acceleration. Ordinary same-axis revisions, restored curves and
+forward-fix corrections retain that state, track the supplied target and
+velocity with acceleration, braking and jerk bounds, and look ahead along the
+received curve to brake into its stationary endpoints. It must not add a second
+route predictor, move platform holds, or fabricate ongoing travel after source
+expiry. Bounds and any permitted correction lag require fixed-input validation.
+
+An unexpected stop behind a moving marker cannot satisfy instantaneous truth,
+zero reversal and finite braking simultaneously. A bounded braking transition
+may temporarily remain beyond a revised target; diagnostics expose its error
+and reason. A large incompatible correction may instead use a visible fade-out,
+rebase only while hidden, and fade-in. Ordinary revisions must not repeatedly
+hide vehicles as a substitute for fixing the prediction. Report transition
+frequency, duration, correction distance and hidden vehicle-time alongside
+position error, stationary time and acceleration/braking/jerk distributions.
+
+An equivalent geometry object must preserve display state. A compatible axis
+replacement may reproject the last rendered world position only within 10 m
+and an unambiguous matching stop corridor. Incompatible geometry/trip changes
+must explicitly transition or start a new identity; they cannot silently reset
+an existing fully visible marker. Long suspension is a lifecycle event, not an
+ordinary frame integration step; returning to a visible map follows the same
+explicit transition rule. User-requested mode changes remain separately labeled.
+
+Only the actual frame producer advances presentation state. Read-only getters,
+camera lookahead and diagnostics stay pure; histories and transitions are
+bounded and cleaned up with vehicle departure. Map opacity is updated through
+the existing imperative sources, without per-frame React rendering.
+
+Validation includes **all displayed frames**, including resets, source recovery,
+axis/trip changes and discontinuities. Report raw world/axis jumps and event
+reasons even when an intentional transition hides the rebase. Never remove bad
+frames from the headline metric. Compare accuracy, prolonged holds, actual
+platform crossings, both acceleration signs, jerk, hidden time and native map
+cadence on identical inputs; a source `at_stop` label alone is not stop truth.
+
 ## Compatible amendment — clock samples and knot velocities (2026-09-05)
 
 This additive amendment retains `protocolVersion: 2`, both track names, the
