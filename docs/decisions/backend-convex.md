@@ -174,4 +174,12 @@ imported directly from `src/lib` — **no forks**:
 3. Calibration folding + bundle + engine-v2 prior seeding.
 4. Geometry serving (`geometries` + precomputed profiles); client shape cache
    points at Convex with Golemio fallback.
+   — SHIPPED 2026-08-08, stricter than planned: `GET /geometry/:tripId`
+   (convex/geometry.ts + http.ts) with a 24 h server cache and stale-if-error,
+   and NO client-side Golemio fallback — the transport switch
+   (`USE_BACKEND_PROXY`, src/lib/golemio/client.ts) removes the key and any
+   direct Golemio path from the app entirely. Precomputed profiles still open.
 5. `feedSource` default `auto` (remote with local fallback); key rotation.
+   — SUPERSEDED 2026-08-08: the runtime constructs `RemoteFeed`
+   unconditionally against the public backend (hooks/tramData.ts); the
+   `feedSource` setting is inert and device-side polling is a non-goal.

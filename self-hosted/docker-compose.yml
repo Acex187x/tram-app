@@ -1,0 +1,107 @@
+# Self-hosted Convex for the Tram Spotter backend (convex/, docs/decisions/backend-convex.md).
+#
+# Two containers, one SQLite volume:
+#   backend    the Convex deployment itself — 3210 (client/sync + CLI), 3211 (HTTP actions)
+#   dashboard  the admin UI — 6791, needs the admin key to do anything
+#
+# PUBLIC VIA TRAEFIK. The containers publish only loopback ports (for the CLI
+# on this host); the internet-facing path is the Dokploy Traefik edge, which
+# reaches the containers by name over the external `dokploy-network`:
+#
+#   https://tram-api.acex.sh    → tram-convex-backend:3210   (app sync + CLI)
+#   https://tram-site.acex.sh   → tram-convex-backend:3211   (HTTP actions)
+#   https://tram-admin.acex.sh  → tram-convex-dashboard:6791 (admin UI)
+#
+# Route files: /etc/dokploy/traefik/dynamic/tram-app.yml (not in this repo —
+# it lives with the server's edge config). TLS terminates at Traefik, so the
+# origins in .env are https and DO_NOT_REQUIRE_SSL is gone.
+#
+# Usage — see ./README.md. Short version:
+#   cp .env.example .env && edit    # instance secret, origins
+#   docker compose -p tram-convex up -d
+#   docker compose -p tram-convex exec backend ./generate_admin_key.sh
+#
+# Always pass `-p tram-convex`: the data lives in the named volume
+# `tram-convex_convex-data`, and the project name is what binds it to this stack
+# no matter which checkout the compose file is invoked from.
+
+services:
+  backend:
+    image: ghcr.io/get-convex/convex-backend:${CONVEX_REV:-latest}
+    container_name: tram-convex-backend
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "3" }
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    ports:
+      # loopback only: the CLI (npx convex deploy/run) and host-side debugging.
+      # Everything else comes in through Traefik on dokploy-network.
+      - '${BIND_ADDR:-127.0.0.1}:${PORT:-3210}:3210'
+      - '${BIND_ADDR:-127.0.0.1}:${SITE_PROXY_PORT:-3211}:3211'
+    volumes:
+      - convex-data:/convex/data
+    networks:
+      - default
+      - dokploy-network
+    environment:
+      # Identity. INSTANCE_SECRET is what admin keys are derived from — changing
+      # it invalidates every issued key.
+      - INSTANCE_NAME=${INSTANCE_NAME:-tram-spotter}
+      - INSTANCE_SECRET=${INSTANCE_SECRET:?set INSTANCE_SECRET in .env}
+      # The URLs clients are told to use. These MUST match the URL the app
+      # actually dials (EXPO_PUBLIC_CONVEX_URL) or the sync protocol rejects it.
+      - CONVEX_CLOUD_ORIGIN=${CONVEX_CLOUD_ORIGIN:-http://127.0.0.1:3210}
+      - CONVEX_SITE_ORIGIN=${CONVEX_SITE_ORIGIN:-http://127.0.0.1:3211}
+      # No phone-home from a self-hosted deployment.
+      - DISABLE_BEACON=true
+      - RUST_LOG=${RUST_LOG:-info}
+      - DISABLE_METRICS_ENDPOINT=${DISABLE_METRICS_ENDPOINT:-true}
+      # The poller writes on a 2 s cadence forever; 2 days of document history
+      # is plenty and keeps the SQLite file from growing without bound.
+      - DOCUMENT_RETENTION_DELAY=${DOCUMENT_RETENTION_DELAY:-172800}
+      # poller.pollLoop runs ~8 min per scheduled action (LOOP_BUDGET_MS,
+      # design §2). Self-hosted V8_ACTION_USER_TIMEOUT_SECS defaults to 1800,
+      # so the loop fits with room to spare — do not lower it below ~600.
+      - V8_ACTION_USER_TIMEOUT_SECS=${V8_ACTION_USER_TIMEOUT_SECS:-1800}
+      - APPLICATION_MAX_CONCURRENT_MUTATIONS=${APPLICATION_MAX_CONCURRENT_MUTATIONS:-16}
+      - APPLICATION_MAX_CONCURRENT_QUERIES=${APPLICATION_MAX_CONCURRENT_QUERIES:-16}
+      - APPLICATION_MAX_CONCURRENT_V8_ACTIONS=${APPLICATION_MAX_CONCURRENT_V8_ACTIONS:-16}
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3210/version']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  dashboard:
+    image: ghcr.io/get-convex/convex-dashboard:${CONVEX_REV:-latest}
+    container_name: tram-convex-dashboard
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "3" }
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    ports:
+      - '${BIND_ADDR:-127.0.0.1}:${DASHBOARD_PORT:-6791}:6791'
+    networks:
+      - default
+      - dokploy-network
+    environment:
+      # The dashboard runs in YOUR browser, so this must be an origin the
+      # browser can reach — not a container-internal name.
+      - NEXT_PUBLIC_DEPLOYMENT_URL=${CONVEX_CLOUD_ORIGIN:-http://127.0.0.1:3210}
+    depends_on:
+      backend:
+        condition: service_healthy
+
+networks:
+  # The Dokploy Traefik edge network — pre-existing on the server, owned by
+  # Dokploy, never created or removed by this stack.
+  dokploy-network:
+    external: true
+
+volumes:
+  convex-data:
