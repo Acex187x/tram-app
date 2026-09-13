@@ -12,6 +12,7 @@ import type * as calibration_bundle from "../calibration/bundle.js";
 import type * as calibration_fold from "../calibration/fold.js";
 import type * as calibration_keys from "../calibration/keys.js";
 import type * as calibration_models from "../calibration/models.js";
+import type * as clock from "../clock.js";
 import type * as crons from "../crons.js";
 import type * as geometry from "../geometry.js";
 import type * as geometryPack from "../geometryPack.js";
@@ -32,6 +33,7 @@ declare const fullApi: ApiFromModules<{
   "calibration/fold": typeof calibration_fold;
   "calibration/keys": typeof calibration_keys;
   "calibration/models": typeof calibration_models;
+  clock: typeof clock;
   crons: typeof crons;
   geometry: typeof geometry;
   geometryPack: typeof geometryPack;
