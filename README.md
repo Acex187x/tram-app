@@ -49,6 +49,18 @@ node scripts/generate-tram-models.mjs         # regenerate 3D models
 node scripts/render-model.mjs assets/models/15t-*.glb out.png  # preview a model
 ```
 
+## Backend
+
+One server, two compose projects, both from this checkout on the host:
+
+| project | dir | what |
+|---|---|---|
+| `tram-convex` | `self-hosted/` | Convex backend + dashboard — Golemio poller, fix diff stream, trajectory tables (`convex/`) |
+| `tram-lab` | `lab/` | prediction engine + ML service + Grafana — publishes drive-v3 curves into Convex |
+
+Deploy = merge to `main`, `git pull --ff-only` in the host checkout, `npx convex deploy`
+for `convex/` changes, `docker restart tram-lab` / `tram-lab-ml` for `lab/` changes.
+
 ## Release build
 
 ```bash

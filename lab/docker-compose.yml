@@ -1,18 +1,23 @@
-# Tram Lab — research infrastructure (docs/research/prediction-architecture.md
-# phase 0): 24/7 fix archive + parallel shadow predictors + online learning +
-# accuracy telemetry, plus Grafana over the same SQLite file.
+# Tram Spotter prediction engine (the "lab" name is historical — this IS the
+# production backend half that turns Convex fixes into published trajectories):
 #
-# Run from this directory:   docker compose -p tram-lab up -d
-# The repo is mounted read-only; lab node_modules live in a named volume and
-# are installed on first boot (npm ci against the committed lockfile).
+#   lab      lab/src/main.ts — ingests the Convex fix stream, learns pace/dwell
+#            surfaces online, asks the ML service for horizons, builds drive-v3
+#            curves and PUBLISHES them into Convex (trajectories:publish) +
+#            uploads the cold-start geometry pack. Archives fixes in SQLite.
+#   ml       lab/ml/service.py — LightGBM/MLP inference, retrained nightly
+#            (02:00 UTC) on the fix archive.
+#   grafana  "Tram Engine — Production Health" dashboard over the same SQLite.
+#
+# Run from this directory (the checkout is mounted read-only at /repo):
+#   docker compose -p tram-lab up -d
 #
 # Public routes (file /etc/dokploy/traefik/dynamic/tram-lab.yml):
-#   https://tram-lab.acex.sh          → live map + /api
+#   https://tram-lab.acex.sh          → /api/summary, /api/vehicle/:key/debug (devtools)
 #   https://tram-lab-grafana.acex.sh  → Grafana (login: admin / .env password)
 #
-# Teardown: docker compose -p tram-lab down   (+ remove the traefik file);
-# volumes tram-lab_lab-data / tram-lab_grafana-data hold the archive — keep
-# them unless you mean to delete the collected data.
+# Data: volume tram-lab_lab-data = /data/lab.db (fix archive, learned surfaces,
+# scores, rollups) + /data/models (trained artefacts). Keep it.
 
 services:
   lab:
@@ -27,16 +32,24 @@ services:
       CONVEX_URL: http://tram-convex-backend:3210
       SITE_URL: http://tram-convex-backend:3211
       ML_URL: http://tram-lab-ml:8092
-      # Production promotion (2026-08-21): which generator the published chain
-      # emits, and the shared secret that enables pushing it into Convex
-      # (trajectories:publish). Values live in lab/.env on the deployment.
+      # Which generator the published chain emits (1 = drive-v3, production
+      # since 2026-08-21) and the shared secret for trajectories:publish.
+      # Values live in lab/.env on the deployment.
       TRAJ_V3_PUBLISH: "${TRAJ_V3_PUBLISH:-0}"
       ENGINE_PUSH_TOKEN: "${ENGINE_PUSH_TOKEN:-}"
+      # Opt-in research flags (both must match the ML service):
+      #   ML_FEATURE_VERSION=4  — v4 motion features (needs ML retrain)
+      #   TRAJ_CONTINUOUS_V1=1  — continuous-v1 motion policy on the wire
+      ML_FEATURE_VERSION: "${ML_FEATURE_VERSION:-3}"
+      TRAJ_CONTINUOUS_V1: "${TRAJ_CONTINUOUS_V1:-0}"
     volumes:
       - ../:/repo:ro
       - lab-node-modules:/repo/lab/node_modules
       - lab-data:/data
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "3" }
     networks:
       - dokploy-network
     healthcheck:
@@ -45,29 +58,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 240s
-
-  watch:
-    # Живой симулятор-вотчер (bench/src/live.ts): ведёт НАСТОЯЩИЙ клиентский
-    # код на живых Convex-потоках 24/7, судит оба режима рендера детекторами
-    # полевых жалоб + контракт эмиссий, пишет аномалии в lab.db (Grafana) и
-    # сохраняет кольцевые окна для детерминированного реплея.
-    image: node:22-bookworm
-    container_name: tram-watch
-    working_dir: /repo
-    command: bash -lc "cd /repo/bench && npm ci --no-audit --no-fund && cd /repo && exec ./bench/node_modules/.bin/tsx bench/src/live.ts"
-    environment:
-      TSX_TSCONFIG_PATH: /repo/bench/tsconfig.json
-      LAB_DB: /data/lab.db
-      BENCH_OUT: /data/bench
-      CONVEX_URL: http://tram-convex-backend:3210
-      SITE_URL: http://tram-convex-backend:3211
-    volumes:
-      - ../:/repo:ro
-      - bench-node-modules:/repo/bench/node_modules
-      - lab-data:/data
-    restart: unless-stopped
-    networks:
-      - dokploy-network
 
   ml:
     image: python:3.12-slim
@@ -78,10 +68,14 @@ services:
       LAB_DB: /data/lab.db
       MODELS_DIR: /data/models
       ML_PORT: "8092"
+      ML_FEATURE_VERSION: "${ML_FEATURE_VERSION:-3}"
     volumes:
       - ../:/repo:ro
       - lab-data:/data
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "3" }
     networks:
       - dokploy-network
 
@@ -103,12 +97,14 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - lab-data:/data
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "3" }
     networks:
       - dokploy-network
 
 volumes:
   lab-node-modules:
-  bench-node-modules:
   lab-data:
   grafana-data:
 

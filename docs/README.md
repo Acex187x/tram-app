@@ -34,6 +34,14 @@ and HOW (with `src/…` references) for one subsystem.
 | [`decisions/process-and-tooling.md`](decisions/process-and-tooling.md) | Testing strategy, EAS build config, model-generation scripts, and the review/QA loop. |
 | [`decisions/ride-recording.md`](decisions/ride-recording.md) | Ride recording (schema v4): 25 Hz DeviceMotion batches, the GPS outlier filter, background-recording mechanics + researched options (Live Activity, CMSensorRecorder, why not audio). |
 
+## Backend (`convex/`, `lab/`, `self-hosted/`)
+
+| Doc | What it is |
+|---|---|
+| [`../self-hosted/README.md`](../self-hosted/README.md) | The self-hosted Convex deployment (compose project `tram-convex`): poller, diff stream, trajectory tables, admin key, Traefik routes. |
+| [`../lab/README.md`](../lab/README.md) | The prediction engine (compose project `tram-lab`: engine + ML + Grafana) that publishes curves into Convex — status note first, research-era findings log below it. |
+| [`HANDOFF-2026-08-24.md`](HANDOFF-2026-08-24.md) | As-built pipeline diagram, deploy traps, backlog at the ML promotion (historical). |
+
 ## Research (`research/`)
 
 Dated empirical notes and protocol amendments. Check each document’s date and

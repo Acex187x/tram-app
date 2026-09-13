@@ -1,5 +1,10 @@
 # Private tracking review build
 
+> **Retired 2026-09-13.** The candidate stack (`lab/isolated/`,
+> `scripts/build/ios-candidate.py`, the `tram-tracking-candidate` compose
+> project on 10.10.10.1) was torn down; its v4 models and artifacts are archived
+> in `/root/backups/tram-cleanup-20260913/`. Sources: git tag `pre-cleanup-2026-09-13`.
+
 The review candidate uses production vehicle identities and a separate private
 trajectory publisher, version-4 ML service and inspector. Review builds from
 36 prefer the direct candidate geometry pack, with bounded public fallback and

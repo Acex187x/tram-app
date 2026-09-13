@@ -1,45 +1,22 @@
-# Тест-бенч клиентской физики
+# bench — offline replay of the shipping client physics
 
-Телефон без телефона: харнесс собирает **настоящие** классы приложения
-(`src/lib/physics/*` — TrajectoryStore, TramFleet, весь путь adaptTram →
-renderTram → fixForward, jump-watch, наивный фолбек) и кормит их записанными
-Convex-потоками. Один источник правды: бенч не реализует физику, он её
-ИМПОРТИРУЕТ. Всё время — параметром (доктрина physics-v3), поэтому реплей
-детерминирован: одна запись = одни и те же пиксели при каждом прогоне.
+Tools that run the REAL client code (`src/lib/physics`) over captured wire
+streams, deterministically, on a virtual clock. No runtime service lives here
+any more (the 24/7 anomaly watcher was retired on 2026-09-13 together with its
+250 GB window archive); what remains is what the tests and the calibration
+runbook use:
 
-## Команды (из корня репо)
-
-```bash
-# записать живую сессию N минут → bench/sessions/<name>.jsonl
-TSX_TSCONFIG_PATH=bench/tsconfig.json bench/node_modules/.bin/tsx bench/src/record.ts 20 myname
-
-# прогнать сессию через клиентский код, отчёт по аномалиям
-TSX_TSCONFIG_PATH=bench/tsconfig.json bench/node_modules/.bin/tsx bench/src/replay.ts sessions/myname.jsonl
-
-# один трамвай, посекундная телеметрия
-... replay.ts sessions/myname.jsonl --key 9369 --dump
-```
-
-## Детекторы (`src/detect.ts`) — формализованные жалобы владельца
-
-| kind | что ловит |
+| file | role |
 |---|---|
-| `teleport` | скачок маркера, не объяснимый ездой (jump-watch физики) |
-| `stand-mid-road` | стоит ≥10с вне остановки, а координаты фикса ≥60м впереди |
-| `behind-coords` | маркер ≥15с позади координат свежайшего фикса на ≥80м |
-| `stand-at-wrong-spot` | фид говорит at_stop, маркер >60м от заявленной остановки |
-| `walk-episode` | τ=∞ (фикс за горизонтом профиля) ≥5с |
+| `src/replay-wire.ts` | replay a captured Convex wire recording through `TrajectoryStore` + `TramFleet`, audit presentation (command in `docs/testing/client-tracking-2026-09-05.md`) |
+| `src/displayAudit.ts` | presentation invariants used by the replay and by `__tests__/physics-display-audit.test.ts` |
+| `src/geometryReplay.ts` | geometry-event folding shared with `__tests__/physics-geometry-replay.test.ts` |
+| `src/presentationPrototype.ts` | client presentation prototype under evaluation in the replay |
+| `scripts/analyze-recording.mjs` | eligible/excluded counts for ride or calibration JSONL (`docs/calibration/plan.md`) |
 
-`*.anomalies.jsonl` — полные `PhysicsDebugInfo`-дампы на момент срабатывания.
+Run with the app's own dependencies from the repo root:
 
-## Правила экспериментов
-
-1. Гипотезы проверяются НА ЗАПИСИ: правишь код в `src/lib/physics/**` (или
-   детектор), перегоняешь ту же сессию, сравниваешь счётчики аномалий.
-   Серверные гипотезы (движок) на записи не проверить — там нужен
-   lab/scripts/check-v2.mjs + свежая запись после деплоя движка.
-2. НИКОГДА не копируй формулы физики в бенч — только импорт из `src/lib`.
-   Если для гипотезы нужно поведение «как в приложении, но чуть иначе» —
-   правь сам модуль физики (это и есть кандидат на фикс) и откатывай.
-3. Сессии в `bench/sessions/` — артефакты расследования; аномальные окна
-   не удалять, они же регресс-тесты будущих фиксов.
+```sh
+npx tsx --tsconfig lab/tsconfig.runtime.json bench/src/replay-wire.ts <recording.jsonl.gz> …
+node bench/scripts/analyze-recording.mjs <ride.jsonl …>
+```

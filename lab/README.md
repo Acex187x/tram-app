@@ -1,4 +1,15 @@
-# Tram Lab — research infrastructure
+# Tram Lab — the prediction engine (production)
+
+> **Status 2026-09-13.** The bake-off is over: `ml-gbdt` + `drive-v3` is THE
+> engine and this directory is the production backend half that publishes
+> curves into Convex (see `docker-compose.yml`). The 24/7 anomaly watcher
+> (`tram-watch`), its 250 GB window archive, the private candidate stack
+> (`lab/isolated/`), the one-off probe/counterfactual scripts and the research
+> dashboard were retired; everything is recoverable from git tag
+> `pre-cleanup-2026-09-13`. The `scores` table still records every variant so
+> the health dashboard keeps its comparison lines, but rows older than 14 days
+> are pruned nightly (`SCORES_RETENTION_DAYS`). The text below is the
+> research-era description and findings log, kept as history.
 
 Phase-0 of `docs/research/prediction-architecture.md`, built 2026-08-08: a
 separate 24/7 service that archives every tram fix, runs THREE predictors in
@@ -176,13 +187,13 @@ the repo's own `serviceDayShiftMs`.
 
 ```sh
 cd lab
-docker compose -p tram-lab up -d      # lab + grafana
-docker logs -f tram-lab               # watch ingest/scoring
+docker compose -p tram-lab up -d      # engine + ml + grafana
+docker logs -f tram-lab               # ingest / publish / scoring log
 ```
 
-- Live map + API: https://tram-lab.acex.sh (`/api/live`, `/api/summary`, `/healthz`)
+- API: https://tram-lab.acex.sh (`/api/summary`, `/api/vehicle/:key/debug`, `/healthz`)
 - Grafana: https://tram-lab-grafana.acex.sh (admin / password in `lab/.env`,
-  dashboard "Tram Lab — точность и обучение")
+  dashboard "Tram Engine — Production Health")
 - Traefik route file: `/etc/dokploy/traefik/dynamic/tram-lab.yml`
 
 Host smoke run (no docker): `cd lab && npm install &&
@@ -191,9 +202,9 @@ TSX_TSCONFIG_PATH=$PWD/tsconfig.runtime.json ./node_modules/.bin/tsx src/main.ts
 
 ### Measuring what the PHONE draws (not what we serve)
 
-```sh
-node lab/scripts/client-path-replay.mjs 240000
-```
+Historical (`client-path-replay.mjs`, removed 2026-09-13 — `git show
+pre-cleanup-2026-09-13:lab/scripts/client-path-replay.mjs`). Today the
+equivalent is `bench/src/replay-wire.ts` over a captured wire recording.
 
 Every gate below scores the SERVED curve. None of them evaluate the client's
 fix-forward shim (`src/lib/physics/fixForward.ts`), which is what the owner is

@@ -38,6 +38,7 @@ import {
   HORIZON_BUCKETS,
   POLL_MS,
   ROLLUP_MS,
+  SCORES_RETENTION_DAYS,
   SCORE_MAX_GAP_S,
   SCORE_MIN_GAP_S,
   TICK_MS,
@@ -1983,6 +1984,20 @@ export function start(): void {
   setInterval(() => engine.tick(Date.now()), TICK_MS);
   setInterval(rollup, ROLLUP_MS);
   setInterval(sampleHealth, 60_000);
+  // Raw `scores` retention (2026-09-13): prune in the quiet 03:xx UTC hour,
+  // after the 02:00 ML retrain, at most once per day.
+  if (SCORES_RETENTION_DAYS > 0) {
+    let lastPruneDay = '';
+    setInterval(() => {
+      const now = new Date();
+      const day = now.toISOString().slice(0, 10);
+      if (now.getUTCHours() !== 3 || lastPruneDay === day) return;
+      lastPruneDay = day;
+      const t0 = Date.now();
+      const n = store.pruneScores(t0 - SCORES_RETENTION_DAYS * 86_400_000);
+      log(`scores prune: ${n} rows older than ${SCORES_RETENTION_DAYS} d in ${Date.now() - t0} ms`);
+    }, 5 * 60_000);
+  }
   // Cold-start geometry pack → Convex file storage (the app reads it from
   // tram-site since 2026-08-21). First upload once the fleet has geometry,
   // then refresh every 5 min; uploadGeometryPack itself skips unchanged packs.

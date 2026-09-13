@@ -67,6 +67,12 @@ export const POLL_MS = 2_000;
 export const TICK_MS = 1_000;
 /** Rollup cadence (one row per variant×bucket per minute). */
 export const ROLLUP_MS = 60_000;
+
+/** Raw per-fix `scores` rows older than this are pruned once a day (the
+ *  per-minute rollups keep the long-run accuracy history). 0 disables. The
+ *  bake-off archive grew 15 GB in five weeks; two weeks of raw rows is enough
+ *  for the health dashboard's 24 h / 7 d comparison tables. */
+export const SCORES_RETENTION_DAYS = Number(process.env.SCORES_RETENTION_DAYS ?? 14);
 /** Learned-table flush + poller-health sample cadence. */
 export const FLUSH_MS = 30_000;
 
