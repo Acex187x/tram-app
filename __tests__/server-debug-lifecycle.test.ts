@@ -3,7 +3,7 @@ import { useServerDebug, type ServerDebugState } from '../src/components/debug/s
 const { act, create } = require('react-test-renderer');
 const mockStateListeners = new Set<(state: string) => void>();
 const mockAppState = { currentState: 'active', addEventListener: (_: string, listener: (state: string) => void) => { mockStateListeners.add(listener); return { remove: () => mockStateListeners.delete(listener) }; } };
-jest.mock('react-native', () => ({ TurboModuleRegistry: {get: () => null}, AppState: { get currentState() { return mockAppState.currentState; }, addEventListener: (...args: [string, (state: string) => void]) => mockAppState.addEventListener(...args) } }));
+jest.mock('react-native', () => ({ TurboModuleRegistry: {get: () => null}, Platform: {OS: 'ios', select: (o: any) => o.ios ?? o.default}, AppState: { get currentState() { return mockAppState.currentState; }, addEventListener: (...args: [string, (state: string) => void]) => mockAppState.addEventListener(...args) } }));
 let values: Record<string, ServerDebugState> = {};
 function Consumer({ id, tramKey }: { id: string; tramKey: string }) { values[id] = useServerDebug(tramKey); return null; }
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };

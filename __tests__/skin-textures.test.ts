@@ -2,7 +2,7 @@ import * as THREE from 'three';
 const mockWrites=new Map<string,Uint8Array>();
 const mockDirectories=new Set<string>();
 let mockSize={width:768,height:512};
-jest.mock('react-native',()=>({TurboModuleRegistry:{get:()=>null},Image:{getSize:(_uri:string,resolve:(width:number,height:number)=>void)=>resolve(mockSize.width,mockSize.height)}}));
+jest.mock('react-native',()=>({TurboModuleRegistry:{get:()=>null},Platform:{OS:'ios',select:(o:any)=>o.ios??o.default},Image:{getSize:(_uri:string,resolve:(width:number,height:number)=>void)=>resolve(mockSize.width,mockSize.height)}}));
 jest.mock('expo-file-system',()=>{
  const path=(args:any[])=>args.map(p=>typeof p==='string'?p:p.uri).join('/');
  return {Paths:{cache:'cache'},Directory:class {uri:string;constructor(...a:any[]){this.uri=path(a);}create(){mockDirectories.add(this.uri);}get exists(){return mockDirectories.has(this.uri);}delete(){mockDirectories.delete(this.uri);}},File:class {uri:string;constructor(...a:any[]){this.uri=path(a);}write(bytes:Uint8Array){mockWrites.set(this.uri,bytes);}}};
