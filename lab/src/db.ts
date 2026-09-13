@@ -283,17 +283,14 @@ export class Store {
     this.insHealthMinute.run(row);
   }
 
-  /** Delete raw score rows with atMs < cutoff in bounded batches (each batch
-   *  is its own short transaction so Grafana/ML readers never wait long).
-   *  Returns rows deleted. Freed pages stay in the file for reuse (no VACUUM). */
-  pruneScores(cutoffMs: number, batch = 50_000): number {
-    const del = this.db.prepare('DELETE FROM scores WHERE id IN (SELECT id FROM scores WHERE atMs < ? ORDER BY atMs LIMIT ?)');
-    let total = 0;
-    for (;;) {
-      const n = del.run(cutoffMs, batch).changes;
-      total += n;
-      if (n < batch) return total;
-    }
+  /** Delete ONE bounded batch of raw score rows with atMs < cutoff (short
+   *  transaction; the caller spaces batches out so the event loop — and the
+   *  publish cadence — stay responsive). Returns rows deleted; < batch ⇒ done.
+   *  Freed pages stay in the file for reuse (no VACUUM). */
+  pruneScoresBatch(cutoffMs: number, batch = 20_000): number {
+    return this.db
+      .prepare('DELETE FROM scores WHERE id IN (SELECT id FROM scores WHERE atMs < ? ORDER BY atMs LIMIT ?)')
+      .run(cutoffMs, batch).changes;
   }
 
   getMeta(k: string): string | null {

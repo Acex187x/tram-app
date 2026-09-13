@@ -1985,17 +1985,38 @@ export function start(): void {
   setInterval(rollup, ROLLUP_MS);
   setInterval(sampleHealth, 60_000);
   // Raw `scores` retention (2026-09-13): prune in the quiet 03:xx UTC hour,
-  // after the 02:00 ML retrain, at most once per day.
+  // after the 02:00 ML retrain, at most once per day. Batches are spaced
+  // 250 ms apart so a big backlog never blocks ticks/publishing.
   if (SCORES_RETENTION_DAYS > 0) {
     let lastPruneDay = '';
+    let pruning = false;
     setInterval(() => {
       const now = new Date();
       const day = now.toISOString().slice(0, 10);
-      if (now.getUTCHours() !== 3 || lastPruneDay === day) return;
+      if (pruning || now.getUTCHours() !== 3 || lastPruneDay === day) return;
       lastPruneDay = day;
+      pruning = true;
       const t0 = Date.now();
-      const n = store.pruneScores(t0 - SCORES_RETENTION_DAYS * 86_400_000);
-      log(`scores prune: ${n} rows older than ${SCORES_RETENTION_DAYS} d in ${Date.now() - t0} ms`);
+      const cutoff = t0 - SCORES_RETENTION_DAYS * 86_400_000;
+      let total = 0;
+      const step = (): void => {
+        let n = 0;
+        try {
+          n = store.pruneScoresBatch(cutoff);
+        } catch (e) {
+          log(`scores prune error: ${e instanceof Error ? e.message : e}`);
+          pruning = false;
+          return;
+        }
+        total += n;
+        if (n >= 20_000) {
+          setTimeout(step, 250);
+          return;
+        }
+        pruning = false;
+        log(`scores prune: ${total} rows older than ${SCORES_RETENTION_DAYS} d in ${Date.now() - t0} ms`);
+      };
+      step();
     }, 5 * 60_000);
   }
   // Cold-start geometry pack → Convex file storage (the app reads it from
