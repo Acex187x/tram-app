@@ -5,10 +5,6 @@
 import { readFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { gunzipSync } from "node:zlib";
-const readText = (path: string) => {
-  const data = readFileSync(path);
-  return (path.endsWith(".gz") ? gunzipSync(data) : data).toString("utf8");
-};
 import { TramFleet } from "@/lib/physics/fleet";
 import { TrajectoryStore } from "@/lib/physics/trajectoryStore";
 import { servedToRouteGeometry } from "@/lib/golemio/gtfs";
@@ -21,6 +17,16 @@ import {
 import { DisplayAudit } from "./displayAudit";
 import { applyGeometryEvent } from "./geometryReplay";
 import { PresentationPrototype } from "./presentationPrototype";
+import { PRESENTATION_REBASE } from "@/lib/physics/presentation";
+
+// Offline sweep of the fade-rebase envelope, e.g. REPLAY_REBASE='{"behindM":300}'.
+if (process.env.REPLAY_REBASE)
+  Object.assign(PRESENTATION_REBASE, JSON.parse(process.env.REPLAY_REBASE));
+
+const readText = (path: string) => {
+  const data = readFileSync(path);
+  return (path.endsWith(".gz") ? gunzipSync(data) : data).toString("utf8");
+};
 
 const [
   wirePath,
@@ -87,6 +93,10 @@ const fleet = new TramFleet({
   trajectories: store,
   resolveModel: () => ({ id: "15t" }) as TramModelSpec,
 });
+const renderMode = process.env.REPLAY_MODE ?? "smooth";
+if (renderMode !== "smooth" && renderMode !== "fixed")
+  throw new Error("REPLAY_MODE must be smooth or fixed");
+fleet.setMode(renderMode);
 const fixes = new Map<string, TramSnapshot>();
 const displayAudit = new DisplayAudit();
 const transitionIds = new Map<string, number>();
@@ -454,7 +464,7 @@ for (
       store.noteConvexClock(v.serverNowMs, r.sentAtMs, r.receivedAtMs);
   }
   const start = performance.now();
-  let states = fleet.getStates(frameAt, "smooth", true);
+  let states = fleet.getStates(frameAt, renderMode, true);
   const runtimeCost = performance.now() - start;
   for (const s of states) {
     if (
@@ -718,6 +728,8 @@ console.log(
       geometryCaveat: geometryArrivalReplay
         ? "Actual captured geometry receipts; provisional seeds and pertrip refinement. Harness loader concurrency differs from native scheduler."
         : "Static sampled geometry pack; not the native cache/refinement timeline. Bare provider IDs may alias cached GTFS generations. Treat axis/fade results as static geometry sensitivity.",
+      renderMode,
+      presentationRebase: PRESENTATION_REBASE,
       researchNoSmoothShim: process.env.RESEARCH_NO_SMOOTH_SHIM === "1",
       legacyMetricCaveat:
         "Legacy top-level slew/hold counters retain the historical discontinuity filter for comparison only. Use completeDisplayAudit for every actual frame, correction, both acceleration signs and visibility.",

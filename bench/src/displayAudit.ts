@@ -21,6 +21,8 @@ type Prev = {
   worldA: [number, number] | null;
   hiddenRunS: number;
   transitionReason: string | null;
+  dwellingStopM: number | null;
+  servedThroughM: number;
 };
 export class DisplayAudit {
   private previous = new Map<string, Prev>();
@@ -72,6 +74,9 @@ export class DisplayAudit {
   private intervals = 0;
   private stationCrossings = 0;
   private crossingsAbove5Ms = 0;
+  private visibleRequiredCrossingsAbove5Ms = 0;
+  private visibleRequiredCrossingExamples: unknown[] = [];
+  private visibleOffPlatformHeldSeconds = 0;
   private maxFullyVisibleWorldStepM = 0;
   private maxUnbrokenNegativeSpeedStepMs = 0;
   private physicalBraking: any[] = [];
@@ -100,6 +105,7 @@ export class DisplayAudit {
       acceleration: number | null = null;
     const opacity = state.presentationOpacity ?? 1;
     let hiddenRunS = 0;
+    let servedThroughM = -Infinity;
     let worldV: [number, number] | null = null,
       worldA: [number, number] | null = null;
     if (old) {
@@ -116,10 +122,34 @@ export class DisplayAudit {
         geometry !== undefined &&
         (old.geometry === geometry || sameGeometryAxis(old.geometry, geometry));
       const ds = sameAxis ? state.simDistM - old.s : null;
+      if (sameAxis) {
+        servedThroughM = old.servedThroughM;
+        if (
+          old.dwellingStopM !== null &&
+          state.phase !== "dwell" &&
+          state.phase !== "terminal"
+        )
+          servedThroughM = Math.max(servedThroughM, old.dwellingStopM);
+      }
       if (dt > 0) {
         v = old.active ? (ds ?? worldM) / dt : null;
         heldS = worldM / dt < 0.1 ? old.heldS + dt : 0;
       }
+      if (
+        measured &&
+        old.active &&
+        sameAxis &&
+        geometry?.stops.length &&
+        dt > 0 &&
+        dt <= 5 &&
+        opacity >= 0.99 &&
+        old.opacity >= 0.99 &&
+        worldM / dt < 0.1 &&
+        !geometry.stops.some(
+          (stop) => Math.abs(stop.distM - state.simDistM) <= 30,
+        )
+      )
+        this.visibleOffPlatformHeldSeconds += dt;
       if (
         dt > 0 &&
         old.active &&
@@ -368,6 +398,23 @@ export class DisplayAudit {
             this.stationCrossings++;
             if ((v ?? 0) > 5) {
               this.crossingsAbove5Ms++;
+              if (
+                opacity >= 0.99 &&
+                old.opacity >= 0.99 &&
+                (!stop.requestOnly || stop.isTerminal)
+              ) {
+                this.visibleRequiredCrossingsAbove5Ms++;
+                if (this.visibleRequiredCrossingExamples.length < 20)
+                  this.visibleRequiredCrossingExamples.push({
+                    key: state.key,
+                    atMs: at,
+                    stopId: stop.stopId,
+                    sequence: stop.sequence,
+                    stopDistM: stop.distM,
+                    alreadyDisplayedService: servedThroughM >= stop.distM,
+                    intervalSpeedMs: v,
+                  });
+              }
               if (this.stopCrossings.length < 80)
                 this.stopCrossings.push({
                   key: state.key,
@@ -382,6 +429,9 @@ export class DisplayAudit {
                   lastStopId: state.snapshot.lastStopId,
                   fixAgeS: (at - state.snapshot.observedAtMs) / 1000,
                   precedingHeldS: old.heldS,
+                  opacity,
+                  previousOpacity: old.opacity,
+                  requestOnly: stop.requestOnly === true,
                 });
             }
           }
@@ -405,6 +455,13 @@ export class DisplayAudit {
       worldA,
       hiddenRunS,
       transitionReason: state.presentationTransitionReason ?? null,
+      dwellingStopM:
+        state.phase === "dwell" || state.phase === "terminal"
+          ? (geometry?.stops.find(
+              (stop) => Math.abs(stop.distM - state.simDistM) <= 30,
+            )?.distM ?? null)
+          : null,
+      servedThroughM,
     });
   }
   report() {
@@ -461,6 +518,9 @@ export class DisplayAudit {
       maxNegativeSpeedStepMs: this.maxNegativeSpeedStepMs,
       stationCrossings: this.stationCrossings,
       crossingsAbove5Ms: this.crossingsAbove5Ms,
+      visibleRequiredCrossingsAbove5Ms: this.visibleRequiredCrossingsAbove5Ms,
+      visibleRequiredCrossingExamples: this.visibleRequiredCrossingExamples,
+      visibleOffPlatformHeldSeconds: this.visibleOffPlatformHeldSeconds,
       worst: this.worst,
       stopCrossingExamples: this.stopCrossings,
     };
