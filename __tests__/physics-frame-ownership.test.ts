@@ -72,19 +72,21 @@ it.each([10, 30, 60])(
   (fps) => {
     const c = client();
     let previous = c.frame(T0);
-    c.emit(T0 + 1, 950, 0);
-    for (let i = 1; i <= fps * 5; i++) {
+    // A small jump back (closable: display ends < 60 m ahead) brakes and holds.
+    c.emit(T0 + 1, 985, 0);
+    // Tram service brake (1.4 m/s², 0.8 m/s³): 10 m/s needs ~9 s to stop.
+    for (let i = 1; i <= fps * 10; i++) {
       const state = c.frame(T0 + (i * 1000) / fps);
       expect(state.simDistM).toBeGreaterThanOrEqual(previous.simDistM);
       expect(
         Math.abs(state.simSpeedKmh - previous.simSpeedKmh) / 3.6,
-      ).toBeLessThanOrEqual(2.5 / fps + 1e-6);
+      ).toBeLessThanOrEqual(1.4 / fps + 1e-6);
       previous = state;
     }
     expect(previous.simSpeedKmh).toBeLessThan(0.01);
     const held = previous.simDistM;
-    c.emit(T0 + 5000, held + 30, 10);
-    expect(c.frame(T0 + 5100).simDistM).toBeGreaterThan(held);
+    c.emit(T0 + 10000, held + 30, 10);
+    expect(c.frame(T0 + 10100).simDistM).toBeGreaterThan(held);
   },
 );
 
@@ -227,9 +229,10 @@ it.each([10, 30, 60])(
       const dt = (at - previousAt) / 1000;
       const speed = (actual.simDistM - previousS) / dt;
       expect(speed).toBeGreaterThanOrEqual(0);
-      expect(speed - previousSpeed).toBeLessThanOrEqual(2.5 * dt + 0.000001);
+      // Tram traction envelope: 1.3 m/s² (jerk-limited launch).
+      expect(speed - previousSpeed).toBeLessThanOrEqual(1.3 * dt + 0.000001);
       expect(Math.abs(actual.simSpeedKmh / 3.6 - speed)).toBeLessThanOrEqual(
-        2.5 * dt + 1e-6,
+        1.3 * dt + 1e-6,
       );
       expect(actual.simDistM).toBeLessThanOrEqual(
         a.fleet.getState("9201", at, "fixed")!.simDistM,
@@ -238,9 +241,46 @@ it.each([10, 30, 60])(
       previousAt = at;
       previousSpeed = speed;
     }
-    expect(previousS).toBeGreaterThan(1060);
+    // 8 s from rest at 1.3 m/s² with a 0.8 m/s³ ramp covers ~34 m.
+    expect(previousS).toBeGreaterThan(1030);
   },
 );
+
+
+it("a target far behind a display it cannot meet fades and rebases instead of standing mid-route", () => {
+  const c = client();
+  c.frame(T0);
+  // Display runs at 10 m/s; the server now says the tram is standing 100 m back.
+  c.emit(T0 + 1, 900, 0);
+  const reasons = new Set<string | null | undefined>();
+  let last = c.frame(T0 + 33);
+  for (let at = T0 + 66; at <= T0 + 6000; at += 33) {
+    if (last.presentationHiddenFrameId !== undefined)
+      c.fleet.acknowledgePresentationHidden("9201", last.presentationHiddenFrameId);
+    last = c.frame(at);
+    reasons.add(last.presentationTransitionReason);
+  }
+  expect(reasons.has("unreachable-correction")).toBe(true);
+  expect(last.presentationOpacity).toBe(1);
+  expect(Math.abs(last.simDistM - 900)).toBeLessThan(1);
+});
+
+it("a target far ahead is faded onto, not raced at line speed", () => {
+  const c = client();
+  c.frame(T0);
+  c.emit(T0 + 1, 1600, 10);
+  let maxSpeed = 0;
+  let last = c.frame(T0 + 33);
+  for (let at = T0 + 66; at <= T0 + 6000; at += 33) {
+    if (last.presentationHiddenFrameId !== undefined)
+      c.fleet.acknowledgePresentationHidden("9201", last.presentationHiddenFrameId);
+    last = c.frame(at);
+    if (last.presentationOpacity === 1) maxSpeed = Math.max(maxSpeed, last.simSpeedKmh / 3.6);
+  }
+  expect(c.fleet.getDiagnostics("9201", T0 + 6000)?.presentationRebaseCount).toBe(1);
+  expect(maxSpeed).toBeLessThan(19.6);
+  expect(Math.abs(last.simDistM - (1600 + 10 * 6))).toBeLessThan(5);
+});
 
 it("a long resume stays on the old point until TWO native zero-frame acknowledgements", () => {
   const c = client();

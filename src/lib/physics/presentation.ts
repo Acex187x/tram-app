@@ -17,6 +17,18 @@ export const PRESENTATION_LIMITS = Object.freeze({
   braking: 2.5,
   jerk: 4,
 });
+/** Along-axis display envelope for a tram (same contract as the server's
+ * drive-v3 profile, lab/src/config.ts): 1.3 m/s² traction, 1.4 m/s² service
+ * braking, 0.8 m/s³ jerk. The speed ceiling keeps some catch-up headroom over
+ * Prague's ~65 km/h line speed; corrections larger than this envelope can close
+ * are faded and rebased (fleet.ts), not raced. PRESENTATION_LIMITS stays the
+ * wider correction envelope for world-space (no-geometry) and axis alignment. */
+export const TRAM_PRESENTATION_LIMITS = Object.freeze({
+  speed: 19.5,
+  acceleration: 1.3,
+  braking: 1.4,
+  jerk: 0.8,
+});
 const clamp = (n: number, lo: number, hi: number) =>
   Math.max(lo, Math.min(hi, n));
 
@@ -56,6 +68,7 @@ export function advancePresentation(
   targetA: number,
   stopS: number | null,
   limits: PresentationLimits = PRESENTATION_LIMITS,
+  speedCap: number = Infinity,
 ): void {
   if (!(dt > 0) || dt > 5 || !Number.isFinite(targetS)) return;
   const count = Math.ceil(dt / 0.05);
@@ -69,6 +82,10 @@ export function advancePresentation(
       -limits.braking,
       limits.acceleration,
     );
+    // Soft ceiling (curves): steer speed toward the cap through the same jerk
+    // limit instead of clipping v, so a lowered cap never steps the velocity.
+    if (speedCap < limits.speed)
+      desired = Math.min(desired, 0.65 * (speedCap - p.v));
     if (
       stopS !== null &&
       stopS - p.s <=
@@ -117,6 +134,21 @@ export function advancePresentation(
     p.a = nextA;
   }
 }
+
+/** When a correction is outside what the tram envelope can close without
+ * looking wrong, the display fades out, rebases onto the target and fades in
+ * (same mechanism as a trip change) instead of racing ahead or standing still.
+ * Mutable so the offline replay can sweep it; the app never writes it. */
+export const PRESENTATION_REBASE = {
+  /** Display behind the target by more than this: racing would be visible. */
+  behindM: 300,
+  /** Display ahead of the target by more than this ... */
+  aheadM: 60,
+  /** ... and the target would need longer than this to come level. */
+  aheadWaitS: 15,
+  /** The condition must hold this long (filters a single odd revision). */
+  persistMs: 1000,
+};
 
 export type PresentationReason =
   | "trip-change"

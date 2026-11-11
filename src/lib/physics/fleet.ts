@@ -30,6 +30,8 @@ import {
   presentationBrakingDistance,
   advanceTransition,
   PRESENTATION_LIMITS,
+  PRESENTATION_REBASE,
+  TRAM_PRESENTATION_LIMITS,
   type PresentationTransition,
   type PresentationReason,
 } from "./presentation";
@@ -53,6 +55,7 @@ import {
   type WorldState,
   type WorldAlignment,
 } from "./worldPresentation";
+import { curveSpeedCap } from "./curveSpeed";
 
 interface DisplayState {
   s: number;
@@ -76,6 +79,10 @@ interface DisplayState {
   alignment: WorldAlignment | null;
   offsetM: [number, number];
   worldSpeed: number;
+  /** Curve ceiling refreshed with the 1 s lookahead (curveSpeed.ts). */
+  curveCap: number;
+  /** First frame at which the target was outside the closable envelope. */
+  unreachableSinceMs: number | null;
 }
 function worldDistance(a: [number, number], b: [number, number]): number {
   return Math.hypot(
@@ -707,6 +714,8 @@ export class TramFleet {
         alignment: null,
         offsetM: [0, 0],
         worldSpeed: geometry ? velocity : 0,
+        curveCap: TRAM_PRESENTATION_LIMITS.speed,
+        unreachableSinceMs: null,
       };
       if (record) this.displays.set(snapshot.key, p);
       return p;
@@ -810,6 +819,20 @@ export class TramFleet {
     }
     p.comparable =
       !!geometry && p.tripId === snapshot.tripId && p.geometry === geometry;
+    if (record && !forced && p.comparable && !p.transition && !p.alignment) {
+      // A target the tram envelope cannot close gracefully: far ahead (would
+      // race at line speed for tens of seconds) or behind a display that would
+      // otherwise stand still mid-route until a slow target comes level.
+      const gap = target - p.s;
+      const unreachable =
+        gap > PRESENTATION_REBASE.behindM ||
+        (-gap > PRESENTATION_REBASE.aheadM &&
+          -gap > velocity * PRESENTATION_REBASE.aheadWaitS);
+      if (!unreachable) p.unreachableSinceMs = null;
+      else if (p.unreachableSinceMs === null) p.unreachableSinceMs = now;
+      else if (now - p.unreachableSinceMs >= PRESENTATION_REBASE.persistMs)
+        forced = "unreachable-correction";
+    } else if (record) p.unreachableSinceMs = null;
     if (forced && (!p.transition || p.transition.stage === "in") && record)
       p.transition = {
         id: ++this.transitionSerial,
@@ -872,6 +895,7 @@ export class TramFleet {
         p.offsetM = [0, 0];
         p.comparable = !!geometry;
         p.lookAtMs = -Infinity;
+        p.unreachableSinceMs = null;
       }
       if (phase.done) p.transition = null;
     }
@@ -912,6 +936,9 @@ export class TramFleet {
           }
           before = next;
         }
+        p.curveCap = geometry
+          ? curveSpeedCap(geometry, p.s, p.v, TRAM_PRESENTATION_LIMITS.speed)
+          : TRAM_PRESENTATION_LIMITS.speed;
       }
       const acceleration = vehicle
         ? (renderSpeedMs(
@@ -931,7 +958,8 @@ export class TramFleet {
         velocity,
         acceleration,
         p.stopS,
-        p.alignment?.limits,
+        p.alignment?.limits ?? TRAM_PRESENTATION_LIMITS,
+        p.curveCap,
       );
     } else if (dt <= 5 && p.transition?.stage === "out" && p.geometry) {
       // Keep the outgoing model moving continuously during its short fade.
