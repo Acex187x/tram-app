@@ -559,9 +559,12 @@ export class TramRuntime {
       (tripId) => this.feed.getGeometry(tripId),
       atMs,
     );
-    this.feed.reportCalibration(
-      toCalibrationRecords(this.fleet.getPredictionStates(atMs), atMs),
-    );
+    // Gate BEFORE the whole-fleet prediction read: with passive logging off
+    // the records would be built and then dropped on every batch.
+    if (this.feed.wantsCalibration?.() !== false)
+      this.feed.reportCalibration(
+        toCalibrationRecords(this.fleet.getPredictionStates(atMs), atMs),
+      );
     // Warm geometries for trips we don't have yet, split by visibility: a
     // missing shape whose tram is ON SCREEN (viewport + margin) loads at raised
     // priority (1) — a visible tram stuck as a bare dot is the user-facing

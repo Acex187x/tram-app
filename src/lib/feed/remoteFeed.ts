@@ -328,6 +328,14 @@ export class RemoteFeed implements TramFeed {
 
   // — calibration —
 
+  wantsCalibration(): boolean {
+    try {
+      return this.passiveLoggingEnabled();
+    } catch {
+      return false;
+    }
+  }
+
   reportCalibration(records: CalibrationRecord[]): void {
     try {
       // Passive fleet logging is user-switchable (Settings → Motion data).

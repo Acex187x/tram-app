@@ -717,8 +717,10 @@ describe('RemoteFeed geometry + calibration delegation (phase 1: Golemio client-
 
     feed.reportCalibration(records);
     expect(sink).toHaveBeenCalledTimes(1);
+    expect(feed.wantsCalibration()).toBe(true);
 
     enabled = false;
+    expect(feed.wantsCalibration()).toBe(false); // runtime skips building records
     feed.reportCalibration(records);
     expect(sink).toHaveBeenCalledTimes(1); // gate held: neither buffered nor written
 
@@ -740,6 +742,7 @@ describe('RemoteFeed geometry + calibration delegation (phase 1: Golemio client-
       },
     });
     expect(() => feed.reportCalibration([])).not.toThrow();
+    expect(feed.wantsCalibration()).toBe(false);
     expect(sink).not.toHaveBeenCalled();
   });
 });

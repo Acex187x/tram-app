@@ -30,6 +30,9 @@ export class NullFeed implements TramFeed {
   promoteGeometry(_tripId: string): void {}
 
   reportCalibration(_records: CalibrationRecord[]): void {}
+  wantsCalibration(): boolean {
+    return false;
+  }
 
   status(): FeedStatus {
     return {

@@ -103,7 +103,10 @@ export const useSettingsStore = create<SettingsState>()(
       physicsEngine: 'current',
       showRouteLines: true,
       followHeadingLock: false,
-      passiveFleetLogging: true,
+      // Off by default since 2026-11: nothing consumes passive calibration
+      // logs any more and building them costs CPU on every batch. Ride
+      // recording is a separate stream and is unaffected.
+      passiveFleetLogging: false,
       feedSource: 'remote',
       iconPack: DEFAULT_ICON_PACK,
       debugMode: false,
@@ -128,11 +131,14 @@ export const useSettingsStore = create<SettingsState>()(
        * verbatim would leave the store holding a mode no code can render.
        * Every retired value folds into the default.
        */
-      version: 2,
-      migrate: (persisted, _version) => {
+      version: 3,
+      migrate: (persisted, version) => {
         const state = (persisted ?? {}) as Partial<SettingsState>;
         return {
           ...state,
+          // v3: passive fleet logging defaults to off; flip existing installs
+          // once (the Settings toggle can turn it back on).
+          ...(version < 3 ? { passiveFleetLogging: false } : {}),
           positionMode: normalizePositionMode(state.positionMode),
           physicsEngine: normalizePhysicsEngine(state.physicsEngine),
         } as SettingsState;

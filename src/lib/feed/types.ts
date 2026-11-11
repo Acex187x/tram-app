@@ -126,6 +126,13 @@ export interface TramFeed {
    * later). Must never throw into the caller — the render/ingest path calls it.
    */
   reportCalibration(records: CalibrationRecord[]): void;
+  /**
+   * Optional capability: false when reportCalibration would drop the records
+   * (passive logging off). Lets the runtime skip building them at all — a
+   * whole-fleet prediction read + per-record serialisation on every batch.
+   * Absent = assume records are wanted.
+   */
+  wantsCalibration?(): boolean;
   /** Feed health for the status chip. */
   status(): FeedStatus;
   /**
