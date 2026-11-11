@@ -1,0 +1,27 @@
+# Resource limits for the tram-lab stack (bring-up 2026-11-11). Overlay, not started yet.
+# Usage (one service at a time):
+#   docker compose -p tram-lab -f docker-compose.yml -f docker-compose.limits.yml up -d --no-deps lab
+# memswap_limit == mem_limit: no swap (host swap is full); an OOM kill inside the
+# container is preferred over dragging the whole host into swap.
+services:
+  lab:
+    mem_limit: 1536m
+    memswap_limit: 1536m
+    cpus: 1
+    pids_limit: 512
+  ml:
+    # Nightly retrain reads the whole fixes table via pandas; 4g will likely OOM
+    # until the retrain is changed to a rolling window / only-on-new-data (step 6).
+    environment:
+      # Fix archive is frozen since ~2026-10-09; serve the persisted artefacts in
+      # /data/models (v3, 2026-11-11 03:58) and skip the nightly retrain (RAM peak).
+      ML_TRAIN_ENABLED: "0"
+    mem_limit: 4g
+    memswap_limit: 4g
+    cpus: 2
+    pids_limit: 512
+  grafana:
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 0.5
+    pids_limit: 256

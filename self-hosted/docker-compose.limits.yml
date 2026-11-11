@@ -1,0 +1,19 @@
+# Resource limits + image pin for the self-hosted Convex backend (bring-up 2026-11-11).
+# Overlay, do not edit the main compose. Usage:
+#   docker compose -p tram-convex -f docker-compose.yml -f docker-compose.limits.yml up -d --no-deps backend
+#
+# Image: pinned by digest to the newest convex-backend image present on this host
+# (ghcr :latest as pulled 2026-08-10, revision c0cb7ae17f54). The exact image that
+# ran until ~2026-10-09 is unknown (container was removed); the DB opened cleanly on it.
+# memswap_limit == mem_limit: no swap for this container (host swap is already full).
+services:
+  backend:
+    image: ghcr.io/get-convex/convex-backend@sha256:1f2044e3eac463ac78973b136c0baf72d4ada602611d853d6f99f280e29e0a98
+    mem_limit: 3g
+    memswap_limit: 3g
+    cpus: 2
+    pids_limit: 1024
+  dashboard:
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 0.5
