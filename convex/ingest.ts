@@ -211,15 +211,8 @@ export const applyPoll = internalMutation({
       rejectedByReason,
     });
 
-    // Scheduled, never awaited: calibration must never be able to stall or
-    // fail the feed path. Chunked so a post-outage whole-fleet poll cannot
-    // push one oversized fold mutation into the execution budget.
-    for (let i = 0; i < pairs.length; i += FOLD_CHUNK) {
-      await ctx.scheduler.runAfter(0, internal.calibration.fold.foldPairs, {
-        atMs,
-        pairs: pairs.slice(i, i + FOLD_CHUNK),
-      });
-    }
+    // Server-side calibration folding (calibration.fold.foldPairs) is disabled:
+    // nothing consumes it and its scheduled-job args grew the DB by >1 GB.
 
     return {
       stale: false,

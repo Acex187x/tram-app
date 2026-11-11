@@ -29,18 +29,4 @@ crons.interval(
   {},
 );
 
-// Compact the live calibration stats into the client-facing bundle. Hourly is a
-// deliberate ceiling on churn — the underlying EWMAs have a 14-day half-life,
-// so nothing meaningful moves faster than that.
-crons.interval('calibration bundle', { hours: 1 }, internal.calibration.bundle.compact, {});
-
-// Garbage-collect decayed-out cells (retired shape variants, scrapped trams).
-// Decay itself is lazy — applied on write — so this only removes the corpses.
-crons.daily(
-  'calibration prune',
-  { hourUTC: 3, minuteUTC: 20 },
-  internal.calibration.fold.pruneStale,
-  {},
-);
-
 export default crons;

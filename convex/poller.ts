@@ -26,7 +26,7 @@ import {
   type TramSnapshotBatch,
 } from '../src/lib/golemio/normalize';
 
-export const SERVER_POLL_MS = 2_000;
+export const SERVER_POLL_MS = 5_000;
 
 /** Self-reschedule well before the 30-minute default-runtime action ceiling. */
 export const LOOP_BUDGET_MS = 8 * 60_000;
