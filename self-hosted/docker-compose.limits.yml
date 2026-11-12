@@ -7,9 +7,9 @@
 # ran until ~2026-10-09 is unknown (container was removed); the DB opened cleanly on it.
 # memswap_limit == mem_limit: no swap for this container (host swap is already full).
 #
-# Data: FRESH volume tram-convex_convex-data-v2 (2026-11-11). The old volume
-# tram-convex_convex-data (11 GB SQLite, OOMs on boot even at 6 GB) is kept
-# untouched, as is the copy in /root/backups/tram-bringup-20261111/.
+# Data: FRESH volume tram-convex_convex-data-v3 (2026-11-12).
+# v2 (1.7 GB SQLite, OOMs on boot at 3 GB and 6 GB after 12 h of writes) is kept
+# untouched, as is v1 (11 GB) and the copy in /root/backups/tram-bringup-20261111/.
 services:
   backend:
     image: ghcr.io/get-convex/convex-backend@sha256:1f2044e3eac463ac78973b136c0baf72d4ada602611d853d6f99f280e29e0a98
@@ -18,14 +18,15 @@ services:
     cpus: 2
     pids_limit: 1024
     volumes:
-      - convex-data-v2:/convex/data
+      - convex-data-v3:/convex/data
     environment:
-      # 12 h of document history instead of 48 h.
-      - DOCUMENT_RETENTION_DELAY=43200
+      # 6 h of document history (was 12 h; 12 h grew v2 SQLite to 1.7 GB and
+      # OOMed at 11:41 CET on 2026-11-12; boot still OOM at 6 GB).
+      - DOCUMENT_RETENTION_DELAY=21600
   dashboard:
     mem_limit: 512m
     memswap_limit: 512m
     cpus: 0.5
 
 volumes:
-  convex-data-v2:
+  convex-data-v3:
